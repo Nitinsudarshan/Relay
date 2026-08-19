@@ -50,6 +50,18 @@ pub struct TtsSettings {
     pub piper_voice_path: Option<String>,
 }
 
+/// Which edge of the active monitor's work area the floating pill anchors
+/// to. "Center" always means centered along that edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PillPosition {
+    #[default]
+    BottomCenter,
+    TopCenter,
+    LeftCenter,
+    RightCenter,
+}
+
 /// General UI/window behavior that isn't tied to a specific capture engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
@@ -57,12 +69,16 @@ pub struct UiSettings {
     /// separate always-on-top desktop overlay (outside the main app
     /// window) rather than only being reachable from inside it.
     pub show_floating_pill: bool,
+    /// Which edge of the screen the floating pill anchors to.
+    #[serde(default)]
+    pub pill_position: PillPosition,
 }
 
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
             show_floating_pill: true,
+            pill_position: PillPosition::default(),
         }
     }
 }

@@ -36,7 +36,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   stt: { whisper_model_path: '' },
   tts: { piper_binary_path: '', piper_voice_path: '' },
   hotkeys: { show_hide_hotkey: 'Ctrl+Shift+Space', dictation_hotkey: 'Ctrl+Space' },
-  ui: { show_floating_pill: true },
+  ui: { show_floating_pill: true, pill_position: 'bottom_center' },
 };
 
 export const ProviderSettings: React.FC = () => {
@@ -317,6 +317,43 @@ export const ProviderSettings: React.FC = () => {
                     }
                   }}
                 />
+              </div>
+
+              <div className="py-3 border-b border-border">
+                <p className="text-xs font-semibold text-foreground mb-1">Pill Position</p>
+                <p className="text-[11px] text-muted-foreground mb-2">
+                  Which edge of the screen the floating pill anchors to
+                </p>
+                <div className="flex bg-muted p-1 rounded-xl border border-border w-fit">
+                  {(
+                    [
+                      { value: 'bottom_center', label: 'Bottom Center' },
+                      { value: 'top_center', label: 'Top Center' },
+                      { value: 'left_center', label: 'Left Center' },
+                      { value: 'right_center', label: 'Right Center' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={async () => {
+                        setSettings({ ...settings, ui: { ...settings.ui, pill_position: opt.value } });
+                        try {
+                          await invoke('set_pill_position', { position: opt.value });
+                        } catch (err) {
+                          console.error('Failed to set pill position', err);
+                        }
+                      }}
+                      className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
+                        settings.ui.pill_position === opt.value
+                          ? 'bg-card text-foreground font-semibold shadow-xs'
+                          : 'text-muted-foreground'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="py-3 border-b border-border">

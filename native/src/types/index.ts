@@ -54,10 +54,14 @@ export interface HotkeySettings {
   dictation_hotkey: string;
 }
 
+export type PillPosition = 'bottom_center' | 'top_center' | 'left_center' | 'right_center';
+
 export interface UiSettings {
   /** Show the "Click to dictate" pill as a floating always-on-top desktop
    * overlay window (outside the main app window) rather than only inline. */
   show_floating_pill: boolean;
+  /** Which edge of the active monitor's work area the floating pill anchors to. */
+  pill_position: PillPosition;
 }
 
 /** Mirrors the Rust `AppSettings` struct persisted at `.relay/config/settings.json`. */
