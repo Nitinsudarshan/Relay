@@ -1,19 +1,22 @@
 # Relay — Changelog
 
-## [0.2.2] - 2026-08-19
+## [0.3.1] - 2026-08-19
 
-### UI Enhancements
+### Model Management, Hotkey Recorder & Floating Overlay
 
-- **Changelog Modal Layout**:
-  - Expanded Changelog Modal container width to `w-[80vw] max-w-5xl` across native and web surfaces for enhanced readability.
+- **Local Ollama & Model Manager (`ollama_manager.rs`, `ProviderSettings.tsx`)**:
+  - Added local Ollama daemon detection, model status checking, and one-click model pulling (`llama3.2:latest`, `qwen2.5:latest`).
+  - Added local Whisper GGML model selection and status monitoring (`ggml-tiny.en.bin`, `ggml-base.en.bin`).
 
-## [0.2.1] - 2026-08-19
+- **Global Hotkey Recorder (`hotkeys/mod.rs`, `HotkeyRecorder.tsx`)**:
+  - Added interactive Hotkey Recorder UI component allowing users to set custom key combinations for global dictation actions.
+  - Bound global overlay toggle (`Ctrl+Shift+Space`) and push-to-talk dictation (`Ctrl+Space`) to OS text focus injection (`enigo`).
 
-### Fix Windows Build (`clang.dll` / `whisper-rs-sys` missing dependency)
+- **Always-on-Top Floating Overlay Window (`overlay.rs`, `FloatingPill.tsx`)**:
+  - Created non-focus-stealing transparent native desktop overlay window for instant dictation state visualization.
 
-- **Native Backend (`native/src-tauri/`)**:
-  - Gated `whisper-rs` under optional feature `whisper-local` in [`Cargo.toml`](file:///d:/Projects/Relay/native/src-tauri/Cargo.toml) and [`stt.rs`](file:///d:/Projects/Relay/native/src-tauri/src/capture/stt.rs).
-  - Resolved `LIBCLANG_PATH` / `clang.dll` build panic on Windows machines without LLVM installed, allowing `npm run dev:native` and `tauri dev` to compile out-of-the-box.
+- **In-App Categorized Release Notes (`ChangelogModal.tsx`, `changelog-dialog.tsx`)**:
+  - Added 80% width modal layout with dual category tags (`Features`, `Fixes`, `Improvements`) and domain tags (`UI`, `LLM`, `Speech`, `Dictation`, `Kanban`, `Vault`, `Settings`, `Build`).
 
 ## [0.3.0] - 2026-08-19
 

@@ -1,26 +1,26 @@
 # Graph Report - Relay  (2026-08-19)
 
 ## Corpus Check
-- 148 files · ~86,669 words
+- 154 files · ~92,577 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1197 nodes · 1939 edges · 122 communities (92 shown, 30 thin omitted)
-- Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS
+- 1256 nodes · 2093 edges · 121 communities (91 shown, 30 thin omitted)
+- Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS · INFERRED: 2 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `5a3d1c58`
+- Built from commit: `70b5995d`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- sheet.tsx
+- settings/mod.rs
 - devDependencies
 - dropdown-menu.tsx
 - VaultManager
 - compilerOptions
-- AppState
+- commands.rs
 - app/layout.tsx
 - cn
 - compilerOptions
@@ -43,7 +43,7 @@
 - Command Signatures
 - permissions
 - .dispatch_action
-- select.tsx
+- (dashboard)/layout.tsx
 - rust-backend.md
 - AGENTS.md
 - webviews
@@ -66,7 +66,7 @@
 - Capability
 - Capability
 - icon.tsx
-- tabs.tsx
+- compute_bottom_center_position
 - Relay — System Architecture
 - Relay — Testing Strategy
 - desktop-schema.json
@@ -108,7 +108,7 @@
 - radix-ui
 - definitions
 - properties
-- AppHandle
+- hotkeys/mod.rs
 - native/package.json
 - webviews
 - CapabilityRemote
@@ -119,12 +119,11 @@
 - linux-schema.json
 - inject_text
 - local
-- Identifier
-- ShellScopeEntryAllowedArgs
+- Target
+- @radix-ui/react-dialog
 - Identifier
 - lucide-react
 - @radix-ui/react-checkbox
-- @radix-ui/react-label
 - @radix-ui/react-select
 - @radix-ui/react-slot
 - @radix-ui/react-tooltip
@@ -133,65 +132,65 @@
 - shadcn
 
 ## God Nodes (most connected - your core abstractions)
-1. `cn()` - 135 edges
-2. `compilerOptions` - 18 edges
-3. `Relay — Architectural & Product Decision Log` - 17 edges
-4. `VaultManager` - 16 edges
-5. `compilerOptions` - 16 edges
-6. `AppState` - 15 edges
-7. `useSidebar()` - 15 edges
-8. `AudioRecorder` - 12 edges
-9. `LLMClient` - 12 edges
-10. `Button()` - 12 edges
+1. `cn()` - 137 edges
+2. `AppState` - 21 edges
+3. `compilerOptions` - 18 edges
+4. `Relay — Architectural & Product Decision Log` - 17 edges
+5. `CommandError` - 16 edges
+6. `VaultManager` - 16 edges
+7. `compilerOptions` - 16 edges
+8. `useSidebar()` - 15 edges
+9. `AudioRecorder` - 14 edges
+10. `cn()` - 13 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `NavUser()` --calls--> `useSidebar()`  [EXTRACTED]
-  web/src/components/nav-user.tsx → web/src/components/ui/sidebar.tsx
+- `on_dictation_pressed()` --calls--> `emit_capture_state()`  [INFERRED]
+  native/src-tauri/src/hotkeys/mod.rs → native/src-tauri/src/commands.rs
+- `on_dictation_released()` --calls--> `emit_capture_state()`  [INFERRED]
+  native/src-tauri/src/hotkeys/mod.rs → native/src-tauri/src/commands.rs
 - `AvatarBadge()` --calls--> `cn()`  [EXTRACTED]
   web/src/components/ui/avatar.tsx → web/src/lib/utils.ts
 - `AvatarGroup()` --calls--> `cn()`  [EXTRACTED]
   web/src/components/ui/avatar.tsx → web/src/lib/utils.ts
 - `AvatarGroupCount()` --calls--> `cn()`  [EXTRACTED]
   web/src/components/ui/avatar.tsx → web/src/lib/utils.ts
-- `BreadcrumbEllipsis()` --calls--> `cn()`  [EXTRACTED]
-  web/src/components/ui/breadcrumb.tsx → web/src/lib/utils.ts
 
 ## Import Cycles
 - None detected.
 
-## Communities (122 total, 30 thin omitted)
+## Communities (121 total, 30 thin omitted)
 
-### Community 0 - "sheet.tsx"
-Cohesion: 0.18
-Nodes (8): Sheet(), SheetContent(), SheetDescription(), SheetFooter(), SheetHeader(), SheetOverlay(), SheetTitle(), SheetTrigger()
+### Community 0 - "settings/mod.rs"
+Cohesion: 0.23
+Nodes (13): AppSettings, HotkeySettings, Default, Error, Option, Path, Result, Self (+5 more)
 
 ### Community 1 - "devDependencies"
 Cohesion: 0.11
 Nodes (19): autoprefixer, devDependencies, autoprefixer, postcss, tailwindcss, @tauri-apps/cli, @types/react, @types/react-dom (+11 more)
 
 ### Community 2 - "dropdown-menu.tsx"
-Cohesion: 0.13
-Nodes (22): HeaderUserMenu(), toTitleCase(), NavUser(), Avatar(), AvatarBadge(), AvatarFallback(), AvatarGroup(), AvatarGroupCount() (+14 more)
+Cohesion: 0.15
+Nodes (18): Avatar(), AvatarBadge(), AvatarFallback(), AvatarGroup(), AvatarGroupCount(), AvatarImage(), DropdownMenu(), DropdownMenuCheckboxItem() (+10 more)
 
 ### Community 3 - "VaultManager"
-Cohesion: 0.13
-Nodes (28): process_chat(), ProcessedPipelineResult, Result, TtsSettings, ExtractedActionItem, PipelineEngine, PipelineError, ProcessedPipelineResult (+20 more)
+Cohesion: 0.20
+Nodes (19): process_chat(), ProcessedPipelineResult, Result, TtsSettings, KanbanCard, parse_debug_string_list(), Error, Option (+11 more)
 
 ### Community 4 - "compilerOptions"
 Cohesion: 0.07
 Nodes (28): esnext, **/*.mts, .next/dev/types/**/*.ts, next-env.d.ts, .next/types/**/*.ts, node_modules, **/*.ts, **/*.tsx (+20 more)
 
-### Community 5 - "AppState"
-Cohesion: 0.23
-Nodes (20): AppSettings, KanbanCard, AppState, CommandError, get_kanban_cards(), get_settings(), get_triggers(), Mutex (+12 more)
+### Community 5 - "commands.rs"
+Cohesion: 0.18
+Nodes (32): AppSettings, HotkeySettings, KanbanCard, AppState, CaptureStatus, CommandError, emit_capture_state(), ensure_local_llm_ready() (+24 more)
 
 ### Community 6 - "app/layout.tsx"
 Cohesion: 0.21
 Nodes (6): geistMono, geistSans, metadata, LoginForm(), ThemeProvider(), Toaster()
 
 ### Community 7 - "cn"
-Cohesion: 0.13
-Nodes (21): Checkbox(), Field(), FieldContent(), FieldDescription(), FieldError(), FieldGroup(), FieldLabel(), FieldLegend() (+13 more)
+Cohesion: 0.09
+Nodes (32): Field(), FieldContent(), FieldDescription(), FieldError(), FieldGroup(), FieldLabel(), FieldLegend(), FieldSeparator() (+24 more)
 
 ### Community 8 - "compilerOptions"
 Cohesion: 0.08
@@ -206,20 +205,20 @@ Cohesion: 0.14
 Nodes (24): Fn, Instant, ActiveSession, AudioRecorder, CapturedAudio, CaptureError, push_mono(), resample_to_16k_mono() (+16 more)
 
 ### Community 11 - "App.tsx"
-Cohesion: 0.06
-Nodes (55): App(), DictationPhase, DictationPill(), DictationPillProps, PROCESSING_CAPTIONS, PTTWidget(), PTTWidgetProps, ChatPanel() (+47 more)
+Cohesion: 0.05
+Nodes (67): App(), CaptureStatus, DictationPhase, DictationPill(), DictationPillProps, PROCESSING_CAPTIONS, FloatingPill(), PTTWidget() (+59 more)
 
 ### Community 12 - "components.json"
 Cohesion: 0.10
 Nodes (19): aliases, components, hooks, lib, ui, utils, iconLibrary, registries (+11 more)
 
 ### Community 13 - "LLMClient"
-Cohesion: 0.13
-Nodes (24): Client, LLMClient, LLMResponse, ProviderConfig, ProviderError, ProviderType, Default, Error (+16 more)
+Cohesion: 0.11
+Nodes (28): Client, ExtractedActionItem, PipelineEngine, PipelineError, ProcessedPipelineResult, Error, Option, Result (+20 more)
 
 ### Community 14 - "dependencies"
 Cohesion: 0.12
-Nodes (17): dependencies, class-variance-authority, clsx, @radix-ui/react-dialog, @radix-ui/react-dropdown-menu, @radix-ui/react-tabs, react-dom, tailwind-merge (+9 more)
+Nodes (17): dependencies, class-variance-authority, clsx, @radix-ui/react-dropdown-menu, @radix-ui/react-label, @radix-ui/react-tabs, react-dom, tailwind-merge (+9 more)
 
 ### Community 15 - "triggers/mod.rs"
 Cohesion: 0.24
@@ -242,16 +241,16 @@ Cohesion: 0.12
 Nodes (16): definitions, Number, PermissionEntry, ShellScopeEntryAllowedArg, ShellScopeEntryAllowedArgs, Value, anyOf, description (+8 more)
 
 ### Community 20 - "components/page.tsx"
-Cohesion: 0.10
-Nodes (24): Accordion(), AccordionContent(), AccordionItem(), AccordionTrigger(), Dialog(), DialogContent(), DialogDescription(), DialogFooter() (+16 more)
+Cohesion: 0.07
+Nodes (36): Accordion(), AccordionContent(), AccordionItem(), AccordionTrigger(), Checkbox(), Dialog(), DialogContent(), DialogDescription() (+28 more)
 
 ### Community 21 - "properties"
-Cohesion: 0.13
-Nodes (15): properties, default, description, type, type, array, null, description (+7 more)
+Cohesion: 0.15
+Nodes (13): properties, Identifier, default, description, type, description, oneOf, type (+5 more)
 
 ### Community 22 - "site-header.tsx"
-Cohesion: 0.24
-Nodes (11): ModeToggle(), HeaderUserMenu, Breadcrumb(), BreadcrumbEllipsis(), BreadcrumbItem(), BreadcrumbLink(), BreadcrumbList(), BreadcrumbPage() (+3 more)
+Cohesion: 0.18
+Nodes (14): CHANGELOG_DATA, ChangelogDialog(), ChangelogDialogProps, ModeToggle(), HeaderUserMenu, Breadcrumb(), BreadcrumbEllipsis(), BreadcrumbItem() (+6 more)
 
 ### Community 23 - "Relay — Architectural & Product Decision Log"
 Cohesion: 0.11
@@ -273,9 +272,9 @@ Nodes (7): $ref, description, items, type, uniqueItems, items, permissions
 Cohesion: 0.53
 Nodes (5): McpError, McpRouter, McpToolCallResult, Result, String
 
-### Community 28 - "select.tsx"
-Cohesion: 0.18
-Nodes (9): Select(), SelectContent(), SelectItem(), SelectLabel(), SelectScrollDownButton(), SelectScrollUpButton(), SelectSeparator(), SelectTrigger() (+1 more)
+### Community 28 - "(dashboard)/layout.tsx"
+Cohesion: 0.14
+Nodes (16): DashboardLayout(), HeaderUserMenu(), toTitleCase(), SiteHeader(), User, UserContext, UserProvider(), useUserContext() (+8 more)
 
 ### Community 30 - "AGENTS.md"
 Cohesion: 0.20
@@ -322,8 +321,8 @@ Cohesion: 0.36
 Nodes (4): DashboardPage(), getSupabaseClient(), MockSupabaseClient, SupabaseKanbanCard
 
 ### Community 42 - "login-form.tsx"
-Cohesion: 0.14
-Nodes (15): DEMO_NOTES, ScribbleNote, SettingsSection, AuthMode, Badge(), badgeVariants, Card(), CardAction() (+7 more)
+Cohesion: 0.13
+Nodes (16): DEMO_NOTES, ScribbleNote, SettingsSection, AuthMode, RelayLogo(), Badge(), badgeVariants, Card() (+8 more)
 
 ### Community 43 - "Relay — Data Model Specification"
 Cohesion: 0.29
@@ -334,8 +333,8 @@ Cohesion: 0.29
 Nodes (6): Core Value Proposition & Competitive Differentiators, In Scope for MVP, Out of Scope for MVP, Overview, Relay — Product Specification, Target User
 
 ### Community 45 - "permissions"
-Cohesion: 0.29
-Nodes (7): $ref, description, items, type, uniqueItems, items, permissions
+Cohesion: 0.17
+Nodes (12): $ref, array, null, description, items, type, uniqueItems, description (+4 more)
 
 ### Community 46 - "Relay AI Agent Guidelines"
 Cohesion: 0.33
@@ -357,9 +356,9 @@ Nodes (6): description, required, type, Capability, identifier, permissions
 Cohesion: 0.33
 Nodes (4): alt, contentType, runtime, size
 
-### Community 51 - "tabs.tsx"
-Cohesion: 0.40
-Nodes (5): Tabs(), TabsContent(), TabsList(), tabsListVariants, TabsTrigger()
+### Community 51 - "compute_bottom_center_position"
+Cohesion: 0.60
+Nodes (4): compute_bottom_center_position(), ensure_pill_window(), AppHandle, Option
 
 ### Community 52 - "Relay — System Architecture"
 Cohesion: 0.40
@@ -386,8 +385,8 @@ Cohesion: 0.40
 Nodes (4): Global Rules, Precedence, Rule files, Scope
 
 ### Community 58 - "Relay — Changelog"
-Cohesion: 0.17
-Nodes (11): [0.1.0] - 2026-08-19, [0.1.1] - 2026-08-19, [0.1.2] - 2026-08-19, [0.2.0] - 2026-08-19, [0.3.0] - 2026-08-19, Complete UI Design Pass & Theme System Refactoring, Improvements & UI Refactoring, Initial Release — Multi-Surface Architecture & Core Pipeline (+3 more)
+Cohesion: 0.12
+Nodes (15): [0.1.0] - 2026-08-19, [0.1.1] - 2026-08-19, [0.1.2] - 2026-08-19, [0.2.0] - 2026-08-19, [0.2.1] - 2026-08-19, [0.2.2] - 2026-08-19, [0.3.0] - 2026-08-19, Complete UI Design Pass & Theme System Refactoring (+7 more)
 
 ### Community 59 - "local"
 Cohesion: 0.50
@@ -434,24 +433,24 @@ Cohesion: 0.67
 Nodes (3): Target, description, oneOf
 
 ### Community 73 - "sidebar.tsx"
-Cohesion: 0.06
-Nodes (50): DashboardLayout(), AppSidebar(), data, NavItem, NavMain(), NavSecondary(), RelayLogo(), SiteHeader() (+42 more)
+Cohesion: 0.10
+Nodes (36): AppSidebar(), data, NavItem, NavMain(), NavSecondary(), NavUser(), Collapsible(), CollapsibleContent() (+28 more)
 
 ### Community 85 - "SttEngine"
-Cohesion: 0.20
-Nodes (12): c_int, num_cpus(), Arc, Default, Mutex, Option, Result, Self (+4 more)
+Cohesion: 0.18
+Nodes (15): c_int, ensure_default_model(), num_cpus(), Arc, Default, Mutex, Option, Path (+7 more)
 
 ### Community 97 - "definitions"
 Cohesion: 0.12
-Nodes (16): definitions, Number, PermissionEntry, ShellScopeEntryAllowedArg, Target, Value, anyOf, description (+8 more)
+Nodes (16): definitions, Number, PermissionEntry, ShellScopeEntryAllowedArg, ShellScopeEntryAllowedArgs, Value, anyOf, description (+8 more)
 
 ### Community 98 - "properties"
 Cohesion: 0.13
 Nodes (15): properties, default, description, type, type, array, null, description (+7 more)
 
-### Community 99 - "AppHandle"
-Cohesion: 0.36
-Nodes (12): AppHandle, compute_bottom_right_position(), ensure_indicator_window(), hide_indicator(), on_dictation_pressed(), on_dictation_released(), register_hotkeys(), Arc (+4 more)
+### Community 99 - "hotkeys/mod.rs"
+Cohesion: 0.28
+Nodes (17): apply_hotkeys(), compute_bottom_right_position(), DictationState, ensure_indicator_window(), hide_indicator(), on_dictation_pressed(), on_dictation_released(), register_hotkeys() (+9 more)
 
 ### Community 100 - "native/package.json"
 Cohesion: 0.20
@@ -493,37 +492,33 @@ Nodes (4): inject_text(), InjectionError, Result, String
 Cohesion: 0.50
 Nodes (4): default, description, type, local
 
-### Community 110 - "Identifier"
+### Community 110 - "Target"
 Cohesion: 0.67
-Nodes (3): Identifier, description, oneOf
-
-### Community 111 - "ShellScopeEntryAllowedArgs"
-Cohesion: 0.67
-Nodes (3): ShellScopeEntryAllowedArgs, anyOf, description
+Nodes (3): Target, description, oneOf
 
 ### Community 112 - "Identifier"
 Cohesion: 0.67
 Nodes (3): Identifier, description, oneOf
 
 ## Knowledge Gaps
-- **438 isolated node(s):** `name`, `private`, `version`, `type`, `dev` (+433 more)
+- **449 isolated node(s):** `name`, `private`, `version`, `type`, `dev` (+444 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **30 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `cn()` connect `cn` to `sheet.tsx`, `dropdown-menu.tsx`, `sidebar.tsx`, `login-form.tsx`, `tabs.tsx`, `components/page.tsx`, `site-header.tsx`, `select.tsx`?**
+- **Why does `AppState` connect `commands.rs` to `AudioRecorder`, `VaultManager`, `SttEngine`?**
   _High betweenness centrality (0.016) - this node is a cross-community bridge._
-- **Why does `VaultManager` connect `VaultManager` to `AppState`?**
-  _High betweenness centrality (0.012) - this node is a cross-community bridge._
-- **Why does `AppState` connect `AppState` to `AudioRecorder`, `VaultManager`, `SttEngine`?**
+- **Why does `VaultManager` connect `VaultManager` to `LLMClient`, `commands.rs`?**
+  _High betweenness centrality (0.015) - this node is a cross-community bridge._
+- **Why does `cn()` connect `cn` to `dropdown-menu.tsx`, `sidebar.tsx`, `login-form.tsx`, `components/page.tsx`, `site-header.tsx`?**
   _High betweenness centrality (0.011) - this node is a cross-community bridge._
 - **What connects `name`, `private`, `version` to the rest of the system?**
-  _438 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _449 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `devDependencies` be split into smaller, more focused modules?**
   _Cohesion score 0.10526315789473684 - nodes in this community are weakly interconnected._
-- **Should `dropdown-menu.tsx` be split into smaller, more focused modules?**
-  _Cohesion score 0.12561576354679804 - nodes in this community are weakly interconnected._
-- **Should `VaultManager` be split into smaller, more focused modules?**
-  _Cohesion score 0.12775842044134728 - nodes in this community are weakly interconnected._
+- **Should `compilerOptions` be split into smaller, more focused modules?**
+  _Cohesion score 0.06896551724137931 - nodes in this community are weakly interconnected._
+- **Should `cn` be split into smaller, more focused modules?**
+  _Cohesion score 0.09358974358974359 - nodes in this community are weakly interconnected._

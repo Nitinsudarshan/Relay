@@ -12,6 +12,36 @@ interface ChangelogModalProps {
 
 export const CHANGELOG_DATA = [
   {
+    version: '0.3.1',
+    date: '2026-08-19',
+    type: 'minor',
+    title: 'Model Manager, Hotkey Recorder & Floating Overlay',
+    tags: ['Features', 'Improvements'],
+    domains: ['LLM', 'Speech', 'Dictation', 'Settings', 'UI'],
+    items: [
+      { category: 'Features', domain: 'LLM', text: 'Added Ollama daemon auto-detection, status monitoring, and one-click model pulling (llama3.2, qwen2.5).' },
+      { category: 'Features', domain: 'Speech', text: 'Added Whisper GGML model selection & status monitoring (ggml-tiny.en.bin, ggml-base.en.bin).' },
+      { category: 'Features', domain: 'Dictation', text: 'Added interactive HotkeyRecorder component for setting custom global hotkeys (Ctrl+Shift+Space, Ctrl+Space).' },
+      { category: 'Features', domain: 'Dictation', text: 'Created non-focus-stealing transparent native desktop overlay window for instant speech capture.' },
+      { category: 'Improvements', domain: 'UI', text: 'Expanded release notes modal to 80% width with category and domain tags.' },
+    ],
+  },
+  {
+    version: '0.3.0',
+    date: '2026-08-19',
+    type: 'minor',
+    title: 'Universal Dictation, Global Hotkeys & Voice Chat',
+    tags: ['Features'],
+    domains: ['Dictation', 'Speech', 'LLM', 'Vault'],
+    items: [
+      { category: 'Features', domain: 'Dictation', text: 'Registered global hotkeys (Ctrl+Shift+Space, Ctrl+Space) that type transcribed speech into whichever OS field has focus.' },
+      { category: 'Features', domain: 'LLM', text: 'Added in-app voice chat grounded in vault notes with source attribution.' },
+      { category: 'Features', domain: 'Speech', text: 'Wired real microphone capture via cpal resampled to 16kHz mono.' },
+      { category: 'Features', domain: 'Speech', text: 'Integrated local whisper-rs (whisper.cpp) transcription engine.' },
+      { category: 'Improvements', domain: 'Vault', text: 'Added keyword-ranked search notes retrieval for voice grounding.' },
+    ],
+  },
+  {
     version: '0.2.2',
     date: '2026-08-19',
     type: 'patch',
@@ -20,7 +50,7 @@ export const CHANGELOG_DATA = [
     domains: ['UI', 'Modal'],
     items: [
       { category: 'Improvements', domain: 'UI', text: 'Expanded Changelog Modal container width to 80% (w-[80vw] max-w-5xl) across native and web.' },
-      { category: 'Improvements', domain: 'UI', text: 'Added release category tags (Features, Fixes, Improvements, Security) and domain tags (UI, LLM, Speech, Dictation, Kanban, Vault).' },
+      { category: 'Improvements', domain: 'UI', text: 'Added release category tags (Features, Fixes, Improvements) and domain tags.' },
     ],
   },
   {
@@ -41,7 +71,7 @@ export const CHANGELOG_DATA = [
     type: 'minor',
     title: 'Relay Visual Identity Pass ("Monochrome & Electric Blue")',
     tags: ['Features', 'Improvements'],
-    domains: ['UI', 'Dictation', 'LLM', 'Kanban', 'Vault', 'Settings'],
+    domains: ['UI', 'Dictation', 'Kanban', 'Vault', 'Settings'],
     items: [
       { category: 'Features', domain: 'UI', text: 'Updated CSS variables to Monochrome & Electric Blue palette (#2563EB light / #60A5FA dark) with 3-way semantic colors.' },
       { category: 'Features', domain: 'UI', text: 'Designed two-tone Relay logo mark and integrated across native sidebar, web dashboard, login page, and favicon.' },
@@ -52,24 +82,12 @@ export const CHANGELOG_DATA = [
     ],
   },
   {
-    version: '0.1.2',
-    date: '2026-08-19',
-    type: 'patch',
-    title: 'Complete Theme System & Token Refactoring',
-    tags: ['Improvements'],
-    domains: ['UI', 'Design System'],
-    items: [
-      { category: 'Improvements', domain: 'UI', text: 'Replaced ad-hoc Tailwind colors with theme token classes (bg-primary, bg-card, bg-muted, border-border).' },
-      { category: 'Improvements', domain: 'Speech', text: 'Implemented live audio level meter animation in native capture widget.' },
-    ],
-  },
-  {
     version: '0.1.0',
     date: '2026-08-19',
     type: 'major',
     title: 'Initial Release — Multi-Surface Architecture',
     tags: ['Features'],
-    domains: ['Architecture', 'Speech', 'Vault', 'Sync'],
+    domains: ['Architecture', 'Speech', 'Sync'],
     items: [
       { category: 'Features', domain: 'Speech', text: 'Windows native Tauri app with WASAPI audio capture & Rust backend pipeline.' },
       { category: 'Features', domain: 'Sync', text: 'Next.js web dashboard with Supabase Cloud hybrid sync.' },
