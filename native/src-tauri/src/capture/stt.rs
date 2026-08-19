@@ -175,7 +175,10 @@ impl SttEngine {
 
             let mut text = String::new();
             for segment in state.as_iter() {
-                text.push_str(&segment.to_str_lossy());
+                let segment_text = segment
+                    .to_str_lossy()
+                    .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
+                text.push_str(&segment_text);
             }
 
             Ok(text.trim().to_string())
