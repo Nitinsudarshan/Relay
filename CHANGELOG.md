@@ -1,5 +1,16 @@
 # Relay — Changelog
 
+## [0.3.6] - 2026-08-19
+
+### Murmur Push-to-Talk Pill Design & Edge-Flush Placement
+
+- **Murmur Visual System Replication (`DictationPill.tsx`, `PillSettingsPopover.tsx`, `overlay.rs`)**:
+  - Replicated exact Murmur paper gradients (`#faf8f3` -> `#efeae0`), box shadows, 13 idle dots, 15 terracotta waveform bars, toast notifications, and keyboard hint bar.
+  - Made handle/notch 25% wider (`96px` width, `6px` height) with `border-radius: 999px 999px 0 0` (rounded-t-lg top part).
+  - Fixed handle overlap bug by hiding handle (`opacity: 0`) whenever pill is expanded, recording, processing, or showing toast.
+  - Updated Rust `overlay.rs` positioning so resting notch window anchors flush against the top edge of the taskbar / screen bottom without floating gap.
+  - Added sub-page navigation in settings popover for Cleanup Style (`Faithful`/`Polished`/`Clean`/`Concise`) and Language (`Auto-detect`/`English (US)`/`Hinglish`/`Hindi`/`Español`).
+
 ## [0.3.5] - 2026-08-19
 
 ### Oscar-Inspired Push-to-Talk Pill Redesign & Interaction Refinement

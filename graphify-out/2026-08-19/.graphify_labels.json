@@ -109,7 +109,7 @@
   "107": "linux-schema.json",
   "108": "inject_text",
   "109": "local",
-  "110": "Target",
+  "110": "Identifier",
   "111": "index.ts",
   "112": "Identifier",
   "113": "3. First task — repository reconnaissance",
@@ -132,5 +132,6 @@
   "130": "Push-to-Talk Pill Redesign Update Report",
   "131": "popover.tsx",
   "132": "FloatingPill.tsx",
-  "133": "Push-to-Talk Pill Inspection"
+  "133": "Push-to-Talk Pill Inspection",
+  "134": "ShellScopeEntryAllowedArgs"
 }

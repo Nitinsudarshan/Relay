@@ -8,9 +8,7 @@ const RESTING_SIZE: (f64, f64) = (120.0, 48.0);
 /// Full listening/processing pill body + top floating hotkey hint pill.
 const EXPANDED_SIZE: (f64, f64) = (460.0, 100.0);
 /// Pill body + top hotkey hint + compact settings popover dropdown.
-const POPOVER_SIZE: (f64, f64) = (460.0, 360.0);
-/// Gap between the pill and the edge of the work area it's anchored to.
-const EDGE_MARGIN: f64 = 16.0;
+const POPOVER_SIZE: (f64, f64) = (380.0, 360.0);
 
 /// Creates the floating dictation pill window if it doesn't exist yet, at
 /// its resting size, anchored per `position`. If it already exists, just
@@ -140,12 +138,12 @@ fn compute_anchor(app: &AppHandle, size: (f64, f64), position: PillPosition) -> 
     let (x, y) = match position {
         PillPosition::BottomCenter => (
             wa_x + (wa_w - size.0) / 2.0,
-            wa_y + wa_h - size.1 - EDGE_MARGIN,
+            wa_y + wa_h - size.1,
         ),
-        PillPosition::TopCenter => (wa_x + (wa_w - size.0) / 2.0, wa_y + EDGE_MARGIN),
-        PillPosition::LeftCenter => (wa_x + EDGE_MARGIN, wa_y + (wa_h - size.1) / 2.0),
+        PillPosition::TopCenter => (wa_x + (wa_w - size.0) / 2.0, wa_y),
+        PillPosition::LeftCenter => (wa_x, wa_y + (wa_h - size.1) / 2.0),
         PillPosition::RightCenter => (
-            wa_x + wa_w - size.0 - EDGE_MARGIN,
+            wa_x + wa_w - size.0,
             wa_y + (wa_h - size.1) / 2.0,
         ),
     };

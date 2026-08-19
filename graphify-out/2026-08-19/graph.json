@@ -1737,8 +1737,8 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_identifier_description",
-      "community": 98,
-      "community_name": "properties",
+      "community": 110,
+      "community_name": "Identifier",
       "norm_label": "description"
     },
     {
@@ -2045,8 +2045,8 @@
       "source_location": "L94",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_properties_platforms",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "platforms"
     },
     {
@@ -2056,8 +2056,8 @@
       "source_location": "L95",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_platforms_description",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "description"
     },
     {
@@ -2067,8 +2067,8 @@
       "source_location": "L96",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_platforms_type",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "type"
     },
     {
@@ -2078,8 +2078,8 @@
       "source_location": "L96",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_json_ref_array",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "array"
     },
     {
@@ -2089,8 +2089,8 @@
       "source_location": "L96",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_json_ref_null",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "null"
     },
     {
@@ -2254,8 +2254,8 @@
       "source_location": "L386",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_definitions_identifier",
-      "community": 98,
-      "community_name": "properties",
+      "community": 110,
+      "community_name": "Identifier",
       "norm_label": "identifier"
     },
     {
@@ -2265,8 +2265,8 @@
       "source_location": "L388",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_identifier_oneof",
-      "community": 98,
-      "community_name": "properties",
+      "community": 110,
+      "community_name": "Identifier",
       "norm_label": "oneof"
     },
     {
@@ -2342,8 +2342,8 @@
       "source_location": "L2857",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_definitions_target",
-      "community": 110,
-      "community_name": "Target",
+      "community": 97,
+      "community_name": "definitions",
       "norm_label": "target"
     },
     {
@@ -2353,8 +2353,8 @@
       "source_location": "L2858",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_target_description",
-      "community": 110,
-      "community_name": "Target",
+      "community": 97,
+      "community_name": "definitions",
       "norm_label": "description"
     },
     {
@@ -2364,8 +2364,8 @@
       "source_location": "L2859",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_target_oneof",
-      "community": 110,
-      "community_name": "Target",
+      "community": 97,
+      "community_name": "definitions",
       "norm_label": "oneof"
     },
     {
@@ -2408,8 +2408,8 @@
       "source_location": "L2925",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_definitions_shellscopeentryallowedargs",
-      "community": 97,
-      "community_name": "definitions",
+      "community": 134,
+      "community_name": "ShellScopeEntryAllowedArgs",
       "norm_label": "shellscopeentryallowedargs"
     },
     {
@@ -2419,8 +2419,8 @@
       "source_location": "L2926",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_shellscopeentryallowedargs_description",
-      "community": 97,
-      "community_name": "definitions",
+      "community": 134,
+      "community_name": "ShellScopeEntryAllowedArgs",
       "norm_label": "description"
     },
     {
@@ -2430,8 +2430,8 @@
       "source_location": "L2927",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_shellscopeentryallowedargs_anyof",
-      "community": 97,
-      "community_name": "definitions",
+      "community": 134,
+      "community_name": "ShellScopeEntryAllowedArgs",
       "norm_label": "anyof"
     },
     {
@@ -4883,8 +4883,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "pipeline/mod.rs"
     },
     {
@@ -4894,8 +4894,8 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_pipelineerror",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "pipelineerror"
     },
     {
@@ -4905,8 +4905,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_error",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "error"
     },
     {
@@ -4916,8 +4916,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_string",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "string"
     },
     {
@@ -4927,8 +4927,8 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_processedpipelineresult",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "processedpipelineresult"
     },
     {
@@ -4938,8 +4938,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_option",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "option"
     },
     {
@@ -4949,8 +4949,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_vec",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "vec"
     },
     {
@@ -4960,8 +4960,8 @@
       "source_location": "L37",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_extractedactionitem",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "extractedactionitem"
     },
     {
@@ -4971,8 +4971,8 @@
       "source_location": "L45",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_pipelineengine",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "pipelineengine"
     },
     {
@@ -4982,8 +4982,8 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_pipelineengine_process_meeting",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": ".process_meeting()"
     },
     {
@@ -4993,8 +4993,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_result",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "result"
     },
     {
@@ -5004,8 +5004,8 @@
       "source_location": "L158",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_pipelineengine_process_scribble",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": ".process_scribble()"
     },
     {
@@ -9217,8 +9217,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_app_sidebar_appsidebar",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "appsidebar()"
     },
     {
@@ -9228,8 +9228,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_changelog_dialog",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "changelog-dialog.tsx"
     },
     {
@@ -9241,8 +9241,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "web_src_components_changelog_dialog_changelogdialogprops",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "changelogdialogprops"
     },
     {
@@ -9252,8 +9252,8 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "web_src_components_changelog_dialog_changelog_data",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "changelog_data"
     },
     {
@@ -9264,8 +9264,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_changelog_dialog_changelogdialog",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "changelogdialog()"
     },
     {
@@ -9287,8 +9287,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_header_user_menu_totitlecase",
-      "community": 28,
-      "community_name": "(dashboard)/layout.tsx",
+      "community": 2,
+      "community_name": "dropdown-menu.tsx",
       "norm_label": "totitlecase()"
     },
     {
@@ -9299,8 +9299,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_header_user_menu_headerusermenu",
-      "community": 28,
-      "community_name": "(dashboard)/layout.tsx",
+      "community": 2,
+      "community_name": "dropdown-menu.tsx",
       "norm_label": "headerusermenu()"
     },
     {
@@ -10035,8 +10035,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_collapsible",
-      "community": 20,
-      "community_name": "components/page.tsx",
+      "community": 73,
+      "community_name": "sidebar.tsx",
       "norm_label": "collapsible.tsx"
     },
     {
@@ -10047,8 +10047,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_collapsible_collapsible",
-      "community": 20,
-      "community_name": "components/page.tsx",
+      "community": 73,
+      "community_name": "sidebar.tsx",
       "norm_label": "collapsible()"
     },
     {
@@ -10059,8 +10059,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_collapsible_collapsibletrigger",
-      "community": 20,
-      "community_name": "components/page.tsx",
+      "community": 73,
+      "community_name": "sidebar.tsx",
       "norm_label": "collapsibletrigger()"
     },
     {
@@ -10071,8 +10071,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_collapsible_collapsiblecontent",
-      "community": 20,
-      "community_name": "components/page.tsx",
+      "community": 73,
+      "community_name": "sidebar.tsx",
       "norm_label": "collapsiblecontent()"
     },
     {
@@ -11668,8 +11668,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_contexts_user_context_useusercontext",
-      "community": 28,
-      "community_name": "(dashboard)/layout.tsx",
+      "community": 2,
+      "community_name": "dropdown-menu.tsx",
       "norm_label": "useusercontext()"
     },
     {
@@ -12411,10 +12411,32 @@
       "norm_label": "relay \u2014 changelog"
     },
     {
-      "label": "[0.3.4] - 2026-08-19",
+      "label": "[0.3.5] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
       "source_location": "L3",
+      "_origin": "ast",
+      "id": "changelog_0_3_5_2026_08_19",
+      "community": 58,
+      "community_name": "Relay \u2014 Changelog",
+      "norm_label": "[0.3.5] - 2026-08-19"
+    },
+    {
+      "label": "Oscar-Inspired Push-to-Talk Pill Redesign & Interaction Refinement",
+      "file_type": "document",
+      "source_file": "CHANGELOG.md",
+      "source_location": "L5",
+      "_origin": "ast",
+      "id": "changelog_oscar_inspired_push_to_talk_pill_redesign_interaction_refinement",
+      "community": 58,
+      "community_name": "Relay \u2014 Changelog",
+      "norm_label": "oscar-inspired push-to-talk pill redesign & interaction refinement"
+    },
+    {
+      "label": "[0.3.4] - 2026-08-19",
+      "file_type": "document",
+      "source_file": "CHANGELOG.md",
+      "source_location": "L15",
       "_origin": "ast",
       "id": "changelog_0_3_4_2026_08_19",
       "community": 58,
@@ -12425,7 +12447,7 @@
       "label": "Native Build Fix for npm run dev:native",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L5",
+      "source_location": "L17",
       "_origin": "ast",
       "id": "changelog_native_build_fix_for_npm_run_dev_native",
       "community": 58,
@@ -12436,7 +12458,7 @@
       "label": "[0.3.3] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L10",
+      "source_location": "L22",
       "_origin": "ast",
       "id": "changelog_0_3_3_2026_08_19",
       "community": 58,
@@ -12447,7 +12469,7 @@
       "label": "Multi-Monitor Active Positioning & Floating Pill Consolidation",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L12",
+      "source_location": "L24",
       "_origin": "ast",
       "id": "changelog_multi_monitor_active_positioning_floating_pill_consolidation",
       "community": 58,
@@ -12458,7 +12480,7 @@
       "label": "[0.3.2] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L19",
+      "source_location": "L31",
       "_origin": "ast",
       "id": "changelog_0_3_2_2026_08_19",
       "community": 58,
@@ -12469,7 +12491,7 @@
       "label": "Push-to-Talk Floating Pill Upgrade",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L21",
+      "source_location": "L33",
       "_origin": "ast",
       "id": "changelog_push_to_talk_floating_pill_upgrade",
       "community": 58,
@@ -12480,7 +12502,7 @@
       "label": "[0.3.1] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L29",
+      "source_location": "L41",
       "_origin": "ast",
       "id": "changelog_0_3_1_2026_08_19",
       "community": 58,
@@ -12491,7 +12513,7 @@
       "label": "Model Management, Hotkey Recorder & Floating Overlay",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L31",
+      "source_location": "L43",
       "_origin": "ast",
       "id": "changelog_model_management_hotkey_recorder_floating_overlay",
       "community": 58,
@@ -12502,7 +12524,7 @@
       "label": "[0.3.0] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L47",
+      "source_location": "L59",
       "_origin": "ast",
       "id": "changelog_0_3_0_2026_08_19",
       "community": 58,
@@ -12513,7 +12535,7 @@
       "label": "Universal Dictation, Global Hotkeys & Voice Chat (minor: new modules, major features)",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L49",
+      "source_location": "L61",
       "_origin": "ast",
       "id": "changelog_universal_dictation_global_hotkeys_voice_chat_minor_new_modules_major_features",
       "community": 58,
@@ -12524,7 +12546,7 @@
       "label": "[0.2.0] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L71",
+      "source_location": "L83",
       "_origin": "ast",
       "id": "changelog_0_2_0_2026_08_19",
       "community": 58,
@@ -12535,7 +12557,7 @@
       "label": "Relay Visual Identity Pass (\"Monochrome & Electric Blue\")",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L73",
+      "source_location": "L85",
       "_origin": "ast",
       "id": "changelog_relay_visual_identity_pass_monochrome_electric_blue",
       "community": 58,
@@ -12546,7 +12568,7 @@
       "label": "[0.1.2] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L93",
+      "source_location": "L105",
       "_origin": "ast",
       "id": "changelog_0_1_2_2026_08_19",
       "community": 58,
@@ -12557,7 +12579,7 @@
       "label": "Complete UI Design Pass & Theme System Refactoring",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L95",
+      "source_location": "L107",
       "_origin": "ast",
       "id": "changelog_complete_ui_design_pass_theme_system_refactoring",
       "community": 58,
@@ -12568,7 +12590,7 @@
       "label": "[0.1.1] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L115",
+      "source_location": "L127",
       "_origin": "ast",
       "id": "changelog_0_1_1_2026_08_19",
       "community": 58,
@@ -12579,7 +12601,7 @@
       "label": "Improvements & UI Refactoring",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L117",
+      "source_location": "L129",
       "_origin": "ast",
       "id": "changelog_improvements_ui_refactoring",
       "community": 58,
@@ -12590,7 +12612,7 @@
       "label": "[0.1.0] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L123",
+      "source_location": "L135",
       "_origin": "ast",
       "id": "changelog_0_1_0_2026_08_19",
       "community": 58,
@@ -12601,7 +12623,7 @@
       "label": "Initial Release \u2014 Multi-Surface Architecture & Core Pipeline",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L125",
+      "source_location": "L137",
       "_origin": "ast",
       "id": "changelog_initial_release_multi_surface_architecture_core_pipeline",
       "community": 58,
@@ -38770,7 +38792,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L123",
+      "source_location": "L135",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38781,7 +38803,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L115",
+      "source_location": "L127",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38792,7 +38814,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L93",
+      "source_location": "L105",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38803,7 +38825,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L71",
+      "source_location": "L83",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38814,7 +38836,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L47",
+      "source_location": "L59",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38825,7 +38847,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L29",
+      "source_location": "L41",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38836,7 +38858,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L19",
+      "source_location": "L31",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38847,7 +38869,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L10",
+      "source_location": "L22",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38858,7 +38880,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L3",
+      "source_location": "L15",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38869,7 +38891,29 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "changelog_relay_changelog",
+      "target": "changelog_0_3_5_2026_08_19",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHANGELOG.md",
       "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "changelog_0_3_5_2026_08_19",
+      "target": "changelog_oscar_inspired_push_to_talk_pill_redesign_interaction_refinement",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHANGELOG.md",
+      "source_location": "L17",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_3_4_2026_08_19",
@@ -38880,7 +38924,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L12",
+      "source_location": "L24",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_3_3_2026_08_19",
@@ -38891,7 +38935,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L21",
+      "source_location": "L33",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_3_2_2026_08_19",
@@ -38902,7 +38946,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L31",
+      "source_location": "L43",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_3_1_2026_08_19",
@@ -38913,7 +38957,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L49",
+      "source_location": "L61",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_3_0_2026_08_19",
@@ -38924,7 +38968,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L73",
+      "source_location": "L85",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_2_0_2026_08_19",
@@ -38935,7 +38979,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L95",
+      "source_location": "L107",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_1_2_2026_08_19",
@@ -38946,7 +38990,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L117",
+      "source_location": "L129",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_1_1_2026_08_19",
@@ -38957,7 +39001,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L125",
+      "source_location": "L137",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_1_0_2026_08_19",

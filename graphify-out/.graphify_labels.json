@@ -77,7 +77,7 @@
   "75": "shadcn",
   "76": "ui-components.md",
   "77": "version-and-changelog.md",
-  "78": "component-architecture.md",
+  "78": "ShellScopeEntryAllowedArgs",
   "79": "rules/graphify.md",
   "80": "workflows/graphify.md",
   "81": "build.rs",
@@ -114,7 +114,7 @@
   "112": "Identifier",
   "113": "3. First task — repository reconnaissance",
   "114": "@radix-ui/react-checkbox",
-  "115": "ProviderSettings.tsx",
+  "115": "HotkeyRecorder.tsx",
   "116": "@radix-ui/react-select",
   "117": "@radix-ui/react-slot",
   "118": "@radix-ui/react-tooltip",
@@ -128,10 +128,9 @@
   "126": "6. RESTING STATE",
   "127": "Decisions",
   "128": "TriggerSettings.tsx",
-  "129": "ScribbleViewer.tsx",
-  "130": "Push-to-Talk Pill Redesign Update Report",
-  "131": "popover.tsx",
-  "132": "FloatingPill.tsx",
-  "133": "Push-to-Talk Pill Inspection",
-  "134": "ShellScopeEntryAllowedArgs"
+  "129": "accessibility.md",
+  "130": "Push-to-Talk Pill Refinement Update Report",
+  "131": "cn",
+  "132": "DictationPill",
+  "133": "Push-to-Talk Pill Inspection"
 }

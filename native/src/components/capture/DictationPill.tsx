@@ -16,11 +16,11 @@ import {
   Sparkles, 
   ChevronDown, 
   ChevronUp, 
-  AlertCircle, 
-  CheckCircle2, 
-  Square, 
+  AlertTriangle, 
+  Check, 
   Loader2, 
-  Bug 
+  Bug, 
+  Square 
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -41,7 +41,7 @@ const PROCESSING_CAPTIONS = [
   'writing note to vault...',
 ];
 
-const HOVER_EXPAND_DELAY_MS = 120;
+const HOVER_EXPAND_DELAY_MS = 150;
 const HOVER_COLLAPSE_DELAY_MS = 1000;
 
 export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete }) => {
@@ -58,12 +58,12 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const [language, setLanguage] = useState<SpeechLanguage>('english');
   const [dictationShortcut, setDictationShortcut] = useState('Ctrl+Space');
 
-  // Recording & Status State
+  // Audio Level & Processing Captions
   const [audioLevel, setAudioLevel] = useState(0);
   const [captionIndex, setCaptionIndex] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string>('Text inserted');
+  const [successMessage, setSuccessMessage] = useState<string>('Inserted into document');
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   // Dependency Verification Statuses
@@ -86,7 +86,6 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
   const isExpanded = (phase !== 'collapsed' && phase !== 'hidden_notch' && phase !== 'error' && phase !== 'warning') || hovering || popoverOpen;
 
-  // Refresh dependency statuses
   const refreshDependencies = async () => {
     try {
       const appSettings = await invoke<AppSettings>('get_settings');
@@ -96,7 +95,6 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         setHotkeyStatus({ status: 'registered', hotkey: appSettings.hotkeys.dictation_hotkey });
       }
 
-      // Check STT
       try {
         const sttResult = await invoke<any>('ensure_stt_model_ready');
         if (sttResult.state === 'ready' || sttResult.Ready) {
@@ -108,7 +106,6 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         setWhisperStatus({ status: 'download_required', message: 'Whisper check failed' });
       }
 
-      // Check Ollama / LLM
       try {
         const llmResult = await invoke<any>('ensure_local_llm_ready');
         if (appSettings.provider.active_provider !== 'ollama') {
@@ -167,7 +164,6 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       })
       .catch(() => {});
 
-    // Listen for backend capture events
     const unlistenState = listen<CaptureStatePayload>('capture-state-changed', ({ payload }) => {
       if (payload.active) {
         setPhase('listening');
@@ -177,7 +173,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         setPhase('processing');
       } else if (payload.status === 'SUCCESS') {
         setPhase('success');
-        setSuccessMessage(promptMode ? 'Prompt transformed & inserted' : 'Text inserted');
+        setSuccessMessage(promptMode ? 'Prompt inserted into document' : 'Inserted into document');
         if (successTimerRef.current) clearTimeout(successTimerRef.current);
         successTimerRef.current = setTimeout(() => setPhase('collapsed'), 2200);
       } else if (payload.status === 'ERROR' || payload.message) {
@@ -209,7 +205,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     };
   }, []);
 
-  // Update Rust overlay window geometry
+  // Update Rust native window geometry
   useEffect(() => {
     let modeName: 'resting' | 'expanded' | 'popover' = 'resting';
     if (popoverOpen) {
@@ -238,7 +234,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     };
   }, [phase]);
 
-  // Hover Handlers (120ms enter intent, 1000ms leave collapse delay)
+  // Hover Handlers
   const handleMouseEnter = () => {
     if (hoverLeaveTimerRef.current) clearTimeout(hoverLeaveTimerRef.current);
     if (!hovering) {
@@ -276,7 +272,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         setPhase('processing');
         const result = await invoke<ProcessedPipelineResult>('stop_capture');
         setPhase('success');
-        setSuccessMessage('Text inserted');
+        setSuccessMessage('Inserted into document');
         if (onProcessComplete) onProcessComplete(result);
         if (successTimerRef.current) clearTimeout(successTimerRef.current);
         successTimerRef.current = setTimeout(() => setPhase('collapsed'), 2200);
@@ -309,15 +305,15 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
   return (
     <div
-      className="relative flex flex-col items-center justify-center select-none font-sans"
+      className="absolute inset-0 flex items-end justify-center select-none font-sans overflow-hidden bg-transparent"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
       {/* Dev Diagnostic HUD */}
       {showDiagnostics && (
-        <div className="absolute -top-28 left-1/2 -translate-x-1/2 bg-black/90 text-emerald-400 font-mono text-[10px] p-2 rounded-lg border border-emerald-500/30 shadow-xl whitespace-nowrap z-50 flex flex-col gap-0.5">
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-black/90 text-emerald-400 font-mono text-[10px] p-2 rounded-lg border border-emerald-500/30 shadow-xl whitespace-nowrap z-50 flex flex-col gap-0.5">
           <div className="flex items-center gap-1 font-bold border-b border-emerald-500/20 pb-0.5">
-            <Bug className="w-3 h-3 text-emerald-400" /> Relay Inspection HUD
+            <Bug className="w-3 h-3 text-emerald-400" /> Murmur Pill Diagnostics
           </div>
           <div>State: <span className="text-white">{diagnosticsInfo.state}</span> | Window: <span className="text-white">{diagnosticsInfo.windowMode}</span></div>
           <div>STT: <span className="text-white">{diagnosticsInfo.sttStatus}</span> | LLM: <span className="text-white">{diagnosticsInfo.llmStatus}</span></div>
@@ -325,181 +321,193 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         </div>
       )}
 
-      {/* Floating Hotkey Hint Bar (Rendered above pill on hover/recording, Oscar-style) */}
-      {isExpanded && (
-        <div className="absolute -top-9 left-1/2 -translate-x-1/2 bg-[#faf8f5]/95 dark:bg-[#1a1918]/95 border border-[#e6e0d5] dark:border-[#2e2c29] shadow-md px-3 py-0.5 rounded-full text-[11px] text-[#595550] dark:text-[#a8a39a] flex items-center gap-1.5 whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 duration-200 z-10">
-          <span>Hold to record</span>
-          <kbd className="px-1.5 py-0.2 rounded bg-[#eee9df] dark:bg-[#2c2a29] font-mono text-[10px] font-bold text-[#2c2a29] dark:text-[#f0ede8] border border-[#d8d2c4] dark:border-[#383533]">
-            Ctrl
-          </kbd>
-          <kbd className="px-1.5 py-0.2 rounded bg-[#eee9df] dark:bg-[#2c2a29] font-mono text-[10px] font-bold text-[#2c2a29] dark:text-[#f0ede8] border border-[#d8d2c4] dark:border-[#383533]">
-            Space
-          </kbd>
+      {/* Hit zone for cursor hit testing */}
+      <div
+        className={cn(
+          'absolute bottom-0 z-10 transition-all bg-black/[0.001]',
+          !isExpanded
+            ? 'left-1/2 -translate-x-1/2 w-[140px] h-[16px] pointer-events-auto'
+            : 'left-0 w-full h-full pointer-events-auto'
+        )}
+      />
+
+      {/* Handle (rest / ready edge notch) — 25% wider (~96px), height 6px, top rounded (999px 999px 0 0)
+          Hides completely (`opacity: 0`) when expanded or recording so no notch sticks out of the top of the pill! */}
+      <div
+        className={cn(
+          'absolute left-1/2 bottom-0 -translate-x-1/2 transition-all duration-200 pointer-events-none z-20',
+          'bg-[#faf8f3] bg-gradient-to-b from-[#faf8f3] to-[#efeae0] border border-black/8 border-b-0 shadow-[0_-1px_6px_rgba(0,0,0,0.3)]',
+          !hovering ? 'w-[96px] h-[6px] rounded-t-lg' : 'w-[110px] h-[7px] rounded-t-xl shadow-[0_-2px_12px_rgba(184,98,61,0.4)]',
+          isExpanded && 'opacity-0 pointer-events-none'
+        )}
+      />
+
+      {/* Success Toast */}
+      {phase === 'success' && (
+        <div className="absolute left-1/2 bottom-[82px] -translate-x-1/2 bg-[#b8623d] text-[#faf8f3] px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-wide flex items-center gap-1.5 shadow-[0_8px_24px_rgba(184,98,61,0.4)] pointer-events-none z-40 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+          <span>{successMessage}</span>
         </div>
       )}
 
-      {/* Main Surface (Notch vs Oscar Pill) */}
-      {!isExpanded ? (
-        /* Oscar Edge Horizontal Notch (Resting State) */
+      {/* Keyboard hint bar (floating above main pill when expanded) */}
+      {isExpanded && !popoverOpen && phase !== 'success' && (
+        <div className="absolute left-1/2 bottom-[76px] -translate-x-1/2 bg-[#faf8f3] bg-gradient-to-b from-[#faf8f3] to-[#efeae0] border border-black/10 rounded-lg px-2.5 py-1.5 shadow-[0_8px_20px_rgba(26,24,22,0.25)] whitespace-nowrap flex items-center gap-2 text-xs text-[#1a1816] pointer-events-none z-30 animate-in fade-in slide-in-from-bottom-1 duration-180">
+          <span className="text-black/50">Hold to record</span>
+          <span className="flex items-center gap-1">
+            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[#b8623d]/10 text-[#1a1816] border border-[#b8623d]/20 font-medium">
+              Ctrl
+            </kbd>
+            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[#b8623d]/10 text-[#1a1816] border border-[#b8623d]/20 font-medium">
+              Space
+            </kbd>
+          </span>
+        </div>
+      )}
+
+      {/* Full Murmur Paper Pill (Expanded State) */}
+      <div
+        className={cn(
+          'absolute left-1/2 bottom-[22px] -translate-x-1/2 transition-all duration-260 ease-out pointer-events-none z-30',
+          !isExpanded
+            ? 'translate-y-[28px] scale-75 opacity-0'
+            : 'translate-y-0 scale-100 opacity-100 pointer-events-auto'
+        )}
+      >
         <div
-          onClick={toggleClickToTalk}
-          className="w-16 h-2 rounded-t-lg bg-[#dfd9cd] dark:bg-[#3d3b38] hover:h-3 transition-all duration-200 cursor-pointer shadow-xs border-t border-x border-[#c8c2b5] dark:border-[#4d4a46]"
-          title="Click or hover to expand push-to-talk"
-        />
-      ) : (
-        /* Oscar-Inspired Pill Surface */
-        <div
-          className={cn(
-            'flex items-center justify-between bg-[#faf8f5] dark:bg-[#1a1918] border border-[#e6e0d5] dark:border-[#2e2c29] shadow-xl rounded-full px-4 h-11 w-[430px] transition-all duration-250 ease-out'
-          )}
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest('.pill-actions')) return;
+            toggleClickToTalk();
+          }}
+          className="inline-flex items-center gap-0 pl-4 pr-1.5 h-[44px] max-w-[calc(100vw-8px)] rounded-full bg-[#faf8f3] bg-gradient-to-b from-[#faf8f3] to-[#efeae0] border border-black/10 shadow-[0_16px_40px_rgba(26,24,22,0.45),0_2px_8px_rgba(26,24,22,0.25),inset_0_1px_0_#faf8f3] text-[#1a1816] cursor-pointer"
         >
-          {/* Left: Active Process / App Indicator (No "RELAY" branding) */}
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="w-2 h-2 rounded-full bg-[#8c867a] dark:bg-[#999387]" />
-            <span className="text-[11px] font-mono font-medium text-[#7a7469] dark:text-[#999387] tracking-wide uppercase max-w-[100px] truncate">
-              {activeApp}
+          <div className="flex items-center min-w-[110px] pr-2.5 h-[22px]">
+            {/* App Context Label (Terracotta dot + mono uppercase app name) */}
+            <span className="inline-flex items-center gap-1.5 mr-2 min-w-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#b8623d] shrink-0" />
+              <span className="font-mono text-[10px] tracking-widest text-[#b8623d] uppercase whitespace-nowrap overflow-hidden text-ellipsis max-w-[90px]">
+                {activeApp}
+              </span>
             </span>
-          </div>
 
-          {/* Center: Main Interactive Action / Recording State */}
-          <div className="flex-1 flex items-center justify-center px-2 min-w-0">
-            {/* COLLAPSED / EXPANDED IDLE */}
+            {/* Phase 1: IDLE / READY — Click to dictate */}
             {(phase === 'collapsed' || phase === 'expanded') && (
-              <button
-                type="button"
-                onClick={toggleClickToTalk}
-                className="text-xs font-semibold text-[#2c2a29] dark:text-[#f0ede8] hover:text-[#c26238] transition-colors cursor-pointer truncate"
-              >
-                {promptMode ? 'Click to prompt' : 'Click to dictate'}
-              </button>
-            )}
-
-            {/* RECORDING / LISTENING */}
-            {phase === 'listening' && (
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 text-xs font-bold text-[#c26238] dark:text-[#d97345]">
-                  <span className="w-2 h-2 rounded-full bg-[#c26238] dark:bg-[#d97345] animate-ping" />
-                  <span>{promptMode ? 'Prompting...' : 'Listening...'}</span>
-                </div>
-
-                {/* Real RMS Audio Visualizer Waveform */}
-                <div className="flex items-center gap-1 h-4 px-2 bg-[#eee9df]/50 dark:bg-[#262423]/50 rounded-full">
-                  {[0.5, 0.9, 0.7, 1.0, 0.6, 0.8].map((factor, i) => {
-                    const heightPx = Math.max(3, Math.min(16, Math.round(audioLevel * 16 * factor)));
-                    return (
-                      <span
-                        key={i}
-                        className="w-1 rounded-full bg-[#c26238] dark:bg-[#d97345] transition-all duration-75"
-                        style={{ height: `${heightPx}px` }}
-                      />
-                    );
-                  })}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={toggleClickToTalk}
-                  className="p-1 rounded-full bg-[#f2e6d8] dark:bg-[#382b24] text-[#c26238] dark:text-[#d97345] transition-colors cursor-pointer"
-                  title="Stop recording"
-                >
-                  <Square className="w-3 h-3 fill-current" />
-                </button>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-xs font-medium text-[#1a1816] tracking-tight whitespace-nowrap">
+                  {promptMode ? 'Click to prompt' : 'Click to dictate'}
+                </span>
               </div>
             )}
 
-            {/* PROCESSING */}
+            {/* Phase 2: RECORDING — 15 terracotta bars waveform */}
+            {phase === 'listening' && (
+              <div className="flex items-center gap-[2.5px] h-[22px] shrink-0">
+                {[0.35, 0.55, 0.85, 0.45, 0.7, 0.95, 0.6, 0.4, 0.75, 0.55, 0.3, 0.6, 0.85, 0.5, 0.7].map((h, i) => {
+                  const scale = 0.34 + audioLevel * 0.8;
+                  const heightPx = Math.max(3, Math.round(h * 22 * scale));
+                  return (
+                    <span
+                      key={i}
+                      className="w-[2.5px] bg-[#b8623d] rounded-sm transition-all duration-75 origin-center"
+                      style={{ height: `${heightPx}px` }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Phase 3: PROCESSING */}
             {phase === 'processing' && (
-              <div className="flex items-center gap-2 text-xs text-[#2c2a29] dark:text-[#f0ede8] font-medium truncate">
-                <Loader2 className="w-3.5 h-3.5 text-[#c26238] dark:text-[#d97345] animate-spin shrink-0" />
-                <span className="font-mono text-[#8c867a] text-[11px] animate-pulse truncate">
+              <div className="flex items-center gap-2 max-w-[220px] overflow-hidden">
+                <span className="w-2.5 h-2.5 rounded-full border-[1.4px] border-black/20 border-t-[#b8623d] animate-spin shrink-0" />
+                <span className="font-mono text-[10.5px] tracking-wide text-[#5a5852] whitespace-nowrap animate-in fade-in duration-200">
                   {PROCESSING_CAPTIONS[captionIndex]}
                 </span>
               </div>
             )}
 
-            {/* SUCCESS */}
-            {phase === 'success' && (
-              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 animate-in fade-in duration-200 truncate">
-                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">{successMessage}</span>
-              </div>
-            )}
-
-            {/* ERROR */}
+            {/* Phase 4: ERROR */}
             {phase === 'error' && (
-              <div className="flex items-center gap-1.5 text-xs text-rose-600 dark:text-rose-400 font-medium truncate">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">{errorMessage || 'Something went wrong'}</span>
+              <div className="flex items-center gap-1.5 text-[#8c2f25] text-xs font-medium">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{errorMessage || 'no input'}</span>
               </div>
             )}
 
-            {/* WARNING */}
+            {/* Phase 5: WARNING */}
             {phase === 'warning' && (
-              <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 font-medium truncate">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">{warningMessage || 'LLM not configured'}</span>
+              <div className="flex items-center gap-1.5 text-[#b8623d] text-xs font-medium">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{warningMessage || 'Sign in to enable AI'}</span>
               </div>
             )}
           </div>
 
-          {/* Right Controls: Separator | Sparkle | Chevron */}
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="h-4 w-px bg-[#e6e0d5] dark:bg-[#2e2c29]" />
+          <div className="w-px h-[22px] bg-black/10 shrink-0" />
 
-            {/* Sparkle (Prompt Mode Button) */}
+          {/* Action Buttons: Prompt Mode + Settings Chevron */}
+          <div className="flex items-center gap-0.5 pl-1.5 shrink-0 pill-actions">
             <button
               type="button"
-              onClick={handleTogglePromptMode}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleTogglePromptMode();
+              }}
               className={cn(
-                'p-1.5 rounded-full transition-colors cursor-pointer flex items-center justify-center',
+                'w-7 h-7 rounded-full border-none bg-transparent flex items-center justify-center cursor-pointer transition-colors p-0',
                 promptMode
-                  ? 'bg-[#f5eade] dark:bg-[#382b24] text-[#c26238] dark:text-[#d97345] font-bold shadow-xs'
-                  : 'text-[#8c867a] hover:text-[#2c2a29] dark:hover:text-[#f0ede8]'
+                  ? 'text-[#b8623d] bg-[#b8623d]/14 hover:bg-[#b8623d]/20'
+                  : 'text-black/40 hover:bg-black/6'
               )}
-              title={promptMode ? 'Prompt Mode Active' : 'Toggle Prompt Mode'}
-              aria-label="Toggle Prompt Mode"
+              title="Prompt mode — rewrite speech into a prompt"
+              aria-label="Prompt mode"
             >
-              <Sparkles className="w-3.5 h-3.5" />
+              <Sparkles className="w-3.5 h-3.5 stroke-[1.4]" />
             </button>
 
-            {/* Chevron (Settings Dropdown) */}
             <button
               type="button"
-              onClick={() => setPopoverOpen((prev) => !prev)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setPopoverOpen((prev) => !prev);
+              }}
               className={cn(
-                'p-1 text-[#8c867a] hover:text-[#2c2a29] dark:hover:text-[#f0ede8] transition-colors cursor-pointer'
+                'w-7 h-7 rounded-full border-none bg-transparent text-[#1a1816] flex items-center justify-center cursor-pointer transition-colors p-0 hover:bg-black/6',
+                popoverOpen && 'bg-black/6'
               )}
-              title="Open Dictation Settings"
-              aria-label="Open Dictation settings"
+              title="Settings"
+              aria-label="Settings"
             >
-              {popoverOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              {popoverOpen ? (
+                <ChevronUp className="w-3 h-3 stroke-[2]" />
+              ) : (
+                <ChevronDown className="w-3 h-3 stroke-[2]" />
+              )}
             </button>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* Popover Settings Dropdown Panel */}
+      {/* Settings Popover Dropdown */}
       {popoverOpen && (
-        <div className="mt-2 z-20">
-          <PillSettingsPopover
-            settings={settings}
-            autoPaste={autoPaste}
-            onToggleAutoPaste={setAutoPaste}
-            textTransform={textTransform}
-            onToggleTextTransform={setTextTransform}
-            cleanupStyle={cleanupStyle}
-            onChangeCleanupStyle={setCleanupStyle}
-            promptMode={promptMode}
-            onTogglePromptMode={handleTogglePromptMode}
-            language={language}
-            onChangeLanguage={setLanguage}
-            whisperStatus={whisperStatus}
-            ollamaStatus={ollamaStatus}
-            hotkeyStatus={hotkeyStatus}
-            onRefreshStatuses={refreshDependencies}
-            onDownloadWhisper={handleDownloadWhisper}
-          />
-        </div>
+        <PillSettingsPopover
+          settings={settings}
+          autoPaste={autoPaste}
+          onToggleAutoPaste={setAutoPaste}
+          textTransform={textTransform}
+          onToggleTextTransform={setTextTransform}
+          cleanupStyle={cleanupStyle}
+          onChangeCleanupStyle={setCleanupStyle}
+          promptMode={promptMode}
+          onTogglePromptMode={handleTogglePromptMode}
+          language={language}
+          onChangeLanguage={setLanguage}
+          whisperStatus={whisperStatus}
+          ollamaStatus={ollamaStatus}
+          hotkeyStatus={hotkeyStatus}
+          onRefreshStatuses={refreshDependencies}
+          onDownloadWhisper={handleDownloadWhisper}
+        />
       )}
     </div>
   );
