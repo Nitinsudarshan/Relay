@@ -1,5 +1,21 @@
 # Relay — Changelog
 
+## [0.4.2] - 2026-08-19
+
+### Dictation Pill Recording Lifecycle & Global Hotkey Reliability Fix
+
+- **Authoritative Audio Detection (`capture/mod.rs`, `commands.rs`, `hotkeys/mod.rs`)**:
+  - `AudioRecorder` now tracks `had_audio` — set only when a captured chunk's RMS crosses a real input threshold during the session — instead of assuming a started recording implies usable audio.
+  - `stop_capture` and the dictation hotkey's release handler both gate on `had_audio`: a silent/no-input recording emits `capture-state-changed` with `status: "NO_SPEECH"` and returns to idle without ever invoking the Whisper STT engine. `stop_capture` now returns `Option<ProcessedPipelineResult>` (`None` on no audio) instead of always fabricating a result.
+  - Removed the frontend's optimistic local `setPhase('processing')` on stop — the pill now only shows "Transcribing…" once the backend has actually confirmed audio was captured, closing the bug where clicking the pill twice with no input still walked through Transcribing → Processing.
+- **Real, Smoothed Waveform (`capture/mod.rs`)**:
+  - Added a one-pole low-pass smoothing filter to the RMS level pipeline (`capture` → level → normalize → smooth → `capture-level` event) so the waveform reflects actual mic input without jitter, and reuses the same per-chunk level for audio detection.
+- **Global Hotkey Reliability (`hotkeys/mod.rs`, `DictationPill.tsx`)**:
+  - `show_hide_hotkey` and `dictation_hotkey` now register independently — previously a registration failure on the first silently skipped ever attempting the second, which could leave Ctrl+Space completely unregistered with no visible error.
+  - Added a `hotkey-status-changed` event carrying the real per-hotkey OS registration outcome; the pill's Hotkey Status now reflects it instead of an optimistic hardcoded "registered".
+- **Docked Pill Listener Lifecycle (`App.tsx`)**:
+  - The docked pill (used when the floating overlay is turned off) is now always mounted and hidden via CSS instead of being conditionally rendered per-tab, so its `capture-state-changed`/`capture-level` listeners stay alive across tab switches — matching the floating pill, whose overlay window already persists for the app's whole lifetime.
+
 ## [0.4.1] - 2026-08-19
 
 ### Unconditional Automatic GGML Whisper Model Downloader
