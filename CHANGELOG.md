@@ -1,5 +1,57 @@
 # Relay — Changelog
 
+## [0.4.4] - 2026-08-20
+
+### Real Speech Detection, Rolling Waveform & Dictation Lifecycle Hardening
+
+A prior attempt at this fix (gating transcription on a `had_audio` flag set
+by a fixed RMS threshold) landed real correctness improvements but was
+independently found to be incomplete: the threshold couldn't tell a
+sustained-but-silent noisy room apart from speech, the waveform still used
+one scalar to scale a fixed decorative bar shape (never truly flat at
+silence), and the click handler still declared "listening"/"processing"
+before the native recorder confirmed either. This release addresses all
+three, plus the docked-pill hotkey-visibility gap that fell out of the
+same review.
+
+- **Speech detection (`capture/mod.rs`)**:
+  - Replaced the fixed `AUDIO_DETECTED_THRESHOLD` gate with a per-session
+    calibration: the first 300ms of a recording measures the ambient noise
+    floor (fan/room/mic-AGC noise), and only energy sustained for 200ms+
+    *above that measured floor by a margin* counts towards `had_audio`.
+    Fan noise, keyboard clatter, and Windows mic-enhancement processing
+    sitting continuously above a static threshold no longer falsely
+    triggers transcription.
+  - Added unit tests (`capture::tests`) covering true silence, sustained
+    ambient noise at a fixed level, sustained real speech above the
+    calibrated floor, and a brief sub-threshold-duration spike — the exact
+    regression scenario a static threshold couldn't distinguish.
+- **Real waveform (`DictationPill.tsx`)**:
+  - Replaced the fixed 15-value decorative shape scaled by one shared
+    `audioLevel` scalar with a rolling per-bar history: each bar now
+    renders its own actual recent audio-level sample. Silence now
+    collapses every bar to its hairline minimum instead of a predetermined
+    non-zero pattern.
+- **Recording lifecycle (`DictationPill.tsx`)**:
+  - Removed the remaining optimistic local state transitions: clicking to
+    start no longer claims `listening` before `start_capture` resolves.
+    The pill now exclusively reflects state the native recorder has
+    confirmed via `capture-state-changed`, removing the last
+    two-sources-of-truth race between the UI and the backend.
+- **Docked hotkey visibility (`hotkeys/mod.rs`)**:
+  - Pressing the dictation hotkey while docked (floating pill off) now
+    shows the main window (without focusing it, so the actual dictation
+    target keeps OS focus for text injection) and switches to the Voice
+    Capture tab via the existing `navigate-tab` event, so a hotkey-triggered
+    recording is actually visible instead of updating a pill that's hidden
+    behind another tab or window.
+  - `try_register_hotkeys` now registers the show/hide and dictation
+    hotkeys independently; previously a failure on the first silently
+    skipped ever attempting the second, which could leave the dictation
+    hotkey completely unregistered with no visible error. A
+    `hotkey-status-changed` event now carries the real per-hotkey
+    registration outcome to the UI.
+
 ## [0.4.3] - 2026-08-20
 
 ### Dev Environment Setup & Workspace Install Scripts
