@@ -1,5 +1,12 @@
 # Relay — Changelog
 
+## [0.2.2] - 2026-08-19
+
+### UI Enhancements
+
+- **Changelog Modal Layout**:
+  - Expanded Changelog Modal container width to `w-[80vw] max-w-5xl` across native and web surfaces for enhanced readability.
+
 ## [0.2.1] - 2026-08-19
 
 ### Fix Windows Build (`clang.dll` / `whisper-rs-sys` missing dependency)

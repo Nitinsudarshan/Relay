@@ -65,7 +65,7 @@ export const ChangelogModal: React.FC<ChangelogModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-      <div className="bg-popover border border-border shadow-2xl rounded-2xl w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden text-popover-foreground">
+      <div className="bg-popover border border-border shadow-2xl rounded-2xl w-[80vw] max-w-5xl max-h-[85vh] flex flex-col overflow-hidden text-popover-foreground">
         {/* Modal Header */}
         <div className="p-4 md:p-5 border-b border-border flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
