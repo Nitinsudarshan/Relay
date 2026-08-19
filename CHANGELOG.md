@@ -1,5 +1,14 @@
 # Relay — Changelog
 
+## [0.3.3] - 2026-08-19
+
+### Multi-Monitor Active Positioning & Floating Pill Consolidation
+
+- **Unified Floating Overlay Surface (`overlay.rs`, `hotkeys/mod.rs`)**:
+  - Consolidated legacy `dictation-indicator` window into the unified `dictation-pill` overlay.
+  - Implemented active-window monitor auto-detection so the floating pill appears on whichever display contains the user's active application target.
+  - Hardened focus preservation and session locks across global hotkeys and overlay UI.
+
 ## [0.3.2] - 2026-08-19
 
 ### Push-to-Talk Floating Pill Upgrade

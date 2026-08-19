@@ -12,6 +12,19 @@ interface ChangelogModalProps {
 
 export const CHANGELOG_DATA = [
   {
+    version: '0.3.3',
+    date: '2026-08-19',
+    type: 'patch',
+    title: 'Multi-Monitor Active Positioning & Floating Pill Consolidation',
+    tags: ['Improvements'],
+    domains: ['Dictation', 'UI', 'Build'],
+    items: [
+      { category: 'Improvements', domain: 'Dictation', text: 'Consolidated legacy dictation-indicator into unified dictation-pill overlay window.' },
+      { category: 'Improvements', domain: 'UI', text: 'Implemented active-window monitor auto-detection for multi-monitor overlay positioning.' },
+      { category: 'Fixes', domain: 'Dictation', text: 'Hardened focus preservation and session locks across global hotkeys and mouse click-to-talk.' },
+    ],
+  },
+  {
     version: '0.3.2',
     date: '2026-08-19',
     type: 'patch',

@@ -132,7 +132,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               title="View Release Notes & Changelog"
             >
               <Activity className="w-3 h-3 text-primary group-hover:animate-pulse" />
-              <span className="underline decoration-dotted underline-offset-2">v0.3.2</span>
+              <span className="underline decoration-dotted underline-offset-2">v0.3.3</span>
             </button>
           </div>
         </SidebarFooter>
@@ -141,7 +141,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <ChangelogDialog
         open={changelogOpen}
         onClose={() => setChangelogOpen(false)}
-        currentVersion="0.3.2"
+        currentVersion="0.3.3"
       />
     </>
   );

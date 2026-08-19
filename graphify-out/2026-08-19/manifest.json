@@ -30,13 +30,13 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/capture/mod.rs": {
-    "mtime": 1787128613.0450568,
-    "ast_hash": "e656f4647b7a0cd73cb68ccbccaf978f",
+    "mtime": 1787133401.8452952,
+    "ast_hash": "0d5fcb3ebe429ae79dd10f7bdc69f63a",
     "semantic_hash": ""
   },
   "native/src-tauri/src/commands.rs": {
-    "mtime": 1787132919.442917,
-    "ast_hash": "ac3767fbf5c023d6075f0020083dfaae",
+    "mtime": 1787133486.8927906,
+    "ast_hash": "892119e7ed9869b8846aef398fdf107b",
     "semantic_hash": ""
   },
   "native/src-tauri/src/lib.rs": {
@@ -80,8 +80,8 @@
     "semantic_hash": ""
   },
   "native/src/App.tsx": {
-    "mtime": 1787128613.1967375,
-    "ast_hash": "f7b6f4acf0cffa05f5087021c2a1e902",
+    "mtime": 1787133546.3016272,
+    "ast_hash": "dd36034fc4312e1a564cbc52da472f41",
     "semantic_hash": ""
   },
   "native/src/components/capture/PTTWidget.tsx": {
@@ -200,8 +200,8 @@
     "semantic_hash": ""
   },
   "web/src/components/app-sidebar.tsx": {
-    "mtime": 1787125685.4628222,
-    "ast_hash": "a04f1310164d2a62cf57a39f309e0369",
+    "mtime": 1787133552.2438612,
+    "ast_hash": "d0e35159438d15f44addbe1fab825f34",
     "semantic_hash": ""
   },
   "web/src/components/header-user-menu.tsx": {
@@ -450,8 +450,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1787125675.094151,
-    "ast_hash": "7174351afa9248f7806af4225e8b7560",
+    "mtime": 1787133529.8264177,
+    "ast_hash": "30b8c754e6f1b25eb9b3742504e378c4",
     "semantic_hash": ""
   },
   "README.md": {
@@ -475,8 +475,8 @@
     "semantic_hash": ""
   },
   "docs/decisions.md": {
-    "mtime": 1787124963.3695467,
-    "ast_hash": "64cc83bd5f4223931c54961efb033816",
+    "mtime": 1787133351.2947507,
+    "ast_hash": "756c1424cb531274dc84b5ab6988d720",
     "semantic_hash": ""
   },
   "docs/product.md": {
@@ -675,8 +675,8 @@
     "semantic_hash": ""
   },
   "native/src/components/capture/DictationPill.tsx": {
-    "mtime": 1787128613.2154217,
-    "ast_hash": "8b19bb13695af0078869acbeab111f4a",
+    "mtime": 1787133441.9297614,
+    "ast_hash": "272e88448dff58cd81f09a6544142c8b",
     "semantic_hash": ""
   },
   "native/src/components/common/RelayLogo.tsx": {
@@ -725,8 +725,8 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/hotkeys/mod.rs": {
-    "mtime": 1787132919.4597435,
-    "ast_hash": "5091000732d7efb809bfe45c5a20b021",
+    "mtime": 1787133428.7350664,
+    "ast_hash": "3bf118c270616407a394d4281160ff91",
     "semantic_hash": ""
   },
   "native/src-tauri/src/pipeline/chat.rs": {
@@ -775,8 +775,8 @@
     "semantic_hash": ""
   },
   "native/src/components/common/ChangelogModal.tsx": {
-    "mtime": 1787125792.5187652,
-    "ast_hash": "04c5c71a9f4ad312493b0414a4e1d495",
+    "mtime": 1787133535.7623227,
+    "ast_hash": "a59381c0fdc514467c2c245b10f5edc9",
     "semantic_hash": ""
   },
   "native/src/components/settings/HotkeyRecorder.tsx": {
@@ -785,8 +785,8 @@
     "semantic_hash": ""
   },
   "web/src/components/changelog-dialog.tsx": {
-    "mtime": 1787125798.9564803,
-    "ast_hash": "c212f7cc13e656a9d87fdbb50f1fe3e2",
+    "mtime": 1787133540.9687667,
+    "ast_hash": "cd6d7efb0a0c73ebbe5277439384eabb",
     "semantic_hash": ""
   }
 }
