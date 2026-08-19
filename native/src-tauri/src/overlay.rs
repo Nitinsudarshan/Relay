@@ -3,14 +3,12 @@ use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, Webvie
 
 pub const PILL_WINDOW_LABEL: &str = "dictation-pill";
 
-/// The compact, non-expanded pill: just big enough for the logo/mic dot —
-/// intentionally tiny so there's no invisible-but-clickable dead zone
-/// around it (a larger fixed window with a small visible pill inside it
-/// is exactly what swallows clicks meant for whatever's underneath, and
-/// can clip/hide any dialog that pill ever opens).
-const RESTING_SIZE: (f64, f64) = (56.0, 56.0);
-/// The full listening/processing/success/error pill body.
-const EXPANDED_SIZE: (f64, f64) = (420.0, 72.0);
+/// Compact horizontal notch resting size (includes invisible hover hit area).
+const RESTING_SIZE: (f64, f64) = (120.0, 48.0);
+/// Full listening/processing pill body + top floating hotkey hint pill.
+const EXPANDED_SIZE: (f64, f64) = (460.0, 100.0);
+/// Pill body + top hotkey hint + compact settings popover dropdown.
+const POPOVER_SIZE: (f64, f64) = (460.0, 360.0);
 /// Gap between the pill and the edge of the work area it's anchored to.
 const EDGE_MARGIN: f64 = 16.0;
 
@@ -75,16 +73,26 @@ pub fn reposition_pill(app: &AppHandle, position: PillPosition) {
     reposition(app, &window, current_size, position);
 }
 
-/// Grows/shrinks the pill window to tightly match its actual on-screen
-/// content (resting dot vs. the full expanded body) and re-anchors it.
-/// Called by the frontend (via the `set_pill_expanded` command) whenever
-/// its own RESTING/EXPANDED presentation state changes — the window
-/// geometry itself can only be changed from the Rust side.
+/// Grows/shrinks the pill window to tightly match its actual on-screen content
+/// and re-anchors it.
 pub fn set_expanded(app: &AppHandle, expanded: bool, position: PillPosition) {
     let Some(window) = app.get_webview_window(PILL_WINDOW_LABEL) else {
         return;
     };
     let size = if expanded { EXPANDED_SIZE } else { RESTING_SIZE };
+    reposition(app, &window, size, position);
+}
+
+/// Sets geometry by named state mode ('resting', 'expanded', 'popover')
+pub fn set_pill_window_geometry(app: &AppHandle, mode: &str, position: PillPosition) {
+    let Some(window) = app.get_webview_window(PILL_WINDOW_LABEL) else {
+        return;
+    };
+    let size = match mode {
+        "popover" => POPOVER_SIZE,
+        "expanded" => EXPANDED_SIZE,
+        _ => RESTING_SIZE,
+    };
     reposition(app, &window, size, position);
 }
 

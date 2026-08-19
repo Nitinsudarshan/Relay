@@ -1,5 +1,17 @@
 # Relay — Changelog
 
+## [0.3.5] - 2026-08-19
+
+### Oscar-Inspired Push-to-Talk Pill Redesign & Interaction Refinement
+
+- **Oscar Visual & Interaction Redesign (`DictationPill.tsx`, `PillSettingsPopover.tsx`, `overlay.rs`)**:
+  - Removed middle-logo component overlap bug on expanded pill.
+  - Replaced floating resting dot with a slim, edge-attached horizontal notch (`w-16 h-2`) when idle.
+  - Added floating hotkey hint bar (`Hold to record [Ctrl] [Space]`) floating above the main pill on hover/activation.
+  - Removed "RELAY" brand text in favor of minimal process indicators (`● SNIPPING TOOL`).
+  - Added Oscar-style settings dropdown supporting Auto-paste, Text transform, Cleanup style (`Faithful`/`Clean`/`Professional`/`Concise`), Prompt mode (`Rewrite speech into a prompt`), and Language selection.
+  - Added repository inspection docs [`docs/inspect/push-to-talk-pill.md`](file:///d:/Projects/Relay/docs/inspect/push-to-talk-pill.md) and decision log [`docs/decisions/push-to-talk-pill.md`](file:///d:/Projects/Relay/docs/decisions/push-to-talk-pill.md).
+
 ## [0.3.4] - 2026-08-19
 
 ### Native Build Fix for npm run dev:native

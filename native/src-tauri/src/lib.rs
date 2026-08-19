@@ -59,6 +59,7 @@ pub fn run() {
             commands::set_pill_visible,
             commands::set_pill_position,
             commands::set_pill_expanded,
+            commands::set_pill_window_mode,
             commands::ensure_local_llm_ready,
             commands::ensure_stt_model_ready,
             commands::get_kanban_cards,

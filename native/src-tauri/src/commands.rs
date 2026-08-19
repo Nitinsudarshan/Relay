@@ -167,6 +167,17 @@ pub async fn set_pill_expanded(
 }
 
 #[tauri::command]
+pub async fn set_pill_window_mode(
+    app: AppHandle,
+    mode: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let position = state.settings.lock().unwrap().ui.pill_position;
+    crate::overlay::set_pill_window_geometry(&app, &mode, position);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn start_capture(
     app: AppHandle,
     mode: String,

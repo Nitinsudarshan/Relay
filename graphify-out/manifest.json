@@ -35,13 +35,13 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/commands.rs": {
-    "mtime": 1787149498.6411374,
-    "ast_hash": "e034970cf5291e5468bb4a2178a3126b",
+    "mtime": 1787152016.1795816,
+    "ast_hash": "d7a96c9994ed48280909a3a019e29e0e",
     "semantic_hash": ""
   },
   "native/src-tauri/src/lib.rs": {
-    "mtime": 1787149498.6915305,
-    "ast_hash": "d87cb0ab256b974127b301eba703fe69",
+    "mtime": 1787152020.4968212,
+    "ast_hash": "160bb8667e58e912aa6f98f3a3479d2e",
     "semantic_hash": ""
   },
   "native/src-tauri/src/main.rs": {
@@ -450,8 +450,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1787149899.0586438,
-    "ast_hash": "9a3bebd000aa43372b5aad7b709afbc6",
+    "mtime": 1787156684.2442482,
+    "ast_hash": "ea8d6f10a7eb69edd4c008943784db4a",
     "semantic_hash": ""
   },
   "README.md": {
@@ -675,8 +675,8 @@
     "semantic_hash": ""
   },
   "native/src/components/capture/DictationPill.tsx": {
-    "mtime": 1787149498.7351854,
-    "ast_hash": "ce0a13a65775b523689abd23f33379a9",
+    "mtime": 1787152811.564826,
+    "ast_hash": "3fe18e0cab852b2be422ae103b3f7ed6",
     "semantic_hash": ""
   },
   "native/src/components/common/RelayLogo.tsx": {
@@ -755,8 +755,8 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/overlay.rs": {
-    "mtime": 1787149498.7075856,
-    "ast_hash": "120df5ef90777ed4dfd382b86a883dfd",
+    "mtime": 1787152789.7149768,
+    "ast_hash": "d2812357b73d86d53f5944c48611fd7d",
     "semantic_hash": ""
   },
   "native/src-tauri/src/providers/ollama_manager.rs": {
@@ -782,6 +782,36 @@
   "web/src/components/changelog-dialog.tsx": {
     "mtime": 1787149908.5085402,
     "ast_hash": "364a9c4d637e8b9ff1336f11dccf7857",
+    "semantic_hash": ""
+  },
+  "native/src/components/capture/PillSettingsPopover.tsx": {
+    "mtime": 1787152801.4993768,
+    "ast_hash": "16233ebebe26ce8bbfbfa049284fd2c0",
+    "semantic_hash": ""
+  },
+  "native/src/components/capture/PillTypes.ts": {
+    "mtime": 1787152794.9313085,
+    "ast_hash": "680378827cf2af7719eee3dd62b4d6de",
+    "semantic_hash": ""
+  },
+  "docs/ptt-redesign-spec.md": {
+    "mtime": 1787151940.5675828,
+    "ast_hash": "0e90da589cfa7381d98249882eb32b5f",
+    "semantic_hash": ""
+  },
+  "docs/decisions/push-to-talk-pill.md": {
+    "mtime": 1787152774.3259757,
+    "ast_hash": "e69b97bdb9a79d14502586059598a6a7",
+    "semantic_hash": ""
+  },
+  "docs/inspect/push-to-talk-pill.md": {
+    "mtime": 1787152766.0462615,
+    "ast_hash": "504167ecbb0624af2806d73ddb20ded0",
+    "semantic_hash": ""
+  },
+  "update.md": {
+    "mtime": 1787152832.0131125,
+    "ast_hash": "788f43a5079078f431ad98ac89d66335",
     "semantic_hash": ""
   }
 }
