@@ -450,8 +450,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1787159189.438796,
-    "ast_hash": "5355f5725128266f8a2e5c4df5aa41b3",
+    "mtime": 1787160787.620576,
+    "ast_hash": "39818f1aeb5b526ae5c8a23e9cad3b77",
     "semantic_hash": ""
   },
   "README.md": {
@@ -675,8 +675,8 @@
     "semantic_hash": ""
   },
   "native/src/components/capture/DictationPill.tsx": {
-    "mtime": 1787159152.6053474,
-    "ast_hash": "1898b43dbfc337c33832d8a2102abfe7",
+    "mtime": 1787160765.3296745,
+    "ast_hash": "166c8fa7a47355014b139337d4fa8515",
     "semantic_hash": ""
   },
   "native/src/components/common/RelayLogo.tsx": {
@@ -785,8 +785,8 @@
     "semantic_hash": ""
   },
   "native/src/components/capture/PillSettingsPopover.tsx": {
-    "mtime": 1787159033.3903344,
-    "ast_hash": "2a7fdda13fec4da47d9ac16275c81637",
+    "mtime": 1787160754.3045785,
+    "ast_hash": "7d1e6cc78eb2e27c543486a0fe9b4c9f",
     "semantic_hash": ""
   },
   "native/src/components/capture/PillTypes.ts": {
@@ -810,8 +810,8 @@
     "semantic_hash": ""
   },
   "update.md": {
-    "mtime": 1787159197.8543444,
-    "ast_hash": "b803172ccf6b52f1da0d6e5b1600ffbb",
+    "mtime": 1787160792.7103193,
+    "ast_hash": "351eb19f4aff64106b5ca5e2df287666",
     "semantic_hash": ""
   }
 }

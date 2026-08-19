@@ -1,5 +1,16 @@
 # Relay — Changelog
 
+## [0.4.0] - 2026-08-19
+
+### STT Whisper Model Error Resolution & Interactive Configuration Handler
+
+- **STT Model Validation (`commands.rs`, `stt.rs`)**:
+  - Updated `ensure_stt_model_ready` to verify file existence on disk before declaring status ready.
+  - Simplified STT missing model error message to a clean, actionable instruction (`Set Whisper model path in Provider Settings.`).
+- **Interactive Error Action (`DictationPill.tsx`)**:
+  - Formatted error banner text with truncation (`max-w-[260px]`) to prevent pill overflow.
+  - Added click-to-configure interaction: clicking the error banner automatically opens the settings popover for one-click configuration.
+
 ## [0.3.9] - 2026-08-19
 
 ### Process Label Removal & Application Dark Theme Syncing

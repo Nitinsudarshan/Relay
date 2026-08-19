@@ -457,15 +457,29 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
             {/* Phase 4: ERROR */}
             {phase === 'error' && (
-              <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 text-xs font-medium">
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPopoverOpen(true);
+                }}
+                className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 text-xs font-medium max-w-[260px] cursor-pointer hover:underline"
+                title="Click to open settings"
+              >
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">{errorMessage || 'no input'}</span>
+                <span className="truncate">{errorMessage || 'Set Whisper model in Settings'}</span>
               </div>
             )}
 
             {/* Phase 5: WARNING */}
             {phase === 'warning' && (
-              <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 text-xs font-medium">
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPopoverOpen(true);
+                }}
+                className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 text-xs font-medium max-w-[260px] cursor-pointer hover:underline"
+                title="Click to open settings"
+              >
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">{warningMessage || 'Sign in to enable AI'}</span>
               </div>

@@ -400,7 +400,9 @@ pub async fn ensure_stt_model_ready(state: State<'_, AppState>) -> Result<SttMod
         .clone()
         .filter(|p| !p.trim().is_empty());
     if let Some(path) = configured {
-        return Ok(SttModelStatus::Ready { path });
+        if std::path::Path::new(&path).exists() {
+            return Ok(SttModelStatus::Ready { path });
+        }
     }
 
     let models_dir = state.config_dir.join("models");

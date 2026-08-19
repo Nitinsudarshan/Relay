@@ -1,16 +1,16 @@
 # Graph Report - Relay  (2026-08-19)
 
 ## Corpus Check
-- 159 files · ~100,412 words
+- 159 files · ~100,536 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1376 nodes · 2263 edges · 134 communities (102 shown, 32 thin omitted)
+- 1378 nodes · 2266 edges · 134 communities (102 shown, 32 thin omitted)
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS · INFERRED: 2 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `4b032caf`
+- Built from commit: `3449855d`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -139,7 +139,7 @@
 - Decisions
 - DictationPill
 - eslint-config-next
-- Push-to-Talk Pill Refinement Update Report (v0.3.9)
+- Push-to-Talk Pill Update Report (v0.4.0)
 - @radix-ui/react-checkbox
 - lucide-react
 - Push-to-Talk Pill Inspection
@@ -154,7 +154,7 @@
 7. `cn()` - 17 edges
 8. `VaultManager` - 16 edges
 9. `compilerOptions` - 16 edges
-10. `useSidebar()` - 15 edges
+10. `Relay — Changelog` - 16 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `on_dictation_pressed()` --calls--> `emit_capture_state()`  [INFERRED]
@@ -186,8 +186,8 @@ Cohesion: 0.13
 Nodes (21): HeaderUserMenu(), toTitleCase(), Avatar(), AvatarBadge(), AvatarFallback(), AvatarGroup(), AvatarGroupCount(), AvatarImage() (+13 more)
 
 ### Community 3 - "VaultManager"
-Cohesion: 0.27
-Nodes (15): KanbanCard, parse_debug_string_list(), Error, Option, PathBuf, Result, Self, String (+7 more)
+Cohesion: 0.13
+Nodes (28): process_chat(), ProcessedPipelineResult, Result, TtsSettings, ExtractedActionItem, PipelineEngine, PipelineError, ProcessedPipelineResult (+20 more)
 
 ### Community 4 - "compilerOptions"
 Cohesion: 0.07
@@ -226,8 +226,8 @@ Cohesion: 0.10
 Nodes (19): aliases, components, hooks, lib, ui, utils, iconLibrary, registries (+11 more)
 
 ### Community 13 - "LLMClient"
-Cohesion: 0.09
-Nodes (32): Client, process_chat(), ProcessedPipelineResult, Result, TtsSettings, ExtractedActionItem, PipelineEngine, PipelineError (+24 more)
+Cohesion: 0.16
+Nodes (19): Client, LLMClient, LLMResponse, ProviderConfig, ProviderError, ProviderType, Default, Error (+11 more)
 
 ### Community 14 - "dependencies"
 Cohesion: 0.12
@@ -255,7 +255,7 @@ Nodes (16): definitions, Number, PermissionEntry, ShellScopeEntryAllowedArg, She
 
 ### Community 20 - "components/page.tsx"
 Cohesion: 0.07
-Nodes (35): Accordion(), AccordionContent(), AccordionItem(), AccordionTrigger(), Checkbox(), Collapsible(), CollapsibleContent(), CollapsibleTrigger() (+27 more)
+Nodes (32): Accordion(), AccordionContent(), AccordionItem(), AccordionTrigger(), Checkbox(), Dialog(), DialogContent(), DialogDescription() (+24 more)
 
 ### Community 21 - "properties"
 Cohesion: 0.13
@@ -338,8 +338,8 @@ Cohesion: 0.67
 Nodes (3): Target, description, oneOf
 
 ### Community 42 - "login-form.tsx"
-Cohesion: 0.14
-Nodes (15): DEMO_NOTES, ScribbleNote, SettingsSection, AuthMode, Badge(), badgeVariants, Card(), CardAction() (+7 more)
+Cohesion: 0.13
+Nodes (16): DEMO_NOTES, ScribbleNote, SettingsSection, AuthMode, RelayLogo(), Badge(), badgeVariants, Card() (+8 more)
 
 ### Community 43 - "Relay — Data Model Specification"
 Cohesion: 0.29
@@ -402,8 +402,8 @@ Cohesion: 0.40
 Nodes (4): Global Rules, Precedence, Rule files, Scope
 
 ### Community 58 - "Relay — Changelog"
-Cohesion: 0.07
-Nodes (29): [0.1.0] - 2026-08-19, [0.1.1] - 2026-08-19, [0.1.2] - 2026-08-19, [0.2.0] - 2026-08-19, [0.3.0] - 2026-08-19, [0.3.1] - 2026-08-19, [0.3.2] - 2026-08-19, [0.3.3] - 2026-08-19 (+21 more)
+Cohesion: 0.06
+Nodes (31): [0.1.0] - 2026-08-19, [0.1.1] - 2026-08-19, [0.1.2] - 2026-08-19, [0.2.0] - 2026-08-19, [0.3.0] - 2026-08-19, [0.3.1] - 2026-08-19, [0.3.2] - 2026-08-19, [0.3.3] - 2026-08-19 (+23 more)
 
 ### Community 59 - "local"
 Cohesion: 0.50
@@ -443,7 +443,7 @@ Nodes (3): Target, description, oneOf
 
 ### Community 73 - "sidebar.tsx"
 Cohesion: 0.09
-Nodes (36): data, NavItem, NavMain(), NavSecondary(), NavUser(), RelayLogo(), Sidebar(), SidebarContent() (+28 more)
+Nodes (38): data, NavItem, NavMain(), NavSecondary(), NavUser(), Collapsible(), CollapsibleContent(), CollapsibleTrigger() (+30 more)
 
 ### Community 75 - "Target"
 Cohesion: 0.67
@@ -553,29 +553,29 @@ Nodes (9): Context, Decision 1: Oscar-Style Edge-Attached Horizontal Notch, Deci
 Cohesion: 0.50
 Nodes (3): App(), DictationPill(), FloatingPill()
 
-### Community 130 - "Push-to-Talk Pill Refinement Update Report (v0.3.9)"
+### Community 130 - "Push-to-Talk Pill Update Report (v0.4.0)"
 Cohesion: 0.40
-Nodes (4): Files Modified, Push-to-Talk Pill Refinement Update Report (v0.3.9), Verification Results, What Changed
+Nodes (4): Files Modified, Push-to-Talk Pill Update Report (v0.4.0), Verification Results, What Changed
 
 ## Knowledge Gaps
-- **530 isolated node(s):** `name`, `private`, `version`, `type`, `dev` (+525 more)
+- **531 isolated node(s):** `name`, `private`, `version`, `type`, `dev` (+526 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **32 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `VaultManager` connect `VaultManager` to `LLMClient`, `commands.rs`?**
+- **Why does `VaultManager` connect `VaultManager` to `commands.rs`?**
   _High betweenness centrality (0.015) - this node is a cross-community bridge._
 - **Why does `AppState` connect `commands.rs` to `AudioRecorder`, `VaultManager`, `SttEngine`?**
   _High betweenness centrality (0.015) - this node is a cross-community bridge._
 - **Why does `cn()` connect `cn` to `dropdown-menu.tsx`, `sidebar.tsx`, `login-form.tsx`, `components/page.tsx`, `site-header.tsx`, `(dashboard)/layout.tsx`?**
   _High betweenness centrality (0.010) - this node is a cross-community bridge._
 - **What connects `name`, `private`, `version` to the rest of the system?**
-  _530 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _531 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `devDependencies` be split into smaller, more focused modules?**
   _Cohesion score 0.10526315789473684 - nodes in this community are weakly interconnected._
 - **Should `dropdown-menu.tsx` be split into smaller, more focused modules?**
   _Cohesion score 0.13227513227513227 - nodes in this community are weakly interconnected._
-- **Should `compilerOptions` be split into smaller, more focused modules?**
-  _Cohesion score 0.06896551724137931 - nodes in this community are weakly interconnected._
+- **Should `VaultManager` be split into smaller, more focused modules?**
+  _Cohesion score 0.12775842044134728 - nodes in this community are weakly interconnected._

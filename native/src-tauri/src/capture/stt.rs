@@ -9,7 +9,7 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 
 #[derive(Error, Debug)]
 pub enum SttError {
-    #[error("No local Whisper model configured. Set a GGML model path (e.g. ggml-base.en.bin) in Provider Settings.")]
+    #[error("Set Whisper model path in Provider Settings.")]
     ModelNotConfigured,
 
     #[error("Failed to load Whisper model at {path}: {message}")]

@@ -35,8 +35,8 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/commands.rs": {
-    "mtime": 1787152016.1795816,
-    "ast_hash": "d7a96c9994ed48280909a3a019e29e0e",
+    "mtime": 1787160974.8566554,
+    "ast_hash": "99a7f3848f221cf82be0536d09c177ff",
     "semantic_hash": ""
   },
   "native/src-tauri/src/lib.rs": {
@@ -450,8 +450,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1787160787.620576,
-    "ast_hash": "39818f1aeb5b526ae5c8a23e9cad3b77",
+    "mtime": 1787161056.2678168,
+    "ast_hash": "2e502e169792e2afc047be0ff0caa2da",
     "semantic_hash": ""
   },
   "README.md": {
@@ -675,8 +675,8 @@
     "semantic_hash": ""
   },
   "native/src/components/capture/DictationPill.tsx": {
-    "mtime": 1787160765.3296745,
-    "ast_hash": "166c8fa7a47355014b139337d4fa8515",
+    "mtime": 1787161033.7713583,
+    "ast_hash": "45c21a9155c366d694dd2c0fb11fa118",
     "semantic_hash": ""
   },
   "native/src/components/common/RelayLogo.tsx": {
@@ -715,8 +715,8 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/capture/stt.rs": {
-    "mtime": 1787132919.417867,
-    "ast_hash": "86a387ec0ee47df8934ce26b589c8f5a",
+    "mtime": 1787161023.936418,
+    "ast_hash": "67e0270317b17f53b87b43c11c91908d",
     "semantic_hash": ""
   },
   "native/src-tauri/src/hotkeys/injection.rs": {
@@ -810,8 +810,8 @@
     "semantic_hash": ""
   },
   "update.md": {
-    "mtime": 1787160792.7103193,
-    "ast_hash": "351eb19f4aff64106b5ca5e2df287666",
+    "mtime": 1787161061.483175,
+    "ast_hash": "b6b99ab81a485aa5c40eaafc4fe70d08",
     "semantic_hash": ""
   }
 }
