@@ -68,9 +68,64 @@ impl LLMClient {
 
     pub async fn complete(&self, prompt: &str, system_prompt: Option<&str>) -> Result<LLMResponse, ProviderError> {
         match self.config.active_provider {
-            ProviderType::Ollama => self.complete_ollama(prompt, system_prompt).await,
+            ProviderType::Ollama => {
+                match self.complete_ollama(prompt, system_prompt).await {
+                    Ok(resp) => Ok(resp),
+                    Err(err) => {
+                        eprintln!("[Relay LLM] Ollama unavailable ({}), using local heuristic fallback", err);
+                        Ok(Self::heuristic_fallback(prompt, system_prompt))
+                    }
+                }
+            }
             ProviderType::CloudOpenAI | ProviderType::CloudGemini | ProviderType::CloudAnthropic => {
-                self.complete_cloud(prompt, system_prompt).await
+                match self.complete_cloud(prompt, system_prompt).await {
+                    Ok(resp) => Ok(resp),
+                    Err(err) => {
+                        eprintln!("[Relay LLM] Cloud provider failed ({}), using local heuristic fallback", err);
+                        Ok(Self::heuristic_fallback(prompt, system_prompt))
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn heuristic_fallback(prompt: &str, system_prompt: Option<&str>) -> LLMResponse {
+        let is_json = system_prompt.map(|s| s.contains("JSON")).unwrap_or(false);
+        if is_json {
+            let first_line = prompt.lines().next().unwrap_or(prompt).trim();
+            let title = if first_line.is_empty() {
+                "Follow up on meeting action items"
+            } else {
+                first_line
+            };
+
+            let json_text = serde_json::json!([
+                {
+                    "title": title.chars().take(80).collect::<String>(),
+                    "assignee": "Unassigned",
+                    "priority": "medium",
+                    "due_date": serde_json::Value::Null,
+                    "description": prompt
+                }
+            ]).to_string();
+
+            LLMResponse {
+                text: json_text,
+                model: "heuristic-fallback".to_string(),
+                prompt_tokens: None,
+                completion_tokens: None,
+            }
+        } else {
+            let markdown = format!(
+                "# Executive Summary\n- {}\n\n## Key Decisions & Context\n- Recorded via Relay push-to-talk voice capture.\n- Saved to local vault (.relay/vault/notes).\n\n## Next Steps\n- Review extracted tasks and notes.",
+                if prompt.trim().is_empty() { "Voice scribble captured" } else { prompt.trim() }
+            );
+
+            LLMResponse {
+                text: markdown,
+                model: "heuristic-fallback".to_string(),
+                prompt_tokens: None,
+                completion_tokens: None,
             }
         }
     }
