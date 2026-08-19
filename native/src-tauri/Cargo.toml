@@ -30,16 +30,11 @@ cpal = "0.15"
 hound = "3.5"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.8", features = ["v4", "serde"] }
-whisper-rs = { version = "0.14", optional = true }
+whisper-rs = { version = "0.16", optional = true }
 enigo = "0.2"
 base64 = "0.22"
 
 [features]
-# Whisper transcription is what makes recording actually produce text —
-# without it every capture (meeting/scribble/chat/universal dictation)
-# fails at the STT step with "no local Whisper model configured" no matter
-# what's set in Settings, because the code path that reads that setting
-# doesn't even exist in the binary. See .cargo/config.toml for how the
-# Windows libclang/bindgen build failure that got this disabled is avoided.
-default = []
+default = ["whisper-local"]
 whisper-local = ["dep:whisper-rs"]
+

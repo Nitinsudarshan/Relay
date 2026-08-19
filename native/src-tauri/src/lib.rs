@@ -67,6 +67,7 @@ pub fn run() {
             commands::save_triggers,
             commands::get_settings,
             commands::save_settings,
+            commands::open_settings_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

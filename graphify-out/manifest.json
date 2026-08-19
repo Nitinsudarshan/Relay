@@ -35,13 +35,13 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/commands.rs": {
-    "mtime": 1787160974.8566554,
-    "ast_hash": "99a7f3848f221cf82be0536d09c177ff",
+    "mtime": 1787163790.0642955,
+    "ast_hash": "b5bc9cde53af2a2c64e051de823c3466",
     "semantic_hash": ""
   },
   "native/src-tauri/src/lib.rs": {
-    "mtime": 1787152020.4968212,
-    "ast_hash": "160bb8667e58e912aa6f98f3a3479d2e",
+    "mtime": 1787162077.0270593,
+    "ast_hash": "572c50fd87c1041b9ce916373f0c61b3",
     "semantic_hash": ""
   },
   "native/src-tauri/src/main.rs": {
@@ -80,8 +80,8 @@
     "semantic_hash": ""
   },
   "native/src/App.tsx": {
-    "mtime": 1787149913.0155213,
-    "ast_hash": "97a2b1a2603e5375756b299369b33928",
+    "mtime": 1787162082.9572546,
+    "ast_hash": "724dc7be12d9985f919be20f7c562125",
     "semantic_hash": ""
   },
   "native/src/components/capture/PTTWidget.tsx": {
@@ -675,8 +675,8 @@
     "semantic_hash": ""
   },
   "native/src/components/capture/DictationPill.tsx": {
-    "mtime": 1787161033.7713583,
-    "ast_hash": "45c21a9155c366d694dd2c0fb11fa118",
+    "mtime": 1787162090.6720054,
+    "ast_hash": "8c81e706a59fcf13868f4829646863d2",
     "semantic_hash": ""
   },
   "native/src/components/common/RelayLogo.tsx": {
@@ -715,8 +715,8 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/capture/stt.rs": {
-    "mtime": 1787161128.2293937,
-    "ast_hash": "67e7cf45ae8387c04a87de13c14a75fe",
+    "mtime": 1787163838.3073025,
+    "ast_hash": "9085c4da685b5d94393c7c40ddf81025",
     "semantic_hash": ""
   },
   "native/src-tauri/src/hotkeys/injection.rs": {
@@ -785,8 +785,8 @@
     "semantic_hash": ""
   },
   "native/src/components/capture/PillSettingsPopover.tsx": {
-    "mtime": 1787160754.3045785,
-    "ast_hash": "7d1e6cc78eb2e27c543486a0fe9b4c9f",
+    "mtime": 1787162105.593036,
+    "ast_hash": "33e0910ec5793e174502e8009972310a",
     "semantic_hash": ""
   },
   "native/src/components/capture/PillTypes.ts": {

@@ -173,16 +173,9 @@ impl SttEngine {
                 .full(params, samples_16k_mono)
                 .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
 
-            let num_segments = state
-                .full_n_segments()
-                .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
-
             let mut text = String::new();
-            for i in 0..num_segments {
-                let segment = state
-                    .full_get_segment_text(i)
-                    .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
-                text.push_str(&segment);
+            for segment in state.as_iter() {
+                text.push_str(&segment.to_str_lossy());
             }
 
             Ok(text.trim().to_string())

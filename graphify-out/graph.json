@@ -153,8 +153,8 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "native_package_dependencies_radix_ui_react_dialog",
-      "community": 14,
-      "community_name": "dependencies",
+      "community": 112,
+      "community_name": "@radix-ui/react-dialog",
       "norm_label": "@radix-ui/react-dialog"
     },
     {
@@ -164,8 +164,8 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "radix_ui_react_dialog",
-      "community": 14,
-      "community_name": "dependencies",
+      "community": 112,
+      "community_name": "@radix-ui/react-dialog",
       "norm_label": "@radix-ui/react-dialog"
     },
     {
@@ -395,8 +395,8 @@
       "source_location": "L25",
       "_origin": "ast",
       "id": "native_package_dependencies_lucide_react",
-      "community": 132,
-      "community_name": "lucide-react",
+      "community": 14,
+      "community_name": "dependencies",
       "norm_label": "lucide-react"
     },
     {
@@ -406,8 +406,8 @@
       "source_location": "L25",
       "_origin": "ast",
       "id": "native_package_json_lucide_react",
-      "community": 132,
-      "community_name": "lucide-react",
+      "community": 14,
+      "community_name": "dependencies",
       "norm_label": "lucide-react"
     },
     {
@@ -1484,8 +1484,8 @@
       "source_location": "L2857",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_definitions_target",
-      "community": 18,
-      "community_name": "definitions",
+      "community": 67,
+      "community_name": "Target",
       "norm_label": "target"
     },
     {
@@ -1495,8 +1495,8 @@
       "source_location": "L2858",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_target_description",
-      "community": 18,
-      "community_name": "definitions",
+      "community": 67,
+      "community_name": "Target",
       "norm_label": "description"
     },
     {
@@ -1506,8 +1506,8 @@
       "source_location": "L2859",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_target_oneof",
-      "community": 18,
-      "community_name": "definitions",
+      "community": 67,
+      "community_name": "Target",
       "norm_label": "oneof"
     },
     {
@@ -1550,8 +1550,8 @@
       "source_location": "L2925",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_definitions_shellscopeentryallowedargs",
-      "community": 78,
-      "community_name": "ShellScopeEntryAllowedArgs",
+      "community": 18,
+      "community_name": "definitions",
       "norm_label": "shellscopeentryallowedargs"
     },
     {
@@ -1561,8 +1561,8 @@
       "source_location": "L2926",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_shellscopeentryallowedargs_description",
-      "community": 78,
-      "community_name": "ShellScopeEntryAllowedArgs",
+      "community": 18,
+      "community_name": "definitions",
       "norm_label": "description"
     },
     {
@@ -1572,8 +1572,8 @@
       "source_location": "L2927",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_shellscopeentryallowedargs_anyof",
-      "community": 78,
-      "community_name": "ShellScopeEntryAllowedArgs",
+      "community": 18,
+      "community_name": "definitions",
       "norm_label": "anyof"
     },
     {
@@ -1737,8 +1737,8 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_identifier_description",
-      "community": 98,
-      "community_name": "properties",
+      "community": 75,
+      "community_name": "Identifier",
       "norm_label": "description"
     },
     {
@@ -2045,8 +2045,8 @@
       "source_location": "L94",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_properties_platforms",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "platforms"
     },
     {
@@ -2056,8 +2056,8 @@
       "source_location": "L95",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_platforms_description",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "description"
     },
     {
@@ -2067,8 +2067,8 @@
       "source_location": "L96",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_platforms_type",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "type"
     },
     {
@@ -2078,8 +2078,8 @@
       "source_location": "L96",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_json_ref_array",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "array"
     },
     {
@@ -2089,8 +2089,8 @@
       "source_location": "L96",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_json_ref_null",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "null"
     },
     {
@@ -2254,8 +2254,8 @@
       "source_location": "L386",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_definitions_identifier",
-      "community": 98,
-      "community_name": "properties",
+      "community": 75,
+      "community_name": "Identifier",
       "norm_label": "identifier"
     },
     {
@@ -2265,8 +2265,8 @@
       "source_location": "L388",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_identifier_oneof",
-      "community": 98,
-      "community_name": "properties",
+      "community": 75,
+      "community_name": "Identifier",
       "norm_label": "oneof"
     },
     {
@@ -3846,7 +3846,7 @@
       "label": "num_cpus()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L194",
+      "source_location": "L195",
       "_origin": "ast",
       "id": "native_src_tauri_src_capture_stt_num_cpus",
       "community": 85,
@@ -4303,6 +4303,17 @@
       "community": 5,
       "community_name": "commands.rs",
       "norm_label": "save_settings()"
+    },
+    {
+      "label": "open_settings_window()",
+      "file_type": "code",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L453",
+      "_origin": "ast",
+      "id": "native_src_tauri_src_commands_open_settings_window",
+      "community": 5,
+      "community_name": "commands.rs",
+      "norm_label": "open_settings_window()"
     },
     {
       "label": "injection.rs",
@@ -4883,8 +4894,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "pipeline/mod.rs"
     },
     {
@@ -4894,8 +4905,8 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_pipelineerror",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "pipelineerror"
     },
     {
@@ -4905,8 +4916,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_error",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "error"
     },
     {
@@ -4916,8 +4927,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_string",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "string"
     },
     {
@@ -4927,8 +4938,8 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_processedpipelineresult",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "processedpipelineresult"
     },
     {
@@ -4938,8 +4949,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_option",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "option"
     },
     {
@@ -4949,8 +4960,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_vec",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "vec"
     },
     {
@@ -4960,8 +4971,8 @@
       "source_location": "L37",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_extractedactionitem",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "extractedactionitem"
     },
     {
@@ -4971,8 +4982,8 @@
       "source_location": "L45",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_pipelineengine",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "pipelineengine"
     },
     {
@@ -4982,8 +4993,8 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_pipelineengine_process_meeting",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": ".process_meeting()"
     },
     {
@@ -4993,8 +5004,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_result",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "result"
     },
     {
@@ -5004,8 +5015,8 @@
       "source_location": "L158",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_pipelineengine_process_scribble",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": ".process_scribble()"
     },
     {
@@ -6532,7 +6543,7 @@
       "label": "PillSettingsPopoverProps",
       "file_type": "code",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L7",
+      "source_location": "L8",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
@@ -6545,7 +6556,7 @@
       "label": "LANG_LABELS",
       "file_type": "code",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L26",
+      "source_location": "L27",
       "_origin": "ast",
       "id": "native_src_components_capture_pillsettingspopover_lang_labels",
       "community": 11,
@@ -6556,7 +6567,7 @@
       "label": "STYLE_LABELS",
       "file_type": "code",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L34",
+      "source_location": "L35",
       "_origin": "ast",
       "id": "native_src_components_capture_pillsettingspopover_style_labels",
       "community": 11,
@@ -6567,7 +6578,7 @@
       "label": "PillSettingsPopover()",
       "file_type": "code",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L42",
+      "source_location": "L43",
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_components_capture_pillsettingspopover_pillsettingspopover",
@@ -8682,8 +8693,8 @@
       "source_location": "L29",
       "_origin": "ast",
       "id": "web_package_devdependencies_eslint_config_next",
-      "community": 17,
-      "community_name": "devDependencies",
+      "community": 111,
+      "community_name": "eslint-config-next",
       "norm_label": "eslint-config-next"
     },
     {
@@ -8693,8 +8704,8 @@
       "source_location": "L29",
       "_origin": "ast",
       "id": "eslint_config_next",
-      "community": 17,
-      "community_name": "devDependencies",
+      "community": 111,
+      "community_name": "eslint-config-next",
       "norm_label": "eslint-config-next"
     },
     {
@@ -8704,8 +8715,8 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "web_package_devdependencies_shadcn",
-      "community": 111,
-      "community_name": "shadcn",
+      "community": 17,
+      "community_name": "devDependencies",
       "norm_label": "shadcn"
     },
     {
@@ -8715,8 +8726,8 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "shadcn",
-      "community": 111,
-      "community_name": "shadcn",
+      "community": 17,
+      "community_name": "devDependencies",
       "norm_label": "shadcn"
     },
     {
@@ -8859,8 +8870,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_app_dashboard_layout",
-      "community": 22,
-      "community_name": "site-header.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "(dashboard)/layout.tsx"
     },
     {
@@ -8871,8 +8882,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_app_dashboard_layout_dashboardlayout",
-      "community": 22,
-      "community_name": "site-header.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "dashboardlayout()"
     },
     {
@@ -9239,8 +9250,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_app_sidebar_appsidebar",
-      "community": 22,
-      "community_name": "site-header.tsx",
+      "community": 73,
+      "community_name": "sidebar.tsx",
       "norm_label": "appsidebar()"
     },
     {
@@ -9250,8 +9261,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_changelog_dialog",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "changelog-dialog.tsx"
     },
     {
@@ -9263,8 +9274,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "web_src_components_changelog_dialog_changelogdialogprops",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "changelogdialogprops"
     },
     {
@@ -9274,8 +9285,8 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "web_src_components_changelog_dialog_changelog_data",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "changelog_data"
     },
     {
@@ -9286,8 +9297,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_changelog_dialog_changelogdialog",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "changelogdialog()"
     },
     {
@@ -9309,8 +9320,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_header_user_menu_totitlecase",
-      "community": 2,
-      "community_name": "dropdown-menu.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "totitlecase()"
     },
     {
@@ -9321,8 +9332,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_header_user_menu_headerusermenu",
-      "community": 2,
-      "community_name": "dropdown-menu.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "headerusermenu()"
     },
     {
@@ -9426,8 +9437,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_mode_toggle",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "mode-toggle.tsx"
     },
     {
@@ -9438,8 +9449,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_mode_toggle_modetoggle",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "modetoggle()"
     },
     {
@@ -9600,8 +9611,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_site_header_siteheader",
-      "community": 22,
-      "community_name": "site-header.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "siteheader()"
     },
     {
@@ -9905,8 +9916,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_button",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "web/src/components/ui/button.tsx"
     },
     {
@@ -9916,8 +9927,8 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "web_src_components_ui_button_buttonvariants",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "buttonvariants"
     },
     {
@@ -9928,8 +9939,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_button_button",
-      "community": 42,
-      "community_name": "login-form.tsx",
+      "community": 22,
+      "community_name": "site-header.tsx",
       "norm_label": "button()"
     },
     {
@@ -10826,8 +10837,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_sheet",
-      "community": 75,
-      "community_name": "sheet.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "sheet.tsx"
     },
     {
@@ -10838,8 +10849,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sheet_sheet",
-      "community": 75,
-      "community_name": "sheet.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "sheet()"
     },
     {
@@ -10850,8 +10861,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sheet_sheettrigger",
-      "community": 75,
-      "community_name": "sheet.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "sheettrigger()"
     },
     {
@@ -10862,8 +10873,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sheet_sheetclose",
-      "community": 75,
-      "community_name": "sheet.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "sheetclose()"
     },
     {
@@ -10874,8 +10885,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sheet_sheetportal",
-      "community": 75,
-      "community_name": "sheet.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "sheetportal()"
     },
     {
@@ -10886,8 +10897,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sheet_sheetoverlay",
-      "community": 75,
-      "community_name": "sheet.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "sheetoverlay()"
     },
     {
@@ -10898,8 +10909,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sheet_sheetcontent",
-      "community": 75,
-      "community_name": "sheet.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "sheetcontent()"
     },
     {
@@ -10910,8 +10921,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sheet_sheetheader",
-      "community": 75,
-      "community_name": "sheet.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "sheetheader()"
     },
     {
@@ -10922,8 +10933,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sheet_sheetfooter",
-      "community": 75,
-      "community_name": "sheet.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "sheetfooter()"
     },
     {
@@ -10934,8 +10945,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sheet_sheettitle",
-      "community": 75,
-      "community_name": "sheet.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "sheettitle()"
     },
     {
@@ -10946,8 +10957,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sheet_sheetdescription",
-      "community": 75,
-      "community_name": "sheet.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "sheetdescription()"
     },
     {
@@ -11053,8 +11064,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sidebar_sidebarinset",
-      "community": 22,
-      "community_name": "site-header.tsx",
+      "community": 73,
+      "community_name": "sidebar.tsx",
       "norm_label": "sidebarinset()"
     },
     {
@@ -11360,8 +11371,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_switch",
-      "community": 20,
-      "community_name": "components/page.tsx",
+      "community": 42,
+      "community_name": "login-form.tsx",
       "norm_label": "web/src/components/ui/switch.tsx"
     },
     {
@@ -11372,8 +11383,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_switch_switch",
-      "community": 20,
-      "community_name": "components/page.tsx",
+      "community": 42,
+      "community_name": "login-form.tsx",
       "norm_label": "switch()"
     },
     {
@@ -11642,8 +11653,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_contexts_user_context",
-      "community": 22,
-      "community_name": "site-header.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "user-context.tsx"
     },
     {
@@ -11655,8 +11666,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "web_src_contexts_user_context_user",
-      "community": 22,
-      "community_name": "site-header.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "user"
     },
     {
@@ -11666,8 +11677,8 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "web_src_contexts_user_context_usercontext",
-      "community": 22,
-      "community_name": "site-header.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "usercontext"
     },
     {
@@ -11678,8 +11689,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_contexts_user_context_userprovider",
-      "community": 22,
-      "community_name": "site-header.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "userprovider()"
     },
     {
@@ -11690,8 +11701,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_contexts_user_context_useusercontext",
-      "community": 2,
-      "community_name": "dropdown-menu.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "useusercontext()"
     },
     {
@@ -11725,7 +11736,7 @@
       "_origin": "ast",
       "id": "web_src_lib_auth",
       "community": 28,
-      "community_name": "roles.ts",
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "auth.ts"
     },
     {
@@ -11737,7 +11748,7 @@
       "_origin": "ast",
       "id": "web_src_lib_auth_auth",
       "community": 28,
-      "community_name": "roles.ts",
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "auth()"
     },
     {
@@ -11748,8 +11759,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_lib_auth_currentuser",
-      "community": 22,
-      "community_name": "site-header.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "currentuser()"
     },
     {
@@ -11760,7 +11771,7 @@
       "_origin": "ast",
       "id": "web_src_lib_roles",
       "community": 28,
-      "community_name": "roles.ts",
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "roles.ts"
     },
     {
@@ -11773,7 +11784,7 @@
       "_origin": "ast",
       "id": "web_src_lib_roles_userrole",
       "community": 28,
-      "community_name": "roles.ts",
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "userrole"
     },
     {
@@ -11786,7 +11797,7 @@
       "_origin": "ast",
       "id": "web_src_lib_roles_volunteertype",
       "community": 28,
-      "community_name": "roles.ts",
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "volunteertype"
     },
     {
@@ -11799,7 +11810,7 @@
       "_origin": "ast",
       "id": "web_src_lib_roles_userappmetadata",
       "community": 28,
-      "community_name": "roles.ts",
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "userappmetadata"
     },
     {
@@ -11811,7 +11822,7 @@
       "_origin": "ast",
       "id": "web_src_lib_roles_checkrole",
       "community": 28,
-      "community_name": "roles.ts",
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "checkrole()"
     },
     {
@@ -11823,7 +11834,7 @@
       "_origin": "ast",
       "id": "web_src_lib_roles_getuserrole",
       "community": 28,
-      "community_name": "roles.ts",
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "getuserrole()"
     },
     {
@@ -11835,7 +11846,7 @@
       "_origin": "ast",
       "id": "web_src_lib_roles_istrueadmin",
       "community": 28,
-      "community_name": "roles.ts",
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "istrueadmin()"
     },
     {
@@ -14562,8 +14573,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "rules_accessibility",
-      "community": 30,
-      "community_name": "AGENTS.md",
+      "community": 78,
+      "community_name": "accessibility.md",
       "norm_label": "accessibility.md"
     },
     {
@@ -14573,8 +14584,8 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "rules_accessibility_accessibility_rules",
-      "community": 30,
-      "community_name": "AGENTS.md",
+      "community": 78,
+      "community_name": "accessibility.md",
       "norm_label": "accessibility rules"
     },
     {
@@ -14584,8 +14595,8 @@
       "source_location": "L11",
       "_origin": "ast",
       "id": "rules_accessibility_rules",
-      "community": 30,
-      "community_name": "AGENTS.md",
+      "community": 78,
+      "community_name": "accessibility.md",
       "norm_label": "rules"
     },
     {
@@ -14826,8 +14837,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "rules_component_architecture",
-      "community": 67,
-      "community_name": "component-architecture.md",
+      "community": 30,
+      "community_name": "AGENTS.md",
       "norm_label": "component-architecture.md"
     },
     {
@@ -14837,8 +14848,8 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "rules_component_architecture_component_architecture",
-      "community": 67,
-      "community_name": "component-architecture.md",
+      "community": 30,
+      "community_name": "AGENTS.md",
       "norm_label": "component architecture"
     },
     {
@@ -14848,8 +14859,8 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "rules_component_architecture_rules",
-      "community": 67,
-      "community_name": "component-architecture.md",
+      "community": 30,
+      "community_name": "AGENTS.md",
       "norm_label": "rules"
     },
     {
@@ -19787,7 +19798,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L194",
+      "source_location": "L195",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_capture_stt",
@@ -20128,7 +20139,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L194",
+      "source_location": "L195",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -20255,6 +20266,17 @@
       "_origin": "ast",
       "source": "native_src_tauri_src_commands",
       "target": "native_src_tauri_src_commands_get_triggers",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L453",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands",
+      "target": "native_src_tauri_src_commands_open_settings_window",
       "confidence_score": 1.0
     },
     {
@@ -20586,6 +20608,18 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L453",
+      "weight": 1.0,
+      "context": "parameter_type",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands_open_settings_window",
+      "target": "native_src_tauri_src_commands_rs_apphandle",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
       "source_location": "L159",
       "weight": 1.0,
       "context": "parameter_type",
@@ -20758,6 +20792,18 @@
       "context": "generic_arg",
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_get_triggers",
+      "target": "native_src_tauri_src_commands_commanderror",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L453",
+      "weight": 1.0,
+      "context": "generic_arg",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands_open_settings_window",
       "target": "native_src_tauri_src_commands_commanderror",
       "confidence_score": 1.0
     },
@@ -21657,6 +21703,18 @@
       "context": "return_type",
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_get_triggers",
+      "target": "native_src_tauri_src_commands_rs_result",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L453",
+      "weight": 1.0,
+      "context": "return_type",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands_open_settings_window",
       "target": "native_src_tauri_src_commands_rs_result",
       "confidence_score": 1.0
     },
@@ -27206,7 +27264,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L26",
+      "source_location": "L27",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27217,7 +27275,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L42",
+      "source_location": "L43",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27228,7 +27286,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L7",
+      "source_location": "L8",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27239,7 +27297,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L34",
+      "source_location": "L35",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27251,7 +27309,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L3",
+      "source_location": "L4",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27263,7 +27321,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L3",
+      "source_location": "L4",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27275,7 +27333,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L3",
+      "source_location": "L4",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27287,7 +27345,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L3",
+      "source_location": "L4",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27299,7 +27357,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L3",
+      "source_location": "L4",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27311,7 +27369,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L3",
+      "source_location": "L4",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27323,7 +27381,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L5",
+      "source_location": "L6",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27335,7 +27393,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L5",
+      "source_location": "L6",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27347,7 +27405,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L2",
+      "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27359,7 +27417,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L2",
+      "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27371,7 +27429,7 @@
       "context": "field",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L13",
+      "source_location": "L14",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
@@ -27383,7 +27441,7 @@
       "context": "field",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L21",
+      "source_location": "L22",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
@@ -27395,7 +27453,7 @@
       "context": "field",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L20",
+      "source_location": "L21",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
@@ -27407,7 +27465,7 @@
       "context": "field",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L17",
+      "source_location": "L18",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
@@ -27419,7 +27477,7 @@
       "context": "field",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L19",
+      "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
@@ -27431,7 +27489,7 @@
       "context": "field",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L8",
+      "source_location": "L9",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
@@ -27444,7 +27502,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L69",
+      "source_location": "L70",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopover",
@@ -41618,5 +41676,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "14824f38df6a6097b2fd81fdfd3c5b4809af1ef0"
+  "built_at_commit": "c1d8331967c4207b0b4b2d706ecd52eaf2d00b1d"
 }

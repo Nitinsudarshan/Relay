@@ -9,7 +9,7 @@ use crate::vault::{KanbanCard, VaultManager};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Broadcast to every window whenever the shared microphone session starts
 /// or stops, so any surface (main window, floating pill, indicator) can
@@ -448,3 +448,14 @@ pub async fn save_settings(
     *state.settings.lock().unwrap() = settings;
     Ok(())
 }
+
+#[tauri::command]
+pub async fn open_settings_window(app: AppHandle) -> Result<(), CommandError> {
+    if let Some(window) = app.get_webview_window(crate::hotkeys::MAIN_WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = app.emit("navigate-tab", "settings");
+    }
+    Ok(())
+}
+

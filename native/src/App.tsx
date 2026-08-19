@@ -71,11 +71,25 @@ export const App: React.FC = () => {
     const unlistenPromise = listen<ProcessedPipelineResult>('capture-processed', ({ payload }) =>
       handleProcessComplete(payload)
     );
+    const unlistenTabPromise = listen<string>('navigate-tab', ({ payload }) => {
+      if (
+        payload === 'capture' ||
+        payload === 'kanban' ||
+        payload === 'scribble' ||
+        payload === 'chat' ||
+        payload === 'triggers' ||
+        payload === 'settings'
+      ) {
+        setActiveTab(payload as any);
+      }
+    });
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
+      unlistenTabPromise.then((unlisten) => unlisten());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
 
   const renderHeroHeader = () => {
     switch (activeTab) {
