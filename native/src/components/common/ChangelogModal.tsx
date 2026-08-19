@@ -12,6 +12,21 @@ interface ChangelogModalProps {
 
 export const CHANGELOG_DATA = [
   {
+    version: '0.4.2',
+    date: '2026-08-19',
+    type: 'patch',
+    title: 'Dictation Pill Recording Lifecycle & Global Hotkey Reliability Fix',
+    tags: ['Fixes', 'Improvements'],
+    domains: ['Dictation', 'Speech', 'Build'],
+    items: [
+      { category: 'Fixes', domain: 'Dictation', text: 'Pill no longer enters Transcribing/Processing when no audio was captured — recording now tracks a real had_audio signal instead of assuming a started session means usable audio.' },
+      { category: 'Fixes', domain: 'Dictation', text: 'Fixed Ctrl+Space sometimes never registering: the show/hide and dictation hotkeys now register independently instead of one failure silently skipping the other.' },
+      { category: 'Fixes', domain: 'Dictation', text: 'Docked pill no longer loses its recording-state listeners when switching away from the Voice Capture tab.' },
+      { category: 'Improvements', domain: 'Speech', text: 'Waveform level is now smoothed with a low-pass filter for steadier, more natural motion tied to real mic input.' },
+      { category: 'Improvements', domain: 'Dictation', text: 'Hotkey status in the pill now reflects the real OS registration outcome instead of an assumed "registered" state.' },
+    ],
+  },
+  {
     version: '0.3.4',
     date: '2026-08-19',
     type: 'patch',

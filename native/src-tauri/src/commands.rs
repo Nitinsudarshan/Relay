@@ -247,11 +247,17 @@ pub async fn start_capture(
 /// vault/Kanban board without polling.
 pub const CAPTURE_PROCESSED_EVENT: &str = "capture-processed";
 
+/// Stops the active capture session and, only if the microphone actually
+/// picked up audio (see [`crate::capture::CapturedAudio::had_audio`]),
+/// transcribes and processes it. Returns `Ok(None)` — never a fabricated
+/// `ProcessedPipelineResult` — when nothing was captured, so callers can
+/// tell "recorded silence" apart from "recorded and processed speech"
+/// instead of assuming every stop produced a result.
 #[tauri::command]
 pub async fn stop_capture(
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<ProcessedPipelineResult, CommandError> {
+) -> Result<Option<ProcessedPipelineResult>, CommandError> {
     let captured = state
         .recorder
         .stop()
@@ -260,11 +266,18 @@ pub async fn stop_capture(
     emit_capture_state(&app, &state.recorder);
     let captured = captured?;
 
+    if !captured.had_audio {
+        tracing::info!("[Dictation] Recording stopped with no audio input");
+        emit_capture_status_event(&app, false, Some(captured.mode), "NO_SPEECH", None);
+        return Ok(None);
+    }
+
+    emit_capture_status_event(&app, false, Some(captured.mode.clone()), "TRANSCRIBING", None);
     let result = process_captured_audio(&state, captured).await;
     if let Ok(processed) = &result {
         let _ = app.emit(CAPTURE_PROCESSED_EVENT, processed);
     }
-    result
+    result.map(Some)
 }
 
 async fn process_captured_audio(

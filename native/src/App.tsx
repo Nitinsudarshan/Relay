@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
@@ -335,7 +336,7 @@ export const App: React.FC = () => {
               title="View Release Notes & Changelog"
             >
               <Activity className="w-3 h-3 text-primary group-hover:animate-pulse" />
-              <span className="underline decoration-dotted underline-offset-2">v0.3.4</span>
+              <span className="underline decoration-dotted underline-offset-2">v0.4.2</span>
             </button>
           </div>
         </div>
@@ -345,7 +346,7 @@ export const App: React.FC = () => {
       <ChangelogModal
         open={changelogOpen}
         onClose={() => setChangelogOpen(false)}
-        currentVersion="0.3.4"
+        currentVersion="0.4.2"
       />
 
       {/* Main Content Area */}
@@ -385,24 +386,37 @@ export const App: React.FC = () => {
           {/* Top Hero Banner */}
           {renderHeroHeader()}
 
-          {activeTab === 'capture' && (
-            <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
-              <PTTWidget onProcessComplete={handleProcessComplete} />
+          {/* Always mounted (never conditionally rendered on `activeTab`) —
+              when the floating pill is turned off in Settings, this is the
+              *only* place the docked pill lives, and it owns the
+              capture-state-changed/capture-level listeners that make
+              Ctrl+Space (held from anywhere in the OS) show up as a visible
+              recording state. Conditionally mounting it per-tab used to
+              tear those listeners down the moment the user left the Voice
+              Capture tab, silently orphaning any hotkey-triggered session.
+              Visibility is CSS-only so the component — and its listeners —
+              stay alive across tab switches. */}
+          <div
+            className={cn(
+              'flex-1 flex flex-col max-w-4xl mx-auto w-full',
+              activeTab !== 'capture' && 'hidden'
+            )}
+          >
+            <PTTWidget onProcessComplete={handleProcessComplete} />
 
-              {lastResult && (
-                <div className="mt-4 flex-1">
-                  {lastResult.mode === 'scribble' ? (
-                    <ScribbleViewer content={lastResult.output_markdown} transcript={lastResult.transcript} />
-                  ) : (
-                    <div className="rounded-xl p-4 border border-border bg-card text-xs font-mono text-foreground shadow-sm">
-                      <p className="font-semibold text-emerald-500 mb-1">Result Summary:</p>
-                      <p className="text-muted-foreground">{lastResult.output_markdown}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+            {lastResult && activeTab === 'capture' && (
+              <div className="mt-4 flex-1">
+                {lastResult.mode === 'scribble' ? (
+                  <ScribbleViewer content={lastResult.output_markdown} transcript={lastResult.transcript} />
+                ) : (
+                  <div className="rounded-xl p-4 border border-border bg-card text-xs font-mono text-foreground shadow-sm">
+                    <p className="font-semibold text-emerald-500 mb-1">Result Summary:</p>
+                    <p className="text-muted-foreground">{lastResult.output_markdown}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {activeTab === 'kanban' && <KanbanBoard cards={cards} onRefresh={fetchKanbanCards} />}
           {activeTab === 'chat' && <ChatPanel />}

@@ -44,22 +44,26 @@ export const ChatPanel: React.FC = () => {
       setIsProcessing(true);
       setStatusText('Transcribing & searching your notes…');
 
-      const result = await invoke<ProcessedPipelineResult>('stop_capture');
-      setTurns((prev) => [
-        ...prev,
-        {
-          question: result.transcript,
-          answer: result.output_markdown,
-          sources: result.sources,
-          audioBase64: result.spoken_audio_base64,
-        },
-      ]);
-      setStatusText('Click the mic and ask a question about your notes');
+      const result = await invoke<ProcessedPipelineResult | null>('stop_capture');
+      if (result) {
+        setTurns((prev) => [
+          ...prev,
+          {
+            question: result.transcript,
+            answer: result.output_markdown,
+            sources: result.sources,
+            audioBase64: result.spoken_audio_base64,
+          },
+        ]);
 
-      if (result.spoken_audio_base64 && audioRef.current) {
-        audioRef.current.src = `data:audio/wav;base64,${result.spoken_audio_base64}`;
-        void audioRef.current.play();
+        if (result.spoken_audio_base64 && audioRef.current) {
+          audioRef.current.src = `data:audio/wav;base64,${result.spoken_audio_base64}`;
+          void audioRef.current.play();
+        }
       }
+      // No audio was captured (silence/no input) — nothing to answer, just
+      // fall through to resetting the status text below.
+      setStatusText('Click the mic and ask a question about your notes');
     } catch (err) {
       console.error('Voice chat failed', err);
       setStatusText('Something went wrong — check your Whisper model & LLM provider settings');
