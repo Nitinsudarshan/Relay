@@ -19,8 +19,7 @@ import {
   AlertTriangle, 
   Check, 
   Loader2, 
-  Bug, 
-  Square 
+  Bug 
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -48,7 +47,6 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const [phase, setPhase] = useState<PillState>('collapsed');
   const [hovering, setHovering] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
-  const [activeApp, setActiveApp] = useState<string>('SNIPPING TOOL');
   
   // Settings & Toggles
   const [autoPaste, setAutoPaste] = useState(true);
@@ -340,7 +338,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     hotkeyStatus: hotkeyStatus.status,
     windowMode: popoverOpen ? 'popover' : isExpanded ? 'expanded' : 'resting',
     promptMode,
-    activeApp,
+    activeApp: 'Relay',
   };
 
   return (
@@ -357,7 +355,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
           </div>
           <div>State: <span className="text-white">{diagnosticsInfo.state}</span> | Window: <span className="text-white">{diagnosticsInfo.windowMode}</span></div>
           <div>STT: <span className="text-white">{diagnosticsInfo.sttStatus}</span> | LLM: <span className="text-white">{diagnosticsInfo.llmStatus}</span></div>
-          <div>Hotkey: <span className="text-white">{diagnosticsInfo.hotkeyStatus}</span> | App: <span className="text-white">{diagnosticsInfo.activeApp}</span></div>
+          <div>Hotkey: <span className="text-white">{diagnosticsInfo.hotkeyStatus}</span></div>
         </div>
       )}
 
@@ -371,11 +369,11 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         )}
       />
 
-      {/* Edge Handle / Notch — 25% wider (~96px), rounded-t-lg top part */}
+      {/* Edge Handle / Notch — 25% wider (~96px), rounded-t-lg top part, neutral dark background in dark mode */}
       <div
         className={cn(
           'absolute left-1/2 bottom-0 -translate-x-1/2 transition-all duration-200 pointer-events-none z-20',
-          'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 border-b-0 shadow-[0_-1px_6px_rgba(0,0,0,0.15)]',
+          'bg-white dark:bg-[#171717] border border-slate-200 dark:border-[#262626] border-b-0 shadow-[0_-1px_6px_rgba(0,0,0,0.15)]',
           !hovering ? 'w-[96px] h-[6px] rounded-t-lg' : 'w-[110px] h-[7px] rounded-t-xl shadow-[0_-2px_12px_rgba(37,99,235,0.3)]',
           isExpanded && 'opacity-0 pointer-events-none'
         )}
@@ -389,22 +387,22 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         </div>
       )}
 
-      {/* Floating Keyboard hint bar (rounded-lg) */}
+      {/* Keyboard hint bar (floating above main pill, matching application dark card #171717) */}
       {isExpanded && !popoverOpen && phase !== 'success' && (
-        <div className="absolute left-1/2 bottom-[70px] -translate-x-1/2 bg-white/95 dark:bg-slate-900/95 border border-slate-200 dark:border-slate-800 shadow-md rounded-lg px-3 py-1.5 whitespace-nowrap flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200 pointer-events-none z-30 animate-in fade-in slide-in-from-bottom-1 duration-150">
-          <span className="text-slate-500 dark:text-slate-400 font-medium">Hold to record</span>
+        <div className="absolute left-1/2 bottom-[70px] -translate-x-1/2 bg-white/95 dark:bg-[#171717]/95 border border-slate-200 dark:border-[#262626] shadow-md rounded-lg px-3 py-1.5 whitespace-nowrap flex items-center gap-2 text-xs text-slate-700 dark:text-neutral-300 pointer-events-none z-30 animate-in fade-in slide-in-from-bottom-1 duration-150">
+          <span className="text-slate-500 dark:text-neutral-400 font-medium">Hold to record</span>
           <span className="flex items-center gap-1">
-            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-semibold shadow-xs">
+            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-[#262626] text-slate-800 dark:text-neutral-200 border border-slate-200 dark:border-[#404040] font-semibold shadow-xs">
               Ctrl
             </kbd>
-            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-semibold shadow-xs">
+            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-[#262626] text-slate-800 dark:text-neutral-200 border border-slate-200 dark:border-[#404040] font-semibold shadow-xs">
               Space
             </kbd>
           </span>
         </div>
       )}
 
-      {/* Main Pill Surface (rounded-lg / rounded-xl geometry) */}
+      {/* Main Relay Pill Surface (Process label removed, dark theme matching #171717) */}
       <div
         className={cn(
           'absolute left-1/2 bottom-[16px] -translate-x-1/2 transition-all duration-200 ease-out pointer-events-none z-30',
@@ -418,27 +416,19 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
             if ((e.target as HTMLElement).closest('.pill-actions')) return;
             toggleClickToTalk();
           }}
-          className="inline-flex items-center gap-0 pl-4 pr-2 h-[44px] max-w-[calc(100vw-8px)] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-[0_16px_40px_rgba(15,23,42,0.15),0_2px_8px_rgba(15,23,42,0.08)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.45)] text-slate-900 dark:text-slate-100 cursor-pointer"
+          className="inline-flex items-center gap-0 pl-4 pr-2 h-[44px] rounded-xl bg-white dark:bg-[#171717] border border-slate-200 dark:border-[#262626] shadow-[0_16px_40px_rgba(15,23,42,0.15),0_2px_8px_rgba(15,23,42,0.08)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.5)] text-slate-900 dark:text-neutral-100 cursor-pointer"
         >
-          <div className="flex items-center min-w-[110px] pr-2.5 h-[22px]">
-            {/* App Context Label */}
-            <span className="inline-flex items-center gap-1.5 mr-2 min-w-0">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400 shrink-0" />
-              <span className="font-mono text-[10px] font-semibold tracking-wider text-blue-600 dark:text-blue-400 uppercase whitespace-nowrap overflow-hidden text-ellipsis max-w-[100px]">
-                {activeApp}
-              </span>
-            </span>
-
-            {/* Phase 1: IDLE / READY */}
+          <div className="flex items-center min-w-[120px] pr-2.5 h-[22px]">
+            {/* Phase 1: IDLE / READY — Click to dictate */}
             {(phase === 'collapsed' || phase === 'expanded') && (
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 tracking-tight whitespace-nowrap">
+                <span className="text-xs font-semibold text-slate-900 dark:text-neutral-100 tracking-tight whitespace-nowrap">
                   {promptMode ? 'Click to prompt' : 'Click to dictate'}
                 </span>
               </div>
             )}
 
-            {/* Phase 2: RECORDING */}
+            {/* Phase 2: RECORDING — 15 Relay primary blue waveform bars */}
             {phase === 'listening' && (
               <div className="flex items-center gap-[2.5px] h-[22px] shrink-0">
                 {[0.35, 0.55, 0.85, 0.45, 0.7, 0.95, 0.6, 0.4, 0.75, 0.55, 0.3, 0.6, 0.85, 0.5, 0.7].map((h, i) => {
@@ -458,8 +448,8 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
             {/* Phase 3: PROCESSING */}
             {phase === 'processing' && (
               <div className="flex items-center gap-2 max-w-[220px] overflow-hidden">
-                <span className="w-2.5 h-2.5 rounded-full border-[1.4px] border-slate-300 dark:border-slate-700 border-t-blue-600 dark:border-t-blue-400 animate-spin shrink-0" />
-                <span className="font-mono text-[10.5px] tracking-wide text-slate-600 dark:text-slate-400 whitespace-nowrap animate-in fade-in duration-200">
+                <span className="w-2.5 h-2.5 rounded-full border-[1.4px] border-slate-300 dark:border-neutral-700 border-t-blue-600 dark:border-t-blue-400 animate-spin shrink-0" />
+                <span className="font-mono text-[10.5px] tracking-wide text-slate-600 dark:text-neutral-400 whitespace-nowrap animate-in fade-in duration-200">
                   {PROCESSING_CAPTIONS[captionIndex]}
                 </span>
               </div>
@@ -482,9 +472,9 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
             )}
           </div>
 
-          <div className="w-px h-[20px] bg-slate-200 dark:bg-slate-800 shrink-0" />
+          <div className="w-px h-[20px] bg-slate-200 dark:bg-[#262626] shrink-0" />
 
-          {/* Action Buttons: Prompt Mode + Settings Chevron (rounded-lg) */}
+          {/* Action Buttons: Prompt Mode + Settings Chevron */}
           <div className="flex items-center gap-1 pl-1.5 shrink-0 pill-actions">
             <button
               type="button"
@@ -495,8 +485,8 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
               className={cn(
                 'w-7 h-7 rounded-lg border-none bg-transparent flex items-center justify-center cursor-pointer transition-colors p-0',
                 promptMode
-                  ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 font-bold'
-                  : 'text-slate-400 dark:text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 font-bold'
+                  : 'text-slate-400 dark:text-neutral-400 hover:text-slate-800 dark:hover:text-neutral-100 hover:bg-slate-100 dark:hover:bg-[#262626]'
               )}
               title="Prompt mode — rewrite speech into a prompt"
               aria-label="Prompt mode"
@@ -511,8 +501,8 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
                 setPopoverOpen((prev) => !prev);
               }}
               className={cn(
-                'w-7 h-7 rounded-lg border-none bg-transparent text-slate-700 dark:text-slate-300 flex items-center justify-center cursor-pointer transition-colors p-0 hover:bg-slate-100 dark:hover:bg-slate-800',
-                popoverOpen && 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
+                'w-7 h-7 rounded-lg border-none bg-transparent text-slate-700 dark:text-neutral-300 flex items-center justify-center cursor-pointer transition-colors p-0 hover:bg-slate-100 dark:hover:bg-[#262626]',
+                popoverOpen && 'bg-slate-100 dark:bg-[#262626] text-slate-900 dark:text-neutral-100'
               )}
               title="Settings"
               aria-label="Settings"

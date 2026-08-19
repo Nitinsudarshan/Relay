@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AppSettings } from '../../types';
 import { WhisperStatusInfo, OllamaStatusInfo, HotkeyStatusInfo, CleanupStyle, SpeechLanguage } from './PillTypes';
-import { ChevronRight, ChevronLeft, Edit3, Globe, Sparkles } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Edit3, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface PillSettingsPopoverProps {
@@ -55,26 +55,26 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
 
   return (
     <div
-      className="absolute left-1/2 bottom-[76px] -translate-x-1/2 w-[270px] bg-white text-slate-900 border border-slate-200 shadow-2xl rounded-2xl p-2.5 text-xs text-left select-none z-50 font-sans animate-in fade-in slide-in-from-bottom-2 duration-150"
+      className="absolute left-1/2 bottom-[76px] -translate-x-1/2 w-[270px] bg-white dark:bg-[#171717] text-slate-900 dark:text-neutral-100 border border-slate-200 dark:border-[#262626] shadow-2xl rounded-2xl p-2.5 text-xs text-left select-none z-50 font-sans animate-in fade-in slide-in-from-bottom-2 duration-150"
       onClick={(e) => e.stopPropagation()}
     >
       {page === 'main' && (
         <>
           {/* 1. Auto-paste after dictation */}
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="font-medium text-slate-800">Auto-paste after dictation</span>
+            <span className="font-medium text-slate-800 dark:text-neutral-200">Auto-paste after dictation</span>
             <button
               type="button"
               onClick={() => onToggleAutoPaste(!autoPaste)}
               className={cn(
                 'relative w-8 h-[18px] rounded-full border-none cursor-pointer transition-colors duration-150 p-0',
-                autoPaste ? 'bg-blue-600' : 'bg-slate-300'
+                autoPaste ? 'bg-blue-600 dark:bg-blue-500' : 'bg-slate-300 dark:bg-neutral-700'
               )}
               aria-label="Toggle Auto-paste"
             >
               <span
                 className={cn(
-                  'absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-all duration-150',
+                  'absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white dark:bg-[#171717] shadow-sm transition-all duration-150',
                   autoPaste ? 'left-[16px]' : 'left-[2px]'
                 )}
               />
@@ -83,45 +83,45 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
 
           {/* 2. Text transform */}
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="font-medium text-slate-800">Text transform</span>
+            <span className="font-medium text-slate-800 dark:text-neutral-200">Text transform</span>
             <button
               type="button"
               onClick={() => onToggleTextTransform(!textTransform)}
               className={cn(
                 'relative w-8 h-[18px] rounded-full border-none cursor-pointer transition-colors duration-150 p-0',
-                textTransform ? 'bg-blue-600' : 'bg-slate-300'
+                textTransform ? 'bg-blue-600 dark:bg-blue-500' : 'bg-slate-300 dark:bg-neutral-700'
               )}
               aria-label="Toggle Text transform"
             >
               <span
                 className={cn(
-                  'absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-all duration-150',
+                  'absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white dark:bg-[#171717] shadow-sm transition-all duration-150',
                   textTransform ? 'left-[16px]' : 'left-[2px]'
                 )}
               />
             </button>
           </div>
 
-          <div className="h-px bg-slate-100 my-1" />
+          <div className="h-px bg-slate-100 dark:bg-[#262626] my-1" />
 
           {/* 3. Cleanup style row (opens sub-page) */}
           <div
             onClick={() => setPage('style')}
-            className="flex items-center gap-2.5 px-3 py-2 cursor-pointer rounded-lg hover:bg-slate-100 transition-colors"
+            className="flex items-center gap-2.5 px-3 py-2 cursor-pointer rounded-lg hover:bg-slate-100 dark:hover:bg-[#262626] transition-colors"
           >
-            <Edit3 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-            <span className="flex-1 text-slate-600 text-xs">Cleanup style</span>
-            <span className="text-slate-900 text-xs font-semibold inline-flex items-center gap-1">
+            <Edit3 className="w-3.5 h-3.5 text-slate-500 dark:text-neutral-400 shrink-0" />
+            <span className="flex-1 text-slate-600 dark:text-neutral-400 text-xs">Cleanup style</span>
+            <span className="text-slate-900 dark:text-neutral-100 text-xs font-semibold inline-flex items-center gap-1">
               <span>{STYLE_LABELS[cleanupStyle] || cleanupStyle}</span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400 dark:text-neutral-500" />
             </span>
           </div>
 
           {/* 4. Prompt mode toggle */}
           <div className="flex items-center justify-between px-3 py-2">
             <div className="flex flex-col gap-0.5">
-              <span className="font-medium text-slate-800">Prompt mode</span>
-              <span className="text-[10px] font-normal text-slate-500">
+              <span className="font-medium text-slate-800 dark:text-neutral-200">Prompt mode</span>
+              <span className="text-[10px] font-normal text-slate-500 dark:text-neutral-400">
                 Rewrite speech into a prompt
               </span>
             </div>
@@ -130,31 +130,31 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
               onClick={onTogglePromptMode}
               className={cn(
                 'relative w-8 h-[18px] rounded-full border-none cursor-pointer transition-colors duration-150 p-0 shrink-0',
-                promptMode ? 'bg-blue-600' : 'bg-slate-300'
+                promptMode ? 'bg-blue-600 dark:bg-blue-500' : 'bg-slate-300 dark:bg-neutral-700'
               )}
               aria-label="Toggle Prompt Mode"
             >
               <span
                 className={cn(
-                  'absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-all duration-150',
+                  'absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white dark:bg-[#171717] shadow-sm transition-all duration-150',
                   promptMode ? 'left-[16px]' : 'left-[2px]'
                 )}
               />
             </button>
           </div>
 
-          <div className="h-px bg-slate-100 my-1" />
+          <div className="h-px bg-slate-100 dark:bg-[#262626] my-1" />
 
           {/* 5. Language row (opens sub-page) */}
           <div
             onClick={() => setPage('lang')}
-            className="flex items-center gap-2.5 px-3 py-2 cursor-pointer rounded-lg hover:bg-slate-100 transition-colors"
+            className="flex items-center gap-2.5 px-3 py-2 cursor-pointer rounded-lg hover:bg-slate-100 dark:hover:bg-[#262626] transition-colors"
           >
-            <Globe className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-            <span className="flex-1 text-slate-600 text-xs">Language</span>
-            <span className="text-slate-900 text-xs font-semibold inline-flex items-center gap-1">
+            <Globe className="w-3.5 h-3.5 text-slate-500 dark:text-neutral-400 shrink-0" />
+            <span className="flex-1 text-slate-600 dark:text-neutral-400 text-xs">Language</span>
+            <span className="text-slate-900 dark:text-neutral-100 text-xs font-semibold inline-flex items-center gap-1">
               <span>{LANG_LABELS[language] || language}</span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400 dark:text-neutral-500" />
             </span>
           </div>
         </>
@@ -162,11 +162,11 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
 
       {/* Language Sub-Page */}
       {page === 'lang' && (
-        <div className="bg-white rounded-lg p-0.5 flex flex-col gap-0.5">
+        <div className="bg-white dark:bg-[#171717] rounded-lg p-0.5 flex flex-col gap-0.5">
           <button
             type="button"
             onClick={() => setPage('main')}
-            className="flex items-center gap-2 px-2.5 py-2 cursor-pointer text-slate-600 text-xs font-sans rounded-md hover:bg-slate-100 transition-colors w-full text-left"
+            className="flex items-center gap-2 px-2.5 py-2 cursor-pointer text-slate-600 dark:text-neutral-400 text-xs font-sans rounded-md hover:bg-slate-100 dark:hover:bg-[#262626] transition-colors w-full text-left"
           >
             <ChevronLeft className="w-3.5 h-3.5 stroke-[2]" />
             <span>Back</span>
@@ -187,8 +187,8 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
               className={cn(
                 'flex items-center justify-between px-3 py-2 cursor-pointer rounded-lg text-xs transition-colors',
                 language === item.id
-                  ? 'bg-blue-50 text-blue-600 font-semibold'
-                  : 'hover:bg-slate-100 text-slate-800'
+                  ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-semibold'
+                  : 'hover:bg-slate-100 dark:hover:bg-[#262626] text-slate-800 dark:text-neutral-200'
               )}
             >
               <span>{item.name}</span>
@@ -199,11 +199,11 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
 
       {/* Cleanup Style Sub-Page */}
       {page === 'style' && (
-        <div className="bg-white rounded-lg p-0.5 flex flex-col gap-0.5">
+        <div className="bg-white dark:bg-[#171717] rounded-lg p-0.5 flex flex-col gap-0.5">
           <button
             type="button"
             onClick={() => setPage('main')}
-            className="flex items-center gap-2 px-2.5 py-2 cursor-pointer text-slate-600 text-xs font-sans rounded-md hover:bg-slate-100 transition-colors w-full text-left"
+            className="flex items-center gap-2 px-2.5 py-2 cursor-pointer text-slate-600 dark:text-neutral-400 text-xs font-sans rounded-md hover:bg-slate-100 dark:hover:bg-[#262626] transition-colors w-full text-left"
           >
             <ChevronLeft className="w-3.5 h-3.5 stroke-[2]" />
             <span>Back</span>
@@ -223,8 +223,8 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
               className={cn(
                 'flex items-center justify-between px-3 py-2 cursor-pointer rounded-lg text-xs transition-colors',
                 cleanupStyle === item.id
-                  ? 'bg-blue-50 text-blue-600 font-semibold'
-                  : 'hover:bg-slate-100 text-slate-800'
+                  ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-semibold'
+                  : 'hover:bg-slate-100 dark:hover:bg-[#262626] text-slate-800 dark:text-neutral-200'
               )}
             >
               <span>{item.name}</span>

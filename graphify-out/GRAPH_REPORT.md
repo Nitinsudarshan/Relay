@@ -1,16 +1,16 @@
 # Graph Report - Relay  (2026-08-19)
 
 ## Corpus Check
-- 159 files · ~100,313 words
+- 159 files · ~100,412 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1374 nodes · 2261 edges · 133 communities (101 shown, 32 thin omitted)
+- 1376 nodes · 2263 edges · 134 communities (102 shown, 32 thin omitted)
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS · INFERRED: 2 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `89cdcfe3`
+- Built from commit: `4b032caf`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -90,10 +90,10 @@
 - responsive-design.md
 - sidebar.tsx
 - security.md
-- shadcn
+- Target
 - ui-components.md
 - version-and-changelog.md
-- @radix-ui/react-dialog
+- Identifier
 - rules/graphify.md
 - workflows/graphify.md
 - next
@@ -134,13 +134,14 @@
 - index.ts
 - Identifier
 - (dashboard)/page.tsx
-- rust-backend.md
+- accessibility.md
 - 6. RESTING STATE
 - Decisions
 - DictationPill
-- ShellScopeEntryAllowedArgs
-- Push-to-Talk Pill Refinement Update Report (v0.3.8)
+- eslint-config-next
+- Push-to-Talk Pill Refinement Update Report (v0.3.9)
 - @radix-ui/react-checkbox
+- lucide-react
 - Push-to-Talk Pill Inspection
 
 ## God Nodes (most connected - your core abstractions)
@@ -170,7 +171,7 @@
 ## Import Cycles
 - None detected.
 
-## Communities (133 total, 32 thin omitted)
+## Communities (134 total, 32 thin omitted)
 
 ### Community 0 - "settings/mod.rs"
 Cohesion: 0.22
@@ -230,7 +231,7 @@ Nodes (32): Client, process_chat(), ProcessedPipelineResult, Result, TtsSettings
 
 ### Community 14 - "dependencies"
 Cohesion: 0.12
-Nodes (17): dependencies, class-variance-authority, clsx, lucide-react, @radix-ui/react-dropdown-menu, @radix-ui/react-tabs, react-dom, tailwind-merge (+9 more)
+Nodes (17): dependencies, class-variance-authority, clsx, @radix-ui/react-dialog, @radix-ui/react-dropdown-menu, @radix-ui/react-tabs, react-dom, tailwind-merge (+9 more)
 
 ### Community 15 - "triggers/mod.rs"
 Cohesion: 0.24
@@ -242,11 +243,11 @@ Nodes (17): next-themes, sonner, dependencies, class-variance-authority, clsx, l
 
 ### Community 17 - "devDependencies"
 Cohesion: 0.12
-Nodes (17): eslint, eslint-config-next, @tailwindcss/postcss, tw-animate-css, @types/node, devDependencies, eslint, eslint-config-next (+9 more)
+Nodes (17): eslint, shadcn, @tailwindcss/postcss, tw-animate-css, @types/node, devDependencies, eslint, shadcn (+9 more)
 
 ### Community 18 - "definitions"
 Cohesion: 0.12
-Nodes (16): definitions, Number, PermissionEntry, ShellScopeEntryAllowedArg, Target, Value, anyOf, description (+8 more)
+Nodes (16): definitions, Number, PermissionEntry, ShellScopeEntryAllowedArg, ShellScopeEntryAllowedArgs, Value, anyOf, description (+8 more)
 
 ### Community 19 - "definitions"
 Cohesion: 0.12
@@ -254,7 +255,7 @@ Nodes (16): definitions, Number, PermissionEntry, ShellScopeEntryAllowedArg, She
 
 ### Community 20 - "components/page.tsx"
 Cohesion: 0.07
-Nodes (32): Accordion(), AccordionContent(), AccordionItem(), AccordionTrigger(), Checkbox(), Dialog(), DialogContent(), DialogDescription() (+24 more)
+Nodes (35): Accordion(), AccordionContent(), AccordionItem(), AccordionTrigger(), Checkbox(), Collapsible(), CollapsibleContent(), CollapsibleTrigger() (+27 more)
 
 ### Community 21 - "properties"
 Cohesion: 0.13
@@ -269,16 +270,16 @@ Cohesion: 0.06
 Nodes (31): Decision 10: Trigger Phrases are User-Customizable, Decision 11: Target Build Environment, Decision 13: Universal Dictation & Global Hotkeys, Decision 14: Real Local Speech-to-Text (whisper-rs), Decision 15: In-App Voice Chat, Grounded in Vault Notes (RAG-lite for now), Decision 16: Optional Local Text-to-Speech (Piper), Decision 17: Hybrid-Mode Architecture, Decision 18 (PTT-001): Preserve Backend Ownership of Capture State (+23 more)
 
 ### Community 24 - "properties"
-Cohesion: 0.15
-Nodes (13): properties, Identifier, default, description, type, description, oneOf, type (+5 more)
+Cohesion: 0.13
+Nodes (15): properties, default, description, type, type, array, null, description (+7 more)
 
 ### Community 25 - "Command Signatures"
 Cohesion: 0.17
 Nodes (11): 1. Tauri Commands API (`native/src-tauri/src/commands.rs`), 2. Web Route Handlers (`web/src/app/api/...`), Capture Commands, Command Signatures, Common Response Shape, Kanban Commands, Pipeline Commands, Relay — API Conventions & Specifications (+3 more)
 
 ### Community 26 - "permissions"
-Cohesion: 0.17
-Nodes (12): $ref, array, null, description, items, type, uniqueItems, description (+4 more)
+Cohesion: 0.29
+Nodes (7): $ref, description, items, type, uniqueItems, items, permissions
 
 ### Community 27 - ".dispatch_action"
 Cohesion: 0.53
@@ -294,7 +295,7 @@ Nodes (40): 0. Role / execution mode, 10. Hover-out delay, 11. Settings popover,
 
 ### Community 30 - "AGENTS.md"
 Cohesion: 0.20
-Nodes (6): Accessibility Rules, Rules, Design System Rules, Rules, Project Folder Structure, Rules
+Nodes (6): Design System Rules, Rules, Project Folder Structure, Rules, Rules, Rust Backend Rules
 
 ### Community 31 - "webviews"
 Cohesion: 0.20
@@ -337,8 +338,8 @@ Cohesion: 0.67
 Nodes (3): Target, description, oneOf
 
 ### Community 42 - "login-form.tsx"
-Cohesion: 0.13
-Nodes (16): DEMO_NOTES, ScribbleNote, SettingsSection, AuthMode, RelayLogo(), Badge(), badgeVariants, Card() (+8 more)
+Cohesion: 0.14
+Nodes (15): DEMO_NOTES, ScribbleNote, SettingsSection, AuthMode, Badge(), badgeVariants, Card(), CardAction() (+7 more)
 
 ### Community 43 - "Relay — Data Model Specification"
 Cohesion: 0.29
@@ -402,7 +403,7 @@ Nodes (4): Global Rules, Precedence, Rule files, Scope
 
 ### Community 58 - "Relay — Changelog"
 Cohesion: 0.07
-Nodes (27): [0.1.0] - 2026-08-19, [0.1.1] - 2026-08-19, [0.1.2] - 2026-08-19, [0.2.0] - 2026-08-19, [0.3.0] - 2026-08-19, [0.3.1] - 2026-08-19, [0.3.2] - 2026-08-19, [0.3.3] - 2026-08-19 (+19 more)
+Nodes (29): [0.1.0] - 2026-08-19, [0.1.1] - 2026-08-19, [0.1.2] - 2026-08-19, [0.2.0] - 2026-08-19, [0.3.0] - 2026-08-19, [0.3.1] - 2026-08-19, [0.3.2] - 2026-08-19, [0.3.3] - 2026-08-19 (+21 more)
 
 ### Community 59 - "local"
 Cohesion: 0.50
@@ -442,7 +443,15 @@ Nodes (3): Target, description, oneOf
 
 ### Community 73 - "sidebar.tsx"
 Cohesion: 0.09
-Nodes (38): data, NavItem, NavMain(), NavSecondary(), NavUser(), Collapsible(), CollapsibleContent(), CollapsibleTrigger() (+30 more)
+Nodes (36): data, NavItem, NavMain(), NavSecondary(), NavUser(), RelayLogo(), Sidebar(), SidebarContent() (+28 more)
+
+### Community 75 - "Target"
+Cohesion: 0.67
+Nodes (3): Target, description, oneOf
+
+### Community 78 - "Identifier"
+Cohesion: 0.67
+Nodes (3): Identifier, description, oneOf
 
 ### Community 85 - "SttEngine"
 Cohesion: 0.18
@@ -544,16 +553,12 @@ Nodes (9): Context, Decision 1: Oscar-Style Edge-Attached Horizontal Notch, Deci
 Cohesion: 0.50
 Nodes (3): App(), DictationPill(), FloatingPill()
 
-### Community 129 - "ShellScopeEntryAllowedArgs"
-Cohesion: 0.67
-Nodes (3): ShellScopeEntryAllowedArgs, anyOf, description
-
-### Community 130 - "Push-to-Talk Pill Refinement Update Report (v0.3.8)"
+### Community 130 - "Push-to-Talk Pill Refinement Update Report (v0.3.9)"
 Cohesion: 0.40
-Nodes (4): Files Modified, Push-to-Talk Pill Refinement Update Report (v0.3.8), Verification Results, What Changed
+Nodes (4): Files Modified, Push-to-Talk Pill Refinement Update Report (v0.3.9), Verification Results, What Changed
 
 ## Knowledge Gaps
-- **529 isolated node(s):** `name`, `private`, `version`, `type`, `dev` (+524 more)
+- **530 isolated node(s):** `name`, `private`, `version`, `type`, `dev` (+525 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **32 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -567,7 +572,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Why does `cn()` connect `cn` to `dropdown-menu.tsx`, `sidebar.tsx`, `login-form.tsx`, `components/page.tsx`, `site-header.tsx`, `(dashboard)/layout.tsx`?**
   _High betweenness centrality (0.010) - this node is a cross-community bridge._
 - **What connects `name`, `private`, `version` to the rest of the system?**
-  _529 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _530 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `devDependencies` be split into smaller, more focused modules?**
   _Cohesion score 0.10526315789473684 - nodes in this community are weakly interconnected._
 - **Should `dropdown-menu.tsx` be split into smaller, more focused modules?**

@@ -1,5 +1,14 @@
 # Relay — Changelog
 
+## [0.3.9] - 2026-08-19
+
+### Process Label Removal & Application Dark Theme Syncing
+
+- **Process Label Removal (`DictationPill.tsx`)**:
+  - Removed process indicator label (`● SNIPPING TOOL`) from the left side of the expanded dictation pill.
+- **Application Dark Theme Color Synchronization (`DictationPill.tsx`, `PillSettingsPopover.tsx`)**:
+  - Matched dark theme colors to Relay's exact neutral dark theme tokens (`#171717` dark card background, `#262626` dark border, `#fafafa` text), eliminating navy/slate color mismatch between the overlay pill and application dashboard.
+
 ## [0.3.8] - 2026-08-19
 
 ### Rounded-lg Component Geometry & Simultaneous Light/Dark/System Theme Syncing
