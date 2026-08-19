@@ -450,8 +450,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1787159082.325022,
-    "ast_hash": "ab6166ae9e81547cb1a2248bb3e5e2ab",
+    "mtime": 1787159189.438796,
+    "ast_hash": "5355f5725128266f8a2e5c4df5aa41b3",
     "semantic_hash": ""
   },
   "README.md": {
@@ -670,13 +670,13 @@
     "semantic_hash": ""
   },
   "native/src/components/ThemeToggle.tsx": {
-    "mtime": 1787088084.3668652,
-    "ast_hash": "5c5f3958d396a0f5004fed12643a0405",
+    "mtime": 1787159140.344664,
+    "ast_hash": "6640a804a7f544cc388094bfcadfa696",
     "semantic_hash": ""
   },
   "native/src/components/capture/DictationPill.tsx": {
-    "mtime": 1787159045.89355,
-    "ast_hash": "f29415d7a2e0f29bdc316c2fb6872902",
+    "mtime": 1787159152.6053474,
+    "ast_hash": "1898b43dbfc337c33832d8a2102abfe7",
     "semantic_hash": ""
   },
   "native/src/components/common/RelayLogo.tsx": {
@@ -810,8 +810,8 @@
     "semantic_hash": ""
   },
   "update.md": {
-    "mtime": 1787159090.1890996,
-    "ast_hash": "192786184b9ed357c975bc01a53b3173",
+    "mtime": 1787159197.8543444,
+    "ast_hash": "b803172ccf6b52f1da0d6e5b1600ffbb",
     "semantic_hash": ""
   }
 }

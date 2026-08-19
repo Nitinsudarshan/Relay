@@ -27,6 +27,11 @@ export const ThemeToggle: React.FC = () => {
 
     applyTheme(theme);
     localStorage.setItem('relay-theme', theme);
+    try {
+      import('@tauri-apps/api/event').then(({ emit }) => {
+        emit('relay-theme-changed', theme).catch(() => {});
+      }).catch(() => {});
+    } catch {}
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleSystemChange = () => {

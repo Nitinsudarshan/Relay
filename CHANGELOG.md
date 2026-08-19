@@ -1,5 +1,15 @@
 # Relay — Changelog
 
+## [0.3.8] - 2026-08-19
+
+### Rounded-lg Component Geometry & Simultaneous Light/Dark/System Theme Syncing
+
+- **Simultaneous Theme Synchronization (`ThemeToggle.tsx`, `DictationPill.tsx`)**:
+  - Wired real-time theme syncing between the main dashboard window and the floating overlay dictation window.
+  - Listens to `relay-theme-changed` events, `localStorage` theme state, and `prefers-color-scheme` media queries, toggling `.dark` class on root HTML elements simultaneously across all surfaces.
+- **Rounded-lg Component Styling (`DictationPill.tsx`, `PillSettingsPopover.tsx`)**:
+  - Updated pill body container, sparkle button (`✦`), settings chevron (`⌄`), audio waveform bars, hit zones, keyboard hint bar (`Hold to record`), and popover dropdown options to use `rounded-lg` / `rounded-xl` geometry.
+
 ## [0.3.7] - 2026-08-19
 
 ### Top Hint Clipping Fix & Relay Light Theme Palette Integration
