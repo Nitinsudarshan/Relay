@@ -8,6 +8,7 @@
     "dev:web": "npm --prefix web run dev",
     "build:web": "npm --prefix web run build",
     "dev:native": "npm --prefix native run tauri dev",
-    "build:native": "npm --prefix native run tauri build"
+    "build:native": "npm --prefix native run tauri build",
+    "install:all": "npm --prefix native install && npm --prefix web install"
   }
 }

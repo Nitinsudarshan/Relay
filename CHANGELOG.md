@@ -1,20 +1,28 @@
 # Relay — Changelog
 
-## [0.4.2] - 2026-08-19
+## [0.4.3] - 2026-08-20
 
-### Dictation Pill Recording Lifecycle & Global Hotkey Reliability Fix
+### Dev Environment Setup & Workspace Install Scripts
 
-- **Authoritative Audio Detection (`capture/mod.rs`, `commands.rs`, `hotkeys/mod.rs`)**:
-  - `AudioRecorder` now tracks `had_audio` — set only when a captured chunk's RMS crosses a real input threshold during the session — instead of assuming a started recording implies usable audio.
-  - `stop_capture` and the dictation hotkey's release handler both gate on `had_audio`: a silent/no-input recording emits `capture-state-changed` with `status: "NO_SPEECH"` and returns to idle without ever invoking the Whisper STT engine. `stop_capture` now returns `Option<ProcessedPipelineResult>` (`None` on no audio) instead of always fabricating a result.
-  - Removed the frontend's optimistic local `setPhase('processing')` on stop — the pill now only shows "Transcribing…" once the backend has actually confirmed audio was captured, closing the bug where clicking the pill twice with no input still walked through Transcribing → Processing.
-- **Real, Smoothed Waveform (`capture/mod.rs`)**:
-  - Added a one-pole low-pass smoothing filter to the RMS level pipeline (`capture` → level → normalize → smooth → `capture-level` event) so the waveform reflects actual mic input without jitter, and reuses the same per-chunk level for audio detection.
-- **Global Hotkey Reliability (`hotkeys/mod.rs`, `DictationPill.tsx`)**:
-  - `show_hide_hotkey` and `dictation_hotkey` now register independently — previously a registration failure on the first silently skipped ever attempting the second, which could leave Ctrl+Space completely unregistered with no visible error.
-  - Added a `hotkey-status-changed` event carrying the real per-hotkey OS registration outcome; the pill's Hotkey Status now reflects it instead of an optimistic hardcoded "registered".
-- **Docked Pill Listener Lifecycle (`App.tsx`)**:
-  - The docked pill (used when the floating overlay is turned off) is now always mounted and hidden via CSS instead of being conditionally rendered per-tab, so its `capture-state-changed`/`capture-level` listeners stay alive across tab switches — matching the floating pill, whose overlay window already persists for the app's whole lifetime.
+- **Improvements**:
+  - (`root`) Added `install:all` script to root `package.json` to install dependencies across both `native/` and `web/` workspaces in a single command.
+  - (`native/`, `web/`) Configured and verified development dependencies and build pipelines for both native (Tauri + React + Vite) and web (Next.js + Turbopack) environments.
+
+## [0.4.2] - 2026-08-20
+
+### whisper-rs 0.16 Upgrade, Compilation Fixes & Open Settings Command
+
+- **Fixes**:
+  - (`native/src-tauri`) Upgraded `whisper-rs` from 0.14 to 0.16 and re-enabled the `whisper-local` feature as the default in `Cargo.toml` — local STT was silently disabled because the previous version's bindgen build failed on Windows without LLVM/libclang.
+  - (`native/src-tauri`) Added `LIBCLANG_PATH` to `.cargo/config.toml` so whisper-rs-sys bindgen finds the LLVM installation on Windows.
+  - (`native/src-tauri`) Imported `tauri::Manager` trait in `commands.rs` to fix `get_webview_window` not found on `AppHandle`.
+  - (`native/src-tauri`) Updated `stt.rs` segment extraction to use the whisper-rs 0.16 iterator API (`state.as_iter()` + `segment.to_str_lossy()`) replacing the removed `full_n_segments`/`full_get_segment_text` methods.
+- **Features**:
+  - (`native/src-tauri`) Added `open_settings_window` Tauri command that surfaces the main window, focuses it, and emits a `navigate-tab` event to switch to the settings tab.
+  - (`native/src-tauri`) Registered `open_settings_window` in the Tauri command handler list in `lib.rs`.
+  - (`native/src`) Added `navigate-tab` event listener in `App.tsx` so the main window responds to tab-switch requests from the backend or overlay.
+  - (`native/src`) Updated `DictationPill.tsx` error/warning banners to invoke `open_settings_window` instead of opening the local popover — directs users to the full settings page in the main window.
+  - (`native/src`) Added an "Open All Settings in App" link at the bottom of `PillSettingsPopover.tsx` for quick access to the main settings panel.
 
 ## [0.4.1] - 2026-08-19
 
