@@ -171,13 +171,34 @@ fn on_dictation_released(
         };
         emit_capture_state(&app_handle, &state.recorder);
 
-        let model_path = state
+        let configured_model_path = state
             .settings
             .lock()
             .unwrap()
             .stt
             .whisper_model_path
-            .clone();
+            .clone()
+            .filter(|p| !p.trim().is_empty());
+        let model_path = match configured_model_path {
+            Some(path) => Some(path),
+            None => {
+                let models_dir = state.config_dir.join("models");
+                match crate::capture::stt::ensure_default_model(&models_dir).await {
+                    Ok(path) => {
+                        let path_str = path.to_string_lossy().to_string();
+                        let settings_path = state.config_dir.join("settings.json");
+                        let mut guard = state.settings.lock().unwrap();
+                        guard.stt.whisper_model_path = Some(path_str.clone());
+                        let _ = guard.save(&settings_path);
+                        Some(path_str)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Could not auto-provision a default Whisper model: {}", e);
+                        None
+                    }
+                }
+            }
+        };
         let stt = state.stt.clone();
         let samples = captured.samples;
 

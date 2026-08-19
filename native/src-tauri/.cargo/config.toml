@@ -1,0 +1,9 @@
+# Without this, building whisper-rs-sys invokes `bindgen`, which needs
+# libclang (clang.dll on Windows) installed and discoverable at build time —
+# most Windows dev machines don't have LLVM installed, so `cargo build`
+# panics before it ever gets to compiling whisper.cpp itself. Setting this
+# tells whisper-rs-sys to use its committed pre-generated bindings instead,
+# so the only real requirement left is a C/C++ toolchain (which rustup's
+# windows-msvc target already needs for anything else in this workspace).
+[env]
+WHISPER_DONT_GENERATE_BINDINGS = "1"

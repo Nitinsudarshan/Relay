@@ -57,6 +57,7 @@ pub fn run() {
             commands::update_hotkeys,
             commands::set_pill_visible,
             commands::ensure_local_llm_ready,
+            commands::ensure_stt_model_ready,
             commands::get_kanban_cards,
             commands::get_triggers,
             commands::save_triggers,
