@@ -1,5 +1,21 @@
 # Relay — Changelog
 
+## [0.4.2] - 2026-08-20
+
+### whisper-rs 0.16 Upgrade, Compilation Fixes & Open Settings Command
+
+- **Fixes**:
+  - (`native/src-tauri`) Upgraded `whisper-rs` from 0.14 to 0.16 and re-enabled the `whisper-local` feature as the default in `Cargo.toml` — local STT was silently disabled because the previous version's bindgen build failed on Windows without LLVM/libclang.
+  - (`native/src-tauri`) Added `LIBCLANG_PATH` to `.cargo/config.toml` so whisper-rs-sys bindgen finds the LLVM installation on Windows.
+  - (`native/src-tauri`) Imported `tauri::Manager` trait in `commands.rs` to fix `get_webview_window` not found on `AppHandle`.
+  - (`native/src-tauri`) Updated `stt.rs` segment extraction to use the whisper-rs 0.16 iterator API (`state.as_iter()` + `segment.to_str_lossy()`) replacing the removed `full_n_segments`/`full_get_segment_text` methods.
+- **Features**:
+  - (`native/src-tauri`) Added `open_settings_window` Tauri command that surfaces the main window, focuses it, and emits a `navigate-tab` event to switch to the settings tab.
+  - (`native/src-tauri`) Registered `open_settings_window` in the Tauri command handler list in `lib.rs`.
+  - (`native/src`) Added `navigate-tab` event listener in `App.tsx` so the main window responds to tab-switch requests from the backend or overlay.
+  - (`native/src`) Updated `DictationPill.tsx` error/warning banners to invoke `open_settings_window` instead of opening the local popover — directs users to the full settings page in the main window.
+  - (`native/src`) Added an "Open All Settings in App" link at the bottom of `PillSettingsPopover.tsx` for quick access to the main settings panel.
+
 ## [0.4.1] - 2026-08-19
 
 ### Unconditional Automatic GGML Whisper Model Downloader
