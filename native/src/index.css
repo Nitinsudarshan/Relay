@@ -111,6 +111,18 @@
     margin: 0;
     user-select: none;
   }
+
+  /* The floating dictation pill and listening-indicator windows are
+   * created with Tauri's `transparent: true`, but that only makes the OS
+   * window itself transparent — the page's own opaque `bg-background`
+   * (near-black in dark mode) still paints over the whole viewport,
+   * which is what shows up as a solid black rectangle instead of the
+   * pill floating on the desktop. main.tsx tags these routes with this
+   * class so their own background gets out of the way. */
+  html.overlay-window,
+  body.overlay-window {
+    background: transparent !important;
+  }
 }
 
 /* Custom Audio Level & Pulsing Visualizer Utilities */

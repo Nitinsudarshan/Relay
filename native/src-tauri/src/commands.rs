@@ -132,14 +132,30 @@ pub async fn start_capture(
     emit_capture_state(&app, &state.recorder);
 
     if result.is_ok() {
-        // Kick this off now, in parallel with the user talking, rather
-        // than waiting until they stop and the LLM call is imminent — by
-        // the time transcription finishes, a local Ollama that needed
-        // starting has had real time to come up.
+        // Kick these off now, in parallel with the user talking, rather
+        // than waiting until they stop and need them immediately — by the
+        // time transcription runs, a local Ollama that needed starting (or
+        // a default Whisper model that needed downloading) has had real
+        // time to come up.
         let provider = state.settings.lock().unwrap().provider.clone();
         if matches!(provider.active_provider, ProviderType::Ollama) {
             tauri::async_runtime::spawn(async move {
                 crate::providers::ensure_ollama_ready(&provider.ollama_host, &provider.ollama_model).await;
+            });
+        }
+
+        let has_model = state
+            .settings
+            .lock()
+            .unwrap()
+            .stt
+            .whisper_model_path
+            .as_ref()
+            .is_some_and(|p| !p.trim().is_empty());
+        if !has_model {
+            let models_dir = state.config_dir.join("models");
+            tauri::async_runtime::spawn(async move {
+                let _ = crate::capture::stt::ensure_default_model(&models_dir).await;
             });
         }
     }
@@ -180,7 +196,34 @@ async fn process_captured_audio(
     let settings = state.settings.lock().unwrap().clone();
     let stt = state.stt.clone();
     let samples = captured.samples.clone();
-    let model_path = settings.stt.whisper_model_path.clone();
+
+    // Nobody should have to go find and download a GGML file themselves
+    // before dictation produces any text at all — if Settings doesn't have
+    // one configured, fetch a small default and remember it for next time.
+    let model_path = match settings
+        .stt
+        .whisper_model_path
+        .clone()
+        .filter(|p| !p.trim().is_empty())
+    {
+        Some(configured) => Some(configured),
+        None => {
+            let models_dir = state.config_dir.join("models");
+            match crate::capture::stt::ensure_default_model(&models_dir).await {
+                Ok(path) => {
+                    let path_str = path.to_string_lossy().to_string();
+                    let mut guard = state.settings.lock().unwrap();
+                    guard.stt.whisper_model_path = Some(path_str.clone());
+                    let _ = guard.save(&state.settings_path());
+                    Some(path_str)
+                }
+                Err(e) => {
+                    tracing::warn!("Could not auto-provision a default Whisper model: {}", e);
+                    None
+                }
+            }
+        }
+    };
 
     let transcript =
         tokio::task::spawn_blocking(move || stt.transcribe(model_path.as_deref(), &samples))
@@ -255,6 +298,46 @@ pub async fn save_triggers(
     let path = state.config_dir.join("triggers.json");
     TriggerEngine::save_triggers(&path, &triggers)
         .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SttModelStatus {
+    Ready { path: String },
+    Failed { message: String },
+}
+
+/// Removes "go find and download a GGML model yourself" as a prerequisite:
+/// downloads the default one now if nothing is configured, and reports
+/// where things stand so Settings can show real status instead of the
+/// user finding out only when a capture silently fails.
+#[tauri::command]
+pub async fn ensure_stt_model_ready(state: State<'_, AppState>) -> Result<SttModelStatus, CommandError> {
+    let configured = state
+        .settings
+        .lock()
+        .unwrap()
+        .stt
+        .whisper_model_path
+        .clone()
+        .filter(|p| !p.trim().is_empty());
+    if let Some(path) = configured {
+        return Ok(SttModelStatus::Ready { path });
+    }
+
+    let models_dir = state.config_dir.join("models");
+    match crate::capture::stt::ensure_default_model(&models_dir).await {
+        Ok(path) => {
+            let path_str = path.to_string_lossy().to_string();
+            let mut settings = state.settings.lock().unwrap();
+            settings.stt.whisper_model_path = Some(path_str.clone());
+            let _ = settings.save(&state.settings_path());
+            Ok(SttModelStatus::Ready { path: path_str })
+        }
+        Err(e) => Ok(SttModelStatus::Failed {
+            message: e.to_string(),
+        }),
+    }
 }
 
 /// Removes the "install and manually start Ollama" step for local mode:

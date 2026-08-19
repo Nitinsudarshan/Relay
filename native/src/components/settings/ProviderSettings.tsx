@@ -71,6 +71,26 @@ export const ProviderSettings: React.FC = () => {
     }
   };
 
+  type SttModelStatus =
+    | { state: 'checking' }
+    | { state: 'ready'; path: string }
+    | { state: 'failed'; message: string };
+  const [sttModelStatus, setSttModelStatus] = useState<SttModelStatus>({ state: 'checking' });
+
+  const checkSttModel = async () => {
+    setSttModelStatus({ state: 'checking' });
+    try {
+      const status = await invoke<SttModelStatus>('ensure_stt_model_ready');
+      setSttModelStatus(status);
+      if (status.state === 'ready') {
+        setSettings((prev) => ({ ...prev, stt: { whisper_model_path: status.path } }));
+      }
+    } catch (err) {
+      console.error('Failed to check local Whisper model status', err);
+      setSttModelStatus({ state: 'failed', message: 'Could not reach the backend' });
+    }
+  };
+
   useEffect(() => {
     invoke<AppSettings>('get_settings')
       .then(setSettings)
@@ -87,6 +107,13 @@ export const ProviderSettings: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, activeSection, settings.provider.active_provider]);
+
+  useEffect(() => {
+    if (!loading && activeSection === 'general') {
+      checkSttModel();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, activeSection]);
 
   // Hotkeys are applied the moment they're captured — the backend
   // unregisters the old binding and registers the new one live, so there's
@@ -298,17 +325,38 @@ export const ProviderSettings: React.FC = () => {
                   <p className="text-xs font-semibold text-foreground">Local Speech-to-Text (Whisper)</p>
                 </div>
                 <label htmlFor="whisper-model-path" className="block text-[11px] text-muted-foreground mb-1">
-                  GGML Model Path
+                  GGML Model Path (optional — leave blank to use the auto-downloaded default)
                 </label>
                 <Input
                   id="whisper-model-path"
-                  placeholder="C:\\models\\ggml-base.en.bin"
+                  placeholder="Leave blank for the auto-downloaded default, or point at your own model"
                   value={settings.stt.whisper_model_path || ''}
                   onChange={(e) => setSettings({ ...settings, stt: { whisper_model_path: e.target.value } })}
                 />
+                <div className="flex items-center justify-between mt-2 p-3 rounded-xl bg-muted/40 border border-border">
+                  <div className="text-xs">
+                    {sttModelStatus.state === 'checking' && (
+                      <Badge variant="outline" className="text-[10px] font-mono">Checking Whisper model…</Badge>
+                    )}
+                    {sttModelStatus.state === 'ready' && (
+                      <Badge variant="emerald" className="text-[10px] font-mono">
+                        Model ready: {sttModelStatus.path.split(/[\\/]/).pop()}
+                      </Badge>
+                    )}
+                    {sttModelStatus.state === 'failed' && (
+                      <Badge variant="outline" className="text-[10px] font-mono border-destructive/50 text-destructive">
+                        {sttModelStatus.message}
+                      </Badge>
+                    )}
+                  </div>
+                  <Button type="button" size="sm" variant="ghost" onClick={checkSttModel} className="text-xs h-7">
+                    Retry
+                  </Button>
+                </div>
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  Download a GGML model from huggingface.co/ggerganov/whisper.cpp — required for meeting/scribble
-                  capture, voice chat, and universal dictation.
+                  Relay downloads a small default Whisper model automatically the first time it's needed — required
+                  for meeting/scribble capture, voice chat, and universal dictation. Point this at your own GGML
+                  model (huggingface.co/ggerganov/whisper.cpp) for better accuracy or another language.
                 </p>
               </div>
 

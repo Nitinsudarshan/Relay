@@ -11,6 +11,17 @@ import './index.css';
 // hotkeys::ensure_indicator_window in the Rust backend) rather than
 // separate Vite entry points.
 const route = window.location.hash;
+const isOverlayWindow = route === '#/dictation-indicator' || route === '#/dictation-pill';
+
+// These windows are created with Tauri's `transparent: true`, but the
+// page's own default `bg-background` (opaque, near-black in dark mode)
+// otherwise paints right over that and shows up as a solid rectangle
+// instead of floating on the desktop — see the `.overlay-window` rule in
+// index.css this class activates.
+if (isOverlayWindow) {
+  document.documentElement.classList.add('overlay-window');
+  document.body.classList.add('overlay-window');
+}
 
 const view =
   route === '#/dictation-indicator' ? (
