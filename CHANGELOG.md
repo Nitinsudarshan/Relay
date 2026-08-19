@@ -1,5 +1,12 @@
 # Relay — Changelog
 
+## [0.3.4] - 2026-08-19
+
+### Native Build Fix for npm run dev:native
+
+- **Windows Build Fix (`Cargo.toml`)**:
+  - Gated optional `whisper-local` feature from `default = []` in `Cargo.toml` so `npm run dev:native` and `tauri dev` build cleanly on Windows environments without external `cmake` C++ build tools installed.
+
 ## [0.3.3] - 2026-08-19
 
 ### Multi-Monitor Active Positioning & Floating Pill Consolidation

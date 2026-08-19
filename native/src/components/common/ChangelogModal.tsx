@@ -12,6 +12,17 @@ interface ChangelogModalProps {
 
 export const CHANGELOG_DATA = [
   {
+    version: '0.3.4',
+    date: '2026-08-19',
+    type: 'patch',
+    title: 'Native Build Fix for npm run dev:native',
+    tags: ['Fixes'],
+    domains: ['Build', 'Settings'],
+    items: [
+      { category: 'Fixes', domain: 'Build', text: 'Set default features to empty in Cargo.toml so tauri dev runs without requiring cmake.' },
+    ],
+  },
+  {
     version: '0.3.3',
     date: '2026-08-19',
     type: 'patch',
