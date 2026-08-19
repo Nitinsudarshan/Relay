@@ -3,7 +3,7 @@ use crate::hotkeys;
 use crate::mcp::McpRouter;
 use crate::pipeline::{PipelineEngine, ProcessedPipelineResult};
 use crate::providers::{LLMClient, OllamaStatus, ProviderType};
-use crate::settings::{AppSettings, HotkeySettings};
+use crate::settings::{AppSettings, HotkeySettings, PillPosition};
 use crate::triggers::{TriggerConfig, TriggerEngine};
 use crate::vault::{KanbanCard, VaultManager};
 use serde::{Deserialize, Serialize};
@@ -117,7 +117,8 @@ pub async fn set_pill_visible(
     visible: bool,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    crate::overlay::ensure_pill_window(&app, visible);
+    let position = state.settings.lock().unwrap().ui.pill_position;
+    crate::overlay::ensure_pill_window(&app, visible, position);
     let _ = app.emit("pill-visibility-changed", visible);
 
     let mut settings = state.settings.lock().unwrap();
@@ -125,6 +126,44 @@ pub async fn set_pill_visible(
     settings
         .save(&state.settings_path())
         .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))
+}
+
+/// Where the floating pill anchors on screen. Re-anchors immediately using
+/// a freshly computed monitor/work-area, at whatever size (resting or
+/// expanded) it currently is.
+#[tauri::command]
+pub async fn set_pill_position(
+    app: AppHandle,
+    position: PillPosition,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let mut settings = state.settings.lock().unwrap();
+    settings.ui.pill_position = position;
+    settings
+        .save(&state.settings_path())
+        .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
+    drop(settings);
+
+    crate::overlay::reposition_pill(&app, position);
+    let _ = app.emit("pill-position-changed", position);
+    Ok(())
+}
+
+/// The pill's own RESTING/EXPANDED presentation state is frontend-owned
+/// (it's driven by hover and by the capture phase, not by the shared
+/// capture session truth), but window geometry can only be changed from
+/// Rust — this is the actuator the frontend calls whenever that state
+/// flips, so the native window always tightly matches what's actually
+/// visible (never a bigger invisible hit-region than the pill itself).
+#[tauri::command]
+pub async fn set_pill_expanded(
+    app: AppHandle,
+    expanded: bool,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let position = state.settings.lock().unwrap().ui.pill_position;
+    crate::overlay::set_expanded(&app, expanded, position);
+    Ok(())
 }
 
 #[tauri::command]

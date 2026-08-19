@@ -9,9 +9,5 @@ import { DictationPill } from './DictationPill';
  * dashboard's Capture tab.
  */
 export const FloatingPill: React.FC = () => {
-  return (
-    <div className="flex h-screen w-screen items-center justify-center bg-transparent">
-      <DictationPill />
-    </div>
-  );
+  return <DictationPill />;
 };

@@ -29,6 +29,7 @@ pub fn run() {
     let settings = AppSettings::load(&config_dir.join("settings.json")).unwrap_or_default();
     let hotkeys_config = settings.hotkeys.clone();
     let show_floating_pill = settings.ui.show_floating_pill;
+    let pill_position = settings.ui.pill_position;
 
     let state = AppState {
         recorder: AudioRecorder::new(),
@@ -47,7 +48,7 @@ pub fn run() {
                 &hotkeys_config.show_hide_hotkey,
                 &hotkeys_config.dictation_hotkey,
             );
-            overlay::ensure_pill_window(app.handle(), show_floating_pill);
+            overlay::ensure_pill_window(app.handle(), show_floating_pill, pill_position);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -56,6 +57,8 @@ pub fn run() {
             commands::get_capture_status,
             commands::update_hotkeys,
             commands::set_pill_visible,
+            commands::set_pill_position,
+            commands::set_pill_expanded,
             commands::ensure_local_llm_ready,
             commands::ensure_stt_model_ready,
             commands::get_kanban_cards,
