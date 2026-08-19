@@ -1,4 +1,3 @@
-#[cfg(feature = "whisper-local")]
 use std::path::{Path, PathBuf};
 #[cfg(feature = "whisper-local")]
 use std::sync::{Arc, Mutex};
@@ -22,9 +21,7 @@ pub enum SttError {
 /// A small English model good enough to prove dictation works end to end
 /// without the user having to go find and download one themselves — they
 /// can still point Settings at a bigger/multilingual model any time.
-#[cfg(feature = "whisper-local")]
 const DEFAULT_MODEL_FILENAME: &str = "ggml-tiny.en.bin";
-#[cfg(feature = "whisper-local")]
 const DEFAULT_MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin";
 
@@ -33,14 +30,12 @@ const DEFAULT_MODEL_URL: &str =
 /// another right after — without this, both could race to write the same
 /// temp file at once instead of the second simply finding the first's
 /// finished download already in place.
-#[cfg(feature = "whisper-local")]
 static DOWNLOAD_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// If no Whisper model is configured, fetches a small default one into
 /// `models_dir` and returns its path — so "set a GGML model path" isn't a
 /// prerequisite the user has to satisfy by hand before dictation works at
 /// all. A no-op (just returns the existing path) once it's already there.
-#[cfg(feature = "whisper-local")]
 pub async fn ensure_default_model(models_dir: &Path) -> Result<PathBuf, SttError> {
     let target = models_dir.join(DEFAULT_MODEL_FILENAME);
     if target.exists() {
@@ -95,11 +90,6 @@ pub async fn ensure_default_model(models_dir: &Path) -> Result<PathBuf, SttError
 
     tracing::info!("Default Whisper model ready at {}", target.display());
     Ok(target)
-}
-
-#[cfg(not(feature = "whisper-local"))]
-pub async fn ensure_default_model(_models_dir: &std::path::Path) -> Result<std::path::PathBuf, SttError> {
-    Err(SttError::ModelNotConfigured)
 }
 
 /// Local, zero-cost speech-to-text via whisper.cpp (through whisper-rs).

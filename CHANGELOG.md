@@ -1,5 +1,14 @@
 # Relay — Changelog
 
+## [0.4.1] - 2026-08-19
+
+### Unconditional Automatic GGML Whisper Model Downloader
+
+- **STT Model Auto-Fetch (`stt.rs`, `commands.rs`)**:
+  - Removed feature gating from `ensure_default_model` in `stt.rs`.
+  - Automatically fetches HuggingFace's `ggml-tiny.en.bin` model directly into `%APPDATA%\Relay\models\` on launch whenever a model path is unconfigured or missing on disk.
+  - Automatically persists the downloaded model path into `settings.json`, transitioning the dictation pill seamlessly to `Click to dictate` with zero manual configuration.
+
 ## [0.4.0] - 2026-08-19
 
 ### STT Whisper Model Error Resolution & Interactive Configuration Handler

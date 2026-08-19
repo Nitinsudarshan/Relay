@@ -450,8 +450,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1787161056.2678168,
-    "ast_hash": "2e502e169792e2afc047be0ff0caa2da",
+    "mtime": 1787161172.5424588,
+    "ast_hash": "1a09e53da610ff2d7b2784d71e563daf",
     "semantic_hash": ""
   },
   "README.md": {
@@ -715,8 +715,8 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/capture/stt.rs": {
-    "mtime": 1787161023.936418,
-    "ast_hash": "67e0270317b17f53b87b43c11c91908d",
+    "mtime": 1787161128.2293937,
+    "ast_hash": "67e7cf45ae8387c04a87de13c14a75fe",
     "semantic_hash": ""
   },
   "native/src-tauri/src/hotkeys/injection.rs": {
@@ -810,8 +810,8 @@
     "semantic_hash": ""
   },
   "update.md": {
-    "mtime": 1787161061.483175,
-    "ast_hash": "b6b99ab81a485aa5c40eaafc4fe70d08",
+    "mtime": 1787161179.1252375,
+    "ast_hash": "ede82487362076c88d41887b4f070969",
     "semantic_hash": ""
   }
 }
