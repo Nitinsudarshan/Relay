@@ -68,25 +68,39 @@ Stored at `.relay/config/triggers.json`:
 }
 ```
 
-## 4. Provider Settings Configuration Schema (`settings.json`)
-Stored at `.relay/config/settings.json`:
+## 4. App Settings Configuration Schema (`settings.json`)
+Stored at `.relay/config/settings.json`. Mirrors the Rust `AppSettings` struct
+(`native/src-tauri/src/settings/mod.rs`) exactly — this is the real
+implemented shape, not an aspirational one:
 
 ```json
 {
-  "active_provider": "ollama",
-  "ollama": {
-    "host": "http://localhost:11434",
-    "model": "llama3.2:latest"
+  "provider": {
+    "active_provider": "ollama",
+    "ollama_host": "http://localhost:11434",
+    "ollama_model": "llama3.2:latest",
+    "cloud_api_key": null,
+    "cloud_model": "gpt-4o-mini"
   },
-  "cloud": {
-    "provider_type": "openai",
-    "api_key": "sk-...",
-    "model": "gpt-4o-mini"
+  "stt": {
+    "whisper_model_path": null
   },
-  "stt_provider": "whisper_local",
-  "vault_path": "./.relay/vault"
+  "tts": {
+    "piper_binary_path": null,
+    "piper_voice_path": null
+  },
+  "hotkeys": {
+    "show_hide_hotkey": "Ctrl+Shift+Space",
+    "dictation_hotkey": "Ctrl+Space"
+  }
 }
 ```
+
+`active_provider` is one of `"ollama" | "cloud_openai" | "cloud_gemini" | "cloud_anthropic"`.
+`stt.whisper_model_path` must point at a local GGML Whisper model file (not
+bundled with Relay) for any transcription — meeting/scribble capture, voice
+chat, and universal dictation — to work. `tts.*` are both optional; when
+either is unset, voice chat answers are text-only.
 
 ## 5. LanceDB Vector Record Schema
 Table `note_embeddings` inside LanceDB database `.relay/lancedb`:

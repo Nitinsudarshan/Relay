@@ -27,7 +27,9 @@ impl McpRouter {
     ) -> Result<McpToolCallResult, McpError> {
         tracing::info!(
             "Dispatching MCP action: type={}, tool={}, text='{}'",
-            action_type, target_tool, extracted_text
+            action_type,
+            target_tool,
+            extracted_text
         );
 
         match action_type {
@@ -35,7 +37,10 @@ impl McpRouter {
             "local_reminder" => Self::execute_local_reminder(extracted_text).await,
             "mcp_notion" => Self::execute_notion(target_tool, extracted_text).await,
             "mcp_gdrive" => Self::execute_gdrive(target_tool, extracted_text).await,
-            _ => Err(McpError::ClientError(format!("Unknown action type: {}", action_type))),
+            _ => Err(McpError::ClientError(format!(
+                "Unknown action type: {}",
+                action_type
+            ))),
         }
     }
 

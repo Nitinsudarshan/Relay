@@ -70,13 +70,20 @@ impl TriggerEngine {
         Ok(triggers)
     }
 
-    pub fn save_triggers(config_path: &Path, triggers: &[TriggerConfig]) -> Result<(), TriggerError> {
+    pub fn save_triggers(
+        config_path: &Path,
+        triggers: &[TriggerConfig],
+    ) -> Result<(), TriggerError> {
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)?;
         }
         let content = serde_json::to_string_pretty(triggers)?;
         fs::write(config_path, content)?;
-        tracing::info!("Saved {} trigger configurations to {:?}", triggers.len(), config_path);
+        tracing::info!(
+            "Saved {} trigger configurations to {:?}",
+            triggers.len(),
+            config_path
+        );
         Ok(())
     }
 
@@ -85,7 +92,7 @@ impl TriggerEngine {
         triggers: &'a [TriggerConfig],
     ) -> Option<TriggerMatch> {
         let clean_transcript = transcript.to_lowercase();
-        
+
         for trigger in triggers {
             if !trigger.enabled {
                 continue;
@@ -105,7 +112,11 @@ impl TriggerEngine {
                     phrase: trigger.phrase.clone(),
                     action_type: trigger.action_type.clone(),
                     target_tool: trigger.target_tool.clone(),
-                    extracted_text: if remainder.is_empty() { transcript.to_string() } else { remainder },
+                    extracted_text: if remainder.is_empty() {
+                        transcript.to_string()
+                    } else {
+                        remainder
+                    },
                 });
             }
         }
@@ -128,7 +139,10 @@ mod tests {
     #[test]
     fn test_match_transcript() {
         let triggers = TriggerEngine::default_triggers();
-        let match_res = TriggerEngine::match_transcript("Please remind me to submit architecture plan", &triggers);
+        let match_res = TriggerEngine::match_transcript(
+            "Please remind me to submit architecture plan",
+            &triggers,
+        );
         assert!(match_res.is_some());
         let m = match_res.unwrap();
         assert_eq!(m.trigger_id, "trig_002");

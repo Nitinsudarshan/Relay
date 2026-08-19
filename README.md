@@ -1,48 +1,45 @@
-<<<<<<< HEAD
 # Relay
-=======
-# Next.js Shadcn Boilerplate
 
-A clean, modern boilerplate featuring Next.js (App Router), Tailwind CSS, and Shadcn UI components.
+Relay is a hybrid (local + cloud) AI voice and memory assistant. It turns
+push-to-talk speech into structured, actionable system state — Kanban task
+cards, calendar events, reminders, and polished Markdown notes — instead of
+a wall of transcript text you have to re-read and re-type.
 
-## Features
+It also works as a universal dictation and voice-chat tool: a global hotkey
+transcribes speech and types it directly into whatever app or field
+currently has focus, and an in-app voice chat answers questions grounded in
+your own vault notes.
 
-- **Next.js 16** App Router
-- **Tailwind CSS v4** for modern styling
-- **Shadcn UI** pre-configured components
-- **Sidebar & Layout** included (built with Shadcn Sidebar)
-- **Dark Mode** support out of the box
-- **Fully type-safe** with TypeScript
-
-## Getting Started
-
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-2. Run the development server:
-   ```bash
-   npm run dev
-   ```
-
-3. Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+See `docs/product.md` for the full product spec, `docs/decisions.md` for the
+architectural decision log, and `AGENTS.md` for repository conventions.
 
 ## Structure
 
-- `src/app/`: Next.js App Router pages and layouts.
-- `src/components/`: Shadcn UI components and shared UI elements.
-- `src/contexts/`: React context providers (like `user-context`).
-- `src/lib/`: Utility functions.
+- `native/` — Windows desktop app: Rust backend (`native/src-tauri/`) +
+  Tauri/React frontend (`native/src/`). This is the primary surface.
+- `web/` — Next.js + Shadcn + Supabase dashboard for hybrid (cloud-synced)
+  mode.
+- `docs/` — Living product/architecture specification.
 
-## Components Included
+## Getting Started (native desktop app)
 
-This boilerplate includes several pre-built generic components:
-- `AppSidebar`: A generic application sidebar.
-- `SiteHeader`: A top navigation bar with a user menu and theme toggle.
-- `LoginForm`: A generic placeholder login form component.
+```bash
+cd native
+npm install
+npm run tauri dev
+```
+
+## Getting Started (web dashboard)
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) with your browser to see
+the result.
 
 ## License
 
 MIT
->>>>>>> a8feca669558500e995b7a05f2e5bcc22effdb0f

@@ -26,9 +26,13 @@ pub struct LLMResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProviderType {
+    #[serde(rename = "ollama")]
     Ollama,
+    #[serde(rename = "cloud_openai")]
     CloudOpenAI,
+    #[serde(rename = "cloud_gemini")]
     CloudGemini,
+    #[serde(rename = "cloud_anthropic")]
     CloudAnthropic,
 }
 
@@ -66,16 +70,24 @@ impl LLMClient {
         }
     }
 
-    pub async fn complete(&self, prompt: &str, system_prompt: Option<&str>) -> Result<LLMResponse, ProviderError> {
+    pub async fn complete(
+        &self,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<LLMResponse, ProviderError> {
         match self.config.active_provider {
             ProviderType::Ollama => self.complete_ollama(prompt, system_prompt).await,
-            ProviderType::CloudOpenAI | ProviderType::CloudGemini | ProviderType::CloudAnthropic => {
-                self.complete_cloud(prompt, system_prompt).await
-            }
+            ProviderType::CloudOpenAI
+            | ProviderType::CloudGemini
+            | ProviderType::CloudAnthropic => self.complete_cloud(prompt, system_prompt).await,
         }
     }
 
-    async fn complete_ollama(&self, prompt: &str, system_prompt: Option<&str>) -> Result<LLMResponse, ProviderError> {
+    async fn complete_ollama(
+        &self,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<LLMResponse, ProviderError> {
         let url = format!("{}/api/generate", self.config.ollama_host);
         let full_prompt = if let Some(sys) = system_prompt {
             format!("[System Instructions: {}]\n\n{}", sys, prompt)
@@ -89,7 +101,9 @@ impl LLMClient {
             "stream": false
         });
 
-        let res = self.client.post(&url)
+        let res = self
+            .client
+            .post(&url)
             .json(&body)
             .send()
             .await
@@ -116,10 +130,15 @@ impl LLMClient {
         })
     }
 
-    async fn complete_cloud(&self, prompt: &str, system_prompt: Option<&str>) -> Result<LLMResponse, ProviderError> {
-        let api_key = self.config.cloud_api_key.as_ref().ok_or_else(|| {
-            ProviderError::ConfigError("Cloud API key is missing".to_string())
-        })?;
+    async fn complete_cloud(
+        &self,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<LLMResponse, ProviderError> {
+        let api_key =
+            self.config.cloud_api_key.as_ref().ok_or_else(|| {
+                ProviderError::ConfigError("Cloud API key is missing".to_string())
+            })?;
 
         let model = self.config.cloud_model.as_deref().unwrap_or("gpt-4o-mini");
         let url = "https://api.openai.com/v1/chat/completions";
@@ -136,7 +155,9 @@ impl LLMClient {
             "temperature": 0.3
         });
 
-        let res = self.client.post(url)
+        let res = self
+            .client
+            .post(url)
             .header("Authorization", format!("Bearer {}", api_key))
             .json(&body)
             .send()
@@ -160,7 +181,9 @@ impl LLMClient {
             text,
             model: model.to_string(),
             prompt_tokens: json["usage"]["prompt_tokens"].as_u64().map(|v| v as usize),
-            completion_tokens: json["usage"]["completion_tokens"].as_u64().map(|v| v as usize),
+            completion_tokens: json["usage"]["completion_tokens"]
+                .as_u64()
+                .map(|v| v as usize),
         })
     }
 }

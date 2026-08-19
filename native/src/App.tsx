@@ -2,14 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { PTTWidget } from './components/capture/PTTWidget';
 import { KanbanBoard } from './components/kanban/KanbanBoard';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
+import { ChatPanel } from './components/chat/ChatPanel';
 import { TriggerSettings } from './components/settings/TriggerSettings';
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { KanbanCard, ProcessedPipelineResult } from './types';
 import { invoke } from '@tauri-apps/api/core';
-import { Mic, Kanban, Sparkles, Zap, Settings, ShieldCheck, Activity } from 'lucide-react';
+import { Mic, Kanban, Sparkles, Zap, Settings, ShieldCheck, Activity, Bot } from 'lucide-react';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'capture' | 'kanban' | 'scribble' | 'triggers' | 'settings'>('capture');
+  const [activeTab, setActiveTab] = useState<
+    'capture' | 'kanban' | 'scribble' | 'chat' | 'triggers' | 'settings'
+  >('capture');
   const [cards, setCards] = useState<KanbanCard[]>([]);
   const [lastResult, setLastResult] = useState<ProcessedPipelineResult | null>(null);
 
@@ -95,6 +98,18 @@ export const App: React.FC = () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('chat')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+              activeTab === 'chat'
+                ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            <Bot className="w-4 h-4" />
+            Voice Chat
+          </button>
+
+          <button
             onClick={() => setActiveTab('triggers')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
               activeTab === 'triggers'
@@ -154,6 +169,7 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'kanban' && <KanbanBoard cards={cards} onRefresh={fetchKanbanCards} />}
+        {activeTab === 'chat' && <ChatPanel />}
         {activeTab === 'scribble' && (
           <ScribbleViewer
             content={lastResult?.output_markdown || ''}

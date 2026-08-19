@@ -3,6 +3,9 @@ use crate::vault::{KanbanCard, VaultManager, VaultNote};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod chat;
+pub use chat::process_chat;
+
 #[derive(Error, Debug)]
 pub enum PipelineError {
     #[error("LLM Provider error: {0}")]
@@ -22,6 +25,12 @@ pub struct ProcessedPipelineResult {
     pub note_id: Option<String>,
     pub kanban_cards_created: usize,
     pub output_markdown: String,
+    /// Vault note titles used as grounding context (populated for chat mode).
+    #[serde(default)]
+    pub sources: Vec<String>,
+    /// Base64 WAV of the answer spoken aloud, if a local TTS engine is configured.
+    #[serde(default)]
+    pub spoken_audio_base64: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,11 +67,23 @@ Return ONLY the JSON array inside a json codeblock or raw JSON string without ma
 
         let response = llm.complete(transcript, Some(system_prompt)).await?;
         let text = response.text.trim();
-        
+
         let json_str = if text.contains("```json") {
-            text.split("```json").nth(1).unwrap_or("").split("```").next().unwrap_or("").trim()
+            text.split("```json")
+                .nth(1)
+                .unwrap_or("")
+                .split("```")
+                .next()
+                .unwrap_or("")
+                .trim()
         } else if text.contains("```") {
-            text.split("```").nth(1).unwrap_or("").split("```").next().unwrap_or("").trim()
+            text.split("```")
+                .nth(1)
+                .unwrap_or("")
+                .split("```")
+                .next()
+                .unwrap_or("")
+                .trim()
         } else {
             text
         };
@@ -88,9 +109,14 @@ Return ONLY the JSON array inside a json codeblock or raw JSON string without ma
             updated_at: now_str.clone(),
             tags: vec!["meeting".to_string(), "kanban".to_string()],
             source_audio: None,
-            content: format!("# Meeting Transcript\n\n{}\n\n## Action Items Extracted\n{}", transcript, text),
+            content: format!(
+                "# Meeting Transcript\n\n{}\n\n## Action Items Extracted\n{}",
+                transcript, text
+            ),
         };
-        vault.save_note(&note).map_err(|e| PipelineError::VaultError(e.to_string()))?;
+        vault
+            .save_note(&note)
+            .map_err(|e| PipelineError::VaultError(e.to_string()))?;
 
         let mut card_count = 0;
         for item in &items {
@@ -98,15 +124,23 @@ Return ONLY the JSON array inside a json codeblock or raw JSON string without ma
             let card = KanbanCard {
                 id: card_id,
                 title: item.title.clone(),
-                assignee: item.assignee.clone().unwrap_or_else(|| "Unassigned".to_string()),
+                assignee: item
+                    .assignee
+                    .clone()
+                    .unwrap_or_else(|| "Unassigned".to_string()),
                 status: "todo".to_string(),
-                priority: item.priority.clone().unwrap_or_else(|| "medium".to_string()),
+                priority: item
+                    .priority
+                    .clone()
+                    .unwrap_or_else(|| "medium".to_string()),
                 due_date: item.due_date.clone(),
                 created_at: now_str.clone(),
                 description: item.description.clone(),
                 source_note_id: Some(meeting_note_id.clone()),
             };
-            vault.save_kanban_card(&card).map_err(|e| PipelineError::VaultError(e.to_string()))?;
+            vault
+                .save_kanban_card(&card)
+                .map_err(|e| PipelineError::VaultError(e.to_string()))?;
             card_count += 1;
         }
 
@@ -116,6 +150,8 @@ Return ONLY the JSON array inside a json codeblock or raw JSON string without ma
             note_id: Some(meeting_note_id),
             kanban_cards_created: card_count,
             output_markdown: format!("Extracted {} Kanban card(s) from meeting.", card_count),
+            sources: Vec::new(),
+            spoken_audio_base64: None,
         })
     }
 
@@ -154,7 +190,9 @@ Include:
             content: response.text.clone(),
         };
 
-        vault.save_note(&note).map_err(|e| PipelineError::VaultError(e.to_string()))?;
+        vault
+            .save_note(&note)
+            .map_err(|e| PipelineError::VaultError(e.to_string()))?;
 
         Ok(ProcessedPipelineResult {
             mode: "scribble".to_string(),
@@ -162,6 +200,8 @@ Include:
             note_id: Some(note_id),
             kanban_cards_created: 0,
             output_markdown: response.text,
+            sources: Vec::new(),
+            spoken_audio_base64: None,
         })
     }
 }
