@@ -2342,8 +2342,8 @@
       "source_location": "L2857",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_definitions_target",
-      "community": 97,
-      "community_name": "definitions",
+      "community": 69,
+      "community_name": "Target",
       "norm_label": "target"
     },
     {
@@ -2353,8 +2353,8 @@
       "source_location": "L2858",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_target_description",
-      "community": 97,
-      "community_name": "definitions",
+      "community": 69,
+      "community_name": "Target",
       "norm_label": "description"
     },
     {
@@ -2364,8 +2364,8 @@
       "source_location": "L2859",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_target_oneof",
-      "community": 97,
-      "community_name": "definitions",
+      "community": 69,
+      "community_name": "Target",
       "norm_label": "oneof"
     },
     {
@@ -2408,8 +2408,8 @@
       "source_location": "L2925",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_definitions_shellscopeentryallowedargs",
-      "community": 134,
-      "community_name": "ShellScopeEntryAllowedArgs",
+      "community": 97,
+      "community_name": "definitions",
       "norm_label": "shellscopeentryallowedargs"
     },
     {
@@ -2419,8 +2419,8 @@
       "source_location": "L2926",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_shellscopeentryallowedargs_description",
-      "community": 134,
-      "community_name": "ShellScopeEntryAllowedArgs",
+      "community": 97,
+      "community_name": "definitions",
       "norm_label": "description"
     },
     {
@@ -2430,8 +2430,8 @@
       "source_location": "L2927",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_shellscopeentryallowedargs_anyof",
-      "community": 134,
-      "community_name": "ShellScopeEntryAllowedArgs",
+      "community": 97,
+      "community_name": "definitions",
       "norm_label": "anyof"
     },
     {
@@ -3200,8 +3200,8 @@
       "source_location": "L2857",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_windows_schema_definitions_target",
-      "community": 69,
-      "community_name": "Target",
+      "community": 19,
+      "community_name": "definitions",
       "norm_label": "target"
     },
     {
@@ -3211,8 +3211,8 @@
       "source_location": "L2858",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_windows_schema_target_description",
-      "community": 69,
-      "community_name": "Target",
+      "community": 19,
+      "community_name": "definitions",
       "norm_label": "description"
     },
     {
@@ -3222,8 +3222,8 @@
       "source_location": "L2859",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_windows_schema_target_oneof",
-      "community": 69,
-      "community_name": "Target",
+      "community": 19,
+      "community_name": "definitions",
       "norm_label": "oneof"
     },
     {
@@ -3266,8 +3266,8 @@
       "source_location": "L2925",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_windows_schema_definitions_shellscopeentryallowedargs",
-      "community": 19,
-      "community_name": "definitions",
+      "community": 78,
+      "community_name": "ShellScopeEntryAllowedArgs",
       "norm_label": "shellscopeentryallowedargs"
     },
     {
@@ -3277,8 +3277,8 @@
       "source_location": "L2926",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_windows_schema_shellscopeentryallowedargs_description",
-      "community": 19,
-      "community_name": "definitions",
+      "community": 78,
+      "community_name": "ShellScopeEntryAllowedArgs",
       "norm_label": "description"
     },
     {
@@ -3288,8 +3288,8 @@
       "source_location": "L2927",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_windows_schema_shellscopeentryallowedargs_anyof",
-      "community": 19,
-      "community_name": "definitions",
+      "community": 78,
+      "community_name": "ShellScopeEntryAllowedArgs",
       "norm_label": "anyof"
     },
     {
@@ -4693,7 +4693,7 @@
       "label": "ensure_pill_window()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L22",
+      "source_location": "L20",
       "_origin": "ast",
       "id": "native_src_tauri_src_overlay_ensure_pill_window",
       "community": 51,
@@ -4726,7 +4726,7 @@
       "label": "reposition_pill()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L61",
+      "source_location": "L59",
       "_origin": "ast",
       "id": "native_src_tauri_src_overlay_reposition_pill",
       "community": 51,
@@ -4737,7 +4737,7 @@
       "label": "set_expanded()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L78",
+      "source_location": "L76",
       "_origin": "ast",
       "id": "native_src_tauri_src_overlay_set_expanded",
       "community": 51,
@@ -4748,7 +4748,7 @@
       "label": "set_pill_window_geometry()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L87",
+      "source_location": "L85",
       "_origin": "ast",
       "id": "native_src_tauri_src_overlay_set_pill_window_geometry",
       "community": 51,
@@ -4759,7 +4759,7 @@
       "label": "reposition()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L106",
+      "source_location": "L104",
       "_origin": "ast",
       "id": "native_src_tauri_src_overlay_reposition",
       "community": 51,
@@ -4781,7 +4781,7 @@
       "label": "compute_anchor()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L130",
+      "source_location": "L128",
       "_origin": "ast",
       "id": "native_src_tauri_src_overlay_compute_anchor",
       "community": 51,
@@ -4803,7 +4803,7 @@
       "label": "active_monitor()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L155",
+      "source_location": "L153",
       "_origin": "ast",
       "id": "native_src_tauri_src_overlay_active_monitor",
       "community": 51,
@@ -6359,7 +6359,7 @@
       "_origin": "ast",
       "id": "native_src_app_app",
       "community": 132,
-      "community_name": "FloatingPill.tsx",
+      "community_name": "DictationPill",
       "norm_label": "app()"
     },
     {
@@ -6431,8 +6431,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_components_capture_dictationpill_dictationpillprops",
-      "community": 111,
-      "community_name": "index.ts",
+      "community": 128,
+      "community_name": "TriggerSettings.tsx",
       "norm_label": "dictationpillprops"
     },
     {
@@ -6454,8 +6454,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_components_capture_dictationpill_dictationpill",
-      "community": 67,
-      "community_name": "DictationPill.tsx",
+      "community": 132,
+      "community_name": "DictationPill",
       "norm_label": "dictationpill()"
     },
     {
@@ -6466,7 +6466,7 @@
       "_origin": "ast",
       "id": "native_src_components_capture_floatingpill",
       "community": 132,
-      "community_name": "FloatingPill.tsx",
+      "community_name": "DictationPill",
       "norm_label": "floatingpill.tsx"
     },
     {
@@ -6478,7 +6478,7 @@
       "_origin": "ast",
       "id": "native_src_components_capture_floatingpill_floatingpill",
       "community": 132,
-      "community_name": "FloatingPill.tsx",
+      "community_name": "DictationPill",
       "norm_label": "floatingpill()"
     },
     {
@@ -6488,8 +6488,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_components_capture_pttwidget",
-      "community": 111,
-      "community_name": "index.ts",
+      "community": 128,
+      "community_name": "TriggerSettings.tsx",
       "norm_label": "pttwidget.tsx"
     },
     {
@@ -6501,8 +6501,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_components_capture_pttwidget_pttwidgetprops",
-      "community": 111,
-      "community_name": "index.ts",
+      "community": 128,
+      "community_name": "TriggerSettings.tsx",
       "norm_label": "pttwidgetprops"
     },
     {
@@ -6513,8 +6513,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_components_capture_pttwidget_pttwidget",
-      "community": 111,
-      "community_name": "index.ts",
+      "community": 128,
+      "community_name": "TriggerSettings.tsx",
       "norm_label": "pttwidget()"
     },
     {
@@ -6532,7 +6532,7 @@
       "label": "PillSettingsPopoverProps",
       "file_type": "code",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L17",
+      "source_location": "L7",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
@@ -6542,10 +6542,32 @@
       "norm_label": "pillsettingspopoverprops"
     },
     {
+      "label": "LANG_LABELS",
+      "file_type": "code",
+      "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
+      "source_location": "L26",
+      "_origin": "ast",
+      "id": "native_src_components_capture_pillsettingspopover_lang_labels",
+      "community": 67,
+      "community_name": "DictationPill.tsx",
+      "norm_label": "lang_labels"
+    },
+    {
+      "label": "STYLE_LABELS",
+      "file_type": "code",
+      "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
+      "source_location": "L34",
+      "_origin": "ast",
+      "id": "native_src_components_capture_pillsettingspopover_style_labels",
+      "community": 67,
+      "community_name": "DictationPill.tsx",
+      "norm_label": "style_labels"
+    },
+    {
       "label": "PillSettingsPopover()",
       "file_type": "code",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L36",
+      "source_location": "L42",
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_components_capture_pillsettingspopover_pillsettingspopover",
@@ -6687,8 +6709,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_components_chat_chatpanel_chatpanel",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 128,
+      "community_name": "TriggerSettings.tsx",
       "norm_label": "chatpanel()"
     },
     {
@@ -6698,8 +6720,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_components_common_changelogmodal",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 131,
+      "community_name": "cn",
       "norm_label": "changelogmodal.tsx"
     },
     {
@@ -6711,8 +6733,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_components_common_changelogmodal_changelogmodalprops",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 131,
+      "community_name": "cn",
       "norm_label": "changelogmodalprops"
     },
     {
@@ -6722,8 +6744,8 @@
       "source_location": "L13",
       "_origin": "ast",
       "id": "native_src_components_common_changelogmodal_changelog_data",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 131,
+      "community_name": "cn",
       "norm_label": "changelog_data"
     },
     {
@@ -6734,8 +6756,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_components_common_changelogmodal_changelogmodal",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 131,
+      "community_name": "cn",
       "norm_label": "changelogmodal()"
     },
     {
@@ -6781,8 +6803,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_components_kanban_kanbanboard",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 111,
+      "community_name": "index.ts",
       "norm_label": "kanbanboard.tsx"
     },
     {
@@ -6794,8 +6816,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_components_kanban_kanbanboard_kanbanboardprops",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 111,
+      "community_name": "index.ts",
       "norm_label": "kanbanboardprops"
     },
     {
@@ -6806,8 +6828,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_components_kanban_kanbanboard_kanbanboard",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 111,
+      "community_name": "index.ts",
       "norm_label": "kanbanboard()"
     },
     {
@@ -6817,8 +6839,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_components_scribble_scribbleviewer",
-      "community": 129,
-      "community_name": "ScribbleViewer.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "scribbleviewer.tsx"
     },
     {
@@ -6830,8 +6852,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_components_scribble_scribbleviewer_scribbleviewerprops",
-      "community": 129,
-      "community_name": "ScribbleViewer.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "scribbleviewerprops"
     },
     {
@@ -6843,8 +6865,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_components_scribble_scribbleviewer_scribblenote",
-      "community": 129,
-      "community_name": "ScribbleViewer.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "scribblenote"
     },
     {
@@ -6854,8 +6876,8 @@
       "source_location": "L41",
       "_origin": "ast",
       "id": "native_src_components_scribble_scribbleviewer_demo_notes",
-      "community": 129,
-      "community_name": "ScribbleViewer.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "demo_notes"
     },
     {
@@ -6866,8 +6888,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_components_scribble_scribbleviewer_scribbleviewer",
-      "community": 129,
-      "community_name": "ScribbleViewer.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "scribbleviewer()"
     },
     {
@@ -6878,7 +6900,7 @@
       "_origin": "ast",
       "id": "native_src_components_settings_hotkeyrecorder",
       "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community_name": "HotkeyRecorder.tsx",
       "norm_label": "hotkeyrecorder.tsx"
     },
     {
@@ -6889,7 +6911,7 @@
       "_origin": "ast",
       "id": "native_src_components_settings_hotkeyrecorder_modifier_keys",
       "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community_name": "HotkeyRecorder.tsx",
       "norm_label": "modifier_keys"
     },
     {
@@ -6900,7 +6922,7 @@
       "_origin": "ast",
       "id": "native_src_components_settings_hotkeyrecorder_named_keys",
       "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community_name": "HotkeyRecorder.tsx",
       "norm_label": "named_keys"
     },
     {
@@ -6912,7 +6934,7 @@
       "_origin": "ast",
       "id": "native_src_components_settings_hotkeyrecorder_normalizekey",
       "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community_name": "HotkeyRecorder.tsx",
       "norm_label": "normalizekey()"
     },
     {
@@ -6924,7 +6946,7 @@
       "_origin": "ast",
       "id": "native_src_components_settings_hotkeyrecorder_eventtoaccelerator",
       "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community_name": "HotkeyRecorder.tsx",
       "norm_label": "eventtoaccelerator()"
     },
     {
@@ -6937,7 +6959,7 @@
       "_origin": "ast",
       "id": "native_src_components_settings_hotkeyrecorder_hotkeyrecorderprops",
       "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community_name": "HotkeyRecorder.tsx",
       "norm_label": "hotkeyrecorderprops"
     },
     {
@@ -6949,7 +6971,7 @@
       "_origin": "ast",
       "id": "native_src_components_settings_hotkeyrecorder_hotkeyrecorder",
       "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community_name": "HotkeyRecorder.tsx",
       "norm_label": "hotkeyrecorder()"
     },
     {
@@ -6959,8 +6981,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_components_settings_providersettings",
-      "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "providersettings.tsx"
     },
     {
@@ -6972,8 +6994,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_components_settings_providersettings_settingssection",
-      "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "settingssection"
     },
     {
@@ -6983,8 +7005,8 @@
       "source_location": "L29",
       "_origin": "ast",
       "id": "native_src_components_settings_providersettings_default_settings",
-      "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "default_settings"
     },
     {
@@ -6995,8 +7017,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_components_settings_providersettings_providersettings",
-      "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "providersettings()"
     },
     {
@@ -7018,8 +7040,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_components_settings_triggersettings_triggersettings",
-      "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "triggersettings()"
     },
     {
@@ -7029,8 +7051,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_components_ui_badge",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 131,
+      "community_name": "cn",
       "norm_label": "native/src/components/ui/badge.tsx"
     },
     {
@@ -7040,8 +7062,8 @@
       "source_location": "L5",
       "_origin": "ast",
       "id": "native_src_components_ui_badge_badgevariants",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 131,
+      "community_name": "cn",
       "norm_label": "badgevariants"
     },
     {
@@ -7053,8 +7075,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_components_ui_badge_badgeprops",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 131,
+      "community_name": "cn",
       "norm_label": "badgeprops"
     },
     {
@@ -7065,8 +7087,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_components_ui_badge_badge",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 131,
+      "community_name": "cn",
       "norm_label": "badge()"
     },
     {
@@ -7199,8 +7221,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_components_ui_input",
-      "community": 129,
-      "community_name": "ScribbleViewer.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "native/src/components/ui/input.tsx"
     },
     {
@@ -7212,8 +7234,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_components_ui_input_inputprops",
-      "community": 129,
-      "community_name": "ScribbleViewer.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "inputprops"
     },
     {
@@ -7223,8 +7245,8 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "native_src_components_ui_input_input",
-      "community": 129,
-      "community_name": "ScribbleViewer.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "input"
     },
     {
@@ -7235,7 +7257,7 @@
       "_origin": "ast",
       "id": "native_src_components_ui_popover",
       "community": 131,
-      "community_name": "popover.tsx",
+      "community_name": "cn",
       "norm_label": "popover.tsx"
     },
     {
@@ -7248,7 +7270,7 @@
       "_origin": "ast",
       "id": "native_src_components_ui_popover_popoverprops",
       "community": 131,
-      "community_name": "popover.tsx",
+      "community_name": "cn",
       "norm_label": "popoverprops"
     },
     {
@@ -7259,7 +7281,7 @@
       "_origin": "ast",
       "id": "native_src_components_ui_popover_popovercontext",
       "community": 131,
-      "community_name": "popover.tsx",
+      "community_name": "cn",
       "norm_label": "popovercontext"
     },
     {
@@ -7271,7 +7293,7 @@
       "_origin": "ast",
       "id": "native_src_components_ui_popover_popover",
       "community": 131,
-      "community_name": "popover.tsx",
+      "community_name": "cn",
       "norm_label": "popover()"
     },
     {
@@ -7283,7 +7305,7 @@
       "_origin": "ast",
       "id": "native_src_components_ui_popover_popovertrigger",
       "community": 131,
-      "community_name": "popover.tsx",
+      "community_name": "cn",
       "norm_label": "popovertrigger()"
     },
     {
@@ -7295,7 +7317,7 @@
       "_origin": "ast",
       "id": "native_src_components_ui_popover_popovercontent",
       "community": 131,
-      "community_name": "popover.tsx",
+      "community_name": "cn",
       "norm_label": "popovercontent()"
     },
     {
@@ -7305,8 +7327,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_components_ui_skeleton",
-      "community": 67,
-      "community_name": "DictationPill.tsx",
+      "community": 131,
+      "community_name": "cn",
       "norm_label": "native/src/components/ui/skeleton.tsx"
     },
     {
@@ -7317,8 +7339,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_components_ui_skeleton_skeleton",
-      "community": 67,
-      "community_name": "DictationPill.tsx",
+      "community": 131,
+      "community_name": "cn",
       "norm_label": "skeleton()"
     },
     {
@@ -7328,8 +7350,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_components_ui_switch",
-      "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "native/src/components/ui/switch.tsx"
     },
     {
@@ -7341,8 +7363,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_components_ui_switch_switchprops",
-      "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "switchprops"
     },
     {
@@ -7352,8 +7374,8 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "native_src_components_ui_switch_switch",
-      "community": 115,
-      "community_name": "ProviderSettings.tsx",
+      "community": 11,
+      "community_name": "App.tsx",
       "norm_label": "switch"
     },
     {
@@ -7363,8 +7385,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_lib_utils",
-      "community": 67,
-      "community_name": "DictationPill.tsx",
+      "community": 131,
+      "community_name": "cn",
       "norm_label": "native/src/lib/utils.ts"
     },
     {
@@ -7375,8 +7397,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "native_src_lib_utils_cn",
-      "community": 67,
-      "community_name": "DictationPill.tsx",
+      "community": 131,
+      "community_name": "cn",
       "norm_label": "cn()"
     },
     {
@@ -7387,7 +7409,7 @@
       "_origin": "ast",
       "id": "native_src_main",
       "community": 132,
-      "community_name": "FloatingPill.tsx",
+      "community_name": "DictationPill",
       "norm_label": "main.tsx"
     },
     {
@@ -7410,8 +7432,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_types_index_processedpipelineresult",
-      "community": 111,
-      "community_name": "index.ts",
+      "community": 128,
+      "community_name": "TriggerSettings.tsx",
       "norm_label": "processedpipelineresult"
     },
     {
@@ -7423,8 +7445,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_types_index_kanbancard",
-      "community": 11,
-      "community_name": "App.tsx",
+      "community": 111,
+      "community_name": "index.ts",
       "norm_label": "kanbancard"
     },
     {
@@ -7436,8 +7458,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "native_src_types_index_triggerconfig",
-      "community": 111,
-      "community_name": "index.ts",
+      "community": 128,
+      "community_name": "TriggerSettings.tsx",
       "norm_label": "triggerconfig"
     },
     {
@@ -9217,8 +9239,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_app_sidebar_appsidebar",
-      "community": 28,
-      "community_name": "(dashboard)/layout.tsx",
+      "community": 73,
+      "community_name": "sidebar.tsx",
       "norm_label": "appsidebar()"
     },
     {
@@ -9287,8 +9309,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_header_user_menu_totitlecase",
-      "community": 2,
-      "community_name": "dropdown-menu.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "totitlecase()"
     },
     {
@@ -9299,8 +9321,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_header_user_menu_headerusermenu",
-      "community": 2,
-      "community_name": "dropdown-menu.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "headerusermenu()"
     },
     {
@@ -11031,8 +11053,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sidebar_sidebarinset",
-      "community": 28,
-      "community_name": "(dashboard)/layout.tsx",
+      "community": 73,
+      "community_name": "sidebar.tsx",
       "norm_label": "sidebarinset()"
     },
     {
@@ -11561,8 +11583,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_tooltip",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "tooltip.tsx"
     },
     {
@@ -11573,8 +11595,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_tooltip_tooltipprovider",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "tooltipprovider()"
     },
     {
@@ -11585,8 +11607,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_tooltip_tooltip",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "tooltip()"
     },
     {
@@ -11597,8 +11619,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_tooltip_tooltiptrigger",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "tooltiptrigger()"
     },
     {
@@ -11609,8 +11631,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_tooltip_tooltipcontent",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "tooltipcontent()"
     },
     {
@@ -11668,8 +11690,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_contexts_user_context_useusercontext",
-      "community": 2,
-      "community_name": "dropdown-menu.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "useusercontext()"
     },
     {
@@ -12411,10 +12433,32 @@
       "norm_label": "relay \u2014 changelog"
     },
     {
-      "label": "[0.3.5] - 2026-08-19",
+      "label": "[0.3.6] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
       "source_location": "L3",
+      "_origin": "ast",
+      "id": "changelog_0_3_6_2026_08_19",
+      "community": 58,
+      "community_name": "Relay \u2014 Changelog",
+      "norm_label": "[0.3.6] - 2026-08-19"
+    },
+    {
+      "label": "Murmur Push-to-Talk Pill Design & Edge-Flush Placement",
+      "file_type": "document",
+      "source_file": "CHANGELOG.md",
+      "source_location": "L5",
+      "_origin": "ast",
+      "id": "changelog_murmur_push_to_talk_pill_design_edge_flush_placement",
+      "community": 58,
+      "community_name": "Relay \u2014 Changelog",
+      "norm_label": "murmur push-to-talk pill design & edge-flush placement"
+    },
+    {
+      "label": "[0.3.5] - 2026-08-19",
+      "file_type": "document",
+      "source_file": "CHANGELOG.md",
+      "source_location": "L14",
       "_origin": "ast",
       "id": "changelog_0_3_5_2026_08_19",
       "community": 58,
@@ -12425,7 +12469,7 @@
       "label": "Oscar-Inspired Push-to-Talk Pill Redesign & Interaction Refinement",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L5",
+      "source_location": "L16",
       "_origin": "ast",
       "id": "changelog_oscar_inspired_push_to_talk_pill_redesign_interaction_refinement",
       "community": 58,
@@ -12436,7 +12480,7 @@
       "label": "[0.3.4] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L15",
+      "source_location": "L26",
       "_origin": "ast",
       "id": "changelog_0_3_4_2026_08_19",
       "community": 58,
@@ -12447,7 +12491,7 @@
       "label": "Native Build Fix for npm run dev:native",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L17",
+      "source_location": "L28",
       "_origin": "ast",
       "id": "changelog_native_build_fix_for_npm_run_dev_native",
       "community": 58,
@@ -12458,7 +12502,7 @@
       "label": "[0.3.3] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L22",
+      "source_location": "L33",
       "_origin": "ast",
       "id": "changelog_0_3_3_2026_08_19",
       "community": 58,
@@ -12469,7 +12513,7 @@
       "label": "Multi-Monitor Active Positioning & Floating Pill Consolidation",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L24",
+      "source_location": "L35",
       "_origin": "ast",
       "id": "changelog_multi_monitor_active_positioning_floating_pill_consolidation",
       "community": 58,
@@ -12480,7 +12524,7 @@
       "label": "[0.3.2] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L31",
+      "source_location": "L42",
       "_origin": "ast",
       "id": "changelog_0_3_2_2026_08_19",
       "community": 58,
@@ -12491,7 +12535,7 @@
       "label": "Push-to-Talk Floating Pill Upgrade",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L33",
+      "source_location": "L44",
       "_origin": "ast",
       "id": "changelog_push_to_talk_floating_pill_upgrade",
       "community": 58,
@@ -12502,7 +12546,7 @@
       "label": "[0.3.1] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L41",
+      "source_location": "L52",
       "_origin": "ast",
       "id": "changelog_0_3_1_2026_08_19",
       "community": 58,
@@ -12513,7 +12557,7 @@
       "label": "Model Management, Hotkey Recorder & Floating Overlay",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L43",
+      "source_location": "L54",
       "_origin": "ast",
       "id": "changelog_model_management_hotkey_recorder_floating_overlay",
       "community": 58,
@@ -12524,7 +12568,7 @@
       "label": "[0.3.0] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L59",
+      "source_location": "L70",
       "_origin": "ast",
       "id": "changelog_0_3_0_2026_08_19",
       "community": 58,
@@ -12535,7 +12579,7 @@
       "label": "Universal Dictation, Global Hotkeys & Voice Chat (minor: new modules, major features)",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L61",
+      "source_location": "L72",
       "_origin": "ast",
       "id": "changelog_universal_dictation_global_hotkeys_voice_chat_minor_new_modules_major_features",
       "community": 58,
@@ -12546,7 +12590,7 @@
       "label": "[0.2.0] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L83",
+      "source_location": "L94",
       "_origin": "ast",
       "id": "changelog_0_2_0_2026_08_19",
       "community": 58,
@@ -12557,7 +12601,7 @@
       "label": "Relay Visual Identity Pass (\"Monochrome & Electric Blue\")",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L85",
+      "source_location": "L96",
       "_origin": "ast",
       "id": "changelog_relay_visual_identity_pass_monochrome_electric_blue",
       "community": 58,
@@ -12568,7 +12612,7 @@
       "label": "[0.1.2] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L105",
+      "source_location": "L116",
       "_origin": "ast",
       "id": "changelog_0_1_2_2026_08_19",
       "community": 58,
@@ -12579,7 +12623,7 @@
       "label": "Complete UI Design Pass & Theme System Refactoring",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L107",
+      "source_location": "L118",
       "_origin": "ast",
       "id": "changelog_complete_ui_design_pass_theme_system_refactoring",
       "community": 58,
@@ -12590,7 +12634,7 @@
       "label": "[0.1.1] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L127",
+      "source_location": "L138",
       "_origin": "ast",
       "id": "changelog_0_1_1_2026_08_19",
       "community": 58,
@@ -12601,7 +12645,7 @@
       "label": "Improvements & UI Refactoring",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L129",
+      "source_location": "L140",
       "_origin": "ast",
       "id": "changelog_improvements_ui_refactoring",
       "community": 58,
@@ -12612,7 +12656,7 @@
       "label": "[0.1.0] - 2026-08-19",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L135",
+      "source_location": "L146",
       "_origin": "ast",
       "id": "changelog_0_1_0_2026_08_19",
       "community": 58,
@@ -12623,7 +12667,7 @@
       "label": "Initial Release \u2014 Multi-Surface Architecture & Core Pipeline",
       "file_type": "document",
       "source_file": "CHANGELOG.md",
-      "source_location": "L137",
+      "source_location": "L148",
       "_origin": "ast",
       "id": "changelog_initial_release_multi_surface_architecture_core_pipeline",
       "community": 58,
@@ -14408,8 +14452,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "rules_accessibility",
-      "community": 30,
-      "community_name": "AGENTS.md",
+      "community": 129,
+      "community_name": "accessibility.md",
       "norm_label": "accessibility.md"
     },
     {
@@ -14419,8 +14463,8 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "rules_accessibility_accessibility_rules",
-      "community": 30,
-      "community_name": "AGENTS.md",
+      "community": 129,
+      "community_name": "accessibility.md",
       "norm_label": "accessibility rules"
     },
     {
@@ -14430,8 +14474,8 @@
       "source_location": "L11",
       "_origin": "ast",
       "id": "rules_accessibility_rules",
-      "community": 30,
-      "community_name": "AGENTS.md",
+      "community": 129,
+      "community_name": "accessibility.md",
       "norm_label": "rules"
     },
     {
@@ -14672,8 +14716,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "rules_component_architecture",
-      "community": 78,
-      "community_name": "component-architecture.md",
+      "community": 30,
+      "community_name": "AGENTS.md",
       "norm_label": "component-architecture.md"
     },
     {
@@ -14683,8 +14727,8 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "rules_component_architecture_component_architecture",
-      "community": 78,
-      "community_name": "component-architecture.md",
+      "community": 30,
+      "community_name": "AGENTS.md",
       "norm_label": "component architecture"
     },
     {
@@ -14694,8 +14738,8 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "rules_component_architecture_rules",
-      "community": 78,
-      "community_name": "component-architecture.md",
+      "community": 30,
+      "community_name": "AGENTS.md",
       "norm_label": "rules"
     },
     {
@@ -15278,19 +15322,19 @@
       "_origin": "ast",
       "id": "update",
       "community": 130,
-      "community_name": "Push-to-Talk Pill Redesign Update Report",
+      "community_name": "Push-to-Talk Pill Refinement Update Report",
       "norm_label": "update.md"
     },
     {
-      "label": "Push-to-Talk Pill Redesign Update Report",
+      "label": "Push-to-Talk Pill Refinement Update Report",
       "file_type": "document",
       "source_file": "update.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "update_push_to_talk_pill_redesign_update_report",
+      "id": "update_push_to_talk_pill_refinement_update_report",
       "community": 130,
-      "community_name": "Push-to-Talk Pill Redesign Update Report",
-      "norm_label": "push-to-talk pill redesign update report"
+      "community_name": "Push-to-Talk Pill Refinement Update Report",
+      "norm_label": "push-to-talk pill refinement update report"
     },
     {
       "label": "What Changed",
@@ -15300,52 +15344,30 @@
       "_origin": "ast",
       "id": "update_what_changed",
       "community": 130,
-      "community_name": "Push-to-Talk Pill Redesign Update Report",
+      "community_name": "Push-to-Talk Pill Refinement Update Report",
       "norm_label": "what changed"
     },
     {
       "label": "Files Modified / Created",
       "file_type": "document",
       "source_file": "update.md",
-      "source_location": "L14",
+      "source_location": "L12",
       "_origin": "ast",
       "id": "update_files_modified_created",
       "community": 130,
-      "community_name": "Push-to-Talk Pill Redesign Update Report",
+      "community_name": "Push-to-Talk Pill Refinement Update Report",
       "norm_label": "files modified / created"
     },
     {
-      "label": "Functionality Preserved",
+      "label": "Verification Results",
       "file_type": "document",
       "source_file": "update.md",
-      "source_location": "L28",
+      "source_location": "L23",
       "_origin": "ast",
-      "id": "update_functionality_preserved",
+      "id": "update_verification_results",
       "community": 130,
-      "community_name": "Push-to-Talk Pill Redesign Update Report",
-      "norm_label": "functionality preserved"
-    },
-    {
-      "label": "Tests Performed & Packaging Verification",
-      "file_type": "document",
-      "source_file": "update.md",
-      "source_location": "L38",
-      "_origin": "ast",
-      "id": "update_tests_performed_packaging_verification",
-      "community": 130,
-      "community_name": "Push-to-Talk Pill Redesign Update Report",
-      "norm_label": "tests performed & packaging verification"
-    },
-    {
-      "label": "Known Limitations & Remaining TODOs",
-      "file_type": "document",
-      "source_file": "update.md",
-      "source_location": "L60",
-      "_origin": "ast",
-      "id": "update_known_limitations_remaining_todos",
-      "community": 130,
-      "community_name": "Push-to-Talk Pill Redesign Update Report",
-      "norm_label": "known limitations & remaining todos"
+      "community_name": "Push-to-Talk Pill Refinement Update Report",
+      "norm_label": "verification results"
     }
   ],
   "links": [
@@ -22568,7 +22590,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L155",
+      "source_location": "L153",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay",
@@ -22579,7 +22601,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L130",
+      "source_location": "L128",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay",
@@ -22590,7 +22612,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L22",
+      "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay",
@@ -22601,7 +22623,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L106",
+      "source_location": "L104",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay",
@@ -22612,7 +22634,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L61",
+      "source_location": "L59",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay",
@@ -22635,7 +22657,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L78",
+      "source_location": "L76",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay",
@@ -22646,7 +22668,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L87",
+      "source_location": "L85",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay",
@@ -22658,7 +22680,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L49",
+      "source_location": "L47",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay_ensure_pill_window",
@@ -22670,7 +22692,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L25",
+      "source_location": "L23",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay_ensure_pill_window",
@@ -22681,7 +22703,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L22",
+      "source_location": "L20",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22693,7 +22715,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L22",
+      "source_location": "L20",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22705,7 +22727,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L155",
+      "source_location": "L153",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22717,7 +22739,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L130",
+      "source_location": "L128",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22729,7 +22751,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L106",
+      "source_location": "L104",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22741,7 +22763,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L61",
+      "source_location": "L59",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22753,7 +22775,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L78",
+      "source_location": "L76",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22765,7 +22787,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L87",
+      "source_location": "L85",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22777,7 +22799,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L130",
+      "source_location": "L128",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22789,7 +22811,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L106",
+      "source_location": "L104",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22801,7 +22823,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L61",
+      "source_location": "L59",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22813,7 +22835,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L78",
+      "source_location": "L76",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22825,7 +22847,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L87",
+      "source_location": "L85",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22838,7 +22860,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L73",
+      "source_location": "L71",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay_reposition_pill",
@@ -22850,7 +22872,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L83",
+      "source_location": "L81",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay_set_expanded",
@@ -22862,7 +22884,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L96",
+      "source_location": "L94",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay_set_pill_window_geometry",
@@ -22874,7 +22896,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L115",
+      "source_location": "L113",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay_reposition",
@@ -22885,7 +22907,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L106",
+      "source_location": "L104",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -22898,7 +22920,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L131",
+      "source_location": "L129",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_overlay_compute_anchor",
@@ -22909,7 +22931,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L130",
+      "source_location": "L128",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -22921,7 +22943,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L155",
+      "source_location": "L153",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -22933,7 +22955,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/overlay.rs",
-      "source_location": "L155",
+      "source_location": "L153",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -26863,7 +26885,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "native/src/components/capture/DictationPill.tsx",
-      "source_location": "L352",
+      "source_location": "L326",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_dictationpill_dictationpill",
@@ -27062,7 +27084,18 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L36",
+      "source_location": "L26",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "native_src_components_capture_pillsettingspopover",
+      "target": "native_src_components_capture_pillsettingspopover_lang_labels",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
+      "source_location": "L42",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27073,11 +27106,22 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L17",
+      "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
       "target": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
+      "source_location": "L34",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "native_src_components_capture_pillsettingspopover",
+      "target": "native_src_components_capture_pillsettingspopover_style_labels",
       "confidence_score": 1.0
     },
     {
@@ -27157,7 +27201,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L15",
+      "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27169,7 +27213,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L15",
+      "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover",
@@ -27205,7 +27249,7 @@
       "context": "field",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L23",
+      "source_location": "L13",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
@@ -27217,7 +27261,7 @@
       "context": "field",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L31",
+      "source_location": "L21",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
@@ -27229,7 +27273,7 @@
       "context": "field",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L30",
+      "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
@@ -27241,7 +27285,7 @@
       "context": "field",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L27",
+      "source_location": "L17",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
@@ -27253,7 +27297,7 @@
       "context": "field",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L29",
+      "source_location": "L19",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
@@ -27265,7 +27309,7 @@
       "context": "field",
       "confidence": "EXTRACTED",
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L18",
+      "source_location": "L8",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopoverprops",
@@ -27278,7 +27322,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "native/src/components/capture/PillSettingsPopover.tsx",
-      "source_location": "L66",
+      "source_location": "L69",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_components_capture_pillsettingspopover_pillsettingspopover",
@@ -38792,7 +38836,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L135",
+      "source_location": "L146",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38803,7 +38847,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L127",
+      "source_location": "L138",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38814,7 +38858,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L105",
+      "source_location": "L116",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38825,7 +38869,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L83",
+      "source_location": "L94",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38836,7 +38880,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L59",
+      "source_location": "L70",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38847,7 +38891,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L41",
+      "source_location": "L52",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38858,7 +38902,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L31",
+      "source_location": "L42",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38869,7 +38913,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L22",
+      "source_location": "L33",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38880,7 +38924,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L15",
+      "source_location": "L26",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38891,7 +38935,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L3",
+      "source_location": "L14",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_relay_changelog",
@@ -38902,7 +38946,29 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "changelog_relay_changelog",
+      "target": "changelog_0_3_6_2026_08_19",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHANGELOG.md",
       "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "changelog_0_3_6_2026_08_19",
+      "target": "changelog_murmur_push_to_talk_pill_design_edge_flush_placement",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHANGELOG.md",
+      "source_location": "L16",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_3_5_2026_08_19",
@@ -38913,7 +38979,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L17",
+      "source_location": "L28",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_3_4_2026_08_19",
@@ -38924,7 +38990,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L24",
+      "source_location": "L35",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_3_3_2026_08_19",
@@ -38935,7 +39001,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L33",
+      "source_location": "L44",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_3_2_2026_08_19",
@@ -38946,7 +39012,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L43",
+      "source_location": "L54",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_3_1_2026_08_19",
@@ -38957,7 +39023,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L61",
+      "source_location": "L72",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_3_0_2026_08_19",
@@ -38968,7 +39034,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L85",
+      "source_location": "L96",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_2_0_2026_08_19",
@@ -38979,7 +39045,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L107",
+      "source_location": "L118",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_1_2_2026_08_19",
@@ -38990,7 +39056,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L129",
+      "source_location": "L140",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_1_1_2026_08_19",
@@ -39001,7 +39067,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "CHANGELOG.md",
-      "source_location": "L137",
+      "source_location": "L148",
       "weight": 1.0,
       "_origin": "ast",
       "source": "changelog_0_1_0_2026_08_19",
@@ -41282,17 +41348,17 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "update",
-      "target": "update_push_to_talk_pill_redesign_update_report",
+      "target": "update_push_to_talk_pill_refinement_update_report",
       "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "update.md",
-      "source_location": "L14",
+      "source_location": "L12",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "update_push_to_talk_pill_redesign_update_report",
+      "source": "update_push_to_talk_pill_refinement_update_report",
       "target": "update_files_modified_created",
       "confidence_score": 1.0
     },
@@ -41300,33 +41366,11 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "update.md",
-      "source_location": "L28",
+      "source_location": "L23",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "update_push_to_talk_pill_redesign_update_report",
-      "target": "update_functionality_preserved",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "update.md",
-      "source_location": "L60",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "update_push_to_talk_pill_redesign_update_report",
-      "target": "update_known_limitations_remaining_todos",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "update.md",
-      "source_location": "L38",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "update_push_to_talk_pill_redesign_update_report",
-      "target": "update_tests_performed_packaging_verification",
+      "source": "update_push_to_talk_pill_refinement_update_report",
+      "target": "update_verification_results",
       "confidence_score": 1.0
     },
     {
@@ -41336,11 +41380,11 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "update_push_to_talk_pill_redesign_update_report",
+      "source": "update_push_to_talk_pill_refinement_update_report",
       "target": "update_what_changed",
       "confidence_score": 1.0
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "1ea108404cc4bfa9377c37c143f8495bf1212f3b"
+  "built_at_commit": "1330de032fa5b06b79033a6b7d0d61ad9bec1264"
 }

@@ -58,7 +58,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const [language, setLanguage] = useState<SpeechLanguage>('english');
   const [dictationShortcut, setDictationShortcut] = useState('Ctrl+Space');
 
-  // Audio Level & Processing Captions
+  // Audio Level & Captions
   const [audioLevel, setAudioLevel] = useState(0);
   const [captionIndex, setCaptionIndex] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -205,7 +205,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     };
   }, []);
 
-  // Update Rust native window geometry
+  // Update Rust overlay window geometry
   useEffect(() => {
     let modeName: 'resting' | 'expanded' | 'popover' = 'resting';
     if (popoverOpen) {
@@ -311,9 +311,9 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     >
       {/* Dev Diagnostic HUD */}
       {showDiagnostics && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-black/90 text-emerald-400 font-mono text-[10px] p-2 rounded-lg border border-emerald-500/30 shadow-xl whitespace-nowrap z-50 flex flex-col gap-0.5">
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-slate-950/95 text-emerald-400 font-mono text-[10px] p-2 rounded-lg border border-emerald-500/30 shadow-xl whitespace-nowrap z-50 flex flex-col gap-0.5">
           <div className="flex items-center gap-1 font-bold border-b border-emerald-500/20 pb-0.5">
-            <Bug className="w-3 h-3 text-emerald-400" /> Murmur Pill Diagnostics
+            <Bug className="w-3 h-3 text-emerald-400" /> Relay Inspection HUD
           </div>
           <div>State: <span className="text-white">{diagnosticsInfo.state}</span> | Window: <span className="text-white">{diagnosticsInfo.windowMode}</span></div>
           <div>STT: <span className="text-white">{diagnosticsInfo.sttStatus}</span> | LLM: <span className="text-white">{diagnosticsInfo.llmStatus}</span></div>
@@ -331,44 +331,44 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         )}
       />
 
-      {/* Handle (rest / ready edge notch) — 25% wider (~96px), height 6px, top rounded (999px 999px 0 0)
-          Hides completely (`opacity: 0`) when expanded or recording so no notch sticks out of the top of the pill! */}
+      {/* Handle (rest / ready edge notch) — 25% wider (~96px), height 6px, rounded top (999px 999px 0 0)
+          Hides completely (`opacity: 0`) when expanded or recording */}
       <div
         className={cn(
           'absolute left-1/2 bottom-0 -translate-x-1/2 transition-all duration-200 pointer-events-none z-20',
-          'bg-[#faf8f3] bg-gradient-to-b from-[#faf8f3] to-[#efeae0] border border-black/8 border-b-0 shadow-[0_-1px_6px_rgba(0,0,0,0.3)]',
-          !hovering ? 'w-[96px] h-[6px] rounded-t-lg' : 'w-[110px] h-[7px] rounded-t-xl shadow-[0_-2px_12px_rgba(184,98,61,0.4)]',
+          'bg-white border border-slate-200 border-b-0 shadow-[0_-1px_6px_rgba(0,0,0,0.15)]',
+          !hovering ? 'w-[96px] h-[6px] rounded-t-lg' : 'w-[110px] h-[7px] rounded-t-xl shadow-[0_-2px_12px_rgba(37,99,235,0.3)]',
           isExpanded && 'opacity-0 pointer-events-none'
         )}
       />
 
       {/* Success Toast */}
       {phase === 'success' && (
-        <div className="absolute left-1/2 bottom-[82px] -translate-x-1/2 bg-[#b8623d] text-[#faf8f3] px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-wide flex items-center gap-1.5 shadow-[0_8px_24px_rgba(184,98,61,0.4)] pointer-events-none z-40 animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div className="absolute left-1/2 bottom-[82px] -translate-x-1/2 bg-blue-600 text-white px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-wide flex items-center gap-1.5 shadow-lg pointer-events-none z-40 animate-in fade-in slide-in-from-bottom-2 duration-200">
           <Check className="w-3.5 h-3.5 stroke-[2.5]" />
           <span>{successMessage}</span>
         </div>
       )}
 
-      {/* Keyboard hint bar (floating above main pill when expanded) */}
+      {/* Keyboard hint bar (floating above main pill, safely inside the 150px window bounds with zero top clipping!) */}
       {isExpanded && !popoverOpen && phase !== 'success' && (
-        <div className="absolute left-1/2 bottom-[76px] -translate-x-1/2 bg-[#faf8f3] bg-gradient-to-b from-[#faf8f3] to-[#efeae0] border border-black/10 rounded-lg px-2.5 py-1.5 shadow-[0_8px_20px_rgba(26,24,22,0.25)] whitespace-nowrap flex items-center gap-2 text-xs text-[#1a1816] pointer-events-none z-30 animate-in fade-in slide-in-from-bottom-1 duration-180">
-          <span className="text-black/50">Hold to record</span>
+        <div className="absolute left-1/2 bottom-[70px] -translate-x-1/2 bg-white/95 border border-slate-200 shadow-md rounded-xl px-3 py-1.5 whitespace-nowrap flex items-center gap-2 text-xs text-slate-700 pointer-events-none z-30 animate-in fade-in slide-in-from-bottom-1 duration-150">
+          <span className="text-slate-500 font-medium">Hold to record</span>
           <span className="flex items-center gap-1">
-            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[#b8623d]/10 text-[#1a1816] border border-[#b8623d]/20 font-medium">
+            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200 font-semibold shadow-xs">
               Ctrl
             </kbd>
-            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[#b8623d]/10 text-[#1a1816] border border-[#b8623d]/20 font-medium">
+            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200 font-semibold shadow-xs">
               Space
             </kbd>
           </span>
         </div>
       )}
 
-      {/* Full Murmur Paper Pill (Expanded State) */}
+      {/* Full Relay Light Mode Pill (Expanded State) */}
       <div
         className={cn(
-          'absolute left-1/2 bottom-[22px] -translate-x-1/2 transition-all duration-260 ease-out pointer-events-none z-30',
+          'absolute left-1/2 bottom-[16px] -translate-x-1/2 transition-all duration-200 ease-out pointer-events-none z-30',
           !isExpanded
             ? 'translate-y-[28px] scale-75 opacity-0'
             : 'translate-y-0 scale-100 opacity-100 pointer-events-auto'
@@ -379,13 +379,13 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
             if ((e.target as HTMLElement).closest('.pill-actions')) return;
             toggleClickToTalk();
           }}
-          className="inline-flex items-center gap-0 pl-4 pr-1.5 h-[44px] max-w-[calc(100vw-8px)] rounded-full bg-[#faf8f3] bg-gradient-to-b from-[#faf8f3] to-[#efeae0] border border-black/10 shadow-[0_16px_40px_rgba(26,24,22,0.45),0_2px_8px_rgba(26,24,22,0.25),inset_0_1px_0_#faf8f3] text-[#1a1816] cursor-pointer"
+          className="inline-flex items-center gap-0 pl-4 pr-2 h-[44px] max-w-[calc(100vw-8px)] rounded-full bg-white border border-slate-200 shadow-[0_16px_40px_rgba(15,23,42,0.15),0_2px_8px_rgba(15,23,42,0.08)] text-slate-900 cursor-pointer"
         >
           <div className="flex items-center min-w-[110px] pr-2.5 h-[22px]">
-            {/* App Context Label (Terracotta dot + mono uppercase app name) */}
+            {/* App Context Label (Primary blue dot + mono uppercase process name) */}
             <span className="inline-flex items-center gap-1.5 mr-2 min-w-0">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#b8623d] shrink-0" />
-              <span className="font-mono text-[10px] tracking-widest text-[#b8623d] uppercase whitespace-nowrap overflow-hidden text-ellipsis max-w-[90px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0" />
+              <span className="font-mono text-[10px] font-semibold tracking-wider text-blue-600 uppercase whitespace-nowrap overflow-hidden text-ellipsis max-w-[100px]">
                 {activeApp}
               </span>
             </span>
@@ -393,13 +393,13 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
             {/* Phase 1: IDLE / READY — Click to dictate */}
             {(phase === 'collapsed' || phase === 'expanded') && (
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-xs font-medium text-[#1a1816] tracking-tight whitespace-nowrap">
+                <span className="text-xs font-semibold text-slate-900 tracking-tight whitespace-nowrap">
                   {promptMode ? 'Click to prompt' : 'Click to dictate'}
                 </span>
               </div>
             )}
 
-            {/* Phase 2: RECORDING — 15 terracotta bars waveform */}
+            {/* Phase 2: RECORDING — 15 Relay primary blue waveform bars */}
             {phase === 'listening' && (
               <div className="flex items-center gap-[2.5px] h-[22px] shrink-0">
                 {[0.35, 0.55, 0.85, 0.45, 0.7, 0.95, 0.6, 0.4, 0.75, 0.55, 0.3, 0.6, 0.85, 0.5, 0.7].map((h, i) => {
@@ -408,7 +408,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
                   return (
                     <span
                       key={i}
-                      className="w-[2.5px] bg-[#b8623d] rounded-sm transition-all duration-75 origin-center"
+                      className="w-[2.5px] bg-blue-600 rounded-sm transition-all duration-75 origin-center"
                       style={{ height: `${heightPx}px` }}
                     />
                   );
@@ -419,8 +419,8 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
             {/* Phase 3: PROCESSING */}
             {phase === 'processing' && (
               <div className="flex items-center gap-2 max-w-[220px] overflow-hidden">
-                <span className="w-2.5 h-2.5 rounded-full border-[1.4px] border-black/20 border-t-[#b8623d] animate-spin shrink-0" />
-                <span className="font-mono text-[10.5px] tracking-wide text-[#5a5852] whitespace-nowrap animate-in fade-in duration-200">
+                <span className="w-2.5 h-2.5 rounded-full border-[1.4px] border-slate-300 border-t-blue-600 animate-spin shrink-0" />
+                <span className="font-mono text-[10.5px] tracking-wide text-slate-600 whitespace-nowrap animate-in fade-in duration-200">
                   {PROCESSING_CAPTIONS[captionIndex]}
                 </span>
               </div>
@@ -428,7 +428,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
             {/* Phase 4: ERROR */}
             {phase === 'error' && (
-              <div className="flex items-center gap-1.5 text-[#8c2f25] text-xs font-medium">
+              <div className="flex items-center gap-1.5 text-rose-600 text-xs font-medium">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">{errorMessage || 'no input'}</span>
               </div>
@@ -436,17 +436,17 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
             {/* Phase 5: WARNING */}
             {phase === 'warning' && (
-              <div className="flex items-center gap-1.5 text-[#b8623d] text-xs font-medium">
+              <div className="flex items-center gap-1.5 text-amber-600 text-xs font-medium">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">{warningMessage || 'Sign in to enable AI'}</span>
               </div>
             )}
           </div>
 
-          <div className="w-px h-[22px] bg-black/10 shrink-0" />
+          <div className="w-px h-[20px] bg-slate-200 shrink-0" />
 
           {/* Action Buttons: Prompt Mode + Settings Chevron */}
-          <div className="flex items-center gap-0.5 pl-1.5 shrink-0 pill-actions">
+          <div className="flex items-center gap-1 pl-1.5 shrink-0 pill-actions">
             <button
               type="button"
               onClick={(e) => {
@@ -456,13 +456,13 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
               className={cn(
                 'w-7 h-7 rounded-full border-none bg-transparent flex items-center justify-center cursor-pointer transition-colors p-0',
                 promptMode
-                  ? 'text-[#b8623d] bg-[#b8623d]/14 hover:bg-[#b8623d]/20'
-                  : 'text-black/40 hover:bg-black/6'
+                  ? 'text-blue-600 bg-blue-50 font-bold'
+                  : 'text-slate-400 hover:text-slate-800 hover:bg-slate-100'
               )}
               title="Prompt mode — rewrite speech into a prompt"
               aria-label="Prompt mode"
             >
-              <Sparkles className="w-3.5 h-3.5 stroke-[1.4]" />
+              <Sparkles className="w-3.5 h-3.5 stroke-[1.5]" />
             </button>
 
             <button
@@ -472,16 +472,16 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
                 setPopoverOpen((prev) => !prev);
               }}
               className={cn(
-                'w-7 h-7 rounded-full border-none bg-transparent text-[#1a1816] flex items-center justify-center cursor-pointer transition-colors p-0 hover:bg-black/6',
-                popoverOpen && 'bg-black/6'
+                'w-7 h-7 rounded-full border-none bg-transparent text-slate-700 flex items-center justify-center cursor-pointer transition-colors p-0 hover:bg-slate-100',
+                popoverOpen && 'bg-slate-100 text-slate-900'
               )}
               title="Settings"
               aria-label="Settings"
             >
               {popoverOpen ? (
-                <ChevronUp className="w-3 h-3 stroke-[2]" />
+                <ChevronUp className="w-3.5 h-3.5 stroke-[2]" />
               ) : (
-                <ChevronDown className="w-3 h-3 stroke-[2]" />
+                <ChevronDown className="w-3.5 h-3.5 stroke-[2]" />
               )}
             </button>
           </div>

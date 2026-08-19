@@ -4,11 +4,11 @@ use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, Webvie
 pub const PILL_WINDOW_LABEL: &str = "dictation-pill";
 
 /// Compact horizontal notch resting size (includes invisible hover hit area).
-const RESTING_SIZE: (f64, f64) = (120.0, 48.0);
+const RESTING_SIZE: (f64, f64) = (140.0, 48.0);
 /// Full listening/processing pill body + top floating hotkey hint pill.
-const EXPANDED_SIZE: (f64, f64) = (460.0, 100.0);
+const EXPANDED_SIZE: (f64, f64) = (460.0, 150.0);
 /// Pill body + top hotkey hint + compact settings popover dropdown.
-const POPOVER_SIZE: (f64, f64) = (380.0, 360.0);
+const POPOVER_SIZE: (f64, f64) = (460.0, 420.0);
 
 /// Creates the floating dictation pill window if it doesn't exist yet, at
 /// its resting size, anchored per `position`. If it already exists, just

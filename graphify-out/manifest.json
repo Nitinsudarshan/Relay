@@ -450,8 +450,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1787158887.8860483,
-    "ast_hash": "5b329410becdfddbaf1aa6b8d0c776f7",
+    "mtime": 1787159082.325022,
+    "ast_hash": "ab6166ae9e81547cb1a2248bb3e5e2ab",
     "semantic_hash": ""
   },
   "README.md": {
@@ -675,8 +675,8 @@
     "semantic_hash": ""
   },
   "native/src/components/capture/DictationPill.tsx": {
-    "mtime": 1787158778.5285573,
-    "ast_hash": "750d52ee192dda800ba999b22ba8021a",
+    "mtime": 1787159045.89355,
+    "ast_hash": "f29415d7a2e0f29bdc316c2fb6872902",
     "semantic_hash": ""
   },
   "native/src/components/common/RelayLogo.tsx": {
@@ -755,8 +755,8 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/overlay.rs": {
-    "mtime": 1787158873.6365118,
-    "ast_hash": "4bf1a0dc77ecd20f005013c97ef7c092",
+    "mtime": 1787159022.9153087,
+    "ast_hash": "c434f9f3805fba623d9d22dc0dff7a9a",
     "semantic_hash": ""
   },
   "native/src-tauri/src/providers/ollama_manager.rs": {
@@ -785,8 +785,8 @@
     "semantic_hash": ""
   },
   "native/src/components/capture/PillSettingsPopover.tsx": {
-    "mtime": 1787158764.6601074,
-    "ast_hash": "12b56f3e9dcb578afe4e7326c2402df2",
+    "mtime": 1787159033.3903344,
+    "ast_hash": "2a7fdda13fec4da47d9ac16275c81637",
     "semantic_hash": ""
   },
   "native/src/components/capture/PillTypes.ts": {
@@ -810,8 +810,8 @@
     "semantic_hash": ""
   },
   "update.md": {
-    "mtime": 1787158895.0891044,
-    "ast_hash": "4847f9c80c288dd50764b20ab7da535f",
+    "mtime": 1787159090.1890996,
+    "ast_hash": "192786184b9ed357c975bc01a53b3173",
     "semantic_hash": ""
   }
 }

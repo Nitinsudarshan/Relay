@@ -1,5 +1,14 @@
 # Relay — Changelog
 
+## [0.3.7] - 2026-08-19
+
+### Top Hint Clipping Fix & Relay Light Theme Palette Integration
+
+- **Rust Overlay Window Expansion (`overlay.rs`)**:
+  - Increased `EXPANDED_SIZE` height from `100.0` to `150.0` and `POPOVER_SIZE` height to `420.0` to eliminate horizontal top-clipping on the floating `Hold to record [Ctrl] [Space]` hint bar.
+- **Relay Native Light Theme System (`DictationPill.tsx`, `PillSettingsPopover.tsx`)**:
+  - Re-themed push-to-talk pill and settings popover using Relay's crisp light mode design system: pure white card background (`#ffffff`), Slate-900 typography (`#0f172a`), Relay primary blue (`#2563eb`) accents/waveforms/toggles, and subtle Slate-200 borders (`#e2e8f0`).
+
 ## [0.3.6] - 2026-08-19
 
 ### Murmur Push-to-Talk Pill Design & Edge-Flush Placement

@@ -1,15 +1,16 @@
-# Push-to-Talk Pill Refinement Update Report
+# Push-to-Talk Pill Refinement Update Report (v0.3.7)
 
 ## What Changed
-- **Murmur Visual System Replication**: Replicated exact paper gradients (`#faf8f3` -> `#efeae0`), box shadows (`0 16px 40px rgba(26, 24, 22, 0.45)`), 13 idle dots, 15 terracotta waveform bars (`#b8623d`), toast notifications (`Inserted into document`), and keyboard hint bar (`Hold to record [Ctrl] [Space]`).
-- **25% Wider Edge Notch**: Handle width enlarged to `96px` (25% wider), height `6px`, with `border-radius: 999px 999px 0 0` (rounded-t-lg top part).
-- **Handle Overlap Fix**: Edge handle fades out completely (`opacity: 0`) when pill expands or records so no handle sticks out of the top of the pill.
-- **Flush Edge Positioning**: Updated Rust `overlay.rs` positioning so resting notch window anchors flush against the top edge of the taskbar / screen bottom without floating gap.
-- **Popover Sub-Page Navigation**: Added sub-pages in settings dropdown for Cleanup Style (`Faithful`/`Polished`/`Clean`/`Concise`) and Language (`Auto-detect`/`English (US)`/`Hinglish`/`Hindi`/`Español`).
+- **Top Clipping Fix**: Increased Rust `overlay.rs`'s `EXPANDED_SIZE` height to `150.0` and `POPOVER_SIZE` height to `420.0`. The top floating `Hold to record [Ctrl] [Space]` hint bar now sits comfortably with complete vertical clearance and zero horizontal top slicing.
+- **Relay Light Theme Color Palette**: Re-themed main pill, notch, waveform bars, keyboard hint bar, and popover dropdown using Relay's native light mode design system:
+  - Surface: Pure white card background (`#ffffff`).
+  - Text: Slate-900 typography (`#0f172a`).
+  - Primary Accent: Relay primary blue (`#2563eb` / `hsl(221, 83%, 53%)`) for waveform bars, active prompt sparkle mode, and toggle switches.
+  - Borders & Badges: Slate-200 border (`#e2e8f0`) and Slate-100 key badges (`#f1f5f9`).
 
 ---
 
-## Files Modified / Created
+## Files Modified
 
 - `native/src/components/capture/DictationPill.tsx`
 - `native/src/components/capture/PillSettingsPopover.tsx`
@@ -22,6 +23,6 @@
 
 ## Verification Results
 
-1. **Frontend Production Build**: `npm run build` completed with code `0`.
+1. **Frontend Production Build**: `npm run build` completed with code `0` (built in 2.20s).
 2. **Rust Backend Check**: `cargo check` completed with code `0` (0 warnings).
 3. **Knowledge Graph**: `graphify update .` completed with code `0`.
