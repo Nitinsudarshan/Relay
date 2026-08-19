@@ -1,5 +1,13 @@
 # Relay — Changelog
 
+## [0.4.3] - 2026-08-20
+
+### Dev Environment Setup & Workspace Install Scripts
+
+- **Improvements**:
+  - (`root`) Added `install:all` script to root `package.json` to install dependencies across both `native/` and `web/` workspaces in a single command.
+  - (`native/`, `web/`) Configured and verified development dependencies and build pipelines for both native (Tauri + React + Vite) and web (Next.js + Turbopack) environments.
+
 ## [0.4.2] - 2026-08-20
 
 ### whisper-rs 0.16 Upgrade, Compilation Fixes & Open Settings Command

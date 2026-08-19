@@ -1,7 +1,7 @@
 {
   "native/package.json": {
-    "mtime": 1787173152.227829,
-    "ast_hash": "af08ffcfaf4bb95cd316574116d35369",
+    "mtime": 1787172760.7423468,
+    "ast_hash": "6ffc5d0d99342d747414318fe0c2b94c",
     "semantic_hash": ""
   },
   "native/src-tauri/build.rs": {
@@ -20,12 +20,12 @@
     "semantic_hash": ""
   },
   "native/src-tauri/gen/schemas/desktop-schema.json": {
-    "mtime": 1787173189.4776852,
+    "mtime": 1787172840.2092426,
     "ast_hash": "781a060a8797ddc09bbd4e2d89cd471f",
     "semantic_hash": ""
   },
   "native/src-tauri/gen/schemas/windows-schema.json": {
-    "mtime": 1787173189.4776852,
+    "mtime": 1787172840.2092426,
     "ast_hash": "781a060a8797ddc09bbd4e2d89cd471f",
     "semantic_hash": ""
   },
@@ -145,8 +145,8 @@
     "semantic_hash": ""
   },
   "web/package.json": {
-    "mtime": 1787173156.061761,
-    "ast_hash": "78858dffed0ca7fd46ddb5e41cda4386",
+    "mtime": 1787172776.7667778,
+    "ast_hash": "b33c0c14cb9dd4a94697e8c617dcf061",
     "semantic_hash": ""
   },
   "web/postcss.config.mjs": {
@@ -450,8 +450,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1787173206.375129,
-    "ast_hash": "fe47bb62cf2c2e3ee71ecfbf34cc1c14",
+    "mtime": 1787172680.7091804,
+    "ast_hash": "39ec7645e199d545346d768728f83e6a",
     "semantic_hash": ""
   },
   "README.md": {
@@ -665,8 +665,8 @@
     "semantic_hash": ""
   },
   "web/next-env.d.ts": {
-    "mtime": 1787173189.2202306,
-    "ast_hash": "29f60a376e12bf72b67d4994fcc84214",
+    "mtime": 1787172948.3189788,
+    "ast_hash": "b698cdd97fe8e3bd16dcd74899ad7cef",
     "semantic_hash": ""
   },
   "native/src/components/ThemeToggle.tsx": {
