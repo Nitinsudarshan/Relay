@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { ProcessedPipelineResult } from '../../types';
 import { RelayLogo } from '../common/RelayLogo';
 import {
@@ -27,9 +28,22 @@ type DictationPhase =
   | 'recording'
   | 'processing'
   | 'inserted'
-  | 'error';
+  | 'error'
+  // The universal-dictation hotkey (held elsewhere in the OS) currently
+  // owns the microphone — mirrors the real backend state, see the
+  // `capture-state-changed` listener below.
+  | 'hotkey-active';
+
+interface CaptureStatus {
+  active: boolean;
+  mode: string | null;
+}
 
 interface DictationPillProps {
+  /** Optional same-window convenience callback. Cross-window listeners
+   * (e.g. the main App window when this pill is the floating overlay)
+   * should instead listen for the backend's `capture-processed` event,
+   * which fires regardless of which window/surface triggered the capture. */
   onProcessComplete?: (result: ProcessedPipelineResult) => void;
 }
 
@@ -55,6 +69,36 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const captionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Reflect the real backend recording state (shared with the universal
+  // dictation hotkey and, potentially, a floating pill in another window)
+  // instead of trusting only this component's own clicks — this is what
+  // stops the pill from either lying about "Click to dictate" while the
+  // hotkey is actually recording, or getting stuck if a stale click
+  // handler never heard back.
+  useEffect(() => {
+    invoke<CaptureStatus>('get_capture_status')
+      .then((status) => {
+        if (status.active && status.mode === 'dictation') setPhase('hotkey-active');
+      })
+      .catch((err) => console.error('Failed to read capture status', err));
+
+    const unlistenPromise = listen<CaptureStatus>('capture-state-changed', ({ payload }) => {
+      setPhase((prev) => {
+        if (payload.active && payload.mode === 'dictation') {
+          return 'hotkey-active';
+        }
+        if (!payload.active && prev === 'hotkey-active') {
+          return 'expanded';
+        }
+        return prev;
+      });
+    });
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
 
   // Rotating processing caption effect
   useEffect(() => {
@@ -100,6 +144,10 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       await invoke('start_capture', { mode });
     } catch (err: any) {
       console.error('Failed to start recording', err);
+      if (err?.code === 'DICTATION_HOTKEY_ACTIVE') {
+        setPhase('hotkey-active');
+        return;
+      }
       setErrorMessage(err.message || 'Microphone capture error');
       setPhase('error');
     }
@@ -231,6 +279,14 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
                   REC
                 </span>
               </button>
+            )}
+
+            {/* Universal dictation hotkey currently owns the microphone */}
+            {phase === 'hotkey-active' && (
+              <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
+                <Mic className="w-3.5 h-3.5 text-primary animate-pulse shrink-0" />
+                <span className="truncate max-w-[160px]">Listening via hotkey…</span>
+              </div>
             )}
 
             {/* Processing State: Rotating Caption */}

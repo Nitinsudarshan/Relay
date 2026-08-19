@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { DictationPill } from './DictationPill';
-import { ProcessedPipelineResult } from '../../types';
+import { AppSettings, ProcessedPipelineResult } from '../../types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Mic, Zap, ShieldCheck, Sparkles, Kanban, Command } from 'lucide-react';
@@ -10,10 +12,35 @@ interface PTTWidgetProps {
 }
 
 export const PTTWidget: React.FC<PTTWidgetProps> = ({ onProcessComplete }) => {
+  // The pill defaults to living in its own floating, always-on-top desktop
+  // window (see overlay::ensure_pill_window) rather than being boxed inside
+  // this dashboard tab. Only render it inline here as a fallback for users
+  // who've turned that floating window off in Settings.
+  const [showFloatingPill, setShowFloatingPill] = useState(true);
+
+  useEffect(() => {
+    invoke<AppSettings>('get_settings')
+      .then((settings) => setShowFloatingPill(settings.ui.show_floating_pill))
+      .catch((err) => console.error('Failed to load pill visibility setting', err));
+
+    const unlistenPromise = listen<boolean>('pill-visibility-changed', ({ payload }) =>
+      setShowFloatingPill(payload)
+    );
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
+
   return (
     <div className="w-full flex flex-col items-center justify-center py-6">
-      {/* Floating Dictation Pill Component */}
-      <DictationPill onProcessComplete={onProcessComplete} />
+      {showFloatingPill ? (
+        <Badge variant="outline" className="gap-2 px-4 py-2 text-xs font-mono bg-muted/50 border-border">
+          <Command className="w-3.5 h-3.5 text-primary" />
+          Dictation pill is floating on your desktop — toggle it off in Settings to dock it here instead
+        </Badge>
+      ) : (
+        <DictationPill onProcessComplete={onProcessComplete} />
+      )}
 
       {/* Hero Showcase Card */}
       <Card className="w-full max-w-2xl mt-6 border-border bg-card shadow-lg rounded-2xl overflow-hidden">

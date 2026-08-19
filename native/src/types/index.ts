@@ -54,10 +54,17 @@ export interface HotkeySettings {
   dictation_hotkey: string;
 }
 
+export interface UiSettings {
+  /** Show the "Click to dictate" pill as a floating always-on-top desktop
+   * overlay window (outside the main app window) rather than only inline. */
+  show_floating_pill: boolean;
+}
+
 /** Mirrors the Rust `AppSettings` struct persisted at `.relay/config/settings.json`. */
 export interface AppSettings {
   provider: ProviderSettings;
   stt: SttSettings;
   tts: TtsSettings;
   hotkeys: HotkeySettings;
+  ui: UiSettings;
 }

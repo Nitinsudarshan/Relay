@@ -71,6 +71,17 @@ impl AudioRecorder {
         self.active_session.lock().unwrap().is_some()
     }
 
+    /// The `mode` of the in-progress session, if any — lets callers tell a
+    /// hotkey-owned ("dictation") session apart from a UI-owned one
+    /// ("meeting"/"scribble"/"chat") without a separate ownership field.
+    pub fn active_mode(&self) -> Option<String> {
+        self.active_session
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.mode.clone())
+    }
+
     pub fn start(&self, mode: &str, output_dir: &Path) -> Result<String, CaptureError> {
         let mut session = self.active_session.lock().unwrap();
         if session.is_some() {
