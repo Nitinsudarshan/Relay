@@ -1,6 +1,6 @@
 pub mod injection;
 
-use crate::commands::{emit_capture_state, AppState};
+use crate::commands::{emit_capture_state, emit_capture_status_event, AppState};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -165,11 +165,26 @@ fn on_dictation_released(
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("Dictation capture failed to stop cleanly: {}", e);
-                emit_capture_state(&app_handle, &state.recorder);
+                emit_capture_status_event(
+                    &app_handle,
+                    false,
+                    None,
+                    "ERROR",
+                    Some(e.to_string()),
+                );
                 return;
             }
         };
-        emit_capture_state(&app_handle, &state.recorder);
+        // The mic has stopped but there's real work left (transcription,
+        // then injection) — without this, the pill would flash straight
+        // back to idle on key-up and stay silent while that happens.
+        emit_capture_status_event(
+            &app_handle,
+            false,
+            Some(captured.mode.clone()),
+            "TRANSCRIBING",
+            None,
+        );
 
         let configured_model_path = state
             .settings
@@ -208,14 +223,45 @@ fn on_dictation_released(
         .await;
 
         match transcript {
-            Ok(Ok(text)) if !text.trim().is_empty() => {
-                if let Err(e) = injection::inject_text(&text) {
-                    tracing::error!("Dictation text injection failed: {}", e);
+            Ok(Ok(text)) if !text.trim().is_empty() => match injection::inject_text(&text) {
+                Ok(()) => {
+                    emit_capture_status_event(&app_handle, false, None, "SUCCESS", None);
                 }
+                Err(e) => {
+                    tracing::error!("Dictation text injection failed: {}", e);
+                    emit_capture_status_event(
+                        &app_handle,
+                        false,
+                        None,
+                        "ERROR",
+                        Some("Couldn't insert text".to_string()),
+                    );
+                }
+            },
+            Ok(Ok(_)) => {
+                tracing::info!("Dictation produced no speech (silence or too short)");
+                emit_capture_status_event(&app_handle, false, None, "NO_SPEECH", None);
             }
-            Ok(Ok(_)) => tracing::info!("Dictation produced no speech (silence or too short)"),
-            Ok(Err(e)) => tracing::error!("Dictation transcription failed: {}", e),
-            Err(e) => tracing::error!("Dictation transcription task panicked: {}", e),
+            Ok(Err(e)) => {
+                tracing::error!("Dictation transcription failed: {}", e);
+                emit_capture_status_event(
+                    &app_handle,
+                    false,
+                    None,
+                    "ERROR",
+                    Some("Transcription failed".to_string()),
+                );
+            }
+            Err(e) => {
+                tracing::error!("Dictation transcription task panicked: {}", e);
+                emit_capture_status_event(
+                    &app_handle,
+                    false,
+                    None,
+                    "ERROR",
+                    Some("Transcription failed".to_string()),
+                );
+            }
         }
     });
 }
