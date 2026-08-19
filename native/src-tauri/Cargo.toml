@@ -30,6 +30,10 @@ cpal = "0.15"
 hound = "3.5"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.8", features = ["v4", "serde"] }
-whisper-rs = "0.14"
+whisper-rs = { version = "0.14", optional = true }
 enigo = "0.2"
 base64 = "0.22"
+
+[features]
+default = []
+whisper-local = ["dep:whisper-rs"]

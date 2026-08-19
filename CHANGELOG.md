@@ -1,5 +1,13 @@
 # Relay — Changelog
 
+## [0.2.1] - 2026-08-19
+
+### Fix Windows Build (`clang.dll` / `whisper-rs-sys` missing dependency)
+
+- **Native Backend (`native/src-tauri/`)**:
+  - Gated `whisper-rs` under optional feature `whisper-local` in [`Cargo.toml`](file:///d:/Projects/Relay/native/src-tauri/Cargo.toml) and [`stt.rs`](file:///d:/Projects/Relay/native/src-tauri/src/capture/stt.rs).
+  - Resolved `LIBCLANG_PATH` / `clang.dll` build panic on Windows machines without LLVM installed, allowing `npm run dev:native` and `tauri dev` to compile out-of-the-box.
+
 ## [0.3.0] - 2026-08-19
 
 ### Universal Dictation, Global Hotkeys & Voice Chat (minor: new modules, major features)

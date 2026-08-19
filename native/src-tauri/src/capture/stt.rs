@@ -1,5 +1,8 @@
+#[cfg(feature = "whisper-local")]
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
+
+#[cfg(feature = "whisper-local")]
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 #[derive(Error, Debug)]
@@ -15,12 +18,9 @@ pub enum SttError {
 }
 
 /// Local, zero-cost speech-to-text via whisper.cpp (through whisper-rs).
-///
-/// The GGML model is loaded lazily on first use and cached until the
-/// configured model path changes, since loading is comparatively expensive
-/// and every capture/dictation/chat flow shares one engine instance.
 #[derive(Clone)]
 pub struct SttEngine {
+    #[cfg(feature = "whisper-local")]
     loaded: Arc<Mutex<Option<(String, WhisperContext)>>>,
 }
 
@@ -33,6 +33,7 @@ impl Default for SttEngine {
 impl SttEngine {
     pub fn new() -> Self {
         Self {
+            #[cfg(feature = "whisper-local")]
             loaded: Arc::new(Mutex::new(None)),
         }
     }
@@ -43,68 +44,78 @@ impl SttEngine {
         model_path: Option<&str>,
         samples_16k_mono: &[f32],
     ) -> Result<String, SttError> {
-        let model_path = model_path.ok_or(SttError::ModelNotConfigured)?;
-        if model_path.trim().is_empty() {
-            return Err(SttError::ModelNotConfigured);
-        }
-        if samples_16k_mono.is_empty() {
-            return Ok(String::new());
+        #[cfg(not(feature = "whisper-local"))]
+        {
+            let _ = (model_path, samples_16k_mono);
+            Err(SttError::ModelNotConfigured)
         }
 
-        let mut guard = self.loaded.lock().unwrap();
-        let needs_reload = match guard.as_ref() {
-            Some((loaded_path, _)) => loaded_path != model_path,
-            None => true,
-        };
+        #[cfg(feature = "whisper-local")]
+        {
+            let model_path = model_path.ok_or(SttError::ModelNotConfigured)?;
+            if model_path.trim().is_empty() {
+                return Err(SttError::ModelNotConfigured);
+            }
+            if samples_16k_mono.is_empty() {
+                return Ok(String::new());
+            }
 
-        if needs_reload {
-            tracing::info!("Loading Whisper model from {}", model_path);
-            let ctx =
-                WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
-                    .map_err(|e| SttError::ModelLoadFailed {
-                        path: model_path.to_string(),
-                        message: e.to_string(),
-                    })?;
-            *guard = Some((model_path.to_string(), ctx));
-        }
+            let mut guard = self.loaded.lock().unwrap();
+            let needs_reload = match guard.as_ref() {
+                Some((loaded_path, _)) => loaded_path != model_path,
+                None => true,
+            };
 
-        let (_, ctx) = guard
-            .as_ref()
-            .expect("model was just loaded or already present");
-        let mut state = ctx
-            .create_state()
-            .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
+            if needs_reload {
+                tracing::info!("Loading Whisper model from {}", model_path);
+                let ctx =
+                    WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
+                        .map_err(|e| SttError::ModelLoadFailed {
+                            path: model_path.to_string(),
+                            message: e.to_string(),
+                        })?;
+                *guard = Some((model_path.to_string(), ctx));
+            }
 
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(Some("en"));
-        params.set_translate(false);
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
-        params.set_suppress_blank(true);
-        params.set_n_threads(num_cpus());
-
-        state
-            .full(params, samples_16k_mono)
-            .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
-
-        let num_segments = state
-            .full_n_segments()
-            .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
-
-        let mut text = String::new();
-        for i in 0..num_segments {
-            let segment = state
-                .full_get_segment_text(i)
+            let (_, ctx) = guard
+                .as_ref()
+                .expect("model was just loaded or already present");
+            let mut state = ctx
+                .create_state()
                 .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
-            text.push_str(&segment);
-        }
 
-        Ok(text.trim().to_string())
+            let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+            params.set_language(Some("en"));
+            params.set_translate(false);
+            params.set_print_special(false);
+            params.set_print_progress(false);
+            params.set_print_realtime(false);
+            params.set_print_timestamps(false);
+            params.set_suppress_blank(true);
+            params.set_n_threads(num_cpus());
+
+            state
+                .full(params, samples_16k_mono)
+                .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
+
+            let num_segments = state
+                .full_n_segments()
+                .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
+
+            let mut text = String::new();
+            for i in 0..num_segments {
+                let segment = state
+                    .full_get_segment_text(i)
+                    .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
+                text.push_str(&segment);
+            }
+
+            Ok(text.trim().to_string())
+        }
     }
 }
 
+#[cfg(feature = "whisper-local")]
 fn num_cpus() -> std::ffi::c_int {
     std::thread::available_parallelism()
         .map(|n| n.get() as std::ffi::c_int)
