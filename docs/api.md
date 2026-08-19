@@ -18,14 +18,14 @@ interface CommandError {
 #### Capture Commands
 - `start_capture(mode: String) -> Result<String, CommandError>`
   Starts audio capture for mode `"meeting" | "scribble" | "chat"`. Returns capture session ID.
-- `stop_capture() -> Result<ProcessedPipelineResult, CommandError>`
-  Stops audio capture, transcribes via the configured local Whisper model, and:
+- `stop_capture() -> Result<Option<ProcessedPipelineResult>, CommandError>`
+  Stops audio capture. `AudioRecorder::stop` reports `had_audio: bool` — whether any captured chunk actually crossed the mic input threshold while the session was recording — and this command gates on it: if `had_audio` is `false` (silence/no input the whole time), it emits a `capture-state-changed` event with `status: "NO_SPEECH"` and returns `Ok(None)` **without ever invoking the STT engine**. Only when `had_audio` is `true` does it emit `status: "TRANSCRIBING"` and proceed to transcribe via the configured local Whisper model, then:
   - for `"meeting"`/`"scribble"`, first checks trigger phrases (returning mode `"trigger"` on a match), then runs the meeting->Kanban or scribble->structured-note pipeline;
   - for `"chat"`, skips trigger matching and runs `pipeline::process_chat` (vault-grounded Q&A with optional spoken answer) instead.
 
   `ProcessedPipelineResult` additionally carries `sources: string[]` (vault note titles used as grounding, populated for chat) and `spoken_audio_base64?: string | null` (base64 WAV of the answer, if local TTS is configured).
 
-  Universal dictation (the global push-to-talk hotkey) does **not** go through these commands — it calls `AudioRecorder`/`SttEngine` directly from the Rust hotkey handler and injects the transcript via OS keystroke simulation, bypassing Tauri IPC entirely (see `hotkeys::on_dictation_released`).
+  Universal dictation (the global push-to-talk hotkey) does **not** go through these commands — it calls `AudioRecorder`/`SttEngine` directly from the Rust hotkey handler and injects the transcript via OS keystroke simulation, bypassing Tauri IPC entirely (see `hotkeys::on_dictation_released`, which applies the same `had_audio` gate before transcribing).
 
 #### Pipeline Commands
 - `process_transcript(transcript: String, mode: String) -> Result<ProcessResult, CommandError>`

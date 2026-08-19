@@ -217,6 +217,11 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       } else if (payload.status === 'ERROR' || payload.message) {
         setPhase('error');
         setErrorMessage(payload.message || 'Capture processing failed');
+      } else if (payload.status === 'NO_SPEECH') {
+        // Recording stopped but no usable audio was ever received — never a
+        // transcription/processing result to show, just back to idle.
+        console.debug('[Dictation] Recording stopped with no audio input');
+        setPhase('collapsed');
       } else {
         setPhase('collapsed');
       }
@@ -224,6 +229,23 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
     const unlistenLevel = listen<{ level: number }>('capture-level', ({ payload }) => {
       setAudioLevel(payload.level || 0);
+    });
+
+    // Reflects the real OS-level registration outcome (emitted by Rust on
+    // every register/re-register) instead of the optimistic default above —
+    // a hotkey can fail to register (e.g. a conflict with another app or
+    // the OS's own IME binding on that combination), and that must be
+    // visible here rather than silently claimed as "registered".
+    const unlistenHotkeyStatus = listen<{
+      dictation_hotkey: string;
+      dictation_registered: boolean;
+      dictation_error?: string | null;
+    }>('hotkey-status-changed', ({ payload }) => {
+      setHotkeyStatus({
+        status: payload.dictation_registered ? 'registered' : 'conflict',
+        hotkey: payload.dictation_hotkey,
+        message: payload.dictation_error || undefined,
+      });
     });
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -236,6 +258,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     return () => {
       unlistenState.then((fn) => fn());
       unlistenLevel.then((fn) => fn());
+      unlistenHotkeyStatus.then((fn) => fn());
       window.removeEventListener('keydown', handleKeyDown);
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
       if (hoverEnterTimerRef.current) clearTimeout(hoverEnterTimerRef.current);
@@ -307,13 +330,22 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const toggleClickToTalk = async () => {
     if (phase === 'listening') {
       try {
-        setPhase('processing');
-        const result = await invoke<ProcessedPipelineResult>('stop_capture');
-        setPhase('success');
-        setSuccessMessage('Inserted into document');
-        if (onProcessComplete) onProcessComplete(result);
-        if (successTimerRef.current) clearTimeout(successTimerRef.current);
-        successTimerRef.current = setTimeout(() => setPhase('collapsed'), 2200);
+        // Deliberately no optimistic `setPhase('processing')` here — the
+        // backend only emits a TRANSCRIBING status (which flips this to
+        // 'processing' via the capture-state-changed listener above) once it
+        // has confirmed real audio was captured. A silent/empty recording
+        // emits NO_SPEECH instead and this call resolves to `null`, so the
+        // pill must never claim to be transcribing before that's known.
+        const result = await invoke<ProcessedPipelineResult | null>('stop_capture');
+        if (result) {
+          setPhase('success');
+          setSuccessMessage('Inserted into document');
+          if (onProcessComplete) onProcessComplete(result);
+          if (successTimerRef.current) clearTimeout(successTimerRef.current);
+          successTimerRef.current = setTimeout(() => setPhase('collapsed'), 2200);
+        } else {
+          setPhase('collapsed');
+        }
       } catch (err: any) {
         setErrorMessage(err.message || 'Audio capture failed');
         setPhase('error');

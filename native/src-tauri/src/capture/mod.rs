@@ -14,6 +14,14 @@ pub use stt::{SttEngine, SttError};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 
+/// Minimum normalized RMS level (same 0..1 scale as the `capture-level`
+/// event) a chunk must cross to count as "the microphone actually picked up
+/// something" — comfortably above steady-state mic/line noise floor, well
+/// below a spoken word. Crossing this is the *only* thing that sets
+/// `had_audio`; a session that never crosses it (user never spoke, or no
+/// signal reached the mic at all) must never be handed to the STT engine.
+const AUDIO_DETECTED_THRESHOLD: f32 = 0.02;
+
 #[derive(Error, Debug)]
 pub enum CaptureError {
     #[error("Audio capture device error: {0}")]
@@ -41,6 +49,12 @@ pub struct CapturedAudio {
     #[serde(skip)]
     pub samples: Vec<f32>,
     pub duration_seconds: f32,
+    /// Whether any captured chunk crossed [`AUDIO_DETECTED_THRESHOLD`] during
+    /// this session — the authoritative "did the microphone actually pick up
+    /// something" signal. `recordingStarted` never implies this; it is only
+    /// ever set by real input arriving during capture. Callers must treat a
+    /// session with `had_audio: false` as having nothing to transcribe.
+    pub had_audio: bool,
 }
 
 pub struct AudioRecorder {
@@ -53,7 +67,13 @@ struct ActiveSession {
     file_path: PathBuf,
     start_time: std::time::Instant,
     stop_tx: std_mpsc::Sender<()>,
-    done_rx: std_mpsc::Receiver<Result<(Vec<f32>, u32), String>>,
+    done_rx: std_mpsc::Receiver<Result<CaptureThreadResult, String>>,
+}
+
+struct CaptureThreadResult {
+    samples: Vec<f32>,
+    input_rate: u32,
+    had_audio: bool,
 }
 
 impl Default for AudioRecorder {
@@ -130,7 +150,7 @@ impl AudioRecorder {
         let duration = session.start_time.elapsed().as_secs_f32();
         let _ = session.stop_tx.send(());
 
-        let (raw_samples, input_rate) = session
+        let capture_result = session
             .done_rx
             .recv_timeout(Duration::from_secs(10))
             .map_err(|e| {
@@ -138,14 +158,15 @@ impl AudioRecorder {
             })?
             .map_err(CaptureError::DeviceError)?;
 
-        let mono_16k = resample_to_16k_mono(&raw_samples, input_rate);
+        let mono_16k = resample_to_16k_mono(&capture_result.samples, capture_result.input_rate);
         write_wav(&session.file_path, &mono_16k)?;
 
         tracing::info!(
-            "Stopped audio capture session {}, duration: {:.2}s, samples: {}",
+            "Stopped audio capture session {}, duration: {:.2}s, samples: {}, had_audio: {}",
             session.session_id,
             duration,
-            mono_16k.len()
+            mono_16k.len(),
+            capture_result.had_audio
         );
 
         Ok(CapturedAudio {
@@ -154,17 +175,18 @@ impl AudioRecorder {
             audio_path: session.file_path.to_string_lossy().to_string(),
             samples: mono_16k,
             duration_seconds: duration,
+            had_audio: capture_result.had_audio,
         })
     }
 }
 
 fn spawn_capture_thread(
     stop_rx: std_mpsc::Receiver<()>,
-    done_tx: std_mpsc::Sender<Result<(Vec<f32>, u32), String>>,
+    done_tx: std_mpsc::Sender<Result<CaptureThreadResult, String>>,
     app: Option<AppHandle>,
 ) {
     std::thread::spawn(move || {
-        let result = (|| -> Result<(Vec<f32>, u32), String> {
+        let result = (|| -> Result<CaptureThreadResult, String> {
             let host = cpal::default_host();
             let device = host
                 .default_input_device()
@@ -181,15 +203,22 @@ fn spawn_capture_thread(
                 |err: cpal::StreamError| tracing::error!("cpal input stream error: {}", err);
 
             let last_emit = Arc::new(Mutex::new(std::time::Instant::now()));
+            let smoothed_level = Arc::new(Mutex::new(0.0_f32));
+            let had_audio = Arc::new(Mutex::new(false));
 
             let stream = match config.sample_format() {
                 cpal::SampleFormat::F32 => {
                     let app_ref = app.clone();
                     let emit_ref = last_emit.clone();
+                    let level_ref = smoothed_level.clone();
+                    let detected_ref = had_audio.clone();
                     device.build_input_stream(
                         &config.into(),
                         move |data: &[f32], _| {
-                            push_mono_with_level(&samples_cb, data, channels, |s| s, &app_ref, &emit_ref)
+                            push_mono_with_level(
+                                &samples_cb, data, channels, |s| s, &app_ref, &emit_ref,
+                                &level_ref, &detected_ref,
+                            )
                         },
                         err_fn,
                         None,
@@ -198,6 +227,8 @@ fn spawn_capture_thread(
                 cpal::SampleFormat::I16 => {
                     let app_ref = app.clone();
                     let emit_ref = last_emit.clone();
+                    let level_ref = smoothed_level.clone();
+                    let detected_ref = had_audio.clone();
                     device.build_input_stream(
                         &config.into(),
                         move |data: &[i16], _| {
@@ -208,6 +239,8 @@ fn spawn_capture_thread(
                                 |s| s as f32 / i16::MAX as f32,
                                 &app_ref,
                                 &emit_ref,
+                                &level_ref,
+                                &detected_ref,
                             )
                         },
                         err_fn,
@@ -217,6 +250,8 @@ fn spawn_capture_thread(
                 cpal::SampleFormat::U16 => {
                     let app_ref = app.clone();
                     let emit_ref = last_emit.clone();
+                    let level_ref = smoothed_level.clone();
+                    let detected_ref = had_audio.clone();
                     device.build_input_stream(
                         &config.into(),
                         move |data: &[u16], _| {
@@ -227,6 +262,8 @@ fn spawn_capture_thread(
                                 |s| (s as f32 - u16::MAX as f32 / 2.0) / (u16::MAX as f32 / 2.0),
                                 &app_ref,
                                 &emit_ref,
+                                &level_ref,
+                                &detected_ref,
                             )
                         },
                         err_fn,
@@ -245,7 +282,12 @@ fn spawn_capture_thread(
             drop(stream);
 
             let final_samples = samples.lock().unwrap().clone();
-            Ok((final_samples, sample_rate))
+            let audio_detected = *had_audio.lock().unwrap();
+            Ok(CaptureThreadResult {
+                samples: final_samples,
+                input_rate: sample_rate,
+                had_audio: audio_detected,
+            })
         })();
 
         let _ = done_tx.send(result);
@@ -261,6 +303,13 @@ fn compute_rms_f32(samples: &[f32]) -> f32 {
     (mean_sq.sqrt() * 3.5).clamp(0.0, 1.0)
 }
 
+/// One-pole low-pass filter blending the previous smoothed level with the
+/// current raw one — turns per-callback RMS spikiness into the steady
+/// rise/fall the waveform bars are meant to show, without needing to buffer
+/// or delay anything.
+const LEVEL_SMOOTHING_ALPHA: f32 = 0.35;
+
+#[allow(clippy::too_many_arguments)]
 fn push_mono_with_level<T: Copy>(
     buf: &Arc<Mutex<Vec<f32>>>,
     data: &[T],
@@ -268,6 +317,8 @@ fn push_mono_with_level<T: Copy>(
     to_f32: impl Fn(T) -> f32,
     app: &Option<AppHandle>,
     last_emit: &Arc<Mutex<std::time::Instant>>,
+    smoothed_level: &Arc<Mutex<f32>>,
+    had_audio: &Arc<Mutex<bool>>,
 ) {
     let mut chunk = Vec::with_capacity(data.len() / channels.max(1));
     if channels > 1 {
@@ -279,12 +330,26 @@ fn push_mono_with_level<T: Copy>(
         chunk.extend(data.iter().map(|s| to_f32(*s)));
     }
 
+    // Computed unconditionally (not just when an emit is due) so audio
+    // detection never depends on emit throttling or on an `AppHandle` being
+    // present — "did real input arrive" must hold regardless of whether
+    // anything is listening for level events.
+    let raw_level = compute_rms_f32(&chunk);
+    if raw_level >= AUDIO_DETECTED_THRESHOLD {
+        *had_audio.lock().unwrap() = true;
+    }
+
+    let smoothed = {
+        let mut level_guard = smoothed_level.lock().unwrap();
+        *level_guard += (raw_level - *level_guard) * LEVEL_SMOOTHING_ALPHA;
+        *level_guard
+    };
+
     if let Some(ref a) = app {
         let mut last_guard = last_emit.lock().unwrap();
         if last_guard.elapsed() >= Duration::from_millis(40) {
             *last_guard = std::time::Instant::now();
-            let level = compute_rms_f32(&chunk);
-            let _ = a.emit("capture-level", serde_json::json!({ "level": level }));
+            let _ = a.emit("capture-level", serde_json::json!({ "level": smoothed }));
         }
     }
 
