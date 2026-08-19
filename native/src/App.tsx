@@ -7,6 +7,7 @@ import { TriggerSettings } from './components/settings/TriggerSettings';
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RelayLogo } from './components/common/RelayLogo';
+import { ChangelogModal } from './components/common/ChangelogModal';
 import { KanbanCard, ProcessedPipelineResult } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import {
@@ -35,6 +36,7 @@ export const App: React.FC = () => {
   const [cards, setCards] = useState<KanbanCard[]>([]);
   const [lastResult, setLastResult] = useState<ProcessedPipelineResult | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [changelogOpen, setChangelogOpen] = useState(false);
 
   const fetchKanbanCards = async () => {
     try {
@@ -296,13 +298,25 @@ export const App: React.FC = () => {
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>Local Vault ($0)</span>
             </div>
-            <div className="flex items-center gap-1 font-mono">
-              <Activity className="w-3 h-3 text-primary" />
-              <span>v0.1.0</span>
-            </div>
+            <button
+              type="button"
+              onClick={() => setChangelogOpen(true)}
+              className="flex items-center gap-1 font-mono hover:text-primary transition-colors cursor-pointer group"
+              title="View Release Notes & Changelog"
+            >
+              <Activity className="w-3 h-3 text-primary group-hover:animate-pulse" />
+              <span className="underline decoration-dotted underline-offset-2">v0.2.1</span>
+            </button>
           </div>
         </div>
       </aside>
+
+      {/* Changelog Modal */}
+      <ChangelogModal
+        open={changelogOpen}
+        onClose={() => setChangelogOpen(false)}
+        currentVersion="0.2.1"
+      />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
