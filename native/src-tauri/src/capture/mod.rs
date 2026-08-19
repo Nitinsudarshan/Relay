@@ -15,12 +15,19 @@ pub use stt::{SttEngine, SttError};
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 
 /// Minimum normalized RMS level (same 0..1 scale as the `capture-level`
-/// event) a chunk must cross to count as "the microphone actually picked up
-/// something" — comfortably above steady-state mic/line noise floor, well
-/// below a spoken word. Crossing this is the *only* thing that sets
-/// `had_audio`; a session that never crosses it (user never spoke, or no
-/// signal reached the mic at all) must never be handed to the STT engine.
+/// event) a chunk must cross to count towards "the microphone actually
+/// picked up something" — comfortably above steady-state mic/line noise
+/// floor, well below a spoken word.
 const AUDIO_DETECTED_THRESHOLD: f32 = 0.02;
+
+/// How long that threshold must be crossed *cumulatively* before a session
+/// counts as `had_audio`. A single loud callback isn't enough on its own —
+/// mic AGC/gain-boost noise floors (common on Windows with input gain
+/// turned up) can produce a brief spike well above the threshold even with
+/// nobody speaking, which would otherwise defeat this gate entirely and
+/// reproduce the exact "transcribes on silence" bug this is meant to fix.
+/// Real speech sustains energy across a syllable; noise spikes don't.
+const AUDIO_DETECTED_MIN_DURATION_MS: u64 = 200;
 
 #[derive(Error, Debug)]
 pub enum CaptureError {
@@ -204,14 +211,17 @@ fn spawn_capture_thread(
 
             let last_emit = Arc::new(Mutex::new(std::time::Instant::now()));
             let smoothed_level = Arc::new(Mutex::new(0.0_f32));
-            let had_audio = Arc::new(Mutex::new(false));
+            // Accumulated *frame count* (not a bool) that crossed
+            // AUDIO_DETECTED_THRESHOLD — see the had_audio finalization below
+            // for why a single loud callback isn't enough on its own.
+            let frames_above_threshold = Arc::new(Mutex::new(0_u32));
 
             let stream = match config.sample_format() {
                 cpal::SampleFormat::F32 => {
                     let app_ref = app.clone();
                     let emit_ref = last_emit.clone();
                     let level_ref = smoothed_level.clone();
-                    let detected_ref = had_audio.clone();
+                    let detected_ref = frames_above_threshold.clone();
                     device.build_input_stream(
                         &config.into(),
                         move |data: &[f32], _| {
@@ -228,7 +238,7 @@ fn spawn_capture_thread(
                     let app_ref = app.clone();
                     let emit_ref = last_emit.clone();
                     let level_ref = smoothed_level.clone();
-                    let detected_ref = had_audio.clone();
+                    let detected_ref = frames_above_threshold.clone();
                     device.build_input_stream(
                         &config.into(),
                         move |data: &[i16], _| {
@@ -251,7 +261,7 @@ fn spawn_capture_thread(
                     let app_ref = app.clone();
                     let emit_ref = last_emit.clone();
                     let level_ref = smoothed_level.clone();
-                    let detected_ref = had_audio.clone();
+                    let detected_ref = frames_above_threshold.clone();
                     device.build_input_stream(
                         &config.into(),
                         move |data: &[u16], _| {
@@ -282,7 +292,16 @@ fn spawn_capture_thread(
             drop(stream);
 
             let final_samples = samples.lock().unwrap().clone();
-            let audio_detected = *had_audio.lock().unwrap();
+            // A single loud callback crossing the threshold isn't enough to
+            // call it "audio received" — mic AGC/gain-boost noise floor
+            // (common on Windows with input gain turned up) can produce a
+            // brief spike in otherwise-silent input, which would otherwise
+            // defeat this whole gate. Require it to be sustained for at
+            // least AUDIO_DETECTED_MIN_DURATION_MS of real audio.
+            let frames_above = *frames_above_threshold.lock().unwrap();
+            let min_frames_above =
+                (sample_rate as u64 * AUDIO_DETECTED_MIN_DURATION_MS / 1000) as u32;
+            let audio_detected = frames_above >= min_frames_above;
             Ok(CaptureThreadResult {
                 samples: final_samples,
                 input_rate: sample_rate,
@@ -318,7 +337,7 @@ fn push_mono_with_level<T: Copy>(
     app: &Option<AppHandle>,
     last_emit: &Arc<Mutex<std::time::Instant>>,
     smoothed_level: &Arc<Mutex<f32>>,
-    had_audio: &Arc<Mutex<bool>>,
+    frames_above_threshold: &Arc<Mutex<u32>>,
 ) {
     let mut chunk = Vec::with_capacity(data.len() / channels.max(1));
     if channels > 1 {
@@ -336,7 +355,7 @@ fn push_mono_with_level<T: Copy>(
     // anything is listening for level events.
     let raw_level = compute_rms_f32(&chunk);
     if raw_level >= AUDIO_DETECTED_THRESHOLD {
-        *had_audio.lock().unwrap() = true;
+        *frames_above_threshold.lock().unwrap() += chunk.len() as u32;
     }
 
     let smoothed = {
