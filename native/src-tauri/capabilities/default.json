@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core permissions for the main window and the floating dictation pill overlay — both run the same DictationPill component, which reacts entirely through capture-state-changed/capture-level/hotkey-status-changed events emitted from Rust. Without core:event permissions, the frontend's listen() calls are silently denied and the pill never reflects any backend state, no matter what the backend does.",
+  "windows": ["main", "dictation-pill"],
+  "permissions": ["core:default", "core:event:default"]
+}
