@@ -17,9 +17,10 @@ export const CHANGELOG_DATA = [
     type: 'patch',
     title: 'UI & Layout Enhancements',
     tags: ['Improvements'],
+    domains: ['UI', 'Modal'],
     items: [
-      { category: 'Improvements', text: 'Expanded Changelog Modal container width to 80% (w-[80vw] max-w-5xl) across native and web.' },
-      { category: 'Improvements', text: 'Added release category tags (Features, Fixes, Improvements, Security) to release logs.' },
+      { category: 'Improvements', domain: 'UI', text: 'Expanded Changelog Modal container width to 80% (w-[80vw] max-w-5xl) across native and web.' },
+      { category: 'Improvements', domain: 'UI', text: 'Added release category tags (Features, Fixes, Improvements, Security) and domain tags (UI, LLM, Speech, Dictation, Kanban, Vault).' },
     ],
   },
   {
@@ -28,9 +29,10 @@ export const CHANGELOG_DATA = [
     type: 'patch',
     title: 'Fix Windows Build (clang.dll / whisper-rs-sys missing dependency)',
     tags: ['Fixes'],
+    domains: ['Build', 'STT', 'LLM'],
     items: [
-      { category: 'Fixes', text: 'Gated whisper-rs under optional whisper-local feature to prevent LLVM/clang.dll missing panics on Windows.' },
-      { category: 'Improvements', text: 'Added fallback heuristic STT engine when local Ollama or Whisper model is not configured.' },
+      { category: 'Fixes', domain: 'Build', text: 'Gated whisper-rs under optional whisper-local feature to prevent LLVM/clang.dll missing panics on Windows.' },
+      { category: 'Improvements', domain: 'Speech', text: 'Added fallback heuristic STT engine when local Ollama or Whisper model is not configured.' },
     ],
   },
   {
@@ -39,13 +41,14 @@ export const CHANGELOG_DATA = [
     type: 'minor',
     title: 'Relay Visual Identity Pass ("Monochrome & Electric Blue")',
     tags: ['Features', 'Improvements'],
+    domains: ['UI', 'Dictation', 'LLM', 'Kanban', 'Vault', 'Settings'],
     items: [
-      { category: 'Features', text: 'Updated CSS variables to Monochrome & Electric Blue palette (#2563EB light / #60A5FA dark) with 3-way semantic colors.' },
-      { category: 'Features', text: 'Designed two-tone Relay logo mark and integrated across native sidebar, web dashboard, login page, and favicon.' },
-      { category: 'Features', text: 'Rebuilt Push-to-Talk floating Dictation Pill overlay with state machine, live waveform, and rotating captions.' },
-      { category: 'Improvements', text: 'Restructured Provider Settings with General, Providers, Triggers, Vault, Account, and Data & Privacy domains.' },
-      { category: 'Improvements', text: 'Unified native and web Kanban boards with 3-way semantic priority badges.' },
-      { category: 'Improvements', text: 'Restructured Scribble Notes with master list, detail pane, pill actions toolbar, and raw audio reassurance line.' },
+      { category: 'Features', domain: 'UI', text: 'Updated CSS variables to Monochrome & Electric Blue palette (#2563EB light / #60A5FA dark) with 3-way semantic colors.' },
+      { category: 'Features', domain: 'UI', text: 'Designed two-tone Relay logo mark and integrated across native sidebar, web dashboard, login page, and favicon.' },
+      { category: 'Features', domain: 'Dictation', text: 'Rebuilt Push-to-Talk floating Dictation Pill overlay with state machine, live waveform, and rotating captions.' },
+      { category: 'Improvements', domain: 'Settings', text: 'Restructured Provider Settings with General, Providers, Triggers, Vault, Account, and Data & Privacy domains.' },
+      { category: 'Improvements', domain: 'Kanban', text: 'Unified native and web Kanban boards with 3-way semantic priority badges.' },
+      { category: 'Improvements', domain: 'Vault', text: 'Restructured Scribble Notes with master list, detail pane, pill actions toolbar, and raw audio reassurance line.' },
     ],
   },
   {
@@ -54,9 +57,10 @@ export const CHANGELOG_DATA = [
     type: 'patch',
     title: 'Complete Theme System & Token Refactoring',
     tags: ['Improvements'],
+    domains: ['UI', 'Design System'],
     items: [
-      { category: 'Improvements', text: 'Replaced ad-hoc Tailwind colors with theme token classes (bg-primary, bg-card, bg-muted, border-border).' },
-      { category: 'Improvements', text: 'Implemented live audio level meter animation in native capture widget.' },
+      { category: 'Improvements', domain: 'UI', text: 'Replaced ad-hoc Tailwind colors with theme token classes (bg-primary, bg-card, bg-muted, border-border).' },
+      { category: 'Improvements', domain: 'Speech', text: 'Implemented live audio level meter animation in native capture widget.' },
     ],
   },
   {
@@ -65,9 +69,10 @@ export const CHANGELOG_DATA = [
     type: 'major',
     title: 'Initial Release — Multi-Surface Architecture',
     tags: ['Features'],
+    domains: ['Architecture', 'Speech', 'Vault', 'Sync'],
     items: [
-      { category: 'Features', text: 'Windows native Tauri app with WASAPI audio capture & Rust backend pipeline.' },
-      { category: 'Features', text: 'Next.js web dashboard with Supabase Cloud hybrid sync.' },
+      { category: 'Features', domain: 'Speech', text: 'Windows native Tauri app with WASAPI audio capture & Rust backend pipeline.' },
+      { category: 'Features', domain: 'Sync', text: 'Next.js web dashboard with Supabase Cloud hybrid sync.' },
     ],
   },
 ];
@@ -95,7 +100,7 @@ export const ChangelogModal: React.FC<ChangelogModalProps> = ({
                   v{currentVersion}
                 </Badge>
               </div>
-              <p className="text-xs text-muted-foreground">Version history & recent change log</p>
+              <p className="text-xs text-muted-foreground">Version history & categorized release tags</p>
             </div>
           </div>
 
@@ -119,6 +124,8 @@ export const ChangelogModal: React.FC<ChangelogModalProps> = ({
                     v{entry.version}
                   </span>
                   <span className="text-xs font-bold text-foreground">{entry.title}</span>
+                  
+                  {/* Category Type Tags */}
                   {entry.tags.map((tag) => (
                     <Badge
                       key={tag}
@@ -134,6 +141,17 @@ export const ChangelogModal: React.FC<ChangelogModalProps> = ({
                       {tag}
                     </Badge>
                   ))}
+
+                  {/* Domain Tags */}
+                  {entry.domains.map((dom) => (
+                    <Badge
+                      key={dom}
+                      variant="outline"
+                      className="text-[9px] font-mono uppercase px-1.5 py-0 bg-muted/60 text-muted-foreground border-border"
+                    >
+                      {dom}
+                    </Badge>
+                  ))}
                 </div>
                 <span className="font-mono text-[10px] text-muted-foreground">{entry.date}</span>
               </div>
@@ -141,18 +159,26 @@ export const ChangelogModal: React.FC<ChangelogModalProps> = ({
               <ul className="space-y-1.5 pt-1 pl-2">
                 {entry.items.map((item, idx) => (
                   <li key={idx} className="text-xs text-muted-foreground flex items-start gap-2 leading-relaxed">
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-[9px] font-mono uppercase px-1 py-0 rounded shrink-0 mt-0.5",
-                        item.category === 'Features' && "bg-primary/10 text-primary border-primary/20",
-                        item.category === 'Fixes' && "bg-destructive/10 text-destructive border-destructive/20",
-                        item.category === 'Improvements' && "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
-                        item.category === 'Security' && "bg-amber-500/10 text-amber-500 border-amber-500/20"
-                      )}
-                    >
-                      {item.category}
-                    </Badge>
+                    <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-[9px] font-mono uppercase px-1 py-0 rounded",
+                          item.category === 'Features' && "bg-primary/10 text-primary border-primary/20",
+                          item.category === 'Fixes' && "bg-destructive/10 text-destructive border-destructive/20",
+                          item.category === 'Improvements' && "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+                          item.category === 'Security' && "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                        )}
+                      >
+                        {item.category}
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className="text-[8px] font-mono uppercase px-1 py-0 bg-muted text-muted-foreground border-border/70 rounded"
+                      >
+                        {item.domain}
+                      </Badge>
+                    </div>
                     <span>{item.text}</span>
                   </li>
                 ))}
