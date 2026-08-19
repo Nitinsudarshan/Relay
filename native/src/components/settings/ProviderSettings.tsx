@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { TriggerSettings } from './TriggerSettings';
+import { HotkeyRecorder } from './HotkeyRecorder';
 
 type SettingsSection = 'general' | 'providers' | 'triggers' | 'vault' | 'account' | 'privacy';
 
@@ -35,6 +36,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   stt: { whisper_model_path: '' },
   tts: { piper_binary_path: '', piper_voice_path: '' },
   hotkeys: { show_hide_hotkey: 'Ctrl+Shift+Space', dictation_hotkey: 'Ctrl+Space' },
+  ui: { show_floating_pill: true },
 };
 
 export const ProviderSettings: React.FC = () => {
@@ -50,6 +52,25 @@ export const ProviderSettings: React.FC = () => {
   const [autoSaveVault, setAutoSaveVault] = useState(true);
   const [rawAudioKept, setRawAudioKept] = useState(true);
 
+  type OllamaStatus =
+    | { state: 'checking' }
+    | { state: 'running' }
+    | { state: 'started' }
+    | { state: 'not_installed' }
+    | { state: 'unreachable'; message: string };
+  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus>({ state: 'checking' });
+
+  const checkLocalLlm = async () => {
+    setOllamaStatus({ state: 'checking' });
+    try {
+      const status = await invoke<OllamaStatus>('ensure_local_llm_ready');
+      setOllamaStatus(status);
+    } catch (err) {
+      console.error('Failed to check local Ollama status', err);
+      setOllamaStatus({ state: 'unreachable', message: 'Could not reach the backend' });
+    }
+  };
+
   useEffect(() => {
     invoke<AppSettings>('get_settings')
       .then(setSettings)
@@ -59,6 +80,28 @@ export const ProviderSettings: React.FC = () => {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!loading && activeSection === 'providers' && settings.provider.active_provider === 'ollama') {
+      checkLocalLlm();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, activeSection, settings.provider.active_provider]);
+
+  // Hotkeys are applied the moment they're captured — the backend
+  // unregisters the old binding and registers the new one live, so there's
+  // no need to restart Relay (or even press Save) for them to take effect.
+  const applyHotkey = async (field: 'show_hide_hotkey' | 'dictation_hotkey', accelerator: string) => {
+    const updatedHotkeys = { ...settings.hotkeys, [field]: accelerator };
+    setSettings((prev) => ({ ...prev, hotkeys: updatedHotkeys }));
+    try {
+      await invoke('update_hotkeys', { hotkeys: updatedHotkeys });
+      setError('');
+    } catch (err: any) {
+      console.error('Failed to apply hotkey', err);
+      setError(err?.message || 'Failed to apply hotkey — it may already be in use by another app');
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -207,30 +250,46 @@ export const ProviderSettings: React.FC = () => {
                     <label htmlFor="show-hide-hotkey" className="block text-[11px] text-muted-foreground mb-1">
                       Show/Hide Relay (anywhere in the OS)
                     </label>
-                    <Input
+                    <HotkeyRecorder
                       id="show-hide-hotkey"
                       value={settings.hotkeys.show_hide_hotkey}
-                      onChange={(e) =>
-                        setSettings({ ...settings, hotkeys: { ...settings.hotkeys, show_hide_hotkey: e.target.value } })
-                      }
+                      onCapture={(accelerator) => applyHotkey('show_hide_hotkey', accelerator)}
                     />
                   </div>
                   <div>
                     <label htmlFor="dictation-hotkey" className="block text-[11px] text-muted-foreground mb-1">
                       Universal Dictation (hold to talk, types into focused field)
                     </label>
-                    <Input
+                    <HotkeyRecorder
                       id="dictation-hotkey"
                       value={settings.hotkeys.dictation_hotkey}
-                      onChange={(e) =>
-                        setSettings({ ...settings, hotkeys: { ...settings.hotkeys, dictation_hotkey: e.target.value } })
-                      }
+                      onCapture={(accelerator) => applyHotkey('dictation_hotkey', accelerator)}
                     />
                   </div>
                 </div>
                 <p className="text-[10px] text-muted-foreground mt-2">
-                  Restart Relay after changing hotkeys for them to take effect.
+                  Click a hotkey box, then press the keys you want — it takes effect immediately, no restart needed.
                 </p>
+              </div>
+
+              <div className="py-3 border-b border-border flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Floating Dictation Pill</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Show "Click to dictate" as its own always-on-top window on the desktop, outside the Relay window
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.ui.show_floating_pill}
+                  onCheckedChange={async (checked) => {
+                    setSettings({ ...settings, ui: { ...settings.ui, show_floating_pill: checked } });
+                    try {
+                      await invoke('set_pill_visible', { visible: checked });
+                    } catch (err) {
+                      console.error('Failed to toggle floating pill', err);
+                    }
+                  }}
+                />
               </div>
 
               <div className="py-3 border-b border-border">
@@ -377,6 +436,38 @@ export const ProviderSettings: React.FC = () => {
                       />
                     </div>
                   </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40 border border-border">
+                    <div className="flex items-center gap-2 text-xs">
+                      {ollamaStatus.state === 'checking' && (
+                        <Badge variant="outline" className="text-[10px] font-mono">Checking local Ollama…</Badge>
+                      )}
+                      {ollamaStatus.state === 'running' && (
+                        <Badge variant="emerald" className="text-[10px] font-mono">Ollama running ✓</Badge>
+                      )}
+                      {ollamaStatus.state === 'started' && (
+                        <Badge variant="emerald" className="text-[10px] font-mono">Relay started Ollama for you ✓</Badge>
+                      )}
+                      {ollamaStatus.state === 'not_installed' && (
+                        <Badge variant="outline" className="text-[10px] font-mono border-amber-500/50 text-amber-500">
+                          Ollama isn't installed — install it once, Relay handles the rest
+                        </Badge>
+                      )}
+                      {ollamaStatus.state === 'unreachable' && (
+                        <Badge variant="outline" className="text-[10px] font-mono border-destructive/50 text-destructive">
+                          {ollamaStatus.message}
+                        </Badge>
+                      )}
+                    </div>
+                    <Button type="button" size="sm" variant="ghost" onClick={checkLocalLlm} className="text-xs h-7">
+                      Retry
+                    </Button>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Relay starts Ollama and pulls the model above automatically — no manual{' '}
+                    <code className="font-mono">ollama serve</code> or <code className="font-mono">ollama pull</code>{' '}
+                    needed once Ollama itself is installed.
+                  </p>
                 </div>
               ) : (
                 <div className="py-4 space-y-4">

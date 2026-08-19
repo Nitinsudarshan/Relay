@@ -10,6 +10,7 @@ import { RelayLogo } from './components/common/RelayLogo';
 import { ChangelogModal } from './components/common/ChangelogModal';
 import { KanbanCard, ProcessedPipelineResult } from './types';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import {
   Mic,
   Kanban,
@@ -60,6 +61,21 @@ export const App: React.FC = () => {
       setActiveTab('kanban');
     }
   };
+
+  // The dictation pill defaults to living in its own floating desktop
+  // window, separate from this one — this main window has no direct
+  // handle to it, so it learns a capture finished (and switches tabs /
+  // refreshes the board) from the backend event instead of a prop
+  // callback. Also covers the in-app fallback pill for free.
+  useEffect(() => {
+    const unlistenPromise = listen<ProcessedPipelineResult>('capture-processed', ({ payload }) =>
+      handleProcessComplete(payload)
+    );
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const renderHeroHeader = () => {
     switch (activeTab) {

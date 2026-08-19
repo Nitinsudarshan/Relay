@@ -1,3 +1,6 @@
+mod ollama_manager;
+
+pub use ollama_manager::{ensure_ollama_ready, OllamaStatus};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
