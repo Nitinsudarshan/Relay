@@ -14,6 +14,19 @@ interface ChangelogDialogProps {
 
 export const CHANGELOG_DATA = [
   {
+    version: "0.3.2",
+    date: "2026-08-19",
+    type: "patch",
+    title: "Push-to-Talk Floating Pill Upgrade",
+    tags: ["Improvements"],
+    domains: ["Dictation", "Speech", "UI"],
+    items: [
+      { category: "Improvements", domain: "Dictation", text: "Bound floating pill overlay directly to backend capture state machine (IDLE, LISTENING, TRANSCRIBING, SUCCESS, ERROR)." },
+      { category: "Improvements", domain: "Speech", text: "Added real-time RMS microphone audio level calculations emitted from Rust at ~25Hz to drive waveform animation." },
+      { category: "Fixes", domain: "Dictation", text: "Guaranteed zero OS focus theft on overlay window for universal text injection into active apps." },
+    ],
+  },
+  {
     version: "0.3.1",
     date: "2026-08-19",
     type: "minor",

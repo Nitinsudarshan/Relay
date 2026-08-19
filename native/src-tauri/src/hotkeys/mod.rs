@@ -119,7 +119,7 @@ fn on_dictation_pressed(app: &AppHandle, dictation_state: &SharedDictationState)
 
     let state = app.state::<AppState>();
     let audio_dir = state.config_dir.join("audio");
-    match state.recorder.start("dictation", &audio_dir) {
+    match state.recorder.start("dictation", &audio_dir, Some(app.clone())) {
         Ok(_) => {
             show_indicator(app);
             emit_capture_state(app, &state.recorder);

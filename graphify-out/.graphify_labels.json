@@ -112,12 +112,13 @@
   "110": "Target",
   "111": "@radix-ui/react-dialog",
   "112": "Identifier",
-  "113": "lucide-react",
+  "113": "Identifier",
   "114": "@radix-ui/react-checkbox",
+  "115": "eslint-config-next",
   "116": "@radix-ui/react-select",
   "117": "@radix-ui/react-slot",
   "118": "@radix-ui/react-tooltip",
   "119": "react",
   "120": "@tauri-apps/api",
-  "121": "shadcn"
+  "121": "@radix-ui/react-label"
 }

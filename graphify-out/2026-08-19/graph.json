@@ -153,8 +153,8 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "native_package_dependencies_radix_ui_react_dialog",
-      "community": 14,
-      "community_name": "dependencies",
+      "community": 111,
+      "community_name": "@radix-ui/react-dialog",
       "norm_label": "@radix-ui/react-dialog"
     },
     {
@@ -164,8 +164,8 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "radix_ui_react_dialog",
-      "community": 14,
-      "community_name": "dependencies",
+      "community": 111,
+      "community_name": "@radix-ui/react-dialog",
       "norm_label": "@radix-ui/react-dialog"
     },
     {
@@ -197,8 +197,8 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "native_package_dependencies_radix_ui_react_label",
-      "community": 115,
-      "community_name": "@radix-ui/react-label",
+      "community": 14,
+      "community_name": "dependencies",
       "norm_label": "@radix-ui/react-label"
     },
     {
@@ -208,8 +208,8 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "radix_ui_react_label",
-      "community": 115,
-      "community_name": "@radix-ui/react-label",
+      "community": 14,
+      "community_name": "dependencies",
       "norm_label": "@radix-ui/react-label"
     },
     {
@@ -879,8 +879,8 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_identifier_description",
-      "community": 67,
-      "community_name": "Identifier",
+      "community": 21,
+      "community_name": "properties",
       "norm_label": "description"
     },
     {
@@ -1187,8 +1187,8 @@
       "source_location": "L94",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_properties_platforms",
-      "community": 21,
-      "community_name": "properties",
+      "community": 45,
+      "community_name": "permissions",
       "norm_label": "platforms"
     },
     {
@@ -1198,8 +1198,8 @@
       "source_location": "L95",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_platforms_description",
-      "community": 21,
-      "community_name": "properties",
+      "community": 45,
+      "community_name": "permissions",
       "norm_label": "description"
     },
     {
@@ -1209,8 +1209,8 @@
       "source_location": "L96",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_platforms_type",
-      "community": 21,
-      "community_name": "properties",
+      "community": 45,
+      "community_name": "permissions",
       "norm_label": "type"
     },
     {
@@ -1220,8 +1220,8 @@
       "source_location": "L96",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_json_ref_array",
-      "community": 21,
-      "community_name": "properties",
+      "community": 45,
+      "community_name": "permissions",
       "norm_label": "array"
     },
     {
@@ -1231,8 +1231,8 @@
       "source_location": "L96",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_json_ref_null",
-      "community": 21,
-      "community_name": "properties",
+      "community": 45,
+      "community_name": "permissions",
       "norm_label": "null"
     },
     {
@@ -1396,8 +1396,8 @@
       "source_location": "L386",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_definitions_identifier",
-      "community": 67,
-      "community_name": "Identifier",
+      "community": 21,
+      "community_name": "properties",
       "norm_label": "identifier"
     },
     {
@@ -1407,8 +1407,8 @@
       "source_location": "L388",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_desktop_schema_identifier_oneof",
-      "community": 67,
-      "community_name": "Identifier",
+      "community": 21,
+      "community_name": "properties",
       "norm_label": "oneof"
     },
     {
@@ -1737,8 +1737,8 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_identifier_description",
-      "community": 98,
-      "community_name": "properties",
+      "community": 67,
+      "community_name": "Identifier",
       "norm_label": "description"
     },
     {
@@ -2045,8 +2045,8 @@
       "source_location": "L94",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_properties_platforms",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "platforms"
     },
     {
@@ -2056,8 +2056,8 @@
       "source_location": "L95",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_platforms_description",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "description"
     },
     {
@@ -2067,8 +2067,8 @@
       "source_location": "L96",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_platforms_type",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "type"
     },
     {
@@ -2078,8 +2078,8 @@
       "source_location": "L96",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_json_ref_array",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "array"
     },
     {
@@ -2089,8 +2089,8 @@
       "source_location": "L96",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_json_ref_null",
-      "community": 104,
-      "community_name": "permissions",
+      "community": 98,
+      "community_name": "properties",
       "norm_label": "null"
     },
     {
@@ -2254,8 +2254,8 @@
       "source_location": "L386",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_definitions_identifier",
-      "community": 98,
-      "community_name": "properties",
+      "community": 67,
+      "community_name": "Identifier",
       "norm_label": "identifier"
     },
     {
@@ -2265,8 +2265,8 @@
       "source_location": "L388",
       "_origin": "ast",
       "id": "native_src_tauri_gen_schemas_linux_schema_identifier_oneof",
-      "community": 98,
-      "community_name": "properties",
+      "community": 67,
+      "community_name": "Identifier",
       "norm_label": "oneof"
     },
     {
@@ -3648,7 +3648,7 @@
       "label": "SttError",
       "file_type": "code",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L9",
+      "source_location": "L11",
       "_origin": "ast",
       "id": "native_src_tauri_src_capture_stt_stterror",
       "community": 85,
@@ -3667,10 +3667,54 @@
       "norm_label": "string"
     },
     {
+      "label": "ensure_default_model()",
+      "file_type": "code",
+      "source_file": "native/src-tauri/src/capture/stt.rs",
+      "source_location": "L44",
+      "_origin": "ast",
+      "id": "native_src_tauri_src_capture_stt_ensure_default_model",
+      "community": 85,
+      "community_name": "SttEngine",
+      "norm_label": "ensure_default_model()"
+    },
+    {
+      "label": "Path",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "id": "native_src_tauri_src_capture_stt_rs_path",
+      "community": 85,
+      "community_name": "SttEngine",
+      "norm_label": "path"
+    },
+    {
+      "label": "Result",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "id": "native_src_tauri_src_capture_stt_rs_result",
+      "community": 85,
+      "community_name": "SttEngine",
+      "norm_label": "result"
+    },
+    {
+      "label": "PathBuf",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "id": "native_src_tauri_src_capture_stt_rs_pathbuf",
+      "community": 85,
+      "community_name": "SttEngine",
+      "norm_label": "pathbuf"
+    },
+    {
       "label": "SttEngine",
       "file_type": "code",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L22",
+      "source_location": "L107",
       "_origin": "ast",
       "id": "native_src_tauri_src_capture_stt_sttengine",
       "community": 85,
@@ -3736,7 +3780,7 @@
       "label": ".default()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L28",
+      "source_location": "L113",
       "_origin": "ast",
       "id": "native_src_tauri_src_capture_stt_sttengine_default",
       "community": 85,
@@ -3758,7 +3802,7 @@
       "label": ".new()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L34",
+      "source_location": "L119",
       "_origin": "ast",
       "id": "native_src_tauri_src_capture_stt_sttengine_new",
       "community": 85,
@@ -3769,7 +3813,7 @@
       "label": ".transcribe()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L42",
+      "source_location": "L127",
       "_origin": "ast",
       "id": "native_src_tauri_src_capture_stt_sttengine_transcribe",
       "community": 85,
@@ -3777,21 +3821,10 @@
       "norm_label": ".transcribe()"
     },
     {
-      "label": "Result",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "native_src_tauri_src_capture_stt_rs_result",
-      "community": 85,
-      "community_name": "SttEngine",
-      "norm_label": "result"
-    },
-    {
       "label": "num_cpus()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L119",
+      "source_location": "L204",
       "_origin": "ast",
       "id": "native_src_tauri_src_capture_stt_num_cpus",
       "community": 85,
@@ -3817,7 +3850,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "commands.rs"
     },
     {
@@ -3828,7 +3861,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_capturestatus",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "capturestatus"
     },
     {
@@ -3839,7 +3872,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_rs_option",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "option"
     },
     {
@@ -3850,7 +3883,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_rs_string",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "string"
     },
     {
@@ -3861,7 +3894,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_emit_capture_state",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "emit_capture_state()"
     },
     {
@@ -3872,7 +3905,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_rs_apphandle",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "apphandle"
     },
     {
@@ -3883,7 +3916,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_commanderror",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "commanderror"
     },
     {
@@ -3894,7 +3927,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_commanderror_new",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": ".new()"
     },
     {
@@ -3905,7 +3938,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_rs_self",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "self"
     },
     {
@@ -3916,7 +3949,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_appstate",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "appstate"
     },
     {
@@ -3927,7 +3960,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_rs_pathbuf",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "pathbuf"
     },
     {
@@ -3938,7 +3971,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_rs_mutex",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "mutex"
     },
     {
@@ -3949,7 +3982,7 @@
       "_origin": "ast",
       "id": "appsettings",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "appsettings"
     },
     {
@@ -3960,7 +3993,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_appstate_settings_path",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": ".settings_path()"
     },
     {
@@ -3971,7 +4004,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_get_capture_status",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "get_capture_status()"
     },
     {
@@ -3982,7 +4015,7 @@
       "_origin": "ast",
       "id": "state",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "state"
     },
     {
@@ -3993,7 +4026,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_rs_result",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "result"
     },
     {
@@ -4004,7 +4037,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_update_hotkeys",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "update_hotkeys()"
     },
     {
@@ -4015,7 +4048,7 @@
       "_origin": "ast",
       "id": "hotkeysettings",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "hotkeysettings"
     },
     {
@@ -4026,7 +4059,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_set_pill_visible",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "set_pill_visible()"
     },
     {
@@ -4037,18 +4070,18 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_start_capture",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "start_capture()"
     },
     {
       "label": "stop_capture()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L157",
+      "source_location": "L173",
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_stop_capture",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "stop_capture()"
     },
     {
@@ -4059,29 +4092,29 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_rs_processedpipelineresult",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "processedpipelineresult"
     },
     {
       "label": "process_captured_audio()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L176",
+      "source_location": "L192",
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_process_captured_audio",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "process_captured_audio()"
     },
     {
       "label": "get_kanban_cards()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L236",
+      "source_location": "L279",
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_get_kanban_cards",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "get_kanban_cards()"
     },
     {
@@ -4092,7 +4125,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_rs_vec",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "vec"
     },
     {
@@ -4103,18 +4136,18 @@
       "_origin": "ast",
       "id": "kanbancard",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "kanbancard"
     },
     {
       "label": "get_triggers()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L244",
+      "source_location": "L287",
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_get_triggers",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "get_triggers()"
     },
     {
@@ -4125,51 +4158,73 @@
       "_origin": "ast",
       "id": "triggerconfig",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "triggerconfig"
     },
     {
       "label": "save_triggers()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L251",
+      "source_location": "L294",
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_save_triggers",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "save_triggers()"
+    },
+    {
+      "label": "SttModelStatus",
+      "file_type": "code",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L305",
+      "_origin": "ast",
+      "id": "native_src_tauri_src_commands_sttmodelstatus",
+      "community": 5,
+      "community_name": "commands.rs",
+      "norm_label": "sttmodelstatus"
+    },
+    {
+      "label": "ensure_stt_model_ready()",
+      "file_type": "code",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L315",
+      "_origin": "ast",
+      "id": "native_src_tauri_src_commands_ensure_stt_model_ready",
+      "community": 5,
+      "community_name": "commands.rs",
+      "norm_label": "ensure_stt_model_ready()"
     },
     {
       "label": "ensure_local_llm_ready()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L264",
+      "source_location": "L347",
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_ensure_local_llm_ready",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "ensure_local_llm_ready()"
     },
     {
       "label": "get_settings()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L273",
+      "source_location": "L356",
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_get_settings",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "get_settings()"
     },
     {
       "label": "save_settings()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L278",
+      "source_location": "L361",
       "_origin": "ast",
       "id": "native_src_tauri_src_commands_save_settings",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "save_settings()"
     },
     {
@@ -4374,7 +4429,7 @@
       "label": "spawn_release_watchdog()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L202",
+      "source_location": "L223",
       "_origin": "ast",
       "id": "native_src_tauri_src_hotkeys_mod_spawn_release_watchdog",
       "community": 99,
@@ -4385,7 +4440,7 @@
       "label": "ensure_indicator_window()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L219",
+      "source_location": "L240",
       "_origin": "ast",
       "id": "native_src_tauri_src_hotkeys_mod_ensure_indicator_window",
       "community": 99,
@@ -4396,7 +4451,7 @@
       "label": "compute_bottom_right_position()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L254",
+      "source_location": "L275",
       "_origin": "ast",
       "id": "native_src_tauri_src_hotkeys_mod_compute_bottom_right_position",
       "community": 99,
@@ -4407,7 +4462,7 @@
       "label": "show_indicator()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L263",
+      "source_location": "L284",
       "_origin": "ast",
       "id": "native_src_tauri_src_hotkeys_mod_show_indicator",
       "community": 99,
@@ -4418,7 +4473,7 @@
       "label": "hide_indicator()",
       "file_type": "code",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L269",
+      "source_location": "L290",
       "_origin": "ast",
       "id": "native_src_tauri_src_hotkeys_mod_hide_indicator",
       "community": 99,
@@ -4433,7 +4488,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_lib",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "lib.rs"
     },
     {
@@ -4444,7 +4499,7 @@
       "_origin": "ast",
       "id": "native_src_tauri_src_lib_run",
       "community": 5,
-      "community_name": "AppState",
+      "community_name": "commands.rs",
       "norm_label": "run()"
     },
     {
@@ -4707,8 +4762,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "pipeline/mod.rs"
     },
     {
@@ -4718,8 +4773,8 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_pipelineerror",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "pipelineerror"
     },
     {
@@ -4729,8 +4784,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_error",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "error"
     },
     {
@@ -4740,8 +4795,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_string",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "string"
     },
     {
@@ -4751,8 +4806,8 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_processedpipelineresult",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "processedpipelineresult"
     },
     {
@@ -4762,8 +4817,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_option",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "option"
     },
     {
@@ -4773,8 +4828,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_vec",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "vec"
     },
     {
@@ -4784,8 +4839,8 @@
       "source_location": "L37",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_extractedactionitem",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "extractedactionitem"
     },
     {
@@ -4795,8 +4850,8 @@
       "source_location": "L45",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_pipelineengine",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "pipelineengine"
     },
     {
@@ -4806,8 +4861,8 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_pipelineengine_process_meeting",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": ".process_meeting()"
     },
     {
@@ -4817,8 +4872,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_rs_result",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": "result"
     },
     {
@@ -4828,8 +4883,8 @@
       "source_location": "L158",
       "_origin": "ast",
       "id": "native_src_tauri_src_pipeline_mod_pipelineengine_process_scribble",
-      "community": 3,
-      "community_name": "VaultManager",
+      "community": 13,
+      "community_name": "LLMClient",
       "norm_label": ".process_scribble()"
     },
     {
@@ -8535,8 +8590,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_app_dashboard_layout",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "(dashboard)/layout.tsx"
     },
     {
@@ -8547,8 +8602,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_app_dashboard_layout_dashboardlayout",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "dashboardlayout()"
     },
     {
@@ -8985,8 +9040,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_header_user_menu_totitlecase",
-      "community": 2,
-      "community_name": "dropdown-menu.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "totitlecase()"
     },
     {
@@ -8997,8 +9052,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_header_user_menu_headerusermenu",
-      "community": 2,
-      "community_name": "dropdown-menu.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "headerusermenu()"
     },
     {
@@ -9230,8 +9285,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_search_form",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "search-form.tsx"
     },
     {
@@ -9242,8 +9297,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_search_form_searchform",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "searchform()"
     },
     {
@@ -9276,8 +9331,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_site_header_siteheader",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "siteheader()"
     },
     {
@@ -9710,8 +9765,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_checkbox",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "checkbox.tsx"
     },
     {
@@ -9722,8 +9777,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_checkbox_checkbox",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "checkbox()"
     },
     {
@@ -10290,8 +10345,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_progress",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "progress.tsx"
     },
     {
@@ -10302,8 +10357,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_progress_progress",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "progress()"
     },
     {
@@ -10313,8 +10368,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_radio_group",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "radio-group.tsx"
     },
     {
@@ -10325,8 +10380,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_radio_group_radiogroup",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "radiogroup()"
     },
     {
@@ -10337,8 +10392,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_radio_group_radiogroupitem",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "radiogroupitem()"
     },
     {
@@ -10348,8 +10403,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_select",
-      "community": 28,
-      "community_name": "select.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "select.tsx"
     },
     {
@@ -10360,8 +10415,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_select_select",
-      "community": 28,
-      "community_name": "select.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "select()"
     },
     {
@@ -10372,8 +10427,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_select_selectgroup",
-      "community": 28,
-      "community_name": "select.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "selectgroup()"
     },
     {
@@ -10384,8 +10439,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_select_selectvalue",
-      "community": 28,
-      "community_name": "select.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "selectvalue()"
     },
     {
@@ -10396,8 +10451,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_select_selecttrigger",
-      "community": 28,
-      "community_name": "select.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "selecttrigger()"
     },
     {
@@ -10408,8 +10463,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_select_selectcontent",
-      "community": 28,
-      "community_name": "select.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "selectcontent()"
     },
     {
@@ -10420,8 +10475,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_select_selectlabel",
-      "community": 28,
-      "community_name": "select.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "selectlabel()"
     },
     {
@@ -10432,8 +10487,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_select_selectitem",
-      "community": 28,
-      "community_name": "select.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "selectitem()"
     },
     {
@@ -10444,8 +10499,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_select_selectseparator",
-      "community": 28,
-      "community_name": "select.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "selectseparator()"
     },
     {
@@ -10456,8 +10511,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_select_selectscrollupbutton",
-      "community": 28,
-      "community_name": "select.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "selectscrollupbutton()"
     },
     {
@@ -10468,8 +10523,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_select_selectscrolldownbutton",
-      "community": 28,
-      "community_name": "select.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "selectscrolldownbutton()"
     },
     {
@@ -10741,8 +10796,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_sidebar_sidebarinput",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 7,
+      "community_name": "cn",
       "norm_label": "sidebarinput()"
     },
     {
@@ -10967,8 +11022,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_skeleton",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "web/src/components/ui/skeleton.tsx"
     },
     {
@@ -10979,8 +11034,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_skeleton_skeleton",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "skeleton()"
     },
     {
@@ -10990,8 +11045,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_slider",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "slider.tsx"
     },
     {
@@ -11002,8 +11057,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_slider_slider",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "slider()"
     },
     {
@@ -11236,8 +11291,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_textarea",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "textarea.tsx"
     },
     {
@@ -11248,8 +11303,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_textarea_textarea",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "textarea()"
     },
     {
@@ -11259,8 +11314,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_components_ui_tooltip",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "tooltip.tsx"
     },
     {
@@ -11271,8 +11326,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_tooltip_tooltipprovider",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "tooltipprovider()"
     },
     {
@@ -11283,8 +11338,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_tooltip_tooltip",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "tooltip()"
     },
     {
@@ -11295,8 +11350,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_tooltip_tooltiptrigger",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "tooltiptrigger()"
     },
     {
@@ -11307,8 +11362,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_components_ui_tooltip_tooltipcontent",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "tooltipcontent()"
     },
     {
@@ -11318,8 +11373,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_contexts_user_context",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "user-context.tsx"
     },
     {
@@ -11331,8 +11386,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "web_src_contexts_user_context_user",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "user"
     },
     {
@@ -11342,8 +11397,8 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "web_src_contexts_user_context_usercontext",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "usercontext"
     },
     {
@@ -11354,8 +11409,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_contexts_user_context_userprovider",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "userprovider()"
     },
     {
@@ -11366,8 +11421,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_contexts_user_context_useusercontext",
-      "community": 2,
-      "community_name": "dropdown-menu.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "useusercontext()"
     },
     {
@@ -11400,8 +11455,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_lib_auth",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "auth.ts"
     },
     {
@@ -11412,8 +11467,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_lib_auth_auth",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "auth()"
     },
     {
@@ -11424,8 +11479,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_lib_auth_currentuser",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "currentuser()"
     },
     {
@@ -11435,8 +11490,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_lib_roles",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "roles.ts"
     },
     {
@@ -11448,8 +11503,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "web_src_lib_roles_userrole",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "userrole"
     },
     {
@@ -11461,8 +11516,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "web_src_lib_roles_volunteertype",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "volunteertype"
     },
     {
@@ -11474,8 +11529,8 @@
       "_callable_class": true,
       "_origin": "ast",
       "id": "web_src_lib_roles_userappmetadata",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "userappmetadata"
     },
     {
@@ -11486,8 +11541,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_lib_roles_checkrole",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "checkrole()"
     },
     {
@@ -11498,8 +11553,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_lib_roles_getuserrole",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "getuserrole()"
     },
     {
@@ -11510,8 +11565,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_lib_roles_istrueadmin",
-      "community": 73,
-      "community_name": "sidebar.tsx",
+      "community": 28,
+      "community_name": "(dashboard)/layout.tsx",
       "norm_label": "istrueadmin()"
     },
     {
@@ -11594,8 +11649,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "web_src_lib_utils",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "web/src/lib/utils.ts"
     },
     {
@@ -11618,8 +11673,8 @@
       "_callable": true,
       "_origin": "ast",
       "id": "web_src_lib_utils_slugify",
-      "community": 7,
-      "community_name": "cn",
+      "community": 20,
+      "community_name": "components/page.tsx",
       "norm_label": "slugify()"
     },
     {
@@ -17713,7 +17768,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L176",
+      "source_location": "L192",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -18234,7 +18289,18 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L119",
+      "source_location": "L101",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "native_src_tauri_src_capture_stt",
+      "target": "native_src_tauri_src_capture_stt_ensure_default_model",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/capture/stt.rs",
+      "source_location": "L204",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_capture_stt",
@@ -18242,10 +18308,22 @@
       "confidence_score": 1.0
     },
     {
+      "relation": "imports_from",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/capture/stt.rs",
+      "source_location": "L2",
+      "weight": 1.0,
+      "context": "import",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_capture_stt",
+      "target": "native_src_tauri_src_capture_stt_rs_path",
+      "confidence_score": 1.0
+    },
+    {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L22",
+      "source_location": "L107",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_capture_stt",
@@ -18256,7 +18334,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L9",
+      "source_location": "L11",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_capture_stt",
@@ -18267,7 +18345,19 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L42",
+      "source_location": "L101",
+      "weight": 1.0,
+      "context": "generic_arg",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_capture_stt_ensure_default_model",
+      "target": "native_src_tauri_src_capture_stt_stterror",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/capture/stt.rs",
+      "source_location": "L127",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -18279,7 +18369,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L17",
+      "source_location": "L19",
       "weight": 1.0,
       "context": "field",
       "_origin": "ast",
@@ -18291,7 +18381,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L24",
+      "source_location": "L109",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -18303,7 +18393,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L42",
+      "source_location": "L127",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -18315,7 +18405,55 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L24",
+      "source_location": "L101",
+      "weight": 1.0,
+      "context": "parameter_type",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_capture_stt_ensure_default_model",
+      "target": "native_src_tauri_src_capture_stt_rs_path",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/capture/stt.rs",
+      "source_location": "L101",
+      "weight": 1.0,
+      "context": "generic_arg",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_capture_stt_ensure_default_model",
+      "target": "native_src_tauri_src_capture_stt_rs_pathbuf",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/capture/stt.rs",
+      "source_location": "L101",
+      "weight": 1.0,
+      "context": "return_type",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_capture_stt_ensure_default_model",
+      "target": "native_src_tauri_src_capture_stt_rs_result",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/capture/stt.rs",
+      "source_location": "L127",
+      "weight": 1.0,
+      "context": "return_type",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_capture_stt_sttengine_transcribe",
+      "target": "native_src_tauri_src_capture_stt_rs_result",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/capture/stt.rs",
+      "source_location": "L109",
       "weight": 1.0,
       "context": "field",
       "_origin": "ast",
@@ -18327,7 +18465,7 @@
       "relation": "implements",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L27",
+      "source_location": "L112",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_capture_stt_sttengine",
@@ -18338,7 +18476,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L24",
+      "source_location": "L109",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -18350,7 +18488,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L24",
+      "source_location": "L109",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -18362,7 +18500,7 @@
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L28",
+      "source_location": "L113",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_capture_stt_sttengine",
@@ -18373,7 +18511,7 @@
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L34",
+      "source_location": "L119",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_capture_stt_sttengine",
@@ -18384,7 +18522,7 @@
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L42",
+      "source_location": "L127",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_capture_stt_sttengine",
@@ -18395,7 +18533,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L24",
+      "source_location": "L109",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -18419,7 +18557,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L42",
+      "source_location": "L127",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -18431,7 +18569,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L28",
+      "source_location": "L113",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -18444,7 +18582,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L29",
+      "source_location": "L114",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_capture_stt_sttengine_default",
@@ -18456,7 +18594,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L72",
+      "source_location": "L157",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_capture_stt_sttengine_transcribe",
@@ -18467,7 +18605,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L34",
+      "source_location": "L119",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -18480,7 +18618,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L60",
+      "source_location": "L145",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_capture_stt_sttengine_transcribe",
@@ -18492,7 +18630,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L95",
+      "source_location": "L180",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_capture_stt_sttengine_transcribe",
@@ -18503,19 +18641,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L42",
-      "weight": 1.0,
-      "context": "return_type",
-      "_origin": "ast",
-      "source": "native_src_tauri_src_capture_stt_sttengine_transcribe",
-      "target": "native_src_tauri_src_capture_stt_rs_result",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "references",
-      "confidence": "EXTRACTED",
-      "source_file": "native/src-tauri/src/capture/stt.rs",
-      "source_location": "L119",
+      "source_location": "L204",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -18571,11 +18697,22 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L264",
+      "source_location": "L347",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands",
       "target": "native_src_tauri_src_commands_ensure_local_llm_ready",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L315",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands",
+      "target": "native_src_tauri_src_commands_ensure_stt_model_ready",
       "confidence_score": 1.0
     },
     {
@@ -18593,7 +18730,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L236",
+      "source_location": "L279",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands",
@@ -18604,7 +18741,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L273",
+      "source_location": "L356",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands",
@@ -18615,7 +18752,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L244",
+      "source_location": "L287",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands",
@@ -18626,7 +18763,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L176",
+      "source_location": "L192",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands",
@@ -18661,7 +18798,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L278",
+      "source_location": "L361",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands",
@@ -18672,7 +18809,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L251",
+      "source_location": "L294",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands",
@@ -18705,11 +18842,22 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L157",
+      "source_location": "L173",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands",
       "target": "native_src_tauri_src_commands_stop_capture",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L305",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands",
+      "target": "native_src_tauri_src_commands_sttmodelstatus",
       "confidence_score": 1.0
     },
     {
@@ -18799,6 +18947,18 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L307",
+      "weight": 1.0,
+      "context": "field",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands_sttmodelstatus",
+      "target": "native_src_tauri_src_commands_rs_string",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
       "source_location": "L25",
       "weight": 1.0,
       "context": "parameter_type",
@@ -18824,7 +18984,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L166",
+      "source_location": "L182",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_stop_capture",
@@ -18883,7 +19043,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L157",
+      "source_location": "L173",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -18918,11 +19078,23 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L264",
+      "source_location": "L347",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_ensure_local_llm_ready",
+      "target": "native_src_tauri_src_commands_commanderror",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L315",
+      "weight": 1.0,
+      "context": "generic_arg",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands_ensure_stt_model_ready",
       "target": "native_src_tauri_src_commands_commanderror",
       "confidence_score": 1.0
     },
@@ -18942,7 +19114,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L236",
+      "source_location": "L279",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -18954,7 +19126,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L273",
+      "source_location": "L356",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -18966,7 +19138,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L244",
+      "source_location": "L287",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -18978,7 +19150,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L176",
+      "source_location": "L192",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -18990,7 +19162,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L278",
+      "source_location": "L361",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19002,7 +19174,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L251",
+      "source_location": "L294",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19038,7 +19210,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L157",
+      "source_location": "L173",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19075,7 +19247,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L240",
+      "source_location": "L283",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_get_kanban_cards",
@@ -19087,7 +19259,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L247",
+      "source_location": "L290",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_get_triggers",
@@ -19099,7 +19271,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L188",
+      "source_location": "L231",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_process_captured_audio",
@@ -19111,7 +19283,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L284",
+      "source_location": "L367",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_save_settings",
@@ -19123,7 +19295,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L257",
+      "source_location": "L300",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_save_triggers",
@@ -19159,7 +19331,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L165",
+      "source_location": "L181",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_stop_capture",
@@ -19241,11 +19413,23 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L264",
+      "source_location": "L347",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_ensure_local_llm_ready",
+      "target": "native_src_tauri_src_commands_appstate",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L315",
+      "weight": 1.0,
+      "context": "generic_arg",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands_ensure_stt_model_ready",
       "target": "native_src_tauri_src_commands_appstate",
       "confidence_score": 1.0
     },
@@ -19265,7 +19449,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L236",
+      "source_location": "L279",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19277,7 +19461,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L273",
+      "source_location": "L356",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19289,7 +19473,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L244",
+      "source_location": "L287",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19301,7 +19485,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L176",
+      "source_location": "L192",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19313,7 +19497,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L278",
+      "source_location": "L361",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19325,7 +19509,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L251",
+      "source_location": "L294",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19361,7 +19545,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L157",
+      "source_location": "L173",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19397,7 +19581,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L273",
+      "source_location": "L356",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19409,7 +19593,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L278",
+      "source_location": "L361",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -19434,7 +19618,31 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L283",
+      "source_location": "L334",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands_ensure_stt_model_ready",
+      "target": "native_src_tauri_src_commands_appstate_settings_path",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L217",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands_process_captured_audio",
+      "target": "native_src_tauri_src_commands_appstate_settings_path",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L366",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_save_settings",
@@ -19493,7 +19701,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L264",
+      "source_location": "L347",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -19505,7 +19713,19 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L236",
+      "source_location": "L315",
+      "weight": 1.0,
+      "context": "parameter_type",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands_ensure_stt_model_ready",
+      "target": "state",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L279",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -19517,7 +19737,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L273",
+      "source_location": "L356",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -19529,7 +19749,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L244",
+      "source_location": "L287",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -19541,7 +19761,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L176",
+      "source_location": "L192",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -19553,7 +19773,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L278",
+      "source_location": "L361",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -19565,7 +19785,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L251",
+      "source_location": "L294",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -19601,7 +19821,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L157",
+      "source_location": "L173",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -19625,7 +19845,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L264",
+      "source_location": "L347",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -19637,7 +19857,19 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L236",
+      "source_location": "L315",
+      "weight": 1.0,
+      "context": "return_type",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands_ensure_stt_model_ready",
+      "target": "native_src_tauri_src_commands_rs_result",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L279",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -19649,7 +19881,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L273",
+      "source_location": "L356",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -19661,7 +19893,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L244",
+      "source_location": "L287",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -19673,7 +19905,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L176",
+      "source_location": "L192",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -19685,7 +19917,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L278",
+      "source_location": "L361",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -19697,7 +19929,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L251",
+      "source_location": "L294",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -19733,7 +19965,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L157",
+      "source_location": "L173",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -19770,7 +20002,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L169",
+      "source_location": "L185",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_commands_stop_capture",
@@ -19781,7 +20013,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L157",
+      "source_location": "L173",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19793,7 +20025,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L176",
+      "source_location": "L192",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19805,7 +20037,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L236",
+      "source_location": "L279",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19817,7 +20049,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L236",
+      "source_location": "L279",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19829,7 +20061,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L244",
+      "source_location": "L287",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19841,7 +20073,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L251",
+      "source_location": "L294",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -19853,7 +20085,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L244",
+      "source_location": "L287",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19865,7 +20097,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L251",
+      "source_location": "L294",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19877,7 +20109,19 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/commands.rs",
-      "source_location": "L264",
+      "source_location": "L315",
+      "weight": 1.0,
+      "context": "generic_arg",
+      "_origin": "ast",
+      "source": "native_src_tauri_src_commands_ensure_stt_model_ready",
+      "target": "native_src_tauri_src_commands_sttmodelstatus",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "native/src-tauri/src/commands.rs",
+      "source_location": "L347",
       "weight": 1.0,
       "context": "generic_arg",
       "_origin": "ast",
@@ -19958,7 +20202,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L254",
+      "source_location": "L275",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_hotkeys_mod",
@@ -19980,7 +20224,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L219",
+      "source_location": "L240",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_hotkeys_mod",
@@ -19991,7 +20235,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L269",
+      "source_location": "L290",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_hotkeys_mod",
@@ -20035,7 +20279,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L263",
+      "source_location": "L284",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_hotkeys_mod",
@@ -20046,7 +20290,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L202",
+      "source_location": "L223",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_hotkeys_mod",
@@ -20115,7 +20359,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L254",
+      "source_location": "L275",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -20127,7 +20371,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L219",
+      "source_location": "L240",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -20139,7 +20383,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L269",
+      "source_location": "L290",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -20175,7 +20419,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L263",
+      "source_location": "L284",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -20187,7 +20431,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L202",
+      "source_location": "L223",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -20379,7 +20623,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L202",
+      "source_location": "L223",
       "weight": 1.0,
       "context": "parameter_type",
       "_origin": "ast",
@@ -20416,7 +20660,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L214",
+      "source_location": "L235",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_hotkeys_mod_spawn_release_watchdog",
@@ -20427,7 +20671,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L254",
+      "source_location": "L275",
       "weight": 1.0,
       "context": "return_type",
       "_origin": "ast",
@@ -20440,7 +20684,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "native/src-tauri/src/hotkeys/mod.rs",
-      "source_location": "L225",
+      "source_location": "L246",
       "weight": 1.0,
       "_origin": "ast",
       "source": "native_src_tauri_src_hotkeys_mod_ensure_indicator_window",
@@ -38008,5 +38252,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "ff0fdb8ba1711a013f7324e79c7a772c74d6d08e"
+  "built_at_commit": "70b5995df97909c56eaa06c995458075f080249f"
 }

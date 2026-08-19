@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use thiserror::Error;
 
+use tauri::{AppHandle, Emitter};
+
 pub use stt::{SttEngine, SttError};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
@@ -82,7 +84,12 @@ impl AudioRecorder {
             .map(|s| s.mode.clone())
     }
 
-    pub fn start(&self, mode: &str, output_dir: &Path) -> Result<String, CaptureError> {
+    pub fn start(
+        &self,
+        mode: &str,
+        output_dir: &Path,
+        app: Option<AppHandle>,
+    ) -> Result<String, CaptureError> {
         let mut session = self.active_session.lock().unwrap();
         if session.is_some() {
             return Err(CaptureError::SessionAlreadyActive);
@@ -95,7 +102,7 @@ impl AudioRecorder {
 
         let (stop_tx, stop_rx) = std_mpsc::channel();
         let (done_tx, done_rx) = std_mpsc::channel();
-        spawn_capture_thread(stop_rx, done_tx);
+        spawn_capture_thread(stop_rx, done_tx, app);
 
         *session = Some(ActiveSession {
             session_id: session_id.clone(),
@@ -151,14 +158,10 @@ impl AudioRecorder {
     }
 }
 
-/// Runs entirely on its own OS thread because `cpal::Stream` is not `Send` on
-/// every platform backend — it must be built, played, and dropped on the
-/// thread that created it. `stop_rx` blocks the thread until `AudioRecorder::stop`
-/// signals it; the captured samples (plain `Vec<f32>`, which *is* `Send`) are
-/// handed back over `done_tx`.
 fn spawn_capture_thread(
     stop_rx: std_mpsc::Receiver<()>,
     done_tx: std_mpsc::Sender<Result<(Vec<f32>, u32), String>>,
+    app: Option<AppHandle>,
 ) {
     std::thread::spawn(move || {
         let result = (|| -> Result<(Vec<f32>, u32), String> {
@@ -177,31 +180,59 @@ fn spawn_capture_thread(
             let err_fn =
                 |err: cpal::StreamError| tracing::error!("cpal input stream error: {}", err);
 
+            let last_emit = Arc::new(Mutex::new(std::time::Instant::now()));
+
             let stream = match config.sample_format() {
-                cpal::SampleFormat::F32 => device.build_input_stream(
-                    &config.into(),
-                    move |data: &[f32], _| push_mono(&samples_cb, data, channels, |s| s),
-                    err_fn,
-                    None,
-                ),
-                cpal::SampleFormat::I16 => device.build_input_stream(
-                    &config.into(),
-                    move |data: &[i16], _| {
-                        push_mono(&samples_cb, data, channels, |s| s as f32 / i16::MAX as f32)
-                    },
-                    err_fn,
-                    None,
-                ),
-                cpal::SampleFormat::U16 => device.build_input_stream(
-                    &config.into(),
-                    move |data: &[u16], _| {
-                        push_mono(&samples_cb, data, channels, |s| {
-                            (s as f32 - u16::MAX as f32 / 2.0) / (u16::MAX as f32 / 2.0)
-                        })
-                    },
-                    err_fn,
-                    None,
-                ),
+                cpal::SampleFormat::F32 => {
+                    let app_ref = app.clone();
+                    let emit_ref = last_emit.clone();
+                    device.build_input_stream(
+                        &config.into(),
+                        move |data: &[f32], _| {
+                            push_mono_with_level(&samples_cb, data, channels, |s| s, &app_ref, &emit_ref)
+                        },
+                        err_fn,
+                        None,
+                    )
+                }
+                cpal::SampleFormat::I16 => {
+                    let app_ref = app.clone();
+                    let emit_ref = last_emit.clone();
+                    device.build_input_stream(
+                        &config.into(),
+                        move |data: &[i16], _| {
+                            push_mono_with_level(
+                                &samples_cb,
+                                data,
+                                channels,
+                                |s| s as f32 / i16::MAX as f32,
+                                &app_ref,
+                                &emit_ref,
+                            )
+                        },
+                        err_fn,
+                        None,
+                    )
+                }
+                cpal::SampleFormat::U16 => {
+                    let app_ref = app.clone();
+                    let emit_ref = last_emit.clone();
+                    device.build_input_stream(
+                        &config.into(),
+                        move |data: &[u16], _| {
+                            push_mono_with_level(
+                                &samples_cb,
+                                data,
+                                channels,
+                                |s| (s as f32 - u16::MAX as f32 / 2.0) / (u16::MAX as f32 / 2.0),
+                                &app_ref,
+                                &emit_ref,
+                            )
+                        },
+                        err_fn,
+                        None,
+                    )
+                }
                 other => return Err(format!("Unsupported input sample format: {:?}", other)),
             }
             .map_err(|e| format!("Failed to build input stream: {}", e))?;
@@ -210,8 +241,6 @@ fn spawn_capture_thread(
                 .play()
                 .map_err(|e| format!("Failed to start input stream: {}", e))?;
 
-            // Block this thread until the recorder signals stop; the stream
-            // keeps capturing into `samples` the whole time.
             let _ = stop_rx.recv();
             drop(stream);
 
@@ -223,21 +252,44 @@ fn spawn_capture_thread(
     });
 }
 
-fn push_mono<T: Copy>(
+fn compute_rms_f32(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum_sq: f32 = samples.iter().map(|&s| s * s).sum();
+    let mean_sq = sum_sq / samples.len() as f32;
+    (mean_sq.sqrt() * 3.5).clamp(0.0, 1.0)
+}
+
+fn push_mono_with_level<T: Copy>(
     buf: &Arc<Mutex<Vec<f32>>>,
     data: &[T],
     channels: usize,
     to_f32: impl Fn(T) -> f32,
+    app: &Option<AppHandle>,
+    last_emit: &Arc<Mutex<std::time::Instant>>,
 ) {
-    let mut guard = buf.lock().unwrap();
+    let mut chunk = Vec::with_capacity(data.len() / channels.max(1));
     if channels > 1 {
         for frame in data.chunks(channels) {
             let sum: f32 = frame.iter().map(|s| to_f32(*s)).sum();
-            guard.push(sum / channels as f32);
+            chunk.push(sum / channels as f32);
         }
     } else {
-        guard.extend(data.iter().map(|s| to_f32(*s)));
+        chunk.extend(data.iter().map(|s| to_f32(*s)));
     }
+
+    if let Some(ref a) = app {
+        let mut last_guard = last_emit.lock().unwrap();
+        if last_guard.elapsed() >= Duration::from_millis(40) {
+            *last_guard = std::time::Instant::now();
+            let level = compute_rms_f32(&chunk);
+            let _ = a.emit("capture-level", serde_json::json!({ "level": level }));
+        }
+    }
+
+    let mut guard = buf.lock().unwrap();
+    guard.extend(chunk);
 }
 
 /// Naive linear-interpolation resampler. Good enough for speech-to-text

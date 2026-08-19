@@ -145,3 +145,101 @@ This log records material architectural, technical, and product decisions for Re
 - **Reason**: Remote tunneling introduces network complexity, firewall issues, and desktop uptime dependencies. Cloud BaaS ensures reliable web access. Supabase auto-pause is mitigated with client-side status checks.
 - **Alternatives considered**: Tailscale/ngrok tunnel to local machine; custom auth server.
 - **Impact**: Clear separation: local mode uses Markdown vault + LanceDB; hybrid mode syncs to Supabase.
+
+---
+
+### Decision 18 (PTT-001): Preserve Backend Ownership of Capture State
+- **Context**: UI floating dictation pill overlay redesign vs backend capture state management.
+- **Decision made**: Rust backend (`AudioRecorder`, `hotkeys/mod.rs`, `commands.rs`) remains the single source of truth for capture session state.
+- **Reason**: Prevents UI/backend state drift, duplicate capture triggers, or lost recording sessions.
+- **Alternatives considered**: Frontend-owned `isRecording` state in React.
+- **Impact**: React floating pill acts strictly as a consumer of backend events (`capture-state-changed`, `capture-level`).
+
+---
+
+### Decision 19 (PTT-002): Reuse Existing AudioRecorder
+- **Context**: Push-to-talk pill overlay recording logic.
+- **Decision made**: The floating pill overlay must consume the existing `AudioRecorder` rather than initializing a separate recording pipeline.
+- **Reason**: Avoids duplicate microphone capture threads, resource contention, and session conflicts.
+- **Impact**: Shared session management across global hotkeys and UI affordances.
+
+---
+
+### Decision 20 (PTT-003): Reuse Existing Local whisper-rs STT
+- **Context**: Speech transcription for push-to-talk dictation.
+- **Decision made**: PTT dictation uses Relay's existing local `whisper-rs` STT pipeline (with heuristic fallback when unconfigured).
+- **Reason**: Preserves zero-cost local operation and offline privacy commitments.
+- **Impact**: Fast local transcription without external API dependencies.
+
+---
+
+### Decision 21 (PTT-004): Floating Pill as Control/Presentation Surface Only
+- **Context**: Responsibility boundary for floating dictation pill.
+- **Decision made**: The pill window is purely a presentation and control surface. A UI crash, hide, or unmount must never corrupt active capture or text injection.
+- **Reason**: Decouples UI overlay rendering from background audio recording and OS focus injection.
+- **Impact**: Dictation completes reliably even if the overlay window is minimized or hidden.
+
+---
+
+### Decision 22 (PTT-005): Preserve Global Push-to-Talk Hotkey Interaction
+- **Context**: Interaction model for OS-wide dictation.
+- **Decision made**: Press-and-hold global hotkey (`Ctrl+Space`) with release-triggered text injection remains the primary interaction model.
+- **Reason**: Delivers fast, frictionless universal dictation across all desktop applications.
+- **Impact**: Native `tauri-plugin-global-shortcut` press/release handlers remain core trigger paths.
+
+---
+
+### Decision 23 (PTT-006): Secondary Click-to-Talk Affordance
+- **Context**: Mouse-driven dictation trigger on floating pill overlay.
+- **Decision made**: Support click-to-talk on the floating pill using the exact same backend state machine.
+- **Reason**: Provides accessibility and mouse convenience without introducing parallel state pipelines.
+- **Impact**: Prevents simultaneous mouse/keyboard capture sessions via backend session locks.
+
+---
+
+### Decision 24 (PTT-007): Zero OS Focus Theft
+- **Context**: Window focus management during text injection.
+- **Decision made**: The floating dictation pill overlay must never steal OS window focus (`focused(false)`, `always_on_top(true)`, `skip_taskbar(true)`).
+- **Reason**: OS text injection via `enigo` relies on preserving the user's active application target (Chrome, VS Code, Slack, Notepad, etc.).
+- **Impact**: Transcribed text reliably lands in the user's target input field.
+
+---
+
+### Decision 25 (PTT-008): Compact State Visualization Over Live Transcripts
+- **Context**: On-screen overlay content during speech capture.
+- **Decision made**: The floating pill communicates state (`IDLE` → `LISTENING` → `TRANSCRIBING` → `SUCCESS` / `ERROR`) and live audio level rather than streaming raw transcripts.
+- **Reason**: Keeps overlay compact (~420x72px), non-distracting, and privacy-preserving.
+- **Impact**: Minimal visual footprint on desktop.
+
+---
+
+### Decision 26 (PTT-009): Real Audio RMS Level Waveform
+- **Context**: Visual feedback during active microphone recording.
+- **Decision made**: Drive the listening waveform from real-time Root Mean Square (RMS) audio level metrics calculated in Rust and emitted at ~25Hz.
+- **Reason**: Gives immediate, tactile visual confirmation of microphone pickup without IPC bloat.
+- **Impact**: Emits lightweight `{ level: f32 }` payload every 40ms during recording.
+
+---
+
+### Decision 27 (PTT-010): Structured Capture Event Architecture
+- **Context**: Event payload format for `capture-state-changed`.
+- **Decision made**: Extend `capture-state-changed` events with structured state machine status (`IDLE`, `STARTING`, `LISTENING`, `STOPPING`, `TRANSCRIBING`, `PROCESSING`, `INJECTING`, `SUCCESS`, `ERROR`, `CANCELLED`, `NO_SPEECH`).
+- **Reason**: Provides complete state synchronization across all application windows.
+- **Impact**: Single unified state event schema for desktop overlay and main window.
+
+---
+
+### Decision 28 (PTT-011): Defer Dictation Indicator Consolidation
+- **Context**: Coexistence of `dictation-pill` and `dictation-indicator` windows.
+- **Decision made**: Preserve `dictation-indicator` until the upgraded `dictation-pill` passes full regression testing across all platforms.
+- **Reason**: Avoids breaking existing shortcut flows during transition.
+- **Impact**: Safe, incremental migration to unified pill overlay.
+
+---
+
+### Decision 29 (PTT-012): Defer Active-Monitor Utility Positioning
+- **Context**: Multi-monitor overlay placement.
+- **Decision made**: Use bottom-center primary monitor positioning for MVP, deferring active-window monitor auto-detection to post-MVP utility.
+- **Reason**: Focuses immediate scope on core PTT reliability and focus preservation.
+- **Impact**: Clean, predictable default overlay placement across single and multi-monitor setups.
+

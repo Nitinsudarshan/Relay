@@ -35,13 +35,13 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/commands.rs": {
-    "mtime": 1787128613.0630543,
-    "ast_hash": "b5d33af6266cae1a209dc7e1ea515cb0",
+    "mtime": 1787132919.442917,
+    "ast_hash": "ac3767fbf5c023d6075f0020083dfaae",
     "semantic_hash": ""
   },
   "native/src-tauri/src/lib.rs": {
-    "mtime": 1787128613.0979087,
-    "ast_hash": "9611ff2ed8a52099064bf95977d6cbe5",
+    "mtime": 1787132919.4762938,
+    "ast_hash": "3514045f6514438f406e3479d8fa4af0",
     "semantic_hash": ""
   },
   "native/src-tauri/src/main.rs": {
@@ -100,8 +100,8 @@
     "semantic_hash": ""
   },
   "native/src/components/settings/ProviderSettings.tsx": {
-    "mtime": 1787128613.2581472,
-    "ast_hash": "88cc7fbf7edc05f814e3ae71ca1f8119",
+    "mtime": 1787132919.501287,
+    "ast_hash": "57d2765a67dcbff69396e265ea7dbb07",
     "semantic_hash": ""
   },
   "native/src/components/settings/TriggerSettings.tsx": {
@@ -110,8 +110,8 @@
     "semantic_hash": ""
   },
   "native/src/main.tsx": {
-    "mtime": 1787128613.266682,
-    "ast_hash": "d444967ce815e2bea86083846b92d934",
+    "mtime": 1787132919.5354624,
+    "ast_hash": "35fdfd7c4129f37e44ef1ff081fe659a",
     "semantic_hash": ""
   },
   "native/src/types/index.ts": {
@@ -715,8 +715,8 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/capture/stt.rs": {
-    "mtime": 1787125178.9422796,
-    "ast_hash": "512db13e4021890035e94b9b564002b9",
+    "mtime": 1787132919.417867,
+    "ast_hash": "86a387ec0ee47df8934ce26b589c8f5a",
     "semantic_hash": ""
   },
   "native/src-tauri/src/hotkeys/injection.rs": {
@@ -725,8 +725,8 @@
     "semantic_hash": ""
   },
   "native/src-tauri/src/hotkeys/mod.rs": {
-    "mtime": 1787128613.083358,
-    "ast_hash": "f53b8e239b58775038705a97fe5a63ea",
+    "mtime": 1787132919.4597435,
+    "ast_hash": "5091000732d7efb809bfe45c5a20b021",
     "semantic_hash": ""
   },
   "native/src-tauri/src/pipeline/chat.rs": {

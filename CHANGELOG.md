@@ -1,5 +1,15 @@
 # Relay — Changelog
 
+## [0.3.2] - 2026-08-19
+
+### Push-to-Talk Floating Pill Upgrade
+
+- **Push-to-Talk Overlay Redesign (`DictationPill.tsx`, `commands.rs`)**:
+  - Bound overlay states directly to backend capture machine (`IDLE` → `LISTENING` → `TRANSCRIBING` → `SUCCESS` / `ERROR`).
+  - Added real-time RMS microphone audio level calculations (`compute_rms_f32`) emitted at ~25Hz to drive overlay waveform animation.
+  - Preserved zero-focus-theft properties (`focused(false)`) on floating overlay window for reliable OS text injection (`enigo`).
+  - Recorded architectural decisions **PTT-001** through **PTT-012** in [`docs/decisions.md`](file:///d:/Projects/Relay/docs/decisions.md).
+
 ## [0.3.1] - 2026-08-19
 
 ### Model Management, Hotkey Recorder & Floating Overlay

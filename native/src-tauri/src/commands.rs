@@ -20,14 +20,37 @@ pub const CAPTURE_STATE_EVENT: &str = "capture-state-changed";
 pub struct CaptureStatus {
     pub active: bool,
     pub mode: Option<String>,
+    pub status: String,
+    pub message: Option<String>,
 }
 
 pub fn emit_capture_state(app: &AppHandle, recorder: &AudioRecorder) {
-    let status = CaptureStatus {
-        active: recorder.is_active(),
-        mode: recorder.active_mode(),
+    let mode = recorder.active_mode();
+    let active = recorder.is_active();
+    let status = if active { "LISTENING" } else { "IDLE" };
+    let payload = CaptureStatus {
+        active,
+        mode,
+        status: status.to_string(),
+        message: None,
     };
-    let _ = app.emit(CAPTURE_STATE_EVENT, status);
+    let _ = app.emit(CAPTURE_STATE_EVENT, payload);
+}
+
+pub fn emit_capture_status_event(
+    app: &AppHandle,
+    active: bool,
+    mode: Option<String>,
+    status: &str,
+    message: Option<String>,
+) {
+    let payload = CaptureStatus {
+        active,
+        mode,
+        status: status.to_string(),
+        message,
+    };
+    let _ = app.emit(CAPTURE_STATE_EVENT, payload);
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -61,9 +84,14 @@ impl AppState {
 
 #[tauri::command]
 pub async fn get_capture_status(state: State<'_, AppState>) -> Result<CaptureStatus, CommandError> {
+    let active = state.recorder.is_active();
+    let mode = state.recorder.active_mode();
+    let status = if active { "LISTENING" } else { "IDLE" };
     Ok(CaptureStatus {
-        active: state.recorder.is_active(),
-        mode: state.recorder.active_mode(),
+        active,
+        mode,
+        status: status.to_string(),
+        message: None,
     })
 }
 
@@ -127,7 +155,7 @@ pub async fn start_capture(
     let audio_dir = state.config_dir.join("audio");
     let result = state
         .recorder
-        .start(&mode, &audio_dir)
+        .start(&mode, &audio_dir, Some(app.clone()))
         .map_err(|e| CommandError::new("CAPTURE_FAILED", &e.to_string()));
     emit_capture_state(&app, &state.recorder);
 
