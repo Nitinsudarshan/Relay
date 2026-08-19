@@ -2,12 +2,13 @@
 
 import React, { useState } from "react";
 import { toast } from "sonner";
-import { Toaster } from "@/components/ui/sonner";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import Input from "./Input";
-import { MiniLoader } from "./mini-loader";
-import { LoadingSpinner } from "./loading-view";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { RelayLogo } from "@/components/relay-logo";
+import { ArrowLeft, Loader2, Cloud, ShieldCheck } from "lucide-react";
 
 type AuthMode = 'login' | 'forgot' | 'reset';
 
@@ -16,159 +17,155 @@ export function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isSocialLoading, setIsSocialLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  const handleGoogleLogin = async () => {
-    setIsSocialLoading(true);
-    setError(null);
-    try {
-      // Mock login delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      toast.success("Login successful (Mocked)");
-      router.push("/");
-    } catch (err: any) {
-      setError(err.message || "Failed to connect.");
-      toast.error("Login failed");
-    } finally {
-      setIsSocialLoading(false);
-    }
-  };
-
-  const handleAuth = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      if (mode === 'forgot') {
-        toast.success("Password reset link sent to your email!");
-        setMode('login');
-      } else if (mode === 'reset') {
-        toast.success("Password updated successfully!");
-        setMode('login');
-      }
+      await new Promise(resolve => setTimeout(resolve, 800));
+      toast.success("Signed in to Relay Cloud");
+      router.push("/");
     } catch (err: any) {
-      setError(err.message || "An error occurred");
-      toast.error(err.message || "Authentication failed");
+      setError(err.message || "Authentication failed");
+      toast.error("Login failed");
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="flex items-center justify-center bg-transparent py-4 transition-all duration-500">
-      <div className="w-full max-w-[360px] bg-white dark:bg-slate-900 rounded-lg shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-500">
-        <Toaster />
-        <div className="p-7 md:p-8">
-          <header className="text-center mb-7">
-            <div className="flex justify-center mb-4">
-              <MiniLoader />
+    <Card className="w-full max-w-sm border-border bg-card shadow-2xl">
+      <CardHeader className="text-center pb-4 space-y-2">
+        <div className="flex justify-center mb-1">
+          <div className="w-12 h-12 rounded-2xl bg-card border border-border flex items-center justify-center shadow-md">
+            <RelayLogo className="w-7 h-7" />
+          </div>
+        </div>
+        <div className="flex justify-center gap-1.5 mb-1">
+          <Badge variant="default" className="text-[10px] gap-1 px-2 py-0">
+            <Cloud className="w-3 h-3" /> Hybrid Sync
+          </Badge>
+          <Badge variant="emerald" className="text-[10px] gap-1 px-2 py-0">
+            <ShieldCheck className="w-3 h-3" /> Supabase Auth
+          </Badge>
+        </div>
+        <CardTitle className="text-xl font-bold text-foreground">
+          {mode === 'login' && 'Relay Cloud Access'}
+          {mode === 'forgot' && 'Reset Password'}
+          {mode === 'reset' && 'Update Password'}
+        </CardTitle>
+        <CardDescription className="text-xs">
+          {mode === 'login' && 'Sign in to access your synced vault notes & Kanban state'}
+          {mode === 'forgot' && 'Enter your email to receive a password reset link'}
+          {mode === 'reset' && 'Enter your new password below'}
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {error && (
+          <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs font-medium">
+            {error}
+          </div>
+        )}
+
+        {mode === 'login' && (
+          <form onSubmit={handleLogin} className="space-y-3.5">
+            <div>
+              <label htmlFor="login-email" className="block text-xs font-medium text-muted-foreground mb-1">Email Address</label>
+              <Input
+                id="login-email"
+                type="email"
+                placeholder="name@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
             </div>
-            <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              {mode === 'login' && 'Welcome Back'}
-              {mode === 'forgot' && 'Reset Password'}
-              {mode === 'reset' && 'Update Password'}
-            </h1>
-            <p className="text-slate-500 dark:text-slate-400 mt-1.5 text-xs font-medium px-4">
-              {mode === 'login' && 'Access the Boilerplate with your account'}
-              {mode === 'forgot' && 'Enter your email to receive a reset link'}
-              {mode === 'reset' && 'Enter your new password below'}
-            </p>
-          </header>
 
-          {error && (
-            <div className="mb-5 p-3.5 bg-rose-50 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900/50 rounded-lg flex items-start gap-2.5 animate-in fade-in slide-in-from-top-2 duration-300">
-              <i className="fa-solid fa-circle-exclamation text-rose-500 mt-0.5"></i>
-              <p className="text-[11px] font-bold text-rose-700 dark:text-rose-400 leading-relaxed">{error}</p>
-            </div>
-          )}
-
-          {/* Sign-In */}
-          {mode === 'login' && (
-            <div className="space-y-6">
-              <button
-                onClick={handleGoogleLogin}
-                disabled={isSocialLoading}
-                className="w-full flex items-center justify-center gap-2.5 bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 py-3 rounded-lg font-bold text-slate-700 dark:text-slate-200 hover:border-indigo-500 dark:hover:border-indigo-500 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-all active:scale-[0.98] disabled:opacity-50 shadow-md hover:shadow-lg shadow-slate-200/50 dark:shadow-none"
-              >
-                {isSocialLoading ? (
-                  <LoadingSpinner size="sm" />
-                ) : (
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-sm">Mock Sign In</span>
-                  </div>
-                )}
-              </button>
-
-              <div className="text-center pt-3.5">
-                <p className="text-xs font-bold text-slate-500 dark:text-slate-400 capitalize tracking-wide">
-                  New here?{" "}
-                  <button
-                    type="button"
-                    className="text-indigo-600 dark:text-indigo-400 hover:underline ml-1"
-                  >
-                    Register Now!
-                  </button>
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Password recovery forms */}
-          {(mode === 'forgot' || mode === 'reset') && (
-            <form onSubmit={handleAuth} className="space-y-4">
-              {mode === 'forgot' && (
-                <Input
-                  label="Email Address"
-                  type="email"
-                  placeholder="name@example.com"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              )}
-              {mode === 'reset' && (
-                <Input
-                  label="New Password"
-                  type="password"
-                  placeholder="••••••••"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              )}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white dark:text-slate-200 py-3.5 rounded-lg font-bold transition-all active:scale-[0.98] disabled:opacity-50 mt-3.5 flex items-center justify-center shadow-xl shadow-slate-900/20 dark:shadow-indigo-500/10"
-              >
-                {isLoading ? (
-                  <div className="flex items-center gap-2">
-                    <LoadingSpinner size="sm" />
-                    <span>Processing...</span>
-                  </div>
-                ) : (
-                  <i className={`fa-solid ${mode === 'forgot' ? 'fa-paper-plane' : 'fa-check'} mr-2`}></i>
-                )}
-                {mode === 'forgot' ? 'Send Reset Link' : 'Update Password'}
-              </button>
-              <div className="text-center mt-3.5">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label htmlFor="login-password" className="text-xs font-medium text-muted-foreground">Password</label>
                 <button
                   type="button"
-                  onClick={() => { setMode('login'); setError(null); }}
-                  className="text-xs font-bold text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 transition-all flex items-center justify-center gap-2 mx-auto"
+                  onClick={() => setMode('forgot')}
+                  className="text-xs text-primary hover:underline"
                 >
-                  <i className="fa-solid fa-arrow-left"></i>
-                  <span>Back to Login</span>
+                  Forgot?
                 </button>
               </div>
-            </form>
-          )}
-        </div>
-      </div>
-    </div>
+              <Input
+                id="login-password"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+
+            <Button type="submit" className="w-full font-medium text-xs mt-2" disabled={isLoading}>
+              {isLoading ? (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Signing in...</span>
+                </div>
+              ) : (
+                'Sign In to Relay'
+              )}
+            </Button>
+          </form>
+        )}
+
+        {(mode === 'forgot' || mode === 'reset') && (
+          <form onSubmit={handleLogin} className="space-y-3.5">
+            {mode === 'forgot' && (
+              <div>
+                <label htmlFor="reset-email" className="block text-xs font-medium text-muted-foreground mb-1">Email Address</label>
+                <Input
+                  id="reset-email"
+                  type="email"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+
+            {mode === 'reset' && (
+              <div>
+                <label htmlFor="new-password" className="block text-xs font-medium text-muted-foreground mb-1">New Password</label>
+                <Input
+                  id="new-password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+
+            <Button type="submit" className="w-full font-medium text-xs" disabled={isLoading}>
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : mode === 'forgot' ? 'Send Reset Link' : 'Update Password'}
+            </Button>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => { setMode('login'); setError(null); }}
+              className="w-full text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Sign In</span>
+            </Button>
+          </form>
+        )}
+      </CardContent>
+    </Card>
   );
 }
-
