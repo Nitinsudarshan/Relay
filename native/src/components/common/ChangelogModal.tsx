@@ -12,17 +12,21 @@ interface ChangelogModalProps {
 
 export const CHANGELOG_DATA = [
   {
-    version: '0.4.2',
-    date: '2026-08-19',
+    version: '0.4.4',
+    date: '2026-08-20',
     type: 'patch',
-    title: 'Dictation Pill Recording Lifecycle & Global Hotkey Reliability Fix',
+    title: 'Real Speech Detection, Rolling Waveform & Dictation Lifecycle Hardening',
     tags: ['Fixes', 'Improvements'],
     domains: ['Dictation', 'Speech', 'Build'],
     items: [
-      { category: 'Fixes', domain: 'Dictation', text: 'Pill no longer enters Transcribing/Processing when no audio was captured — recording now tracks a real had_audio signal instead of assuming a started session means usable audio.' },
+      { category: 'Fixes', domain: 'Dictation', text: 'Pill no longer enters Transcribing/Processing when no audio was captured — recording tracks whether the mic measured real, sustained speech instead of assuming a started session means usable audio.' },
+      { category: 'Fixes', domain: 'Speech', text: 'Speech detection now calibrates the ambient noise floor per session and requires sustained energy above it, replacing a fixed RMS threshold that sustained fan/keyboard/room noise or mic AGC could sit above continuously and falsely trigger transcription.' },
+      { category: 'Fixes', domain: 'Dictation', text: 'Waveform bars now each reflect their own real recent-history audio-level sample (a genuine scrolling waveform) instead of one shared scalar scaling a fixed decorative bar pattern — silence now collapses to a flat baseline instead of a predetermined shape.' },
+      { category: 'Fixes', domain: 'Dictation', text: 'Removed optimistic "listening"/"processing" UI state on click — the pill now only reflects state the native recorder has actually confirmed, closing a two-sources-of-truth race between the click handler and the backend capture event.' },
+      { category: 'Fixes', domain: 'Dictation', text: 'Ctrl+Space in docked mode now shows the main window (without stealing OS focus) and switches to the Voice Capture tab, so a hotkey-triggered recording is actually visible instead of updating a pill hidden behind another tab or window.' },
       { category: 'Fixes', domain: 'Dictation', text: 'Fixed Ctrl+Space sometimes never registering: the show/hide and dictation hotkeys now register independently instead of one failure silently skipping the other.' },
       { category: 'Fixes', domain: 'Dictation', text: 'Docked pill no longer loses its recording-state listeners when switching away from the Voice Capture tab.' },
-      { category: 'Improvements', domain: 'Speech', text: 'Waveform level is now smoothed with a low-pass filter for steadier, more natural motion tied to real mic input.' },
+      { category: 'Improvements', domain: 'Speech', text: 'Waveform level is smoothed with a low-pass filter for steadier, more natural motion tied to real mic input.' },
       { category: 'Improvements', domain: 'Dictation', text: 'Hotkey status in the pill now reflects the real OS registration outcome instead of an assumed "registered" state.' },
     ],
   },

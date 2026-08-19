@@ -43,6 +43,13 @@ const PROCESSING_CAPTIONS = [
 const HOVER_EXPAND_DELAY_MS = 150;
 const HOVER_COLLAPSE_DELAY_MS = 1000;
 
+// One rolling level sample per bar — a real scrolling waveform (each bar is
+// its own recent-history sample) rather than one scalar level reused to
+// scale a fixed decorative shape, which at silence still rendered as a
+// non-zero pattern instead of going flat.
+const WAVEFORM_BAR_COUNT = 15;
+const SILENT_LEVEL_HISTORY = new Array(WAVEFORM_BAR_COUNT).fill(0);
+
 export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete }) => {
   const [phase, setPhase] = useState<PillState>('collapsed');
   const [hovering, setHovering] = useState(false);
@@ -57,7 +64,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const [dictationShortcut, setDictationShortcut] = useState('Ctrl+Space');
 
   // Audio Level & Captions
-  const [audioLevel, setAudioLevel] = useState(0);
+  const [levelHistory, setLevelHistory] = useState<number[]>(SILENT_LEVEL_HISTORY);
   const [captionIndex, setCaptionIndex] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
@@ -207,6 +214,9 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         setPhase('listening');
         setErrorMessage(null);
         setWarningMessage(null);
+        // Fresh recording, fresh waveform — never carry the previous
+        // session's trailing history into a new one.
+        setLevelHistory(SILENT_LEVEL_HISTORY);
       } else if (payload.status === 'TRANSCRIBING' || payload.status === 'PROCESSING') {
         setPhase('processing');
       } else if (payload.status === 'SUCCESS') {
@@ -228,7 +238,8 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     });
 
     const unlistenLevel = listen<{ level: number }>('capture-level', ({ payload }) => {
-      setAudioLevel(payload.level || 0);
+      const level = payload.level || 0;
+      setLevelHistory((prev) => [...prev.slice(1), level]);
     });
 
     // Reflects the real OS-level registration outcome (emitted by Rust on
@@ -354,7 +365,13 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       try {
         setErrorMessage(null);
         setWarningMessage(null);
-        setPhase('listening');
+        // No optimistic setPhase('listening') here either — the native
+        // recorder is the source of truth for whether capture actually
+        // started. Claiming "listening" before start_capture resolves (or
+        // when it fails) is exactly the two-sources-of-truth pattern that
+        // let the pill show recording state independent of whether
+        // anything was actually recording. The capture-state-changed
+        // listener above flips this to 'listening' once Rust confirms it.
         await invoke('start_capture', { mode: 'scribble' });
       } catch (err: any) {
         setErrorMessage(err.message || 'Failed to start capture');
@@ -460,12 +477,15 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
               </div>
             )}
 
-            {/* Phase 2: RECORDING — 15 Relay primary blue waveform bars */}
+            {/* Phase 2: RECORDING — 15 bars, each a real recent-history
+                audio-level sample (a scrolling waveform), not one scalar
+                scaling a fixed decorative shape. Silence keeps every sample
+                near 0, so the whole row collapses to its hairline minimum
+                instead of showing a predetermined pattern. */}
             {phase === 'listening' && (
               <div className="flex items-center gap-[2.5px] h-[22px] shrink-0">
-                {[0.35, 0.55, 0.85, 0.45, 0.7, 0.95, 0.6, 0.4, 0.75, 0.55, 0.3, 0.6, 0.85, 0.5, 0.7].map((h, i) => {
-                  const scale = 0.34 + audioLevel * 0.8;
-                  const heightPx = Math.max(3, Math.round(h * 22 * scale));
+                {levelHistory.map((level, i) => {
+                  const heightPx = Math.max(3, Math.round(level * 22));
                   return (
                     <span
                       key={i}

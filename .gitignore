@@ -6,13 +6,21 @@ node_modules/
 
 # build & compiled target outputs
 .next/
-**/ .next/
+**/.next/
 out/
 dist/
 **/dist/
 target/
 **/target/
 .relay/
+*.tsbuildinfo
+
+# Tauri-generated ACL/capability manifests — regenerated from
+# native/src-tauri/capabilities on every build, not hand-edited.
+native/src-tauri/gen/schemas/
+
+# graphify code-graph tool output/cache — regenerated per run, not source.
+graphify-out/
 
 # environment & secrets
 .env*
