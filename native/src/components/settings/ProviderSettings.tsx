@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { ProviderSettings as ProviderSettingsType } from '../../types';
+import React, { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { AppSettings } from '../../types';
 import {
   Cpu,
   Cloud,
@@ -12,10 +13,9 @@ import {
   Trash2,
   Download,
   AlertTriangle,
-  RefreshCw,
-  Key,
-  Globe,
-  Radio
+  Mic,
+  Volume2,
+  Keyboard
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,28 +25,61 @@ import { TriggerSettings } from './TriggerSettings';
 
 type SettingsSection = 'general' | 'providers' | 'triggers' | 'vault' | 'account' | 'privacy';
 
+const DEFAULT_SETTINGS: AppSettings = {
+  provider: {
+    active_provider: 'ollama',
+    ollama_host: 'http://localhost:11434',
+    ollama_model: 'llama3.2:latest',
+    cloud_model: 'gpt-4o-mini',
+  },
+  stt: { whisper_model_path: '' },
+  tts: { piper_binary_path: '', piper_voice_path: '' },
+  hotkeys: { show_hide_hotkey: 'Ctrl+Shift+Space', dictation_hotkey: 'Ctrl+Space' },
+};
+
 export const ProviderSettings: React.FC = () => {
   const [activeSection, setActiveSection] = useState<SettingsSection>('providers');
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
 
-  // General & Provider Settings state
-  const [sttEngine, setSttEngine] = useState<'whisper' | 'parakeet' | 'cloud'>('whisper');
-  const [hotkeyMode, setHotkeyMode] = useState<'hold' | 'toggle'>('hold');
-  const [activeProvider, setActiveProvider] = useState<'ollama' | 'cloud'>('ollama');
-  const [ollamaHost, setOllamaHost] = useState('http://localhost:11434');
-  const [ollamaModel, setOllamaModel] = useState('llama3.2:latest');
-  const [cloudApiKey, setCloudApiKey] = useState('');
-  const [cloudModel, setCloudModel] = useState('gpt-4o-mini');
-
-  // Vault & Data & Privacy state
+  // Vault & Data & Privacy state — cosmetic only for now; wiring these up to
+  // real vault/export/reset commands is tracked in docs/roadmap.md, not part
+  // of this settings-persistence pass.
   const [autoSaveVault, setAutoSaveVault] = useState(true);
   const [rawAudioKept, setRawAudioKept] = useState(true);
 
-  const handleSave = (e: React.FormEvent) => {
+  useEffect(() => {
+    invoke<AppSettings>('get_settings')
+      .then(setSettings)
+      .catch((err) => {
+        console.error('Failed to load settings', err);
+        setError('Could not load saved settings — showing defaults');
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    try {
+      await invoke('save_settings', { settings });
+      setSaved(true);
+      setError('');
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      console.error('Failed to save settings', err);
+      setError('Failed to save settings');
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-card rounded-2xl border border-border text-xs text-muted-foreground">
+        Loading settings…
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex flex-col md:flex-row gap-6 min-h-0 overflow-hidden">
@@ -151,91 +184,118 @@ export const ProviderSettings: React.FC = () => {
           </div>
         )}
 
+        {error && <p className="mb-4 text-xs text-amber-500">{error}</p>}
+
         {/* GENERAL SECTION */}
         {activeSection === 'general' && (
-          <div className="space-y-6">
+          <form onSubmit={handleSave} className="space-y-6">
             <div>
               <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
                 GENERAL CAPTURE DEFAULTS
               </p>
-              <h2 className="text-lg font-bold text-foreground">Global Dictation & Hotkey</h2>
+              <h2 className="text-lg font-bold text-foreground">Global Hotkeys, Dictation & Voice</h2>
             </div>
 
             <div className="space-y-4">
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Global Push-to-Talk Hotkey</p>
-                  <p className="text-[11px] text-muted-foreground">Trigger audio capture anywhere on system</p>
+              <div className="py-3 border-b border-border">
+                <div className="flex items-center gap-2 mb-2">
+                  <Keyboard className="w-4 h-4 text-primary" />
+                  <p className="text-xs font-semibold text-foreground">Global Hotkeys</p>
                 </div>
-                <kbd className="px-2 py-1 bg-muted rounded border border-border font-mono text-xs">
-                  Ctrl+Space
-                </kbd>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="show-hide-hotkey" className="block text-[11px] text-muted-foreground mb-1">
+                      Show/Hide Relay (anywhere in the OS)
+                    </label>
+                    <Input
+                      id="show-hide-hotkey"
+                      value={settings.hotkeys.show_hide_hotkey}
+                      onChange={(e) =>
+                        setSettings({ ...settings, hotkeys: { ...settings.hotkeys, show_hide_hotkey: e.target.value } })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="dictation-hotkey" className="block text-[11px] text-muted-foreground mb-1">
+                      Universal Dictation (hold to talk, types into focused field)
+                    </label>
+                    <Input
+                      id="dictation-hotkey"
+                      value={settings.hotkeys.dictation_hotkey}
+                      onChange={(e) =>
+                        setSettings({ ...settings, hotkeys: { ...settings.hotkeys, dictation_hotkey: e.target.value } })
+                      }
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-2">
+                  Restart Relay after changing hotkeys for them to take effect.
+                </p>
               </div>
 
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Hotkey Activation Mode</p>
-                  <p className="text-[11px] text-muted-foreground">Hold down vs press to toggle start/stop</p>
+              <div className="py-3 border-b border-border">
+                <div className="flex items-center gap-2 mb-2">
+                  <Mic className="w-4 h-4 text-primary" />
+                  <p className="text-xs font-semibold text-foreground">Local Speech-to-Text (Whisper)</p>
                 </div>
-                <div className="flex bg-muted p-1 rounded-xl border border-border">
-                  <button
-                    type="button"
-                    onClick={() => setHotkeyMode('hold')}
-                    className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                      hotkeyMode === 'hold' ? 'bg-card text-foreground font-semibold shadow-xs' : 'text-muted-foreground'
-                    }`}
-                  >
-                    Hold
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHotkeyMode('toggle')}
-                    className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                      hotkeyMode === 'toggle' ? 'bg-card text-foreground font-semibold shadow-xs' : 'text-muted-foreground'
-                    }`}
-                  >
-                    Toggle
-                  </button>
-                </div>
+                <label htmlFor="whisper-model-path" className="block text-[11px] text-muted-foreground mb-1">
+                  GGML Model Path
+                </label>
+                <Input
+                  id="whisper-model-path"
+                  placeholder="C:\\models\\ggml-base.en.bin"
+                  value={settings.stt.whisper_model_path || ''}
+                  onChange={(e) => setSettings({ ...settings, stt: { whisper_model_path: e.target.value } })}
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Download a GGML model from huggingface.co/ggerganov/whisper.cpp — required for meeting/scribble
+                  capture, voice chat, and universal dictation.
+                </p>
               </div>
 
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Speech-to-Text Model Engine</p>
-                  <p className="text-[11px] text-muted-foreground">Local Parakeet / Whisper or Cloud STT</p>
+              <div className="py-3 border-b border-border">
+                <div className="flex items-center gap-2 mb-2">
+                  <Volume2 className="w-4 h-4 text-primary" />
+                  <p className="text-xs font-semibold text-foreground">Local Text-to-Speech (Piper) — optional</p>
                 </div>
-                <div className="flex bg-muted p-1 rounded-xl border border-border">
-                  <button
-                    type="button"
-                    onClick={() => setSttEngine('whisper')}
-                    className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                      sttEngine === 'whisper' ? 'bg-card text-foreground font-semibold shadow-xs' : 'text-muted-foreground'
-                    }`}
-                  >
-                    Whisper
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSttEngine('parakeet')}
-                    className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                      sttEngine === 'parakeet' ? 'bg-card text-foreground font-semibold shadow-xs' : 'text-muted-foreground'
-                    }`}
-                  >
-                    Parakeet
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSttEngine('cloud')}
-                    className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                      sttEngine === 'cloud' ? 'bg-card text-foreground font-semibold shadow-xs' : 'text-muted-foreground'
-                    }`}
-                  >
-                    Cloud STT
-                  </button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="piper-binary-path" className="block text-[11px] text-muted-foreground mb-1">
+                      Piper Binary Path
+                    </label>
+                    <Input
+                      id="piper-binary-path"
+                      placeholder="C:\\piper\\piper.exe"
+                      value={settings.tts.piper_binary_path || ''}
+                      onChange={(e) =>
+                        setSettings({ ...settings, tts: { ...settings.tts, piper_binary_path: e.target.value } })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="piper-voice-path" className="block text-[11px] text-muted-foreground mb-1">
+                      Voice Model Path
+                    </label>
+                    <Input
+                      id="piper-voice-path"
+                      placeholder="C:\\piper\\en_US-lessac-medium.onnx"
+                      value={settings.tts.piper_voice_path || ''}
+                      onChange={(e) =>
+                        setSettings({ ...settings, tts: { ...settings.tts, piper_voice_path: e.target.value } })
+                      }
+                    />
+                  </div>
                 </div>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Leave blank to skip "speak back" in voice chat — answers still show as text.
+                </p>
               </div>
+
+              <Button type="submit" size="sm" variant="default" className="mt-2">
+                Save General Settings
+              </Button>
             </div>
-          </div>
+          </form>
         )}
 
         {/* PROVIDERS SECTION */}
@@ -257,18 +317,26 @@ export const ProviderSettings: React.FC = () => {
                 <div className="flex bg-muted p-1 rounded-xl border border-border">
                   <button
                     type="button"
-                    onClick={() => setActiveProvider('ollama')}
+                    onClick={() =>
+                      setSettings({ ...settings, provider: { ...settings.provider, active_provider: 'ollama' } })
+                    }
                     className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                      activeProvider === 'ollama' ? 'bg-card text-foreground font-semibold shadow-xs' : 'text-muted-foreground'
+                      settings.provider.active_provider === 'ollama'
+                        ? 'bg-card text-foreground font-semibold shadow-xs'
+                        : 'text-muted-foreground'
                     }`}
                   >
                     Local Ollama
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveProvider('cloud')}
+                    onClick={() =>
+                      setSettings({ ...settings, provider: { ...settings.provider, active_provider: 'cloud_openai' } })
+                    }
                     className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                      activeProvider === 'cloud' ? 'bg-card text-foreground font-semibold shadow-xs' : 'text-muted-foreground'
+                      settings.provider.active_provider !== 'ollama'
+                        ? 'bg-card text-foreground font-semibold shadow-xs'
+                        : 'text-muted-foreground'
                     }`}
                   >
                     Cloud API
@@ -276,7 +344,7 @@ export const ProviderSettings: React.FC = () => {
                 </div>
               </div>
 
-              {activeProvider === 'ollama' ? (
+              {settings.provider.active_provider === 'ollama' ? (
                 <div className="py-4 space-y-4">
                   <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                     OLLAMA LOCAL PARAMS
@@ -288,8 +356,10 @@ export const ProviderSettings: React.FC = () => {
                       </label>
                       <Input
                         id="ollama-host"
-                        value={ollamaHost}
-                        onChange={(e) => setOllamaHost(e.target.value)}
+                        value={settings.provider.ollama_host}
+                        onChange={(e) =>
+                          setSettings({ ...settings, provider: { ...settings.provider, ollama_host: e.target.value } })
+                        }
                         placeholder="http://localhost:11434"
                       />
                     </div>
@@ -299,8 +369,10 @@ export const ProviderSettings: React.FC = () => {
                       </label>
                       <Input
                         id="ollama-model"
-                        value={ollamaModel}
-                        onChange={(e) => setOllamaModel(e.target.value)}
+                        value={settings.provider.ollama_model}
+                        onChange={(e) =>
+                          setSettings({ ...settings, provider: { ...settings.provider, ollama_model: e.target.value } })
+                        }
                         placeholder="llama3.2:latest"
                       />
                     </div>
@@ -319,8 +391,10 @@ export const ProviderSettings: React.FC = () => {
                       <Input
                         id="cloud-api-key"
                         type="password"
-                        value={cloudApiKey}
-                        onChange={(e) => setCloudApiKey(e.target.value)}
+                        value={settings.provider.cloud_api_key || ''}
+                        onChange={(e) =>
+                          setSettings({ ...settings, provider: { ...settings.provider, cloud_api_key: e.target.value } })
+                        }
                         placeholder="sk-..."
                       />
                     </div>
@@ -330,8 +404,10 @@ export const ProviderSettings: React.FC = () => {
                       </label>
                       <Input
                         id="cloud-model-name"
-                        value={cloudModel}
-                        onChange={(e) => setCloudModel(e.target.value)}
+                        value={settings.provider.cloud_model || ''}
+                        onChange={(e) =>
+                          setSettings({ ...settings, provider: { ...settings.provider, cloud_model: e.target.value } })
+                        }
                         placeholder="gpt-4o-mini"
                       />
                     </div>
@@ -385,6 +461,18 @@ export const ProviderSettings: React.FC = () => {
                   Local File System
                 </Badge>
               </div>
+
+              <div className="py-3 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Note Retrieval</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Keyword-ranked search today — embedded LanceDB vector search is planned (see docs/roadmap.md)
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-xs font-mono">
+                  Keyword Search
+                </Badge>
+              </div>
             </div>
           </div>
         )}
@@ -419,7 +507,7 @@ export const ProviderSettings: React.FC = () => {
           </div>
         )}
 
-        {/* DATA & PRIVACY SECTION (Exact reference design matching Part 4) */}
+        {/* DATA & PRIVACY SECTION */}
         {activeSection === 'privacy' && (
           <div className="space-y-6">
             <div>

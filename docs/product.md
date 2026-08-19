@@ -11,17 +11,21 @@ The primary user is a builder or power user with a meeting-heavy and task-heavy 
 2. **Transcript-to-Kanban**: Automatically parses meeting transcripts into actionable, structured task cards formatted for a Kanban workflow, rather than generating wall-of-text summaries.
 3. **Voice Scribble to Structured Output**: Transforms rambling audio notes into polished markdown templates (executive summaries, key decisions, action points).
 4. **User-Customizable Trigger Phrases**: Allows users to configure arbitrary phrase-to-action mappings (e.g., "Schedule quick sync" -> Calendar MCP call; "Remind me in 2 hours" -> Local OS notification).
-5. **Local-First with Zero Recurring Cost**: Runs 100% locally by default using local STT (Parakeet/Whisper), Ollama, and embedded LanceDB vector RAG over an Obsidian-style markdown vault.
+5. **Local-First with Zero Recurring Cost**: Runs 100% locally by default using local STT (Whisper, via `whisper-rs`), Ollama, and grounded retrieval over an Obsidian-style markdown vault.
 6. **Dual Surface (Native Desktop + Web Dashboard)**: Windows native app for local capture and processing; Next.js web client for remote cloud access in hybrid mode.
+7. **Universal Dictation, Not Just In-App Voice**: A global push-to-talk hotkey types transcribed speech directly into whatever app or field currently has OS focus (Slack, email, code editors) — not confined to Relay's own window — with a non-intrusive "listening" indicator. A separate global hotkey shows/hides Relay from anywhere in the OS.
+8. **Voice Chat Grounded in Your Own Notes**: Ask a question out loud inside Relay; it retrieves relevant vault notes, answers grounded in them with sources shown, and can speak the answer back via local TTS.
 
 ## In Scope for MVP
 - Push-to-talk capture with floating overlay widget & global hotkey.
-- Local Speech-to-Text (Parakeet / Whisper) & local Ollama LLM provider toggle (with cloud LLM option).
+- Local Speech-to-Text (Whisper via `whisper-rs`) & local Ollama LLM provider toggle (with cloud LLM option).
 - Meeting transcript -> Kanban list parser (list-to-board rendering).
 - Audio scribble -> structured prompt engine (templates).
-- Obsidian-style Markdown Vault storage + embedded LanceDB vector search.
-- Configurable Trigger Phrase Engine mapped to MCP actions (Google Calendar, reminders).
+- Obsidian-style Markdown Vault storage + keyword-ranked note retrieval (embedded LanceDB vector search is decided but not yet built — see `docs/roadmap.md`).
+- Configurable Trigger Phrase Engine mapped to MCP actions (Google Calendar, reminders) — MCP dispatch itself is currently a stub pending real MCP client wiring (see `docs/roadmap.md`).
 - Next.js Web Dashboard + Supabase cloud auth/storage for hybrid mode.
+- Global show/hide hotkey and push-to-talk universal dictation (types into whatever app/field has OS focus) with a listening indicator.
+- In-app voice chat: record a question, get an answer grounded in vault notes with sources, optional local TTS "speak back."
 
 ## Out of Scope for MVP
 - Drag-and-drop Kanban card persistence (list-to-board only).
@@ -29,3 +33,6 @@ The primary user is a builder or power user with a meeting-heavy and task-heavy 
 - Third-party meeting-bot joiners.
 - Mobile native application.
 - Multi-user / team shared vaults.
+- Meeting speaker diarization (transcription only, no speaker attribution).
+- Live external connectors beyond the Calendar/local-reminder trigger actions (Notion/Drive push is decided architecturally but not wired to a real MCP client yet).
+- Continuous/always-on background capture (structurally excluded — see `docs/decisions.md` Decision 5).

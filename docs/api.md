@@ -17,9 +17,15 @@ interface CommandError {
 
 #### Capture Commands
 - `start_capture(mode: String) -> Result<String, CommandError>`
-  Starts audio capture for mode `"meeting" | "scribble" | "trigger"`. Returns capture session ID.
-- `stop_capture() -> Result<ProcessResult, CommandError>`
-  Stops audio capture, transcribes, runs pipeline, and returns processing result.
+  Starts audio capture for mode `"meeting" | "scribble" | "chat"`. Returns capture session ID.
+- `stop_capture() -> Result<ProcessedPipelineResult, CommandError>`
+  Stops audio capture, transcribes via the configured local Whisper model, and:
+  - for `"meeting"`/`"scribble"`, first checks trigger phrases (returning mode `"trigger"` on a match), then runs the meeting->Kanban or scribble->structured-note pipeline;
+  - for `"chat"`, skips trigger matching and runs `pipeline::process_chat` (vault-grounded Q&A with optional spoken answer) instead.
+
+  `ProcessedPipelineResult` additionally carries `sources: string[]` (vault note titles used as grounding, populated for chat) and `spoken_audio_base64?: string | null` (base64 WAV of the answer, if local TTS is configured).
+
+  Universal dictation (the global push-to-talk hotkey) does **not** go through these commands — it calls `AudioRecorder`/`SttEngine` directly from the Rust hotkey handler and injects the transcript via OS keystroke simulation, bypassing Tauri IPC entirely (see `hotkeys::on_dictation_released`).
 
 #### Pipeline Commands
 - `process_transcript(transcript: String, mode: String) -> Result<ProcessResult, CommandError>`
@@ -36,9 +42,11 @@ interface CommandError {
 - `save_trigger(trigger: TriggerConfig) -> Result<Vec<TriggerConfig>, CommandError>`
 - `delete_trigger(trigger_id: String) -> Result<Vec<TriggerConfig>, CommandError>`
 
-#### Provider Settings Commands
+#### Settings Commands
 - `get_settings() -> Result<AppSettings, CommandError>`
-- `save_settings(settings: AppSettings) -> Result<AppSettings, CommandError>`
+  Returns the current provider/STT/TTS/hotkey configuration (see `docs/data-model.md` §4).
+- `save_settings(settings: AppSettings) -> Result<(), CommandError>`
+  Persists settings to `.relay/config/settings.json` and updates the running app's in-memory config immediately (LLM provider, STT model path, TTS paths). Hotkey changes take effect on next launch — they're only read once at startup.
 
 ---
 

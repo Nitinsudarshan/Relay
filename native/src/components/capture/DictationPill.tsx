@@ -52,9 +52,9 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const [sttEngine, setSttEngine] = useState<'whisper' | 'parakeet'>('whisper');
   const [autoOpenDashboard, setAutoOpenDashboard] = useState(true);
 
-  const hoverTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const leaveTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const captionTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const captionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Rotating processing caption effect
   useEffect(() => {
