@@ -1,5 +1,42 @@
 # Relay — Changelog
 
+## [0.4.6] - 2026-08-20
+
+### Scope-Reduction Set 2 — Kanban Active Navigation Removed
+
+- **Frontend (`native/src/App.tsx`)**:
+  - Removed the sidebar "Kanban Board" nav button, the `kanban` branch of
+    the tab switcher and hero header, and `kanban` from the `navigate-tab`
+    event's allowed payload list — `activeTab` can no longer become
+    `'kanban'`.
+  - Removed the unconditional `get_kanban_cards` fetch that previously ran
+    on every app launch (`useEffect` with an empty dependency array) and
+    the `fetchKanbanCards` call inside `handleProcessComplete` — both fired
+    regardless of whether the user ever opened the Kanban tab. This was the
+    one "required at startup" concern flagged by the Set 0 audit.
+  - Removed now-unused imports (`KanbanBoard`, `KanbanCard`, `invoke`, the
+    `Kanban` icon) and the dead `cards` state. Cleaned up a stale comment
+    that referenced "refreshes the board" after the fetch call it described
+    was removed.
+- **What was NOT changed**: `native/src/components/kanban/KanbanBoard.tsx`
+  — untouched, still on disk. The `KanbanCard` type in
+  `native/src/types/index.ts` — untouched (still used by `KanbanBoard.tsx`).
+  The backend `get_kanban_cards` Tauri command and every `VaultManager`
+  Kanban read/write method in `native/src-tauri` — untouched; `git diff
+  --stat native/src-tauri/` is empty for this release. No settings changed
+  (Kanban had none). Scribble Notes, Voice Chat, PTT, click-to-talk,
+  hotkeys, STT, and text injection are unmodified.
+- **Verification**: `native/` — `npm run build` (`tsc && vite build`)
+  passes clean with zero errors; the production bundle now transforms 1609
+  modules (down from 1610), confirming `KanbanBoard.tsx` is no longer
+  bundled into the app. Repo-wide grep confirms zero remaining references
+  to `KanbanBoard`/`get_kanban_cards` in `native/src` outside
+  `KanbanBoard.tsx` and `types/index.ts` themselves. `git status` confirms
+  only `native/src/App.tsx` changed under `native/`. No test suite covers
+  this path (only Rust-side `#[cfg(test)]` unit tests exist, in
+  `vault/mod.rs`, `capture/mod.rs`, `triggers/mod.rs` — none reference
+  Kanban or App.tsx, and none were touched).
+
 ## [0.4.5] - 2026-08-20
 
 ### Scope-Reduction Set 0 (Audit) & Set 1 — Web Surface Marked Deferred
