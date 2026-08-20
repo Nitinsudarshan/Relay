@@ -24,7 +24,7 @@
 
 ### 5. Dual Surfaces
 - **FR-5.1 (Native Desktop)**: The Windows app MUST render a responsive floating PTT widget, Kanban board viewer, voice chat panel, trigger phrase config UI, and provider/STT/TTS/hotkey settings.
-- **FR-5.2 (Web Dashboard)**: The Next.js web application MUST allow authentication and viewing/managing synced vault notes and Kanban cards in hybrid mode.
+- **FR-5.2 (Web Dashboard)**: The Next.js web application MUST allow authentication and viewing/managing synced vault notes and Kanban cards in hybrid mode. *(Deferred for the current desktop-first MVP phase — see `docs/decisions.md` Decision 32. Requirement preserved for when hybrid mode resumes; not part of the active build target.)*
 
 ## Non-Functional Requirements
 

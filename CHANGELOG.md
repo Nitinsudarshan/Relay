@@ -1,5 +1,66 @@
 # Relay — Changelog
 
+## [0.4.5] - 2026-08-20
+
+### Scope-Reduction Set 0 (Audit) & Set 1 — Web Surface Marked Deferred
+
+Relay is being reduced to a stable, focused desktop-first universal dictation
+app (global PTT + click-to-talk + local STT + text injection through one
+Dictation Pill). This is a documentation-only release: no application code
+changed. Kanban, Voice Chat, TTS, Triggers/MCP, and the Dictation Pill
+consolidation are explicitly **not** part of this release — each remains
+gated behind its own future approval (see `docs/decisions.md` Decision 32).
+
+- **Repository audit (Set 0, no changes)**: Read-only audit across Web,
+  Kanban, Voice Chat, TTS, Triggers/MCP, the three pill components
+  (`DictationPill.tsx`/`FloatingPill.tsx`/`PTTWidget.tsx`), Settings, and the
+  core capture/hotkey/STT/injection path. Notable findings recorded for
+  future sets rather than acted on now: Voice Chat is fully implemented and
+  active (contradicting an assumption that it might not exist); the
+  standalone "Dictation Indicator" window was already removed in a prior
+  commit (Decision 30/PTT-013) and no longer exists in code; click-to-talk
+  and the global PTT hotkey share the same backend capture session but
+  diverge after transcription (only the hotkey path calls real OS text
+  injection today; click-to-talk runs the scribble LLM-cleanup/vault-write
+  pipeline instead); and the Triggers/MCP phrase-match check is inlined
+  inside the same handler click-to-talk uses, a real (if small) coupling
+  distinct from the trivially-removable Triggers settings tab.
+- **Documentation (`docs/`)**:
+  - Added Decision 32 to `docs/decisions.md`, recording the desktop-first
+    scope reduction and deferring Web for the current phase — explicitly
+    superseding Decision 3's "dual-surface" framing for this phase only,
+    without altering Decision 3's historical text.
+  - `docs/product.md`: moved the "Dual Surface (Native Desktop + Web
+    Dashboard)" differentiator and the Next.js/Supabase MVP bullet out of
+    active MVP scope into a new "Deferred for Current Phase" section.
+  - `docs/requirements.md`: annotated FR-5.2 (Web Dashboard) as deferred for
+    the current phase, requirement text preserved.
+  - `docs/architecture.md`: annotated the Web Surface box in the
+    three-surface diagram as deferred, and corrected the "Hybrid Cloud Mode"
+    description — a repository audit found no Supabase code anywhere in
+    `native/src-tauri` (zero matches, no dependency) and `web/`'s own
+    Supabase client is a mocked stand-in returning hardcoded data, so this
+    was previously describing an unbuilt, aspirational design as if it were
+    implemented.
+- **What was NOT changed**: No files under `web/`. No Rust or TypeScript
+  source under `native/`. No settings, commands, build configuration, or
+  navigation. No modification made to any existing working implementation —
+  `web/` was already fully decoupled from the desktop build (no shared
+  workspace config, no imports either direction) before this release.
+- **Verification**: `native/` frontend — `npm install && npm run build`
+  (`tsc && vite build`) completed cleanly with zero errors (one pre-existing,
+  unrelated warning about a mixed static/dynamic import of
+  `@tauri-apps/api/event.js`, present before this change). Rust backend —
+  `cargo check` in this Linux container fails during dependency compilation
+  at `gdk-sys v0.18.2`'s build script (`pkg-config` can't find `gdk-3.0` —
+  the GTK/GDK system libraries Tauri's Linux windowing backend needs, e.g.
+  `libgtk-3-dev`, which this container doesn't have installed), before any
+  of Relay's own crates or Relay-authored Rust code are even reached. Relay
+  targets Windows and this is a pre-existing container/environment gap, not
+  a regression — this release touched zero Rust code, and the failure
+  occurs entirely within a third-party dependency's native build step,
+  upstream of anything this repository controls.
+
 ## [0.4.4] - 2026-08-20
 
 ### Real Speech Detection, Rolling Waveform & Dictation Lifecycle Hardening

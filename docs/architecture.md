@@ -2,14 +2,14 @@
 
 ## Three-Surface Overview
 
-Relay is architected into three distinct surfaces in a single repository:
+Relay is architected into three distinct surfaces in a single repository. **Current phase note (see `docs/decisions.md` Decision 32): the Web Surface below is deferred.** `native/` has no import, build, or runtime dependency on `web/` in either direction — verified by repository audit — and the two apps build and run fully independently today.
 
 ```
                           ┌─────────────────────────────────────┐
-                          │         Web Surface (web/)          │
+                          │   Web Surface (web/) — DEFERRED     │
                           │   Next.js 15 + Shadcn + Supabase    │
                           └──────────────────┬──────────────────┘
-                                             │ Hybrid Sync (Supabase Auth/DB)
+                                             │ Hybrid Sync (planned — not implemented)
                                              ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        Native Desktop (native/)                        │
@@ -60,4 +60,4 @@ Relay is architected into three distinct surfaces in a single repository:
 
 ## Data Access & Security Model
 - **Local-Only Mode**: No authentication required. Notes saved in `.relay/vault`. Vector indices stored in `.relay/lancedb`. Zero network activity required.
-- **Hybrid Cloud Mode**: Supabase client in `web/src/lib/supabase` for web dashboard authentication. Desktop app syncs vault notes to Supabase PostgreSQL database using RLS policies.
+- **Hybrid Cloud Mode**: Not yet implemented. This describes the intended design (Supabase client in `web/src/lib/supabase` for web dashboard authentication; desktop app syncing vault notes to Supabase PostgreSQL via RLS policies), but a repository audit (2026-08-20) found no Supabase code anywhere in `native/src-tauri`, and `web/`'s own Supabase client is a mocked stand-in returning hardcoded data. Hybrid mode is deferred along with the Web surface — see `docs/decisions.md` Decision 32.
