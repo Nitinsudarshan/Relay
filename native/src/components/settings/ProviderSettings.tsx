@@ -6,7 +6,6 @@ import {
   Cloud,
   CheckCircle,
   Sliders,
-  Zap,
   ShieldCheck,
   HardDrive,
   User,
@@ -14,17 +13,15 @@ import {
   Download,
   AlertTriangle,
   Mic,
-  Volume2,
   Keyboard
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { TriggerSettings } from './TriggerSettings';
 import { HotkeyRecorder } from './HotkeyRecorder';
 
-type SettingsSection = 'general' | 'providers' | 'triggers' | 'vault' | 'account' | 'privacy';
+type SettingsSection = 'general' | 'providers' | 'vault' | 'account' | 'privacy';
 
 const DEFAULT_SETTINGS: AppSettings = {
   provider: {
@@ -35,8 +32,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   stt: { whisper_model_path: '' },
   tts: { piper_binary_path: '', piper_voice_path: '' },
-  hotkeys: { show_hide_hotkey: 'Ctrl+Shift+Space', dictation_hotkey: 'Ctrl+Space' },
-  ui: { show_floating_pill: true, pill_position: 'bottom_center' },
+  hotkeys: { show_hide_hotkey: 'Ctrl+Shift+Space', dictation_hotkey: 'Ctrl+Space', toggle_to_talk: false },
+  ui: { pill_position: 'bottom_center' },
 };
 
 export const ProviderSettings: React.FC = () => {
@@ -189,19 +186,6 @@ export const ProviderSettings: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => setActiveSection('triggers')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-all text-left ${
-            activeSection === 'triggers'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <Zap className="w-4 h-4 text-primary" />
-          <span>Triggers & MCP</span>
-        </button>
-
-        <button
-          type="button"
           onClick={() => setActiveSection('vault')}
           className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-all text-left ${
             activeSection === 'vault'
@@ -285,7 +269,7 @@ export const ProviderSettings: React.FC = () => {
                   </div>
                   <div>
                     <label htmlFor="dictation-hotkey" className="block text-[11px] text-muted-foreground mb-1">
-                      Universal Dictation (hold to talk, types into focused field)
+                      Universal Dictation (types into focused field)
                     </label>
                     <HotkeyRecorder
                       id="dictation-hotkey"
@@ -301,19 +285,24 @@ export const ProviderSettings: React.FC = () => {
 
               <div className="py-3 border-b border-border flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-semibold text-foreground">Floating Dictation Pill</p>
+                  <p className="text-xs font-semibold text-foreground">Toggle-to-Talk</p>
                   <p className="text-[11px] text-muted-foreground">
-                    Show "Click to dictate" as its own always-on-top window on the desktop, outside the Relay window
+                    Press the dictation hotkey once to start recording, press it again to stop — instead of holding
+                    it down the whole time. Useful for longer recordings.
                   </p>
                 </div>
                 <Switch
-                  checked={settings.ui.show_floating_pill}
+                  checked={settings.hotkeys.toggle_to_talk}
                   onCheckedChange={async (checked) => {
-                    setSettings({ ...settings, ui: { ...settings.ui, show_floating_pill: checked } });
+                    const updated = {
+                      ...settings,
+                      hotkeys: { ...settings.hotkeys, toggle_to_talk: checked },
+                    };
+                    setSettings(updated);
                     try {
-                      await invoke('set_pill_visible', { visible: checked });
+                      await invoke('save_settings', { settings: updated });
                     } catch (err) {
-                      console.error('Failed to toggle floating pill', err);
+                      console.error('Failed to toggle toggle-to-talk mode', err);
                     }
                   }}
                 />
@@ -394,44 +383,6 @@ export const ProviderSettings: React.FC = () => {
                   Relay downloads a small default Whisper model automatically the first time it's needed — required
                   for meeting/scribble capture, voice chat, and universal dictation. Point this at your own GGML
                   model (huggingface.co/ggerganov/whisper.cpp) for better accuracy or another language.
-                </p>
-              </div>
-
-              <div className="py-3 border-b border-border">
-                <div className="flex items-center gap-2 mb-2">
-                  <Volume2 className="w-4 h-4 text-primary" />
-                  <p className="text-xs font-semibold text-foreground">Local Text-to-Speech (Piper) — optional</p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="piper-binary-path" className="block text-[11px] text-muted-foreground mb-1">
-                      Piper Binary Path
-                    </label>
-                    <Input
-                      id="piper-binary-path"
-                      placeholder="C:\\piper\\piper.exe"
-                      value={settings.tts.piper_binary_path || ''}
-                      onChange={(e) =>
-                        setSettings({ ...settings, tts: { ...settings.tts, piper_binary_path: e.target.value } })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="piper-voice-path" className="block text-[11px] text-muted-foreground mb-1">
-                      Voice Model Path
-                    </label>
-                    <Input
-                      id="piper-voice-path"
-                      placeholder="C:\\piper\\en_US-lessac-medium.onnx"
-                      value={settings.tts.piper_voice_path || ''}
-                      onChange={(e) =>
-                        setSettings({ ...settings, tts: { ...settings.tts, piper_voice_path: e.target.value } })
-                      }
-                    />
-                  </div>
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  Leave blank to skip "speak back" in voice chat — answers still show as text.
                 </p>
               </div>
 
@@ -597,9 +548,6 @@ export const ProviderSettings: React.FC = () => {
             </div>
           </form>
         )}
-
-        {/* TRIGGERS SECTION */}
-        {activeSection === 'triggers' && <TriggerSettings />}
 
         {/* VAULT SECTION */}
         {activeSection === 'vault' && (

@@ -1,5 +1,318 @@
 # Relay — Changelog
 
+## [0.6.0] - 2026-08-20
+
+### Toggle-to-Talk — Optional Press-Once Dictation Mode
+
+Requested directly as a new capability (not part of the desktop-first
+scope reduction in the entries below): holding the dictation hotkey down
+for a long recording is tedious, so this adds an opt-in mode where one
+press starts recording and a second press stops it.
+
+- **Backend (`native/src-tauri/src/settings/mod.rs`)**: Added
+  `HotkeySettings.toggle_to_talk: bool` (default `false` — hold-to-talk
+  remains the default for everyone who doesn't opt in).
+- **Backend (`native/src-tauri/src/hotkeys/mod.rs`)**: Reworked the
+  dictation hotkey's press/release state machine. Added a `key_down` flag
+  to `DictationState` so a genuine second press (toggle mode's "stop"
+  signal) can be told apart from the OS re-firing "pressed" while a key
+  stays physically held — both modes already had to filter out the
+  latter; only toggle mode needed the former. Extracted the actual
+  stop/transcribe/inject logic (previously inline in
+  `on_dictation_released`) into a new `stop_dictation_session` function so
+  both "release stops it" (hold-to-talk) and "a second press stops it"
+  (toggle-to-talk) call the same path. Added a separate 10-minute
+  stuck-session watchdog timeout for toggle mode
+  (`MAX_PERSISTENT_RECORDING`) — the existing 60-second one
+  (`MAX_DICTATION_HOLD`, sized for hold-to-talk's short-recording
+  assumption) would have silently cut off the exact long recordings this
+  feature exists to make easier.
+- **Frontend (`native/src/components/settings/ProviderSettings.tsx`)**:
+  Added a "Toggle-to-Talk" switch in Settings → General, next to the
+  existing hotkey recorders. Applies immediately via `save_settings` (no
+  hotkey re-registration needed, since only the interpretation of
+  press/release changes, not the key combination itself). Reworded the
+  "Universal Dictation" hotkey label, since "(hold to talk...)" is no
+  longer always true.
+- **Frontend (`native/src/components/capture/DictationPill.tsx`)**: The
+  floating hint text now reads "Tap to start/stop" instead of "Hold to
+  record" when toggle-to-talk is active, so the pill never states the
+  wrong interaction model for how the hotkey actually behaves right now.
+- **Frontend (`native/src/types/index.ts`)**: Added `toggle_to_talk` to
+  the `HotkeySettings` TypeScript interface, mirroring the Rust struct.
+- **What was NOT changed**: Click-to-talk (already toggle-based — each
+  click flips start/stop, unaffected by this change), STT, text injection,
+  the `AudioRecorder` capture primitive, `overlay.rs`, and every decision
+  from the desktop-first scope reduction (Decisions 32–36).
+- **Verification**: `native/` — `npm run build` (`tsc && vite build`)
+  passes clean with zero errors. Rust — `cargo check` passes cleanly
+  (2.4s on the warm build cache). The full press/release/repeat/watchdog
+  state machine was traced by hand through every case (hold-to-talk
+  unchanged; toggle-to-talk's press→press cycle; OS key-repeat in both
+  modes; the watchdog firing in both modes) before considering this done
+  — see Decision 37 for the reasoning and one accepted, narrow edge case.
+- **Not independently tested end-to-end**: same environment limitation as
+  every other change in this session — this is a headless Linux container
+  with no display server or audio hardware, and Relay targets Windows.
+  Compiler-level correctness is verified; live hotkey/microphone behavior
+  is not.
+
+## [0.5.0] - 2026-08-20
+
+### Scope-Reduction Set 5 — Single Dictation Pill (Docked/Floating Mode Removed)
+
+The one set where real architectural consolidation was expected. The
+Set 0 audit found `DictationPill.tsx` was already the sole canonical pill
+implementation — `FloatingPill.tsx` and `PTTWidget.tsx` were two render
+*sites* for it (a separate always-on-top window vs. inline in the main
+window), not competing implementations, selected by one boolean setting
+(`ui.show_floating_pill`, the "Docked vs Floating" product mode this
+release removes per the task's own scope table — unlike Kanban/Voice
+Chat/Triggers, which are *deferred*, this is a genuine *removal*).
+
+- **Backend (`native/src-tauri/src/settings/mod.rs`)**: Removed
+  `UiSettings.show_floating_pill`. `ui.pill_position` (work-area-aware
+  anchor edge) is unchanged.
+- **Backend (`native/src-tauri/src/commands.rs`)**: Removed the
+  `set_pill_visible` command — its only purpose was toggling the
+  now-removed setting.
+- **Backend (`native/src-tauri/src/lib.rs`)**: `overlay::ensure_pill_window`
+  is now always called with `visible: true` at startup — the floating pill
+  window is the one, permanent PTT surface. Removed `set_pill_visible` from
+  the `invoke_handler!` registration.
+- **Backend (`native/src-tauri/src/hotkeys/mod.rs`)**: Removed a
+  docked-mode-specific compensation in `on_dictation_pressed` that showed
+  the main window and switched it to the Capture tab so a docked pill's
+  reaction to the hotkey would be visible. Unnecessary now — the
+  always-on-top floating pill is always present and already reacts to the
+  same `capture-state-changed` event regardless of the main window's state.
+  Caught by a full rebuild, not by inspection alone: this was a second,
+  easy-to-miss reference to the removed setting.
+- **Frontend (`native/src/components/capture/PTTWidget.tsx`)**: Removed
+  the `showFloatingPill` state, its settings-load effect, its
+  `pill-visibility-changed` listener, and the conditional that rendered
+  `DictationPill` inline as the "docked" alternative. Removed the
+  `onProcessComplete` prop entirely — it was only ever needed by the
+  now-removed inline render path; the floating pill (which never received
+  this prop) already relies solely on the `capture-processed` backend
+  event for the main window to learn about completions, so nothing was
+  lost. The informational badge is now static text (no more "toggle it
+  off in Settings" — there's no such toggle anymore).
+- **Frontend (`native/src/App.tsx`)**: `<PTTWidget />` no longer takes a
+  prop; `handleProcessComplete` is unchanged (still used directly by the
+  `capture-processed` event listener).
+- **Frontend (`native/src/components/settings/ProviderSettings.tsx`)**:
+  Removed the "Floating Dictation Pill" toggle switch and the stale
+  `show_floating_pill` field from `DEFAULT_SETTINGS`.
+- **Frontend (`native/src/types/index.ts`)**: Removed `show_floating_pill`
+  from the `UiSettings` TypeScript interface, mirroring the Rust struct.
+- **What was NOT changed**: `DictationPill.tsx`, `FloatingPill.tsx`,
+  `PillSettingsPopover.tsx`, `PillTypes.ts`, and `overlay.rs` — all
+  completely untouched. The capture state machine, STT, text injection,
+  and `ui.pill_position`/`set_pill_position`/`set_pill_expanded`/
+  `set_pill_window_mode` (work-area/monitor/DPI-aware positioning) are
+  unmodified. No settings.json migration needed — `AppSettings` has no
+  `deny_unknown_fields`, so a stale `show_floating_pill` key in an existing
+  user's file is silently ignored on load and simply not written back.
+- **Still open, not addressed by this release**: the click-to-talk vs.
+  global-hotkey text-injection divergence flagged since Set 0 — raised
+  again here for visibility, deliberately left unresolved per explicit
+  direction each time it came up.
+- **Verification**: `native/` — `npm run build` (`tsc && vite build`)
+  passes clean with zero errors (module count unchanged at 1606 — this
+  set trimmed code within existing files rather than removing whole
+  modules). A first build attempt caught the `ProviderSettings.tsx`
+  `DEFAULT_SETTINGS` reference to the removed field as a real `tsc` type
+  error, and a repo-wide grep after fixing it confirms zero remaining
+  references to `show_floating_pill`, `set_pill_visible`, or
+  `pill-visibility-changed` anywhere in `native/`. Rust — `cargo check`
+  (with `LIBCLANG_PATH`/`CMAKE` overridden for this Linux container, same
+  as Set 4) passes clean in 3.4s with the warm build cache, confirming
+  `settings/mod.rs`, `commands.rs`, `lib.rs`, and `hotkeys/mod.rs` all
+  compile correctly together.
+
+## [0.4.8] - 2026-08-20
+
+### Scope-Reduction Set 4 — Triggers/MCP Active Surface Removed
+
+- **Frontend (`native/src/App.tsx`)**: Removed the sidebar "Trigger Phrases"
+  nav button, the `triggers` branch of the tab switcher and hero header,
+  and `triggers` from the `navigate-tab` allowlist. Removed the now-unused
+  `TriggerSettings` and `Zap` icon imports.
+- **Frontend (`native/src/components/settings/ProviderSettings.tsx`)**:
+  Removed a *second*, easy-to-miss entry point to the same component — the
+  "Triggers & MCP" sub-section inside the Settings screen's own sub-nav
+  (`activeSection === 'triggers'`), separate from the App-level tab.
+  Removed the now-unused `TriggerSettings` and `Zap` icon imports.
+- **Backend (`native/src-tauri/src/commands.rs`)**: Removed the inline
+  trigger-match-and-MCP-dispatch block from `process_captured_audio` — the
+  function every click-to-talk ("scribble" mode) capture runs through.
+  Before this change, a spoken phrase matching one of the two
+  *enabled-by-default* triggers ("schedule meeting", "remind me to")
+  silently short-circuited into a canned MCP-stub reply instead of the
+  normal cleanup pipeline, on every fresh install — not only for users who
+  had configured their own triggers. This ran automatically on the core
+  capture path with no UI left to see or control it once the settings
+  entries above are gone, so leaving it in place would not have actually
+  deferred the feature. Removed the now-unused `use crate::mcp::McpRouter;`
+  import and updated a comment that referenced "trigger-matching" as a
+  downstream step it no longer is.
+- **What was NOT changed**: `native/src-tauri/src/triggers/mod.rs`
+  (`TriggerEngine`, including its unit tests), `native/src-tauri/src/mcp/mod.rs`
+  (`McpRouter`), the `get_triggers`/`save_triggers` Tauri commands, and
+  `native/src/components/settings/TriggerSettings.tsx` itself — all
+  unmodified, just no longer invoked or reachable from the UI. PTT,
+  click-to-talk's capture/transcription steps, hotkeys, STT, text
+  injection, Kanban, Voice Chat, and Scribble Notes are unmodified.
+- **Verification**: `native/` — `npm run build` (`tsc && vite build`)
+  passes clean with zero errors; bundle module count dropped from 1608 to
+  1606 (`TriggerSettings.tsx` and one component it exclusively imports no
+  longer bundled). Rust — this container initially couldn't build past
+  `gdk-sys` (Set 1) at all; installing the missing Tauri Linux
+  prerequisites (`libgtk-3-dev`, `libwebkit2gtk-4.1-dev`,
+  `libappindicator3-dev`, `librsvg2-dev`, `libasound2-dev`) plus overriding
+  `LIBCLANG_PATH`/`CMAKE` for this invocation only (the repo's
+  `.cargo/config.toml` hardcodes Windows-only paths for both, left
+  untouched since it's an intentional, platform-specific config file, not
+  something this change needed to touch) let `cargo check` reach and fully
+  compile `relay-native-backend` (Relay's own crate, including the edited
+  `commands.rs`) for the first time this session — `Finished \`dev\`
+  profile [unoptimized + debuginfo] target(s)`, zero errors.
+
+## [0.4.7] - 2026-08-20
+
+### Scope-Reduction Set 3 — Voice Chat & TTS Active Surface Removed
+
+- **Frontend (`native/src/App.tsx`)**:
+  - Removed the sidebar "Voice Chat" nav button, the `chat` branch of the
+    tab switcher and hero header, `chat` from the `navigate-tab` event's
+    allowed payload list, and the `{activeTab === 'chat' && <ChatPanel />}`
+    render line. `activeTab` can no longer become `'chat'`.
+  - Removed the now-unused `ChatPanel` import and `Bot` icon import.
+- **Frontend (`native/src/components/settings/ProviderSettings.tsx`)**:
+  - Removed the "Local Text-to-Speech (Piper) — optional" settings block
+    from the General section — its own caption stated its sole purpose was
+    to "skip 'speak back' in voice chat," so it is Voice Chat's settings
+    surface, not an independent one. Removed the now-unused `Volume2` icon
+    import. `DEFAULT_SETTINGS.tts` and the `settings.tts` round-trip through
+    `get_settings`/`save_settings` are unchanged — the fields simply have no
+    editable UI anymore, exactly like Kanban's backend command in Set 2.
+- **What was NOT changed**: `native/src/components/chat/ChatPanel.tsx` —
+  untouched. `native/src-tauri/src/pipeline/chat.rs` (`process_chat`),
+  `native/src-tauri/src/tts/mod.rs` (`TtsEngine`), and
+  `native/src-tauri/src/providers/mod.rs` (the shared LLM client also used
+  by the in-scope Kanban/meeting and Scribble pipelines) — all untouched;
+  `git diff --stat native/src-tauri/` is empty for this release. The
+  `AppSettings`/`ProcessedPipelineResult` TypeScript types in
+  `native/src/types/index.ts` are unchanged. No settings schema changed.
+  Kanban, PTT, click-to-talk, hotkeys, STT, and text injection unmodified.
+- **Verification**: `native/` — `npm run build` (`tsc && vite build`)
+  passes clean with zero errors; the production bundle now transforms 1608
+  modules (down from 1609 after Set 2), confirming `ChatPanel.tsx` is no
+  longer bundled. Repo-wide grep confirms the only remaining
+  `'chat'`/`piper_*` references in `native/src` are inside `ChatPanel.tsx`
+  itself (untouched) and the preserved `AppSettings`/`DEFAULT_SETTINGS`
+  type shape (needed for settings round-tripping) — no orphaned
+  references. `git status` confirms only the two files above changed.
+
+## [0.4.6] - 2026-08-20
+
+### Scope-Reduction Set 2 — Kanban Active Navigation Removed
+
+- **Frontend (`native/src/App.tsx`)**:
+  - Removed the sidebar "Kanban Board" nav button, the `kanban` branch of
+    the tab switcher and hero header, and `kanban` from the `navigate-tab`
+    event's allowed payload list — `activeTab` can no longer become
+    `'kanban'`.
+  - Removed the unconditional `get_kanban_cards` fetch that previously ran
+    on every app launch (`useEffect` with an empty dependency array) and
+    the `fetchKanbanCards` call inside `handleProcessComplete` — both fired
+    regardless of whether the user ever opened the Kanban tab. This was the
+    one "required at startup" concern flagged by the Set 0 audit.
+  - Removed now-unused imports (`KanbanBoard`, `KanbanCard`, `invoke`, the
+    `Kanban` icon) and the dead `cards` state. Cleaned up a stale comment
+    that referenced "refreshes the board" after the fetch call it described
+    was removed.
+- **What was NOT changed**: `native/src/components/kanban/KanbanBoard.tsx`
+  — untouched, still on disk. The `KanbanCard` type in
+  `native/src/types/index.ts` — untouched (still used by `KanbanBoard.tsx`).
+  The backend `get_kanban_cards` Tauri command and every `VaultManager`
+  Kanban read/write method in `native/src-tauri` — untouched; `git diff
+  --stat native/src-tauri/` is empty for this release. No settings changed
+  (Kanban had none). Scribble Notes, Voice Chat, PTT, click-to-talk,
+  hotkeys, STT, and text injection are unmodified.
+- **Verification**: `native/` — `npm run build` (`tsc && vite build`)
+  passes clean with zero errors; the production bundle now transforms 1609
+  modules (down from 1610), confirming `KanbanBoard.tsx` is no longer
+  bundled into the app. Repo-wide grep confirms zero remaining references
+  to `KanbanBoard`/`get_kanban_cards` in `native/src` outside
+  `KanbanBoard.tsx` and `types/index.ts` themselves. `git status` confirms
+  only `native/src/App.tsx` changed under `native/`. No test suite covers
+  this path (only Rust-side `#[cfg(test)]` unit tests exist, in
+  `vault/mod.rs`, `capture/mod.rs`, `triggers/mod.rs` — none reference
+  Kanban or App.tsx, and none were touched).
+
+## [0.4.5] - 2026-08-20
+
+### Scope-Reduction Set 0 (Audit) & Set 1 — Web Surface Marked Deferred
+
+Relay is being reduced to a stable, focused desktop-first universal dictation
+app (global PTT + click-to-talk + local STT + text injection through one
+Dictation Pill). This is a documentation-only release: no application code
+changed. Kanban, Voice Chat, TTS, Triggers/MCP, and the Dictation Pill
+consolidation are explicitly **not** part of this release — each remains
+gated behind its own future approval (see `docs/decisions.md` Decision 32).
+
+- **Repository audit (Set 0, no changes)**: Read-only audit across Web,
+  Kanban, Voice Chat, TTS, Triggers/MCP, the three pill components
+  (`DictationPill.tsx`/`FloatingPill.tsx`/`PTTWidget.tsx`), Settings, and the
+  core capture/hotkey/STT/injection path. Notable findings recorded for
+  future sets rather than acted on now: Voice Chat is fully implemented and
+  active (contradicting an assumption that it might not exist); the
+  standalone "Dictation Indicator" window was already removed in a prior
+  commit (Decision 30/PTT-013) and no longer exists in code; click-to-talk
+  and the global PTT hotkey share the same backend capture session but
+  diverge after transcription (only the hotkey path calls real OS text
+  injection today; click-to-talk runs the scribble LLM-cleanup/vault-write
+  pipeline instead); and the Triggers/MCP phrase-match check is inlined
+  inside the same handler click-to-talk uses, a real (if small) coupling
+  distinct from the trivially-removable Triggers settings tab.
+- **Documentation (`docs/`)**:
+  - Added Decision 32 to `docs/decisions.md`, recording the desktop-first
+    scope reduction and deferring Web for the current phase — explicitly
+    superseding Decision 3's "dual-surface" framing for this phase only,
+    without altering Decision 3's historical text.
+  - `docs/product.md`: moved the "Dual Surface (Native Desktop + Web
+    Dashboard)" differentiator and the Next.js/Supabase MVP bullet out of
+    active MVP scope into a new "Deferred for Current Phase" section.
+  - `docs/requirements.md`: annotated FR-5.2 (Web Dashboard) as deferred for
+    the current phase, requirement text preserved.
+  - `docs/architecture.md`: annotated the Web Surface box in the
+    three-surface diagram as deferred, and corrected the "Hybrid Cloud Mode"
+    description — a repository audit found no Supabase code anywhere in
+    `native/src-tauri` (zero matches, no dependency) and `web/`'s own
+    Supabase client is a mocked stand-in returning hardcoded data, so this
+    was previously describing an unbuilt, aspirational design as if it were
+    implemented.
+- **What was NOT changed**: No files under `web/`. No Rust or TypeScript
+  source under `native/`. No settings, commands, build configuration, or
+  navigation. No modification made to any existing working implementation —
+  `web/` was already fully decoupled from the desktop build (no shared
+  workspace config, no imports either direction) before this release.
+- **Verification**: `native/` frontend — `npm install && npm run build`
+  (`tsc && vite build`) completed cleanly with zero errors (one pre-existing,
+  unrelated warning about a mixed static/dynamic import of
+  `@tauri-apps/api/event.js`, present before this change). Rust backend —
+  `cargo check` in this Linux container fails during dependency compilation
+  at `gdk-sys v0.18.2`'s build script (`pkg-config` can't find `gdk-3.0` —
+  the GTK/GDK system libraries Tauri's Linux windowing backend needs, e.g.
+  `libgtk-3-dev`, which this container doesn't have installed), before any
+  of Relay's own crates or Relay-authored Rust code are even reached. Relay
+  targets Windows and this is a pre-existing container/environment gap, not
+  a regression — this release touched zero Rust code, and the failure
+  occurs entirely within a third-party dependency's native build step,
+  upstream of anything this repository controls.
+
 ## [0.4.4] - 2026-08-20
 
 ### Real Speech Detection, Rolling Waveform & Dictation Lifecycle Hardening

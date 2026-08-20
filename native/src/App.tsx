@@ -1,25 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { PTTWidget } from './components/capture/PTTWidget';
-import { KanbanBoard } from './components/kanban/KanbanBoard';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
-import { ChatPanel } from './components/chat/ChatPanel';
-import { TriggerSettings } from './components/settings/TriggerSettings';
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RelayLogo } from './components/common/RelayLogo';
 import { ChangelogModal } from './components/common/ChangelogModal';
-import { KanbanCard, ProcessedPipelineResult } from './types';
-import { invoke } from '@tauri-apps/api/core';
+import { ProcessedPipelineResult } from './types';
 import { listen } from '@tauri-apps/api/event';
 import {
   Mic,
-  Kanban,
   Sparkles,
-  Zap,
   Settings,
   ShieldCheck,
   Activity,
-  Bot,
   Sidebar as SidebarIcon,
   ChevronRight,
   HardDrive,
@@ -33,41 +26,24 @@ import { cn } from '@/lib/utils';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
-    'capture' | 'kanban' | 'scribble' | 'chat' | 'triggers' | 'settings'
+    'capture' | 'scribble' | 'settings'
   >('capture');
-  const [cards, setCards] = useState<KanbanCard[]>([]);
   const [lastResult, setLastResult] = useState<ProcessedPipelineResult | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [changelogOpen, setChangelogOpen] = useState(false);
 
-  const fetchKanbanCards = async () => {
-    try {
-      const data = await invoke<KanbanCard[]>('get_kanban_cards');
-      setCards(data);
-    } catch (err) {
-      console.error('Failed to fetch Kanban cards', err);
-    }
-  };
-
-  useEffect(() => {
-    fetchKanbanCards();
-  }, []);
-
   const handleProcessComplete = (result: ProcessedPipelineResult) => {
     setLastResult(result);
-    fetchKanbanCards();
     if (result.mode === 'scribble') {
       setActiveTab('scribble');
-    } else if (result.mode === 'meeting') {
-      setActiveTab('kanban');
     }
   };
 
   // The dictation pill defaults to living in its own floating desktop
   // window, separate from this one — this main window has no direct
-  // handle to it, so it learns a capture finished (and switches tabs /
-  // refreshes the board) from the backend event instead of a prop
-  // callback. Also covers the in-app fallback pill for free.
+  // handle to it, so it learns a capture finished (and switches to the
+  // Scribble tab) from the backend event instead of a prop callback.
+  // Also covers the in-app fallback pill for free.
   useEffect(() => {
     const unlistenPromise = listen<ProcessedPipelineResult>('capture-processed', ({ payload }) =>
       handleProcessComplete(payload)
@@ -75,10 +51,7 @@ export const App: React.FC = () => {
     const unlistenTabPromise = listen<string>('navigate-tab', ({ payload }) => {
       if (
         payload === 'capture' ||
-        payload === 'kanban' ||
         payload === 'scribble' ||
-        payload === 'chat' ||
-        payload === 'triggers' ||
         payload === 'settings'
       ) {
         setActiveTab(payload as any);
@@ -108,20 +81,6 @@ export const App: React.FC = () => {
             </p>
           </div>
         );
-      case 'kanban':
-        return (
-          <div className="mb-6">
-            <p className="font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">
-              RELAY · KANBAN
-            </p>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">
-              Structured tasks, <span className="italic text-primary">extracted</span> live.
-            </h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              {cards.length} action card{cards.length === 1 ? '' : 's'} parsed from local speech transcripts.
-            </p>
-          </div>
-        );
       case 'scribble':
         return (
           <div className="mb-6">
@@ -136,20 +95,6 @@ export const App: React.FC = () => {
             </p>
           </div>
         );
-      case 'triggers':
-        return (
-          <div className="mb-6">
-            <p className="font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">
-              RELAY · TRIGGERS
-            </p>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">
-              Custom phrases, <span className="italic text-primary">automated</span> actions.
-            </h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              Phrase-to-action intent mappings for calendar and notifications.
-            </p>
-          </div>
-        );
       case 'settings':
         return (
           <div className="mb-6">
@@ -161,20 +106,6 @@ export const App: React.FC = () => {
             </h1>
             <p className="text-xs text-muted-foreground mt-1">
               Configure local LLMs, cloud fallback providers, triggers, and privacy bounds.
-            </p>
-          </div>
-        );
-      case 'chat':
-        return (
-          <div className="mb-6">
-            <p className="font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">
-              RELAY · VOICE CHAT
-            </p>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">
-              Ask, <span className="italic text-primary">grounded</span> in your notes.
-            </h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              Voice questions answered from your own vault, with sources shown.
             </p>
           </div>
         );
@@ -227,28 +158,6 @@ export const App: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('kanban')}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'kanban'
-                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold shadow-xs'
-                : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Kanban className="w-4 h-4" />
-              <span>Kanban Board</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              {cards.length > 0 && (
-                <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono">
-                  {cards.length}
-                </Badge>
-              )}
-              {activeTab === 'kanban' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
-            </div>
-          </button>
-
-          <button
             onClick={() => setActiveTab('scribble')}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
               activeTab === 'scribble'
@@ -261,36 +170,6 @@ export const App: React.FC = () => {
               <span>Scribble Notes</span>
             </div>
             {activeTab === 'scribble' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('chat')}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'chat'
-                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold shadow-xs'
-                : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Bot className="w-4 h-4" />
-              <span>Voice Chat</span>
-            </div>
-            {activeTab === 'chat' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('triggers')}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'triggers'
-                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold shadow-xs'
-                : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Zap className="w-4 h-4" />
-              <span>Trigger Phrases</span>
-            </div>
-            {activeTab === 'triggers' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
           </button>
 
           <button
@@ -402,7 +281,7 @@ export const App: React.FC = () => {
               activeTab !== 'capture' && 'hidden'
             )}
           >
-            <PTTWidget onProcessComplete={handleProcessComplete} />
+            <PTTWidget />
 
             {lastResult && activeTab === 'capture' && (
               <div className="mt-4 flex-1">
@@ -418,15 +297,12 @@ export const App: React.FC = () => {
             )}
           </div>
 
-          {activeTab === 'kanban' && <KanbanBoard cards={cards} onRefresh={fetchKanbanCards} />}
-          {activeTab === 'chat' && <ChatPanel />}
           {activeTab === 'scribble' && (
             <ScribbleViewer
               content={lastResult?.output_markdown || ''}
               transcript={lastResult?.transcript || ''}
             />
           )}
-          {activeTab === 'triggers' && <TriggerSettings />}
           {activeTab === 'settings' && <ProviderSettings />}
         </main>
       </div>

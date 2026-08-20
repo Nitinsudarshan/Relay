@@ -21,6 +21,14 @@ pub struct HotkeySettings {
     pub show_hide_hotkey: String,
     /// Push-to-talk: hold to dictate into whatever field currently has OS focus.
     pub dictation_hotkey: String,
+    /// When true, the dictation hotkey toggles instead of requiring a
+    /// press-and-hold: one press starts recording, a second press stops it,
+    /// and simply releasing the key in between does nothing. Meant for
+    /// longer dictations where holding a key down the whole time is
+    /// tedious. Defaults to `false` (hold-to-talk), preserving existing
+    /// behavior for anyone who hasn't opted in.
+    #[serde(default)]
+    pub toggle_to_talk: bool,
 }
 
 impl Default for HotkeySettings {
@@ -28,6 +36,7 @@ impl Default for HotkeySettings {
         Self {
             show_hide_hotkey: "Ctrl+Shift+Space".to_string(),
             dictation_hotkey: "Ctrl+Space".to_string(),
+            toggle_to_talk: false,
         }
     }
 }
@@ -65,10 +74,6 @@ pub enum PillPosition {
 /// General UI/window behavior that isn't tied to a specific capture engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
-    /// Whether the floating "Click to dictate" pill window is shown as a
-    /// separate always-on-top desktop overlay (outside the main app
-    /// window) rather than only being reachable from inside it.
-    pub show_floating_pill: bool,
     /// Which edge of the screen the floating pill anchors to.
     #[serde(default)]
     pub pill_position: PillPosition,
@@ -77,7 +82,6 @@ pub struct UiSettings {
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
-            show_floating_pill: true,
             pill_position: PillPosition::default(),
         }
     }

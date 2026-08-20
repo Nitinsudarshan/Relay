@@ -439,7 +439,9 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       {/* Keyboard hint bar (floating above main pill, matching application dark card #171717) */}
       {isExpanded && !popoverOpen && phase !== 'success' && (
         <div className="absolute left-1/2 bottom-[70px] -translate-x-1/2 bg-white/95 dark:bg-[#171717]/95 border border-slate-200 dark:border-[#262626] shadow-md rounded-lg px-3 py-1.5 whitespace-nowrap flex items-center gap-2 text-xs text-slate-700 dark:text-neutral-300 pointer-events-none z-30 animate-in fade-in slide-in-from-bottom-1 duration-150">
-          <span className="text-slate-500 dark:text-neutral-400 font-medium">Hold to record</span>
+          <span className="text-slate-500 dark:text-neutral-400 font-medium">
+            {settings?.hotkeys.toggle_to_talk ? 'Tap to start/stop' : 'Hold to record'}
+          </span>
           <span className="flex items-center gap-1">
             <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-[#262626] text-slate-800 dark:text-neutral-200 border border-slate-200 dark:border-[#404040] font-semibold shadow-xs">
               Ctrl
