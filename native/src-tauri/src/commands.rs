@@ -4,11 +4,12 @@ use crate::pipeline::{PipelineEngine, ProcessedPipelineResult};
 use crate::providers::{LLMClient, OllamaStatus, ProviderType};
 use crate::settings::{AppSettings, HotkeySettings, PillPosition};
 use crate::triggers::{TriggerConfig, TriggerEngine};
-use crate::vault::{KanbanCard, VaultManager};
+use crate::vault::{KanbanCard, VaultManager, VaultNote};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 /// Broadcast to every window whenever the shared microphone session starts
 /// or stops, so any surface (main window, floating pill, indicator) can
@@ -70,6 +71,10 @@ impl CommandError {
 pub struct AppState {
     pub recorder: AudioRecorder,
     pub vault: VaultManager,
+    /// The process-relative vault path Relay used before Vault Directory
+    /// Location was configurable — the "Use Default Relay Vault" choice in
+    /// first-time setup, and the fallback whenever nothing is configured.
+    pub default_vault_dir: PathBuf,
     pub config_dir: PathBuf,
     pub settings: Mutex<AppSettings>,
     pub stt: SttEngine,
@@ -229,6 +234,33 @@ pub async fn start_capture(
 /// vault/Kanban board without polling.
 pub const CAPTURE_PROCESSED_EVENT: &str = "capture-processed";
 
+/// Broadcast whenever a Voice Note is persisted to the vault, so the Voice
+/// Note page can prepend it to Transcript History and refresh its stats
+/// without polling or requiring a restart.
+pub const VOICE_NOTE_SAVED_EVENT: &str = "voice-note-saved";
+
+/// Persists `transcript` as a Voice Note and notifies every window. This is
+/// the single funnel both the global dictation hotkey
+/// (`hotkeys::stop_dictation_session`) and click-to-talk
+/// (`process_captured_audio`) route every successful, non-empty transcript
+/// through — regardless of whether OS text injection also happens for it —
+/// so one recording can never produce more than one Voice Note. Callers
+/// must already have guarded against an empty/whitespace-only transcript.
+/// Failure to write is logged, not surfaced — a Voice Note write failure
+/// must never interrupt dictation/injection, which have already succeeded
+/// by the time this is called.
+pub fn save_voice_note(app: &AppHandle, vault: &VaultManager, transcript: &str) {
+    let note = VaultNote::new_voice_note(transcript);
+    match vault.save_note(&note) {
+        Ok(_) => {
+            let _ = app.emit(VOICE_NOTE_SAVED_EVENT, &note);
+        }
+        Err(e) => {
+            tracing::error!("Failed to save voice note: {}", e);
+        }
+    }
+}
+
 /// Stops the active capture session and, only if the microphone actually
 /// picked up audio (see [`crate::capture::CapturedAudio::had_audio`]),
 /// transcribes and processes it. Returns `Ok(None)` — never a fabricated
@@ -255,7 +287,7 @@ pub async fn stop_capture(
     }
 
     emit_capture_status_event(&app, false, Some(captured.mode.clone()), "TRANSCRIBING", None);
-    let result = process_captured_audio(&state, captured).await;
+    let result = process_captured_audio(&app, &state, captured).await;
     match &result {
         Ok(Some(processed)) => {
             let _ = app.emit(CAPTURE_PROCESSED_EVENT, processed);
@@ -276,6 +308,7 @@ pub async fn stop_capture(
 }
 
 async fn process_captured_audio(
+    app: &AppHandle,
     state: &State<'_, AppState>,
     captured: crate::capture::CapturedAudio,
 ) -> Result<Option<ProcessedPipelineResult>, CommandError> {
@@ -326,6 +359,16 @@ async fn process_captured_audio(
         return Ok(None);
     }
 
+    // Every successful, non-empty transcript becomes a Voice Note — this
+    // must not depend on which mode-specific pipeline runs next, or on
+    // whether it succeeds. "chat" is Voice Chat (a deferred, unrelated
+    // feature per docs/decisions.md Decision 34) answering a spoken
+    // question, not a dictation to keep — excluded so voice chat queries
+    // don't clutter the Voice Note history.
+    if captured.mode != "chat" {
+        save_voice_note(app, &state.vault, &transcript);
+    }
+
     let llm = LLMClient::new(settings.provider.clone());
 
     match captured.mode.as_str() {
@@ -350,6 +393,107 @@ pub async fn get_kanban_cards(state: State<'_, AppState>) -> Result<Vec<KanbanCa
         .vault
         .list_kanban_cards()
         .map_err(|e| CommandError::new("VAULT_READ_FAILED", &e.to_string()))
+}
+
+/// All Voice Notes in the vault, newest first — the Transcript History the
+/// Voice Note page renders and computes its stats from.
+#[tauri::command]
+pub async fn get_voice_notes(state: State<'_, AppState>) -> Result<Vec<VaultNote>, CommandError> {
+    state
+        .vault
+        .list_notes_by_type(crate::vault::VOICE_NOTE_TYPE)
+        .map_err(|e| CommandError::new("VAULT_READ_FAILED", &e.to_string()))
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VaultLocationInfo {
+    /// Absolute path currently in use, whether from an explicit user choice
+    /// or the process-relative default.
+    pub path: String,
+    /// The process-relative default path — what "Use Default Relay Vault"
+    /// would set `path` to.
+    pub default_path: String,
+    /// Whether the user has explicitly chosen/confirmed a location (Voice
+    /// Note first-time setup, or Settings) — distinct from "currently using
+    /// the unconfirmed default".
+    pub configured: bool,
+    /// Whether `path` currently exists (or can be created) and is usable.
+    pub accessible: bool,
+}
+
+/// Reports where Relay's vault currently lives, so the Voice Note page can
+/// decide whether to show first-time setup, a "can't access your folder"
+/// recovery state, or the normal history view.
+#[tauri::command]
+pub async fn get_vault_location(
+    state: State<'_, AppState>,
+) -> Result<VaultLocationInfo, CommandError> {
+    let configured = state.settings.lock().unwrap().vault.directory.is_some();
+    let path = state.vault.vault_dir();
+    // Reuses `VaultManager::init` (already called by every read/write path)
+    // as the accessibility probe, rather than duplicating filesystem-
+    // permission-checking logic.
+    let accessible = state.vault.init().is_ok();
+    Ok(VaultLocationInfo {
+        path: path.to_string_lossy().to_string(),
+        default_path: state.default_vault_dir.to_string_lossy().to_string(),
+        configured,
+        accessible,
+    })
+}
+
+/// Opens the native OS folder picker and returns the chosen path, or `None`
+/// if the user cancelled. Runs on a blocking task since the dialog blocks
+/// its calling thread until the user responds.
+#[tauri::command]
+pub async fn choose_vault_folder(app: AppHandle) -> Result<Option<String>, CommandError> {
+    let selected =
+        tauri::async_runtime::spawn_blocking(move || app.dialog().file().blocking_pick_folder())
+            .await
+            .map_err(|e| CommandError::new("DIALOG_TASK_FAILED", &e.to_string()))?;
+
+    match selected {
+        Some(file_path) => file_path
+            .into_path()
+            .map(|p| Some(p.to_string_lossy().to_string()))
+            .map_err(|e| CommandError::new("DIALOG_PATH_INVALID", &e.to_string())),
+        None => Ok(None),
+    }
+}
+
+/// Validates `path`, repoints the live vault at it (no restart needed —
+/// future Voice Notes, and any other vault reads/writes, immediately use
+/// it), and persists it to the existing Vault Directory Location setting.
+/// Never moves, migrates, or deletes whatever is at the old location.
+#[tauri::command]
+pub async fn set_vault_location(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<VaultLocationInfo, CommandError> {
+    let new_dir = PathBuf::from(&path);
+    let probe = VaultManager::new(new_dir.clone());
+    probe
+        .init()
+        .map_err(|e| CommandError::new("VAULT_PATH_INVALID", &e.to_string()))?;
+
+    // Persist before repointing the live vault — if the settings write
+    // fails, the running app must keep using the old (still-working)
+    // location rather than silently diverging from what's on disk.
+    let mut settings = state.settings.lock().unwrap();
+    settings.vault.directory = Some(path.clone());
+    settings
+        .save(&state.settings_path())
+        .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
+    drop(settings);
+
+    state.vault.set_vault_dir(new_dir);
+
+    Ok(VaultLocationInfo {
+        path,
+        default_path: state.default_vault_dir.to_string_lossy().to_string(),
+        configured: true,
+        accessible: true,
+    })
 }
 
 #[tauri::command]

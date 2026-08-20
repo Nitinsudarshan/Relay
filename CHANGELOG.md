@@ -1,5 +1,40 @@
 # Relay — Changelog
 
+## [0.7.0] - 2026-08-20
+
+### Voice Note — Universal Dictation History & Configurable Vault Directory Location
+
+Voice Note is now the persistent history of every successful Relay
+transcription, stored in the existing local Vault — regardless of which
+capture path produced it or whether text injection succeeded. See
+`docs/decisions.md` (Decision 38) for the full design.
+
+- **Backend**: Added a `voice_note` note type to the existing Vault
+  (`native/src-tauri/src/vault/mod.rs`) — reuses the existing Markdown/
+  frontmatter format and `VaultManager::save_note`, no new database. A new
+  `commands::save_voice_note` funnel is called from both the global
+  dictation hotkey (`hotkeys::stop_dictation_session`) and click-to-talk
+  (`commands::process_captured_audio`) right after each already has a
+  successful, non-empty transcript, so one recording always produces
+  exactly one Voice Note, independent of injection's outcome.
+- **Backend**: "Vault Directory Location" is now a real, persisted setting
+  (`AppSettings.vault.directory`) instead of decorative UI text. Added
+  `get_vault_location`, `choose_vault_folder` (native OS folder picker via
+  `tauri-plugin-dialog`, now registered), and `set_vault_location`
+  commands. `VaultManager` can repoint its root at runtime with no
+  restart, so a freshly chosen folder is usable immediately.
+- **Frontend**: The "Voice Capture" sidebar tab is renamed "Voice Note" and
+  rebuilt as the dictation history/review surface — a banner, three stat
+  cards (Total Voice Notes, Total Words, Notes Today), and a live-updating
+  Transcript History list. First visit with no configured location shows
+  a setup prompt (native folder picker or "Use Default Relay Vault"); an
+  inaccessible location shows a recovery prompt instead of crashing.
+  Settings → Vault & LanceDB now shows the real resolved path and can
+  change it via the same commands. Removed the redundant "Menu" label
+  above the sidebar's navigation items.
+- **Preserved**: Global PTT, click-to-talk, the Dictation Pill, Scribble
+  Notes, Kanban, and existing settings are all unmodified.
+
 ## [0.6.0] - 2026-08-20
 
 ### Toggle-to-Talk — Optional Press-Once Dictation Mode

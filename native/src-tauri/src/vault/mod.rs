@@ -1,7 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use thiserror::Error;
+
+/// Note type for Relay's universal dictation history — every successful
+/// transcript, from any capture mode, regardless of whether text injection
+/// also happened for it. Distinct from the LLM-cleaned "scribble"/"meeting"
+/// note types, which remain unchanged.
+pub const VOICE_NOTE_TYPE: &str = "voice_note";
 
 #[derive(Error, Debug)]
 pub enum VaultError {
@@ -27,6 +34,44 @@ pub struct VaultNote {
     pub content: String,
 }
 
+impl VaultNote {
+    /// Builds a Voice Note from a raw transcript. Callers must already have
+    /// guarded against an empty/whitespace-only transcript — this always
+    /// creates a note. Voice Notes carry the verbatim transcript as
+    /// `content` (unlike "scribble" notes, which store an LLM-cleaned
+    /// rewrite) since they exist to be a truthful dictation history.
+    pub fn new_voice_note(transcript: &str) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
+        // The hand-rolled frontmatter below embeds `title` in a single
+        // quoted line (`title: "..."`, no escaping) — fine for the fixed,
+        // developer-authored titles "scribble"/"meeting" notes use, but
+        // this is the first note type whose title comes from arbitrary
+        // speech, so a literal `"` or newline in the excerpt must not be
+        // allowed to corrupt that line.
+        let title: String = transcript
+            .chars()
+            .take(60)
+            .map(|c| {
+                if c == '"' || c == '\n' || c == '\r' {
+                    ' '
+                } else {
+                    c
+                }
+            })
+            .collect();
+        Self {
+            id: format!("note_{}", uuid::Uuid::new_v4()),
+            title,
+            note_type: VOICE_NOTE_TYPE.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            tags: Vec::new(),
+            source_audio: None,
+            content: transcript.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct KanbanCard {
     pub id: String,
@@ -41,23 +86,46 @@ pub struct KanbanCard {
 }
 
 pub struct VaultManager {
-    vault_dir: PathBuf,
+    // A `Mutex` (rather than a plain `PathBuf`) so the vault root can be
+    // repointed at runtime — e.g. when the user picks a folder via the
+    // Voice Note first-time setup, or changes Vault Directory Location in
+    // Settings — without requiring an app restart. Every method already
+    // only needed `&self`, so this is the only change needed to make that
+    // safe; no call site elsewhere has to change.
+    vault_dir: Mutex<PathBuf>,
 }
 
 impl VaultManager {
     pub fn new(vault_dir: PathBuf) -> Self {
-        Self { vault_dir }
+        Self {
+            vault_dir: Mutex::new(vault_dir),
+        }
+    }
+
+    pub fn vault_dir(&self) -> PathBuf {
+        self.vault_dir.lock().unwrap().clone()
+    }
+
+    /// Repoints this vault at a new root directory. Existing notes at the
+    /// old location are left in place untouched — nothing is moved,
+    /// migrated, or deleted (see docs/decisions.md).
+    pub fn set_vault_dir(&self, new_dir: PathBuf) {
+        *self.vault_dir.lock().unwrap() = new_dir;
     }
 
     pub fn init(&self) -> Result<(), VaultError> {
-        fs::create_dir_all(self.vault_dir.join("notes"))?;
-        fs::create_dir_all(self.vault_dir.join("kanban"))?;
+        let dir = self.vault_dir();
+        fs::create_dir_all(dir.join("notes"))?;
+        fs::create_dir_all(dir.join("kanban"))?;
         Ok(())
     }
 
     pub fn save_note(&self, note: &VaultNote) -> Result<PathBuf, VaultError> {
         self.init()?;
-        let file_path = self.vault_dir.join("notes").join(format!("{}.md", note.id));
+        let file_path = self
+            .vault_dir()
+            .join("notes")
+            .join(format!("{}.md", note.id));
         let frontmatter = format!(
             "---\nid: \"{}\"\ntitle: \"{}\"\ntype: \"{}\"\ncreated_at: \"{}\"\nupdated_at: \"{}\"\ntags: {:?}\nsource_audio: {:?}\n---\n\n{}",
             note.id, note.title, note.note_type, note.created_at, note.updated_at, note.tags, note.source_audio, note.content
@@ -71,7 +139,7 @@ impl VaultManager {
     pub fn save_kanban_card(&self, card: &KanbanCard) -> Result<PathBuf, VaultError> {
         self.init()?;
         let file_path = self
-            .vault_dir
+            .vault_dir()
             .join("kanban")
             .join(format!("{}.md", card.id));
         let due_date_str = card.due_date.as_deref().unwrap_or("");
@@ -89,7 +157,7 @@ impl VaultManager {
 
     pub fn list_notes(&self) -> Result<Vec<VaultNote>, VaultError> {
         self.init()?;
-        let notes_dir = self.vault_dir.join("notes");
+        let notes_dir = self.vault_dir().join("notes");
         let mut notes = Vec::new();
 
         if !notes_dir.exists() {
@@ -108,6 +176,20 @@ impl VaultManager {
             }
         }
 
+        Ok(notes)
+    }
+
+    /// Returns only notes of the given `note_type` (e.g. [`VOICE_NOTE_TYPE`]),
+    /// newest first. `created_at` is an RFC3339 string with a fixed-width,
+    /// fixed-offset format (see [`VaultNote::new_voice_note`]), so a plain
+    /// string comparison already sorts chronologically.
+    pub fn list_notes_by_type(&self, note_type: &str) -> Result<Vec<VaultNote>, VaultError> {
+        let mut notes: Vec<VaultNote> = self
+            .list_notes()?
+            .into_iter()
+            .filter(|n| n.note_type == note_type)
+            .collect();
+        notes.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(notes)
     }
 
@@ -211,7 +293,7 @@ impl VaultManager {
 
     pub fn list_kanban_cards(&self) -> Result<Vec<KanbanCard>, VaultError> {
         self.init()?;
-        let kanban_dir = self.vault_dir.join("kanban");
+        let kanban_dir = self.vault_dir().join("kanban");
         let mut cards = Vec::new();
 
         if !kanban_dir.exists() {
@@ -331,6 +413,73 @@ fn parse_debug_string_list(raw: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_voice_note_saved_and_filtered_by_type() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+
+        let voice_note = VaultNote::new_voice_note("Can you send me the report tomorrow?");
+        assert_eq!(voice_note.note_type, VOICE_NOTE_TYPE);
+        assert_eq!(voice_note.content, "Can you send me the report tomorrow?");
+        manager.save_note(&voice_note).unwrap();
+
+        let scribble_note = VaultNote {
+            id: "note_scribble".to_string(),
+            title: "Voice Scribble Note".to_string(),
+            note_type: "scribble".to_string(),
+            created_at: "2026-08-19T01:50:00Z".to_string(),
+            updated_at: "2026-08-19T01:50:00Z".to_string(),
+            tags: vec![],
+            source_audio: None,
+            content: "Some LLM-cleaned content".to_string(),
+        };
+        manager.save_note(&scribble_note).unwrap();
+
+        // Both land in the vault, but only the voice note comes back when
+        // filtering by type — the Voice Note page must not show scribble
+        // notes in its Transcript History.
+        assert_eq!(manager.list_notes().unwrap().len(), 2);
+        let voice_notes = manager.list_notes_by_type(VOICE_NOTE_TYPE).unwrap();
+        assert_eq!(voice_notes.len(), 1);
+        assert_eq!(voice_notes[0].id, voice_note.id);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_set_vault_dir_repoints_reads_and_writes() {
+        let dir_a = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        let dir_b = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(dir_a.clone());
+
+        manager
+            .save_note(&VaultNote::new_voice_note("first note, in dir_a"))
+            .unwrap();
+        assert_eq!(manager.list_notes().unwrap().len(), 1);
+
+        // Repointing must not touch whatever already exists at the old
+        // location — it only changes where *future* reads/writes go.
+        manager.set_vault_dir(dir_b.clone());
+        assert_eq!(manager.vault_dir(), dir_b);
+        assert_eq!(
+            manager.list_notes().unwrap().len(),
+            0,
+            "the freshly repointed vault must start empty, not see dir_a's note"
+        );
+
+        manager
+            .save_note(&VaultNote::new_voice_note("second note, in dir_b"))
+            .unwrap();
+        assert_eq!(manager.list_notes().unwrap().len(), 1);
+        assert!(
+            dir_a.join("notes").read_dir().unwrap().count() == 1,
+            "dir_a's note must be untouched"
+        );
+
+        let _ = fs::remove_dir_all(dir_a);
+        let _ = fs::remove_dir_all(dir_b);
+    }
 
     #[test]
     fn test_kanban_card_serialization() {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { AppSettings } from '../../types';
+import { AppSettings, VaultLocationInfo } from '../../types';
 import {
   Cpu,
   Cloud,
@@ -34,6 +34,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   tts: { piper_binary_path: '', piper_voice_path: '' },
   hotkeys: { show_hide_hotkey: 'Ctrl+Shift+Space', dictation_hotkey: 'Ctrl+Space', toggle_to_talk: false },
   ui: { pill_position: 'bottom_center' },
+  vault: { directory: null },
 };
 
 export const ProviderSettings: React.FC = () => {
@@ -88,6 +89,34 @@ export const ProviderSettings: React.FC = () => {
     }
   };
 
+  const [vaultLocation, setVaultLocation] = useState<VaultLocationInfo | null>(null);
+  const [vaultBusy, setVaultBusy] = useState(false);
+  const [vaultError, setVaultError] = useState('');
+
+  const loadVaultLocation = async () => {
+    try {
+      setVaultLocation(await invoke<VaultLocationInfo>('get_vault_location'));
+    } catch (err) {
+      console.error('Failed to read Vault Directory Location', err);
+      setVaultError('Could not determine where the vault is stored');
+    }
+  };
+
+  const handleChooseVaultFolder = async () => {
+    setVaultBusy(true);
+    setVaultError('');
+    try {
+      const picked = await invoke<string | null>('choose_vault_folder');
+      if (!picked) return;
+      setVaultLocation(await invoke<VaultLocationInfo>('set_vault_location', { path: picked }));
+    } catch (err: any) {
+      console.error('Failed to set Vault Directory Location', err);
+      setVaultError(err?.message || "Couldn't use that folder — choose another.");
+    } finally {
+      setVaultBusy(false);
+    }
+  };
+
   useEffect(() => {
     invoke<AppSettings>('get_settings')
       .then(setSettings)
@@ -97,6 +126,13 @@ export const ProviderSettings: React.FC = () => {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!loading && activeSection === 'vault') {
+      loadVaultLocation();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, activeSection]);
 
   useEffect(() => {
     if (!loading && activeSection === 'providers' && settings.provider.active_provider === 'ollama') {
@@ -576,14 +612,34 @@ export const ProviderSettings: React.FC = () => {
                 <Switch checked={rawAudioKept} onCheckedChange={setRawAudioKept} />
               </div>
 
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
+              <div className="py-3 border-b border-border flex items-center justify-between gap-3">
+                <div className="min-w-0">
                   <p className="text-xs font-semibold text-foreground">Vault Directory Location</p>
-                  <p className="text-[11px] text-muted-foreground font-mono">.relay/vault</p>
+                  <p className="text-[11px] text-muted-foreground font-mono truncate">
+                    {vaultLocation?.path || 'Loading…'}
+                  </p>
+                  {vaultLocation && !vaultLocation.configured && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Using the default location</p>
+                  )}
+                  {vaultError && <p className="text-[10px] text-destructive mt-0.5">{vaultError}</p>}
                 </div>
-                <Badge variant="outline" className="text-xs font-mono">
-                  Local File System
-                </Badge>
+                <div className="flex items-center gap-2 shrink-0">
+                  {vaultLocation?.accessible === false && (
+                    <Badge variant="outline" className="text-xs font-mono border-destructive/50 text-destructive">
+                      Inaccessible
+                    </Badge>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-7"
+                    disabled={vaultBusy}
+                    onClick={handleChooseVaultFolder}
+                  >
+                    Choose Folder
+                  </Button>
+                </div>
               </div>
 
               <div className="py-3 flex items-center justify-between">

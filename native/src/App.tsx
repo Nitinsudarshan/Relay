@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PTTWidget } from './components/capture/PTTWidget';
+import { VoiceNotePage } from './components/voicenotes/VoiceNotePage';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -22,7 +22,12 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+
+const TAB_LABELS: Record<'capture' | 'scribble' | 'settings', string> = {
+  capture: 'Voice Note',
+  scribble: 'Scribble Notes',
+  settings: 'Settings',
+};
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
@@ -71,13 +76,13 @@ export const App: React.FC = () => {
         return (
           <div className="mb-6">
             <p className="font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">
-              RELAY · TODAY
+              RELAY · VOICE NOTES
             </p>
             <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">
-              Today, <span className="italic text-primary">Nitin</span> captured.
+              Voice <span className="italic text-primary">Notes</span>
             </h1>
             <p className="text-xs text-muted-foreground mt-1">
-              Live push-to-talk voice memory & task extraction dashboard.
+              Everything you dictate, captured in one place.
             </p>
           </div>
         );
@@ -133,13 +138,6 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* MENU mono-caps label */}
-        <div className="px-3 mb-2">
-          <span className="font-mono text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
-            MENU
-          </span>
-        </div>
-
         {/* Navigation Items with active accent dot */}
         <nav className="flex-1 space-y-1">
           <button
@@ -152,7 +150,7 @@ export const App: React.FC = () => {
           >
             <div className="flex items-center gap-2.5">
               <Mic className="w-4 h-4" />
-              <span>Voice Capture</span>
+              <span>Voice Note</span>
             </div>
             {activeTab === 'capture' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
           </button>
@@ -248,7 +246,7 @@ export const App: React.FC = () => {
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono uppercase tracking-wider">
               <span>RELAY</span>
               <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/60" />
-              <span className="font-semibold text-foreground">{activeTab}</span>
+              <span className="font-semibold text-foreground">{TAB_LABELS[activeTab]}</span>
             </div>
           </div>
 
@@ -265,37 +263,12 @@ export const App: React.FC = () => {
           {/* Top Hero Banner */}
           {renderHeroHeader()}
 
-          {/* Always mounted (never conditionally rendered on `activeTab`) —
-              when the floating pill is turned off in Settings, this is the
-              *only* place the docked pill lives, and it owns the
-              capture-state-changed/capture-level listeners that make
-              Ctrl+Space (held from anywhere in the OS) show up as a visible
-              recording state. Conditionally mounting it per-tab used to
-              tear those listeners down the moment the user left the Voice
-              Capture tab, silently orphaning any hotkey-triggered session.
-              Visibility is CSS-only so the component — and its listeners —
-              stay alive across tab switches. */}
-          <div
-            className={cn(
-              'flex-1 flex flex-col max-w-4xl mx-auto w-full',
-              activeTab !== 'capture' && 'hidden'
-            )}
-          >
-            <PTTWidget />
-
-            {lastResult && activeTab === 'capture' && (
-              <div className="mt-4 flex-1">
-                {lastResult.mode === 'scribble' ? (
-                  <ScribbleViewer content={lastResult.output_markdown} transcript={lastResult.transcript} />
-                ) : (
-                  <div className="rounded-xl p-4 border border-border bg-card text-xs font-mono text-foreground shadow-sm">
-                    <p className="font-semibold text-emerald-500 mb-1">Result Summary:</p>
-                    <p className="text-muted-foreground">{lastResult.output_markdown}</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          {/* The Dictation Pill (its own always-on-top floating window) is
+              the sole capture/control surface and owns its own listeners
+              regardless of which main-window tab is active — this tab is
+              purely the history/review surface, so it can mount/unmount
+              normally like the other tabs. */}
+          {activeTab === 'capture' && <VoiceNotePage />}
 
           {activeTab === 'scribble' && (
             <ScribbleViewer

@@ -87,6 +87,17 @@ impl Default for UiSettings {
     }
 }
 
+/// Where Relay's local Vault (notes, Kanban cards, Voice Notes) lives on
+/// disk. `directory` is `None` until the user explicitly chooses or
+/// confirms a location — via the Voice Note first-time setup flow, or
+/// Settings → Vault & LanceDB — at which point it holds an absolute
+/// filesystem path. Left unset, the app keeps using its existing
+/// process-relative default so nothing already working moves silently.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VaultSettings {
+    pub directory: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppSettings {
     #[serde(default)]
@@ -99,6 +110,8 @@ pub struct AppSettings {
     pub hotkeys: HotkeySettings,
     #[serde(default)]
     pub ui: UiSettings,
+    #[serde(default)]
+    pub vault: VaultSettings,
 }
 
 impl AppSettings {
