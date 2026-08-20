@@ -105,6 +105,24 @@
 @layer base {
   * {
     @apply border-border;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, hsl(var(--muted-foreground)) 40%, transparent) transparent;
+  }
+
+  /* Webkit custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent !important;
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: color-mix(in srgb, hsl(var(--muted-foreground)) 40%, transparent);
+    border-radius: 4px;
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
@@ -122,6 +140,16 @@
   html.overlay-window,
   body.overlay-window {
     background: transparent !important;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }
 

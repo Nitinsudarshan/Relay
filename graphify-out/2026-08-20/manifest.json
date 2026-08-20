@@ -1,7 +1,7 @@
 {
   "native/package.json": {
-    "mtime": 1787243454.5236435,
-    "ast_hash": "74d5bfd6e2ad3461b80713958b9741e9",
+    "mtime": 1787246990.9391193,
+    "ast_hash": "17c060ec66158f7f380e92629f7c1551",
     "semantic_hash": ""
   },
   "native/postcss.config.cjs": {
@@ -595,8 +595,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1787243454.5165484,
-    "ast_hash": "b0e0dd071b8ea0fa124a4508418d8ffd",
+    "mtime": 1787246996.760103,
+    "ast_hash": "a5c3313f7733e32084c626b9cdcbb917",
     "semantic_hash": ""
   },
   "README.md": {

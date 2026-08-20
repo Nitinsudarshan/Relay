@@ -21,6 +21,7 @@
   - Standardized all button variants (`destructive`, `outline`, `secondary`, `ghost`) to consume
     theme tokens rather than hardcoded slate classes.
   - Standardized UI components across all modules and floating widgets to `rounded-lg` geometry.
+  - Implemented custom minimal theme-aware scrollbars (`4px` width, transparent track, `40%` opacity `--muted-foreground` thumb) and `.no-scrollbar` utility across both native and web frontends.
 
 ## [0.7.1] - 2026-08-20
 
