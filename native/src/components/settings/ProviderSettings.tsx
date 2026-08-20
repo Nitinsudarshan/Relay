@@ -14,7 +14,6 @@ import {
   Download,
   AlertTriangle,
   Mic,
-  Volume2,
   Keyboard
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -394,44 +393,6 @@ export const ProviderSettings: React.FC = () => {
                   Relay downloads a small default Whisper model automatically the first time it's needed — required
                   for meeting/scribble capture, voice chat, and universal dictation. Point this at your own GGML
                   model (huggingface.co/ggerganov/whisper.cpp) for better accuracy or another language.
-                </p>
-              </div>
-
-              <div className="py-3 border-b border-border">
-                <div className="flex items-center gap-2 mb-2">
-                  <Volume2 className="w-4 h-4 text-primary" />
-                  <p className="text-xs font-semibold text-foreground">Local Text-to-Speech (Piper) — optional</p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="piper-binary-path" className="block text-[11px] text-muted-foreground mb-1">
-                      Piper Binary Path
-                    </label>
-                    <Input
-                      id="piper-binary-path"
-                      placeholder="C:\\piper\\piper.exe"
-                      value={settings.tts.piper_binary_path || ''}
-                      onChange={(e) =>
-                        setSettings({ ...settings, tts: { ...settings.tts, piper_binary_path: e.target.value } })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="piper-voice-path" className="block text-[11px] text-muted-foreground mb-1">
-                      Voice Model Path
-                    </label>
-                    <Input
-                      id="piper-voice-path"
-                      placeholder="C:\\piper\\en_US-lessac-medium.onnx"
-                      value={settings.tts.piper_voice_path || ''}
-                      onChange={(e) =>
-                        setSettings({ ...settings, tts: { ...settings.tts, piper_voice_path: e.target.value } })
-                      }
-                    />
-                  </div>
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  Leave blank to skip "speak back" in voice chat — answers still show as text.
                 </p>
               </div>
 

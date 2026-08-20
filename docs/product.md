@@ -14,7 +14,7 @@ The primary user is a builder or power user with a meeting-heavy and task-heavy 
 5. **Local-First with Zero Recurring Cost**: Runs 100% locally by default using local STT (Whisper, via `whisper-rs`), Ollama, and grounded retrieval over an Obsidian-style markdown vault.
 6. **Dual Surface (Native Desktop + Web Dashboard)**: Windows native app for local capture and processing; Next.js web client for remote cloud access in hybrid mode. *(Deferred for the current desktop-first MVP phase — see `docs/decisions.md` Decision 32.)*
 7. **Universal Dictation, Not Just In-App Voice**: A global push-to-talk hotkey types transcribed speech directly into whatever app or field currently has OS focus (Slack, email, code editors) — not confined to Relay's own window — with a non-intrusive "listening" indicator. A separate global hotkey shows/hides Relay from anywhere in the OS.
-8. **Voice Chat Grounded in Your Own Notes**: Ask a question out loud inside Relay; it retrieves relevant vault notes, answers grounded in them with sources shown, and can speak the answer back via local TTS.
+8. **Voice Chat Grounded in Your Own Notes**: Ask a question out loud inside Relay; it retrieves relevant vault notes, answers grounded in them with sources shown, and can speak the answer back via local TTS. *(Deferred for the current desktop-first MVP phase — see `docs/decisions.md` Decision 34.)*
 
 ## In Scope for MVP
 - Push-to-talk capture with floating overlay widget & global hotkey.
@@ -24,7 +24,6 @@ The primary user is a builder or power user with a meeting-heavy and task-heavy 
 - Obsidian-style Markdown Vault storage + keyword-ranked note retrieval (embedded LanceDB vector search is decided but not yet built — see `docs/roadmap.md`).
 - Configurable Trigger Phrase Engine mapped to MCP actions (Google Calendar, reminders) — MCP dispatch itself is currently a stub pending real MCP client wiring (see `docs/roadmap.md`).
 - Global show/hide hotkey and push-to-talk universal dictation (types into whatever app/field has OS focus) with a listening indicator.
-- In-app voice chat: record a question, get an answer grounded in vault notes with sources, optional local TTS "speak back."
 
 ## Out of Scope for MVP
 - Drag-and-drop Kanban card persistence (list-to-board only).
@@ -41,3 +40,4 @@ A desktop-first scope reduction (in progress — see `docs/decisions.md` Decisio
 
 - **Web / Hybrid Dashboard** (Decision 32): the Next.js web client (`web/`) and Supabase-backed hybrid sync. Preserved as-is; no desktop functionality depended on it.
 - **Kanban Board** (Decision 33): the meeting-transcript-to-task-board UI and its `process_meeting` pipeline. `KanbanBoard.tsx`, the `KanbanCard` type, and the backend read path are preserved untouched; only the sidebar nav entry and an unconditional startup fetch were removed.
+- **Voice Chat & TTS** (Decision 34): the vault-grounded voice Q&A tab and its optional local "speak back" (Piper). `ChatPanel.tsx`, `process_chat`, `TtsEngine`, and the shared LLM provider client are preserved untouched; only the nav entry and the Piper settings block were removed.

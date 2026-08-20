@@ -1,5 +1,41 @@
 # Relay — Changelog
 
+## [0.4.7] - 2026-08-20
+
+### Scope-Reduction Set 3 — Voice Chat & TTS Active Surface Removed
+
+- **Frontend (`native/src/App.tsx`)**:
+  - Removed the sidebar "Voice Chat" nav button, the `chat` branch of the
+    tab switcher and hero header, `chat` from the `navigate-tab` event's
+    allowed payload list, and the `{activeTab === 'chat' && <ChatPanel />}`
+    render line. `activeTab` can no longer become `'chat'`.
+  - Removed the now-unused `ChatPanel` import and `Bot` icon import.
+- **Frontend (`native/src/components/settings/ProviderSettings.tsx`)**:
+  - Removed the "Local Text-to-Speech (Piper) — optional" settings block
+    from the General section — its own caption stated its sole purpose was
+    to "skip 'speak back' in voice chat," so it is Voice Chat's settings
+    surface, not an independent one. Removed the now-unused `Volume2` icon
+    import. `DEFAULT_SETTINGS.tts` and the `settings.tts` round-trip through
+    `get_settings`/`save_settings` are unchanged — the fields simply have no
+    editable UI anymore, exactly like Kanban's backend command in Set 2.
+- **What was NOT changed**: `native/src/components/chat/ChatPanel.tsx` —
+  untouched. `native/src-tauri/src/pipeline/chat.rs` (`process_chat`),
+  `native/src-tauri/src/tts/mod.rs` (`TtsEngine`), and
+  `native/src-tauri/src/providers/mod.rs` (the shared LLM client also used
+  by the in-scope Kanban/meeting and Scribble pipelines) — all untouched;
+  `git diff --stat native/src-tauri/` is empty for this release. The
+  `AppSettings`/`ProcessedPipelineResult` TypeScript types in
+  `native/src/types/index.ts` are unchanged. No settings schema changed.
+  Kanban, PTT, click-to-talk, hotkeys, STT, and text injection unmodified.
+- **Verification**: `native/` — `npm run build` (`tsc && vite build`)
+  passes clean with zero errors; the production bundle now transforms 1608
+  modules (down from 1609 after Set 2), confirming `ChatPanel.tsx` is no
+  longer bundled. Repo-wide grep confirms the only remaining
+  `'chat'`/`piper_*` references in `native/src` are inside `ChatPanel.tsx`
+  itself (untouched) and the preserved `AppSettings`/`DEFAULT_SETTINGS`
+  type shape (needed for settings round-tripping) — no orphaned
+  references. `git status` confirms only the two files above changed.
+
 ## [0.4.6] - 2026-08-20
 
 ### Scope-Reduction Set 2 — Kanban Active Navigation Removed

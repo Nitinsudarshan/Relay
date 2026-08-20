@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PTTWidget } from './components/capture/PTTWidget';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
-import { ChatPanel } from './components/chat/ChatPanel';
 import { TriggerSettings } from './components/settings/TriggerSettings';
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -16,7 +15,6 @@ import {
   Settings,
   ShieldCheck,
   Activity,
-  Bot,
   Sidebar as SidebarIcon,
   ChevronRight,
   HardDrive,
@@ -30,7 +28,7 @@ import { cn } from '@/lib/utils';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
-    'capture' | 'scribble' | 'chat' | 'triggers' | 'settings'
+    'capture' | 'scribble' | 'triggers' | 'settings'
   >('capture');
   const [lastResult, setLastResult] = useState<ProcessedPipelineResult | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -56,7 +54,6 @@ export const App: React.FC = () => {
       if (
         payload === 'capture' ||
         payload === 'scribble' ||
-        payload === 'chat' ||
         payload === 'triggers' ||
         payload === 'settings'
       ) {
@@ -129,20 +126,6 @@ export const App: React.FC = () => {
             </p>
           </div>
         );
-      case 'chat':
-        return (
-          <div className="mb-6">
-            <p className="font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">
-              RELAY · VOICE CHAT
-            </p>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">
-              Ask, <span className="italic text-primary">grounded</span> in your notes.
-            </h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              Voice questions answered from your own vault, with sources shown.
-            </p>
-          </div>
-        );
     }
   };
 
@@ -204,21 +187,6 @@ export const App: React.FC = () => {
               <span>Scribble Notes</span>
             </div>
             {activeTab === 'scribble' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('chat')}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'chat'
-                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold shadow-xs'
-                : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Bot className="w-4 h-4" />
-              <span>Voice Chat</span>
-            </div>
-            {activeTab === 'chat' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
           </button>
 
           <button
@@ -361,7 +329,6 @@ export const App: React.FC = () => {
             )}
           </div>
 
-          {activeTab === 'chat' && <ChatPanel />}
           {activeTab === 'scribble' && (
             <ScribbleViewer
               content={lastResult?.output_markdown || ''}
