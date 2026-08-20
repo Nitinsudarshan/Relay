@@ -1,6 +1,5 @@
 use crate::capture::{AudioRecorder, SttEngine};
 use crate::hotkeys;
-use crate::mcp::McpRouter;
 use crate::pipeline::{PipelineEngine, ProcessedPipelineResult};
 use crate::providers::{LLMClient, OllamaStatus, ProviderType};
 use crate::settings::{AppSettings, HotkeySettings, PillPosition};
@@ -339,38 +338,9 @@ async fn process_captured_audio(
     // still land on nothing (most commonly a short hallucination that its
     // own internal confidence/no-speech heuristics then reject, leaving an
     // empty result) on a marginal recording. An empty transcript must never
-    // reach trigger-matching or the note/kanban/chat pipeline.
+    // reach the note/kanban/chat pipeline.
     if transcript.trim().is_empty() {
         return Ok(None);
-    }
-
-    // Trigger phrases only make sense for meeting/scribble capture, not for
-    // an in-app chat question — a question that happens to contain "remind
-    // me" shouldn't hijack the answer into firing an action.
-    if captured.mode != "chat" {
-        let triggers_path = state.config_dir.join("triggers.json");
-        let triggers = TriggerEngine::load_triggers(&triggers_path)
-            .unwrap_or_else(|_| TriggerEngine::default_triggers());
-
-        if let Some(trigger_match) = TriggerEngine::match_transcript(&transcript, &triggers) {
-            let mcp_res = McpRouter::dispatch_action(
-                &trigger_match.action_type,
-                &trigger_match.target_tool,
-                &trigger_match.extracted_text,
-            )
-            .await
-            .map_err(|e| CommandError::new("MCP_EXECUTION_FAILED", &e.to_string()))?;
-
-            return Ok(Some(ProcessedPipelineResult {
-                mode: "trigger".to_string(),
-                transcript,
-                note_id: None,
-                kanban_cards_created: 0,
-                output_markdown: mcp_res.result_summary,
-                sources: Vec::new(),
-                spoken_audio_base64: None,
-            }));
-        }
     }
 
     let llm = LLMClient::new(settings.provider.clone());

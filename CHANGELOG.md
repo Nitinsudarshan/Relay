@@ -1,5 +1,53 @@
 # Relay — Changelog
 
+## [0.4.8] - 2026-08-20
+
+### Scope-Reduction Set 4 — Triggers/MCP Active Surface Removed
+
+- **Frontend (`native/src/App.tsx`)**: Removed the sidebar "Trigger Phrases"
+  nav button, the `triggers` branch of the tab switcher and hero header,
+  and `triggers` from the `navigate-tab` allowlist. Removed the now-unused
+  `TriggerSettings` and `Zap` icon imports.
+- **Frontend (`native/src/components/settings/ProviderSettings.tsx`)**:
+  Removed a *second*, easy-to-miss entry point to the same component — the
+  "Triggers & MCP" sub-section inside the Settings screen's own sub-nav
+  (`activeSection === 'triggers'`), separate from the App-level tab.
+  Removed the now-unused `TriggerSettings` and `Zap` icon imports.
+- **Backend (`native/src-tauri/src/commands.rs`)**: Removed the inline
+  trigger-match-and-MCP-dispatch block from `process_captured_audio` — the
+  function every click-to-talk ("scribble" mode) capture runs through.
+  Before this change, a spoken phrase matching one of the two
+  *enabled-by-default* triggers ("schedule meeting", "remind me to")
+  silently short-circuited into a canned MCP-stub reply instead of the
+  normal cleanup pipeline, on every fresh install — not only for users who
+  had configured their own triggers. This ran automatically on the core
+  capture path with no UI left to see or control it once the settings
+  entries above are gone, so leaving it in place would not have actually
+  deferred the feature. Removed the now-unused `use crate::mcp::McpRouter;`
+  import and updated a comment that referenced "trigger-matching" as a
+  downstream step it no longer is.
+- **What was NOT changed**: `native/src-tauri/src/triggers/mod.rs`
+  (`TriggerEngine`, including its unit tests), `native/src-tauri/src/mcp/mod.rs`
+  (`McpRouter`), the `get_triggers`/`save_triggers` Tauri commands, and
+  `native/src/components/settings/TriggerSettings.tsx` itself — all
+  unmodified, just no longer invoked or reachable from the UI. PTT,
+  click-to-talk's capture/transcription steps, hotkeys, STT, text
+  injection, Kanban, Voice Chat, and Scribble Notes are unmodified.
+- **Verification**: `native/` — `npm run build` (`tsc && vite build`)
+  passes clean with zero errors; bundle module count dropped from 1608 to
+  1606 (`TriggerSettings.tsx` and one component it exclusively imports no
+  longer bundled). Rust — this container initially couldn't build past
+  `gdk-sys` (Set 1) at all; installing the missing Tauri Linux
+  prerequisites (`libgtk-3-dev`, `libwebkit2gtk-4.1-dev`,
+  `libappindicator3-dev`, `librsvg2-dev`, `libasound2-dev`) plus overriding
+  `LIBCLANG_PATH`/`CMAKE` for this invocation only (the repo's
+  `.cargo/config.toml` hardcodes Windows-only paths for both, left
+  untouched since it's an intentional, platform-specific config file, not
+  something this change needed to touch) let `cargo check` reach and fully
+  compile `relay-native-backend` (Relay's own crate, including the edited
+  `commands.rs`) for the first time this session — `Finished \`dev\`
+  profile [unoptimized + debuginfo] target(s)`, zero errors.
+
 ## [0.4.7] - 2026-08-20
 
 ### Scope-Reduction Set 3 — Voice Chat & TTS Active Surface Removed

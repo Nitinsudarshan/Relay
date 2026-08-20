@@ -6,7 +6,6 @@ import {
   Cloud,
   CheckCircle,
   Sliders,
-  Zap,
   ShieldCheck,
   HardDrive,
   User,
@@ -20,10 +19,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { TriggerSettings } from './TriggerSettings';
 import { HotkeyRecorder } from './HotkeyRecorder';
 
-type SettingsSection = 'general' | 'providers' | 'triggers' | 'vault' | 'account' | 'privacy';
+type SettingsSection = 'general' | 'providers' | 'vault' | 'account' | 'privacy';
 
 const DEFAULT_SETTINGS: AppSettings = {
   provider: {
@@ -184,19 +182,6 @@ export const ProviderSettings: React.FC = () => {
         >
           <Cpu className="w-4 h-4 text-primary" />
           <span>LLM Providers</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveSection('triggers')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-all text-left ${
-            activeSection === 'triggers'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <Zap className="w-4 h-4 text-primary" />
-          <span>Triggers & MCP</span>
         </button>
 
         <button
@@ -558,9 +543,6 @@ export const ProviderSettings: React.FC = () => {
             </div>
           </form>
         )}
-
-        {/* TRIGGERS SECTION */}
-        {activeSection === 'triggers' && <TriggerSettings />}
 
         {/* VAULT SECTION */}
         {activeSection === 'vault' && (

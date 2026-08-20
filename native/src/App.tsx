@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PTTWidget } from './components/capture/PTTWidget';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
-import { TriggerSettings } from './components/settings/TriggerSettings';
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RelayLogo } from './components/common/RelayLogo';
@@ -11,7 +10,6 @@ import { listen } from '@tauri-apps/api/event';
 import {
   Mic,
   Sparkles,
-  Zap,
   Settings,
   ShieldCheck,
   Activity,
@@ -28,7 +26,7 @@ import { cn } from '@/lib/utils';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
-    'capture' | 'scribble' | 'triggers' | 'settings'
+    'capture' | 'scribble' | 'settings'
   >('capture');
   const [lastResult, setLastResult] = useState<ProcessedPipelineResult | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -54,7 +52,6 @@ export const App: React.FC = () => {
       if (
         payload === 'capture' ||
         payload === 'scribble' ||
-        payload === 'triggers' ||
         payload === 'settings'
       ) {
         setActiveTab(payload as any);
@@ -95,20 +92,6 @@ export const App: React.FC = () => {
             </h1>
             <p className="text-xs text-muted-foreground mt-1">
               Structured markdown notes with raw audio backstop intact.
-            </p>
-          </div>
-        );
-      case 'triggers':
-        return (
-          <div className="mb-6">
-            <p className="font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">
-              RELAY · TRIGGERS
-            </p>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">
-              Custom phrases, <span className="italic text-primary">automated</span> actions.
-            </h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              Phrase-to-action intent mappings for calendar and notifications.
             </p>
           </div>
         );
@@ -187,21 +170,6 @@ export const App: React.FC = () => {
               <span>Scribble Notes</span>
             </div>
             {activeTab === 'scribble' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('triggers')}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'triggers'
-                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold shadow-xs'
-                : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Zap className="w-4 h-4" />
-              <span>Trigger Phrases</span>
-            </div>
-            {activeTab === 'triggers' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
           </button>
 
           <button
@@ -335,7 +303,6 @@ export const App: React.FC = () => {
               transcript={lastResult?.transcript || ''}
             />
           )}
-          {activeTab === 'triggers' && <TriggerSettings />}
           {activeTab === 'settings' && <ProviderSettings />}
         </main>
       </div>
