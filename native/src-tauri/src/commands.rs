@@ -110,23 +110,6 @@ pub async fn update_hotkeys(
         .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))
 }
 
-#[tauri::command]
-pub async fn set_pill_visible(
-    app: AppHandle,
-    visible: bool,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let position = state.settings.lock().unwrap().ui.pill_position;
-    crate::overlay::ensure_pill_window(&app, visible, position);
-    let _ = app.emit("pill-visibility-changed", visible);
-
-    let mut settings = state.settings.lock().unwrap();
-    settings.ui.show_floating_pill = visible;
-    settings
-        .save(&state.settings_path())
-        .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))
-}
-
 /// Where the floating pill anchors on screen. Re-anchors immediately using
 /// a freshly computed monitor/work-area, at whatever size (resting or
 /// expanded) it currently is.

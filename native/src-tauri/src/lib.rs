@@ -28,7 +28,6 @@ pub fn run() {
 
     let settings = AppSettings::load(&config_dir.join("settings.json")).unwrap_or_default();
     let hotkeys_config = settings.hotkeys.clone();
-    let show_floating_pill = settings.ui.show_floating_pill;
     let pill_position = settings.ui.pill_position;
 
     let state = AppState {
@@ -48,7 +47,10 @@ pub fn run() {
                 &hotkeys_config.show_hide_hotkey,
                 &hotkeys_config.dictation_hotkey,
             );
-            overlay::ensure_pill_window(app.handle(), show_floating_pill, pill_position);
+            // The dictation pill is now the one, permanent PTT surface — no
+            // more docked/floating product-mode choice to hide it behind
+            // (see docs/decisions.md Decision 36) — so it's always shown.
+            overlay::ensure_pill_window(app.handle(), true, pill_position);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -56,7 +58,6 @@ pub fn run() {
             commands::stop_capture,
             commands::get_capture_status,
             commands::update_hotkeys,
-            commands::set_pill_visible,
             commands::set_pill_position,
             commands::set_pill_expanded,
             commands::set_pill_window_mode,

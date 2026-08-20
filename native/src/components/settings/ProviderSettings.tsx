@@ -33,7 +33,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   stt: { whisper_model_path: '' },
   tts: { piper_binary_path: '', piper_voice_path: '' },
   hotkeys: { show_hide_hotkey: 'Ctrl+Shift+Space', dictation_hotkey: 'Ctrl+Space' },
-  ui: { show_floating_pill: true, pill_position: 'bottom_center' },
+  ui: { pill_position: 'bottom_center' },
 };
 
 export const ProviderSettings: React.FC = () => {
@@ -281,26 +281,6 @@ export const ProviderSettings: React.FC = () => {
                 <p className="text-[10px] text-muted-foreground mt-2">
                   Click a hotkey box, then press the keys you want — it takes effect immediately, no restart needed.
                 </p>
-              </div>
-
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Floating Dictation Pill</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Show "Click to dictate" as its own always-on-top window on the desktop, outside the Relay window
-                  </p>
-                </div>
-                <Switch
-                  checked={settings.ui.show_floating_pill}
-                  onCheckedChange={async (checked) => {
-                    setSettings({ ...settings, ui: { ...settings.ui, show_floating_pill: checked } });
-                    try {
-                      await invoke('set_pill_visible', { visible: checked });
-                    } catch (err) {
-                      console.error('Failed to toggle floating pill', err);
-                    }
-                  }}
-                />
               </div>
 
               <div className="py-3 border-b border-border">

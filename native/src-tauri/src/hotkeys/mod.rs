@@ -178,28 +178,12 @@ fn on_dictation_pressed(app: &AppHandle, dictation_state: &SharedDictationState)
     match state.recorder.start("dictation", &audio_dir, Some(app.clone())) {
         Ok(_) => {
             tracing::debug!("[Audio] Capture started");
-            // `emit_capture_state` broadcasts `active: true`, which every
-            // mounted DictationPill reacts to by expanding. That's enough
-            // when the floating overlay is on, since its window always
-            // exists (just possibly hidden-and-idle). In docked mode the
-            // pill only lives inside the main window — if that window
-            // itself isn't currently on screen, expanding the pill inside
-            // it is invisible to the user. Show (never focus, so the
-            // hotkey's actual target keeps OS focus for text injection on
-            // release) the main window so a docked recording is actually
-            // visible.
-            let show_floating_pill = state.settings.lock().unwrap().ui.show_floating_pill;
-            if !show_floating_pill {
-                if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-                    let _ = window.show();
-                    // The docked pill only renders while the Capture tab is
-                    // active (it's CSS-hidden, not unmounted, on other
-                    // tabs — see App.tsx) — reuse the existing navigate-tab
-                    // event so showing the window actually reveals it
-                    // instead of surfacing whatever tab happened to be open.
-                    let _ = app.emit("navigate-tab", "capture");
-                }
-            }
+            // `emit_capture_state` broadcasts `active: true`, which the
+            // floating dictation pill reacts to by expanding — its window
+            // always exists (just possibly hidden-and-idle) and is always
+            // on top, so this alone is enough to make a hotkey-triggered
+            // recording visible; there's no docked/main-window fallback to
+            // compensate for anymore (see docs/decisions.md Decision 36).
             emit_capture_state(app, &state.recorder);
             spawn_release_watchdog(app.clone(), dictation_state.clone(), generation);
         }

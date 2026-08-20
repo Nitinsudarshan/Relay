@@ -281,7 +281,7 @@ export const App: React.FC = () => {
               activeTab !== 'capture' && 'hidden'
             )}
           >
-            <PTTWidget onProcessComplete={handleProcessComplete} />
+            <PTTWidget />
 
             {lastResult && activeTab === 'capture' && (
               <div className="mt-4 flex-1">

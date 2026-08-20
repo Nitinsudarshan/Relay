@@ -65,10 +65,6 @@ pub enum PillPosition {
 /// General UI/window behavior that isn't tied to a specific capture engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
-    /// Whether the floating "Click to dictate" pill window is shown as a
-    /// separate always-on-top desktop overlay (outside the main app
-    /// window) rather than only being reachable from inside it.
-    pub show_floating_pill: bool,
     /// Which edge of the screen the floating pill anchors to.
     #[serde(default)]
     pub pill_position: PillPosition,
@@ -77,7 +73,6 @@ pub struct UiSettings {
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
-            show_floating_pill: true,
             pill_position: PillPosition::default(),
         }
     }

@@ -1,5 +1,79 @@
 # Relay — Changelog
 
+## [0.5.0] - 2026-08-20
+
+### Scope-Reduction Set 5 — Single Dictation Pill (Docked/Floating Mode Removed)
+
+The one set where real architectural consolidation was expected. The
+Set 0 audit found `DictationPill.tsx` was already the sole canonical pill
+implementation — `FloatingPill.tsx` and `PTTWidget.tsx` were two render
+*sites* for it (a separate always-on-top window vs. inline in the main
+window), not competing implementations, selected by one boolean setting
+(`ui.show_floating_pill`, the "Docked vs Floating" product mode this
+release removes per the task's own scope table — unlike Kanban/Voice
+Chat/Triggers, which are *deferred*, this is a genuine *removal*).
+
+- **Backend (`native/src-tauri/src/settings/mod.rs`)**: Removed
+  `UiSettings.show_floating_pill`. `ui.pill_position` (work-area-aware
+  anchor edge) is unchanged.
+- **Backend (`native/src-tauri/src/commands.rs`)**: Removed the
+  `set_pill_visible` command — its only purpose was toggling the
+  now-removed setting.
+- **Backend (`native/src-tauri/src/lib.rs`)**: `overlay::ensure_pill_window`
+  is now always called with `visible: true` at startup — the floating pill
+  window is the one, permanent PTT surface. Removed `set_pill_visible` from
+  the `invoke_handler!` registration.
+- **Backend (`native/src-tauri/src/hotkeys/mod.rs`)**: Removed a
+  docked-mode-specific compensation in `on_dictation_pressed` that showed
+  the main window and switched it to the Capture tab so a docked pill's
+  reaction to the hotkey would be visible. Unnecessary now — the
+  always-on-top floating pill is always present and already reacts to the
+  same `capture-state-changed` event regardless of the main window's state.
+  Caught by a full rebuild, not by inspection alone: this was a second,
+  easy-to-miss reference to the removed setting.
+- **Frontend (`native/src/components/capture/PTTWidget.tsx`)**: Removed
+  the `showFloatingPill` state, its settings-load effect, its
+  `pill-visibility-changed` listener, and the conditional that rendered
+  `DictationPill` inline as the "docked" alternative. Removed the
+  `onProcessComplete` prop entirely — it was only ever needed by the
+  now-removed inline render path; the floating pill (which never received
+  this prop) already relies solely on the `capture-processed` backend
+  event for the main window to learn about completions, so nothing was
+  lost. The informational badge is now static text (no more "toggle it
+  off in Settings" — there's no such toggle anymore).
+- **Frontend (`native/src/App.tsx`)**: `<PTTWidget />` no longer takes a
+  prop; `handleProcessComplete` is unchanged (still used directly by the
+  `capture-processed` event listener).
+- **Frontend (`native/src/components/settings/ProviderSettings.tsx`)**:
+  Removed the "Floating Dictation Pill" toggle switch and the stale
+  `show_floating_pill` field from `DEFAULT_SETTINGS`.
+- **Frontend (`native/src/types/index.ts`)**: Removed `show_floating_pill`
+  from the `UiSettings` TypeScript interface, mirroring the Rust struct.
+- **What was NOT changed**: `DictationPill.tsx`, `FloatingPill.tsx`,
+  `PillSettingsPopover.tsx`, `PillTypes.ts`, and `overlay.rs` — all
+  completely untouched. The capture state machine, STT, text injection,
+  and `ui.pill_position`/`set_pill_position`/`set_pill_expanded`/
+  `set_pill_window_mode` (work-area/monitor/DPI-aware positioning) are
+  unmodified. No settings.json migration needed — `AppSettings` has no
+  `deny_unknown_fields`, so a stale `show_floating_pill` key in an existing
+  user's file is silently ignored on load and simply not written back.
+- **Still open, not addressed by this release**: the click-to-talk vs.
+  global-hotkey text-injection divergence flagged since Set 0 — raised
+  again here for visibility, deliberately left unresolved per explicit
+  direction each time it came up.
+- **Verification**: `native/` — `npm run build` (`tsc && vite build`)
+  passes clean with zero errors (module count unchanged at 1606 — this
+  set trimmed code within existing files rather than removing whole
+  modules). A first build attempt caught the `ProviderSettings.tsx`
+  `DEFAULT_SETTINGS` reference to the removed field as a real `tsc` type
+  error, and a repo-wide grep after fixing it confirms zero remaining
+  references to `show_floating_pill`, `set_pill_visible`, or
+  `pill-visibility-changed` anywhere in `native/`. Rust — `cargo check`
+  (with `LIBCLANG_PATH`/`CMAKE` overridden for this Linux container, same
+  as Set 4) passes clean in 3.4s with the warm build cache, confirming
+  `settings/mod.rs`, `commands.rs`, `lib.rs`, and `hotkeys/mod.rs` all
+  compile correctly together.
+
 ## [0.4.8] - 2026-08-20
 
 ### Scope-Reduction Set 4 — Triggers/MCP Active Surface Removed
