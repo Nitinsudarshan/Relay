@@ -10,7 +10,6 @@ export const ThemeToggle: React.FC = () => {
     if (saved === 'dark' || saved === 'light') {
       return saved;
     }
-    // Default to system preference on initial launch if nothing saved
     return typeof window !== 'undefined' &&
       window.matchMedia('(prefers-color-scheme: dark)').matches
       ? 'dark'
