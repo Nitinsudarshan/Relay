@@ -93,7 +93,7 @@ export const ChatPanel: React.FC = () => {
         <button
           onClick={toggleRecording}
           disabled={isProcessing}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition-all ${
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
             isRecording
               ? 'bg-red-500 text-white recording-pulse'
               : isProcessing
@@ -124,7 +124,7 @@ export const ChatPanel: React.FC = () => {
         {turns.map((turn, i) => (
           <div key={i} className="space-y-2">
             <div className="flex items-start gap-2 justify-end">
-              <div className="bg-blue-600/20 border border-blue-500/30 rounded-xl rounded-tr-sm px-3.5 py-2.5 max-w-[85%] text-xs text-slate-100">
+              <div className="bg-blue-600/20 border border-blue-500/30 rounded-lg rounded-tr-sm px-3.5 py-2.5 max-w-[85%] text-xs text-slate-100">
                 {turn.question}
               </div>
               <User className="w-5 h-5 text-blue-400 shrink-0 mt-1" />
@@ -132,7 +132,7 @@ export const ChatPanel: React.FC = () => {
 
             <div className="flex items-start gap-2">
               <Bot className="w-5 h-5 text-purple-400 shrink-0 mt-1" />
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl rounded-tl-sm px-3.5 py-2.5 max-w-[85%] space-y-2">
+              <div className="bg-slate-950/80 border border-slate-800 rounded-lg rounded-tl-sm px-3.5 py-2.5 max-w-[85%] space-y-2">
                 <p className="text-xs text-slate-200 whitespace-pre-wrap">{turn.answer}</p>
 
                 {turn.sources.length > 0 && (

@@ -93,7 +93,7 @@ export const TriggerSettings: React.FC = () => {
 
       <CardContent className="flex-1 flex flex-col space-y-4 pt-4 overflow-hidden">
         {/* Add New Trigger Form */}
-        <form onSubmit={handleAddTrigger} className="bg-muted/50 rounded-xl p-4 border border-border space-y-3">
+        <form onSubmit={handleAddTrigger} className="bg-muted/50 rounded-lg p-4 border border-border space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label htmlFor="trigger-phrase-input" className="block text-[11px] font-medium text-muted-foreground mb-1">
@@ -152,7 +152,7 @@ export const TriggerSettings: React.FC = () => {
               <Skeleton className="h-12 w-full rounded-lg" />
             </div>
           ) : triggers.length === 0 ? (
-            <div className="text-center py-12 px-4 rounded-xl border border-dashed border-border bg-muted/20 flex flex-col items-center justify-center">
+            <div className="text-center py-12 px-4 rounded-lg border border-dashed border-border bg-muted/20 flex flex-col items-center justify-center">
               <Layers className="w-8 h-8 text-muted-foreground/40 mb-2" />
               <p className="text-xs font-medium text-muted-foreground">No trigger phrases configured yet</p>
               <p className="text-[11px] text-muted-foreground/70 mt-0.5">Add spoken shortcuts using the form above</p>

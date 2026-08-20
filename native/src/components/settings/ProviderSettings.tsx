@@ -178,7 +178,7 @@ export const ProviderSettings: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-card rounded-2xl border border-border text-xs text-muted-foreground">
+      <div className="flex-1 flex items-center justify-center bg-card rounded-lg border border-border text-xs text-muted-foreground">
         Loading settings…
       </div>
     );
@@ -187,7 +187,7 @@ export const ProviderSettings: React.FC = () => {
   return (
     <div className="flex-1 flex flex-col md:flex-row gap-6 min-h-0 overflow-hidden">
       {/* Settings Sub-Nav Sidebar */}
-      <aside className="w-full md:w-56 flex flex-col shrink-0 gap-1 bg-card p-3 rounded-2xl border border-border">
+      <aside className="w-full md:w-56 flex flex-col shrink-0 gap-1 bg-card p-3 rounded-lg border border-border">
         <div className="px-3 py-2 mb-1">
           <span className="font-mono text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
             SETTINGS DOMAINS
@@ -197,7 +197,7 @@ export const ProviderSettings: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveSection('general')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-all text-left ${
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
             activeSection === 'general'
               ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -210,7 +210,7 @@ export const ProviderSettings: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveSection('providers')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-all text-left ${
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
             activeSection === 'providers'
               ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -223,7 +223,7 @@ export const ProviderSettings: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveSection('vault')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-all text-left ${
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
             activeSection === 'vault'
               ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -236,7 +236,7 @@ export const ProviderSettings: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveSection('account')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-all text-left ${
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
             activeSection === 'account'
               ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -249,7 +249,7 @@ export const ProviderSettings: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveSection('privacy')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-all text-left ${
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
             activeSection === 'privacy'
               ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -261,9 +261,9 @@ export const ProviderSettings: React.FC = () => {
       </aside>
 
       {/* Main Settings Content Area */}
-      <main className="flex-1 bg-card rounded-2xl border border-border p-6 overflow-y-auto min-h-0">
+      <main className="flex-1 bg-card rounded-lg border border-border p-6 overflow-y-auto min-h-0">
         {saved && (
-          <div className="mb-4 p-3 rounded-xl bg-success/20 border border-success/40 text-success-foreground text-xs flex items-center justify-between">
+          <div className="mb-4 p-3 rounded-lg bg-success/20 border border-success/40 text-success-foreground text-xs flex items-center justify-between">
             <span className="flex items-center gap-2">
               <CheckCircle className="w-4 h-4 text-emerald-500" />
               Settings updated successfully
@@ -349,7 +349,7 @@ export const ProviderSettings: React.FC = () => {
                 <p className="text-[11px] text-muted-foreground mb-2">
                   Which edge of the screen the floating pill anchors to
                 </p>
-                <div className="flex bg-muted p-1 rounded-xl border border-border w-fit">
+                <div className="flex bg-muted p-1 rounded-lg border border-border w-fit">
                   {(
                     [
                       { value: 'bottom_center', label: 'Bottom Center' },
@@ -395,7 +395,7 @@ export const ProviderSettings: React.FC = () => {
                   value={settings.stt.whisper_model_path || ''}
                   onChange={(e) => setSettings({ ...settings, stt: { whisper_model_path: e.target.value } })}
                 />
-                <div className="flex items-center justify-between mt-2 p-3 rounded-xl bg-muted/40 border border-border">
+                <div className="flex items-center justify-between mt-2 p-3 rounded-lg bg-muted/40 border border-border">
                   <div className="text-xs">
                     {sttModelStatus.state === 'checking' && (
                       <Badge variant="outline" className="text-[10px] font-mono">Checking Whisper model…</Badge>
@@ -445,7 +445,7 @@ export const ProviderSettings: React.FC = () => {
                   <p className="text-xs font-semibold text-foreground">Active LLM Execution Backend</p>
                   <p className="text-[11px] text-muted-foreground">100% Local Ollama ($0) vs OpenAI / Gemini Cloud API</p>
                 </div>
-                <div className="flex bg-muted p-1 rounded-xl border border-border">
+                <div className="flex bg-muted p-1 rounded-lg border border-border">
                   <button
                     type="button"
                     onClick={() =>
@@ -509,7 +509,7 @@ export const ProviderSettings: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40 border border-border">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-muted/40 border border-border">
                     <div className="flex items-center gap-2 text-xs">
                       {ollamaStatus.state === 'checking' && (
                         <Badge variant="outline" className="text-[10px] font-mono">Checking local Ollama…</Badge>
@@ -667,7 +667,7 @@ export const ProviderSettings: React.FC = () => {
               <h2 className="text-lg font-bold text-foreground">Account & Plan Overview</h2>
             </div>
 
-            <div className="p-4 rounded-xl bg-card border border-border flex items-center gap-4">
+            <div className="p-4 rounded-lg bg-card border border-border flex items-center gap-4">
               <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground font-extrabold text-lg flex items-center justify-center">
                 N
               </div>
@@ -699,7 +699,7 @@ export const ProviderSettings: React.FC = () => {
 
             <div className="space-y-4">
               {/* Safe Export Action */}
-              <div className="p-4 rounded-xl bg-card border border-border flex items-center justify-between">
+              <div className="p-4 rounded-lg bg-card border border-border flex items-center justify-between">
                 <div>
                   <p className="text-xs font-bold text-foreground">Export All Vault Data</p>
                   <p className="text-[11px] text-muted-foreground">Download full backup of notes, tasks, and LanceDB embeddings</p>
@@ -711,7 +711,7 @@ export const ProviderSettings: React.FC = () => {
               </div>
 
               {/* Destructive Outlined Actions */}
-              <div className="p-4 rounded-xl border border-destructive/40 bg-destructive/5 space-y-3">
+              <div className="p-4 rounded-lg border border-destructive/40 bg-destructive/5 space-y-3">
                 <div className="flex items-center gap-2 text-destructive font-bold text-xs">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
                   <span>Irreversible Data Reset Actions</span>

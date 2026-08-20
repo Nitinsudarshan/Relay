@@ -1,119 +1,51 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Sun, Moon, Monitor, Check } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import React, { useState, useEffect } from 'react';
+import { Sun, Moon } from 'lucide-react';
+import { emit } from '@tauri-apps/api/event';
+import { applyThemeWithoutTransition } from '@/lib/utils';
 
-export type ThemeMode = 'light' | 'dark' | 'system';
+export type ThemeMode = 'light' | 'dark';
 
 export const ThemeToggle: React.FC = () => {
   const [theme, setTheme] = useState<ThemeMode>(() => {
-    const saved = localStorage.getItem('relay-theme') as ThemeMode;
-    return saved && ['light', 'dark', 'system'].includes(saved) ? saved : 'system';
+    const saved = localStorage.getItem('relay-theme');
+    if (saved === 'light' || saved === 'dark') {
+      return saved;
+    }
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return 'dark';
+    }
+    return 'light';
   });
 
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
-    const applyTheme = (currentTheme: ThemeMode) => {
-      const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      const effectiveDark = currentTheme === 'dark' || (currentTheme === 'system' && isSystemDark);
-
-      if (effectiveDark) {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-    };
-
-    applyTheme(theme);
+    applyThemeWithoutTransition(theme === 'dark');
     localStorage.setItem('relay-theme', theme);
-    try {
-      import('@tauri-apps/api/event').then(({ emit }) => {
-        emit('relay-theme-changed', theme).catch(() => {});
-      }).catch(() => {});
-    } catch {}
-
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleSystemChange = () => {
-      if (theme === 'system') {
-        applyTheme('system');
-      }
-    };
-
-    mediaQuery.addEventListener('change', handleSystemChange);
-    return () => mediaQuery.removeEventListener('change', handleSystemChange);
+    emit('relay-theme-changed', theme).catch(() => {});
   }, [theme]);
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const handleSelectTheme = (mode: ThemeMode) => {
-    setTheme(mode);
-    setIsOpen(false);
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
   return (
-    <div className="relative inline-block text-left" ref={dropdownRef}>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 text-muted-foreground hover:text-foreground relative"
-        onClick={() => setIsOpen(!isOpen)}
-        aria-label="Toggle theme settings"
-      >
-        <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-        <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-      </Button>
-
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-36 rounded-xl border border-border bg-popover p-1 shadow-lg z-50 text-xs animate-in fade-in-50 zoom-in-95">
-          <button
-            onClick={() => handleSelectTheme('light')}
-            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md transition-colors ${
-              theme === 'light' ? 'bg-accent text-accent-foreground font-semibold' : 'text-popover-foreground hover:bg-muted'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Sun className="w-3.5 h-3.5 text-amber-500" />
-              <span>Light</span>
-            </div>
-            {theme === 'light' && <Check className="w-3.5 h-3.5 text-primary" />}
-          </button>
-
-          <button
-            onClick={() => handleSelectTheme('dark')}
-            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md transition-colors ${
-              theme === 'dark' ? 'bg-accent text-accent-foreground font-semibold' : 'text-popover-foreground hover:bg-muted'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Moon className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Dark</span>
-            </div>
-            {theme === 'dark' && <Check className="w-3.5 h-3.5 text-primary" />}
-          </button>
-
-          <button
-            onClick={() => handleSelectTheme('system')}
-            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md transition-colors ${
-              theme === 'system' ? 'bg-accent text-accent-foreground font-semibold' : 'text-popover-foreground hover:bg-muted'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Monitor className="w-3.5 h-3.5 text-blue-400" />
-              <span>System</span>
-            </div>
-            {theme === 'system' && <Check className="w-3.5 h-3.5 text-primary" />}
-          </button>
-        </div>
+    <button
+      type="button"
+      onClick={toggleTheme}
+      className="group h-8 w-8 rounded-lg border border-border bg-card hover:bg-muted/80 text-foreground flex items-center justify-center cursor-pointer shadow-xs active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring select-none"
+      aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+    >
+      {theme === 'dark' ? (
+        <Sun
+          key="sun"
+          className="w-4 h-4 text-amber-400 group-hover:text-amber-300 transition-transform duration-200 transform group-hover:rotate-45 group-hover:scale-110"
+        />
+      ) : (
+        <Moon
+          key="moon"
+          className="w-4 h-4 text-indigo-500 group-hover:text-indigo-600 transition-transform duration-200 transform group-hover:-rotate-12 group-hover:scale-110"
+        />
       )}
-    </div>
+    </button>
   );
 };

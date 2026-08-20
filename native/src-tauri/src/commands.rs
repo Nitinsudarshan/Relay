@@ -405,6 +405,41 @@ pub async fn get_voice_notes(state: State<'_, AppState>) -> Result<Vec<VaultNote
         .map_err(|e| CommandError::new("VAULT_READ_FAILED", &e.to_string()))
 }
 
+#[tauri::command]
+pub async fn update_voice_note(
+    id: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> Result<VaultNote, CommandError> {
+    state
+        .vault
+        .update_note_content(&id, &content)
+        .map_err(|e| CommandError::new("VAULT_UPDATE_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn delete_voice_note(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    state
+        .vault
+        .delete_note(&id)
+        .map_err(|e| CommandError::new("VAULT_DELETE_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn merge_voice_notes(
+    primary_id: String,
+    secondary_id: String,
+    state: State<'_, AppState>,
+) -> Result<VaultNote, CommandError> {
+    state
+        .vault
+        .merge_notes(&primary_id, &secondary_id)
+        .map_err(|e| CommandError::new("VAULT_MERGE_FAILED", &e.to_string()))
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct VaultLocationInfo {
     /// Absolute path currently in use, whether from an explicit user choice

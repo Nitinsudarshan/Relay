@@ -155,6 +155,80 @@ impl VaultManager {
         Ok(file_path)
     }
 
+    pub fn get_note(&self, id: &str) -> Result<VaultNote, VaultError> {
+        self.init()?;
+        let file_path = self.vault_dir().join("notes").join(format!("{}.md", id));
+        if !file_path.exists() {
+            return Err(VaultError::NotFound(id.to_string()));
+        }
+        let content = fs::read_to_string(&file_path)?;
+        Self::parse_note_md(&content)
+            .ok_or_else(|| VaultError::FrontmatterError(format!("Failed to parse note {}", id)))
+    }
+
+    pub fn delete_note(&self, id: &str) -> Result<(), VaultError> {
+        self.init()?;
+        let file_path = self.vault_dir().join("notes").join(format!("{}.md", id));
+        if file_path.exists() {
+            fs::remove_file(&file_path)?;
+            tracing::info!("Deleted vault note {:?}", file_path);
+        }
+        Ok(())
+    }
+
+    pub fn update_note_content(&self, id: &str, new_content: &str) -> Result<VaultNote, VaultError> {
+        let mut note = self.get_note(id)?;
+        note.content = new_content.to_string();
+        note.updated_at = chrono::Utc::now().to_rfc3339();
+        note.title = new_content
+            .chars()
+            .take(60)
+            .map(|c| {
+                if c == '"' || c == '\n' || c == '\r' {
+                    ' '
+                } else {
+                    c
+                }
+            })
+            .collect();
+        self.save_note(&note)?;
+        Ok(note)
+    }
+
+    pub fn merge_notes(&self, primary_id: &str, secondary_id: &str) -> Result<VaultNote, VaultError> {
+        let note1 = self.get_note(primary_id)?;
+        let note2 = self.get_note(secondary_id)?;
+
+        // Chronological order: older note content first, newer note content second
+        let (older, newer) = if note1.created_at <= note2.created_at {
+            (&note1, &note2)
+        } else {
+            (&note2, &note1)
+        };
+
+        let merged_content = format!("{}\n\n{}", older.content.trim(), newer.content.trim());
+
+        let mut merged_note = note1;
+        merged_note.content = merged_content;
+        merged_note.updated_at = chrono::Utc::now().to_rfc3339();
+        merged_note.title = merged_note
+            .content
+            .chars()
+            .take(60)
+            .map(|c| {
+                if c == '"' || c == '\n' || c == '\r' {
+                    ' '
+                } else {
+                    c
+                }
+            })
+            .collect();
+
+        self.save_note(&merged_note)?;
+        self.delete_note(secondary_id)?;
+        Ok(merged_note)
+    }
+
     pub fn list_notes(&self) -> Result<Vec<VaultNote>, VaultError> {
         self.init()?;
         let notes_dir = self.vault_dir().join("notes");
@@ -543,6 +617,38 @@ mod tests {
             .search_notes("kanban calendar reminders", 5)
             .unwrap();
         assert!(no_match.is_empty());
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_note_update_delete_and_merge() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+
+        let mut note_a = VaultNote::new_voice_note("First part of thoughts.");
+        note_a.created_at = "2026-08-20T10:00:00Z".to_string();
+        manager.save_note(&note_a).unwrap();
+
+        let mut note_b = VaultNote::new_voice_note("Second part of thoughts.");
+        note_b.created_at = "2026-08-20T10:01:00Z".to_string();
+        manager.save_note(&note_b).unwrap();
+
+        // Update note A
+        let updated = manager.update_note_content(&note_a.id, "Updated first part.").unwrap();
+        assert_eq!(updated.content, "Updated first part.");
+
+        // Merge notes A and B
+        let merged = manager.merge_notes(&note_a.id, &note_b.id).unwrap();
+        assert_eq!(merged.content, "Updated first part.\n\nSecond part of thoughts.");
+
+        // Note B should now be deleted
+        assert!(manager.get_note(&note_b.id).is_err());
+        assert_eq!(manager.list_notes().unwrap().len(), 1);
+
+        // Delete merged note
+        manager.delete_note(&note_a.id).unwrap();
+        assert_eq!(manager.list_notes().unwrap().len(), 0);
 
         let _ = fs::remove_dir_all(temp_dir);
     }

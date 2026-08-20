@@ -101,7 +101,7 @@ export const ScribbleViewer: React.FC<ScribbleViewerProps> = ({
   return (
     <div className="flex-1 flex flex-col md:flex-row gap-4 min-h-0 overflow-hidden">
       {/* Master List Pane */}
-      <aside className="w-full md:w-80 flex flex-col shrink-0 bg-card rounded-2xl border border-border overflow-hidden">
+      <aside className="w-full md:w-80 flex flex-col shrink-0 bg-card rounded-lg border border-border overflow-hidden">
         {/* Master List Header: Search & Filter Row */}
         <div className="p-3 border-b border-border space-y-2">
           <div className="relative">
@@ -133,7 +133,7 @@ export const ScribbleViewer: React.FC<ScribbleViewerProps> = ({
               <div
                 key={note.id}
                 onClick={() => setSelectedNoteId(note.id)}
-                className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${
                   selectedNoteId === note.id
                     ? 'bg-accent/60 border-primary/50 shadow-xs'
                     : 'bg-card border-transparent hover:bg-muted/40'
@@ -172,7 +172,7 @@ export const ScribbleViewer: React.FC<ScribbleViewerProps> = ({
       </aside>
 
       {/* Detail Pane */}
-      <main className="flex-1 flex flex-col bg-card rounded-2xl border border-border p-6 overflow-y-auto min-h-0">
+      <main className="flex-1 flex flex-col bg-card rounded-lg border border-border p-6 overflow-y-auto min-h-0">
         {selectedNote ? (
           <div className="space-y-6 flex-1 flex flex-col">
             {/* Breadcrumb & Top Bar */}
@@ -186,25 +186,25 @@ export const ScribbleViewer: React.FC<ScribbleViewerProps> = ({
                 </h2>
               </div>
 
-              {/* Action Toolbar of Pill-Shaped Buttons */}
+              {/* Action Toolbar of Buttons */}
               <div className="flex items-center gap-1.5 flex-wrap">
-                <Button size="sm" variant="outline" className="rounded-full text-xs gap-1.5 h-8">
+                <Button size="sm" variant="outline" className="rounded-lg text-xs gap-1.5 h-8">
                   <Edit3 className="w-3.5 h-3.5" />
                   <span>Edit</span>
                 </Button>
-                <Button size="sm" variant="outline" className="rounded-full text-xs gap-1.5 h-8">
+                <Button size="sm" variant="outline" className="rounded-lg text-xs gap-1.5 h-8">
                   <RefreshCw className="w-3.5 h-3.5" />
                   <span>Transform</span>
                 </Button>
-                <Button size="sm" variant="outline" className="rounded-full text-xs gap-1.5 h-8">
+                <Button size="sm" variant="outline" className="rounded-lg text-xs gap-1.5 h-8">
                   <Languages className="w-3.5 h-3.5" />
                   <span>Translate</span>
                 </Button>
-                <Button size="sm" variant="outline" className="rounded-full text-xs gap-1.5 h-8">
+                <Button size="sm" variant="outline" className="rounded-lg text-xs gap-1.5 h-8">
                   <Share2 className="w-3.5 h-3.5" />
                   <span>Share</span>
                 </Button>
-                <Button size="sm" variant="default" className="rounded-full text-xs gap-1.5 h-8">
+                <Button size="sm" variant="default" className="rounded-lg text-xs gap-1.5 h-8">
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Ask Relay</span>
                 </Button>
@@ -216,7 +216,7 @@ export const ScribbleViewer: React.FC<ScribbleViewerProps> = ({
                   size="icon"
                   variant="ghost"
                   onClick={handleCopy}
-                  className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                  className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
                   title="Copy Markdown"
                 >
                   {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -224,7 +224,7 @@ export const ScribbleViewer: React.FC<ScribbleViewerProps> = ({
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                  className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
                   title="Folder Location"
                 >
                   <Folder className="w-3.5 h-3.5" />
@@ -232,7 +232,7 @@ export const ScribbleViewer: React.FC<ScribbleViewerProps> = ({
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                  className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
                   title="Export File"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -250,7 +250,7 @@ export const ScribbleViewer: React.FC<ScribbleViewerProps> = ({
                   Obsidian Compatible
                 </Badge>
               </div>
-              <div className="p-5 rounded-2xl bg-muted/30 border border-border font-mono text-xs text-foreground whitespace-pre-wrap leading-relaxed">
+              <div className="p-5 rounded-lg bg-muted/30 border border-border font-mono text-xs text-foreground whitespace-pre-wrap leading-relaxed">
                 {selectedNote.cleanedText}
               </div>
             </div>
@@ -260,27 +260,27 @@ export const ScribbleViewer: React.FC<ScribbleViewerProps> = ({
               <span className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
                 LABELED RAW TRANSCRIPT
               </span>
-              <div className="p-4 rounded-xl bg-card border border-border text-xs text-muted-foreground italic leading-relaxed">
+              <div className="p-4 rounded-lg bg-card border border-border text-xs text-muted-foreground italic leading-relaxed">
                 "{selectedNote.rawTranscript}"
               </div>
             </div>
 
             {/* Standing "Ask Relay to Reshape" Suggestions Block */}
-            <div className="p-4 rounded-2xl bg-accent/30 border border-accent-foreground/20 space-y-3">
+            <div className="p-4 rounded-lg bg-accent/30 border border-accent-foreground/20 space-y-3">
               <div className="flex items-center gap-2 text-xs font-bold text-foreground">
                 <MessageSquarePlus className="w-4 h-4 text-primary" />
                 <span>Ask Relay to Reshape</span>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" className="rounded-full text-xs bg-card gap-1.5">
+                <Button variant="outline" size="sm" className="rounded-lg text-xs bg-card gap-1.5">
                   <span>Pull out action items</span>
                   <ArrowRight className="w-3 h-3 text-primary" />
                 </Button>
-                <Button variant="outline" size="sm" className="rounded-full text-xs bg-card gap-1.5">
+                <Button variant="outline" size="sm" className="rounded-lg text-xs bg-card gap-1.5">
                   <span>Draft executive summary email</span>
                   <ArrowRight className="w-3 h-3 text-primary" />
                 </Button>
-                <Button variant="outline" size="sm" className="rounded-full text-xs bg-card gap-1.5">
+                <Button variant="outline" size="sm" className="rounded-lg text-xs bg-card gap-1.5">
                   <span>Summarize in 3 key bullet points</span>
                   <ArrowRight className="w-3 h-3 text-primary" />
                 </Button>

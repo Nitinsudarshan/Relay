@@ -57,11 +57,11 @@ export const ChangelogModal: React.FC<ChangelogModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-      <div className="bg-popover border border-border shadow-2xl rounded-2xl w-[80vw] max-w-5xl max-h-[85vh] flex flex-col overflow-hidden text-popover-foreground">
+      <div className="bg-popover border border-border shadow-2xl rounded-lg w-[80vw] max-w-5xl max-h-[85vh] flex flex-col overflow-hidden text-popover-foreground">
         {/* Modal Header */}
         <div className="p-4 md:p-5 border-b border-border flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-primary/10 text-primary">
+            <div className="p-2 rounded-lg bg-primary/10 text-primary">
               <Activity className="w-5 h-5" />
             </div>
             <div>
@@ -79,7 +79,7 @@ export const ChangelogModal: React.FC<ChangelogModalProps> = ({
             size="icon"
             variant="ghost"
             onClick={onClose}
-            className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+            className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
           >
             <X className="w-4 h-4" />
           </Button>
@@ -100,7 +100,7 @@ export const ChangelogModal: React.FC<ChangelogModalProps> = ({
               <div key={entry.version} className="space-y-2 border-b border-border/60 pb-5 last:border-none last:pb-0">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono font-bold text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-md">
+                    <span className="font-mono font-bold text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-lg">
                       v{entry.version}
                     </span>
                     <span className="text-xs font-bold text-foreground">{entry.title}</span>

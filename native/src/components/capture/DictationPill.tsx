@@ -21,7 +21,7 @@ import {
   Loader2, 
   Bug 
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, applyThemeWithoutTransition } from '@/lib/utils';
 
 interface CaptureStatePayload {
   active: boolean;
@@ -96,11 +96,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     const applyTheme = (mode: string) => {
       const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       const isDark = mode === 'dark' || (mode === 'system' && isSystemDark);
-      if (isDark) {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
+      applyThemeWithoutTransition(isDark);
     };
 
     const initialTheme = localStorage.getItem('relay-theme') || 'system';
@@ -443,10 +439,10 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
             {settings?.hotkeys.toggle_to_talk ? 'Tap to start/stop' : 'Hold to record'}
           </span>
           <span className="flex items-center gap-1">
-            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-[#262626] text-slate-800 dark:text-neutral-200 border border-slate-200 dark:border-[#404040] font-semibold shadow-xs">
+            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-lg bg-slate-100 dark:bg-[#262626] text-slate-800 dark:text-neutral-200 border border-slate-200 dark:border-[#404040] font-semibold shadow-xs">
               Ctrl
             </kbd>
-            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-[#262626] text-slate-800 dark:text-neutral-200 border border-slate-200 dark:border-[#404040] font-semibold shadow-xs">
+            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-lg bg-slate-100 dark:bg-[#262626] text-slate-800 dark:text-neutral-200 border border-slate-200 dark:border-[#404040] font-semibold shadow-xs">
               Space
             </kbd>
           </span>
@@ -467,7 +463,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
             if ((e.target as HTMLElement).closest('.pill-actions')) return;
             toggleClickToTalk();
           }}
-          className="inline-flex items-center gap-0 pl-4 pr-2 h-[44px] rounded-xl bg-white dark:bg-[#171717] border border-slate-200 dark:border-[#262626] shadow-[0_16px_40px_rgba(15,23,42,0.15),0_2px_8px_rgba(15,23,42,0.08)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.5)] text-slate-900 dark:text-neutral-100 cursor-pointer"
+          className="inline-flex items-center gap-0 pl-4 pr-2 h-[44px] rounded-lg bg-white dark:bg-[#171717] border border-slate-200 dark:border-[#262626] shadow-[0_16px_40px_rgba(15,23,42,0.15),0_2px_8px_rgba(15,23,42,0.08)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.5)] text-slate-900 dark:text-neutral-100 cursor-pointer"
         >
           <div className="flex items-center min-w-[120px] pr-2.5 h-[22px]">
             {/* Phase 1: IDLE / READY — Click to dictate */}

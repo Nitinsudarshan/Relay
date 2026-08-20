@@ -37,11 +37,11 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({ cards, isLoading = fal
       <div className="flex-1 overflow-y-auto space-y-3 pr-1">
         {isLoading ? (
           <div className="space-y-3">
-            <Skeleton className="h-24 w-full rounded-xl" />
-            <Skeleton className="h-24 w-full rounded-xl" />
+            <Skeleton className="h-24 w-full rounded-lg" />
+            <Skeleton className="h-24 w-full rounded-lg" />
           </div>
         ) : columnCards.length === 0 ? (
-          <div className="text-center py-12 px-4 rounded-xl border border-dashed border-border bg-muted/20 flex flex-col items-center justify-center h-full min-h-[160px]">
+          <div className="text-center py-12 px-4 rounded-lg border border-dashed border-border bg-muted/20 flex flex-col items-center justify-center h-full min-h-[160px]">
             <Layers className="w-8 h-8 text-muted-foreground/30 mb-2" />
             <p className="text-xs font-medium text-muted-foreground">No tasks in {title.toLowerCase()}</p>
             <p className="text-[11px] text-muted-foreground/60 mt-0.5">Push-to-talk dictates task cards live</p>
@@ -97,7 +97,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({ cards, isLoading = fal
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden gap-4">
       {/* Kanban Board Top Bar */}
-      <div className="flex items-center justify-between bg-card p-3 rounded-xl border border-border shrink-0">
+      <div className="flex items-center justify-between bg-card p-3 rounded-lg border border-border shrink-0">
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="gap-1.5 text-xs font-mono px-2.5 py-0.5 border-border">
             <HardDrive className="w-3 h-3 text-primary" /> Vault Storage

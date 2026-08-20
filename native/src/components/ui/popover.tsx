@@ -71,7 +71,7 @@ export const PopoverContent: React.FC<{ className?: string; children: React.Reac
     <div
       ref={ref}
       className={cn(
-        "absolute right-0 bottom-full mb-2 z-50 rounded-2xl bg-popover text-popover-foreground border border-border p-4 shadow-2xl animate-in fade-in zoom-in-95",
+        "absolute right-0 bottom-full mb-2 z-50 rounded-lg bg-popover text-popover-foreground border border-border p-4 shadow-2xl animate-in fade-in zoom-in-95",
         className
       )}
     >

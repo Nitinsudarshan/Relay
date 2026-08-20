@@ -1,5 +1,27 @@
 # Relay — Changelog
 
+## [0.7.2] - 2026-08-20
+
+### Voice Note Actions (Edit, Delete, Merge), High-Contrast Destructive Tokens & Geometry Polish
+
+- **Backend (`native/src-tauri/src/vault/mod.rs`, `native/src-tauri/src/commands.rs`)**: Added
+  `update_voice_note`, `delete_voice_note`, and `merge_voice_notes` Tauri commands and unit
+  tests for persistent Markdown vault note editing, deletion, and chronological adjacent note merging.
+- **Frontend (`native/src/components/voicenotes/VoiceNotePage.tsx`)**:
+  - Removed redundant `"Voice Note"` text labels from each note card in favor of clean timestamps
+    and word count chips.
+  - Added full interactive action toolbar: **Edit** (inline textarea with <kbd>Ctrl+Enter</kbd>
+    save / <kbd>Esc</kbd> cancel), **Delete** (safety confirmation banner), **Adjacent Merge**
+    (combines split transcripts into one), and **Copy** (animated 1-click clipboard copy).
+  - Enhanced delete confirmation banner with high-contrast, accessible red accents across both
+    Light and Dark themes.
+- **Design System (`native/src/index.css`, `web/src/app/globals.css`, `native/src/components/ui/button.tsx`)**:
+  - Fixed `--destructive` and `--destructive-foreground` design tokens to vivid crimson (`#EF4444`)
+    and crisp white (`#FFFFFF`) in both Light and Dark modes.
+  - Standardized all button variants (`destructive`, `outline`, `secondary`, `ghost`) to consume
+    theme tokens rather than hardcoded slate classes.
+  - Standardized UI components across all modules and floating widgets to `rounded-lg` geometry.
+
 ## [0.7.1] - 2026-08-20
 
 ### Dynamic Changelog, 1-Click Theme Toggle & UI Streamlining

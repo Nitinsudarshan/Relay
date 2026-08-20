@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { HardDrive, Mic, ShieldCheck } from 'lucide-react';
+import { HardDrive, Mic, ShieldCheck, Edit3, Trash2, GitMerge, Copy, Check, X, Save } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { VaultLocationInfo, VaultNote } from '../../types';
@@ -39,7 +39,7 @@ const VaultSetupPrompt: React.FC<{
   onChooseFolder: () => void;
   onUseDefault: () => void;
 }> = ({ recovery, busy, error, onChooseFolder, onUseDefault }) => (
-  <div className="flex-1 flex flex-col items-center justify-center text-center py-16 px-6 rounded-2xl border border-dashed border-border bg-card">
+  <div className="flex-1 flex flex-col items-center justify-center text-center py-16 px-6 rounded-lg border border-dashed border-border bg-card">
     <HardDrive className="w-9 h-9 mb-3 text-muted-foreground opacity-60" />
     <h2 className="text-lg font-bold text-foreground mb-1.5 max-w-sm">
       {recovery ? "We can't access your Voice Note folder" : 'Where should Relay save your Voice Notes?'}
@@ -74,6 +74,14 @@ export const VoiceNotePage: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  // Interactive Action States
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState('');
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+  const [mergingNoteId, setMergingNoteId] = useState<string | null>(null);
+  const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+
   const refreshLocation = async () => {
     try {
       const info = await invoke<VaultLocationInfo>('get_vault_location');
@@ -88,16 +96,12 @@ export const VoiceNotePage: React.FC = () => {
     } catch (err) {
       console.error('Failed to read Vault Directory Location', err);
       setError('Could not determine where Voice Notes are stored.');
-      // Must not leave the page stuck on "Loading" forever — treat an
-      // unreadable location the same as an inaccessible one, so the user
-      // always lands on an actionable screen.
       setVaultState({ status: 'recovery' });
     }
   };
 
   useEffect(() => {
     refreshLocation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -107,9 +111,6 @@ export const VoiceNotePage: React.FC = () => {
       .catch((err) => console.error('Failed to load Voice Notes', err));
   }, [vaultState.status]);
 
-  // Keeps Transcript History live while this page is open — the backend
-  // emits this exactly once per successful, non-empty transcript, from
-  // both the global dictation hotkey and click-to-talk.
   useEffect(() => {
     const unlistenPromise = listen<VaultNote>('voice-note-saved', ({ payload }) => {
       setNotes((prev) => [payload, ...prev.filter((n) => n.id !== payload.id)]);
@@ -149,6 +150,77 @@ export const VoiceNotePage: React.FC = () => {
     }
   };
 
+  // Note Action Handlers
+  const handleStartEdit = (note: VaultNote) => {
+    setEditingNoteId(note.id);
+    setEditingContent(note.content);
+    setDeletingNoteId(null);
+    setMergingNoteId(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingNoteId(null);
+    setEditingContent('');
+  };
+
+  const handleSaveEdit = async (id: string) => {
+    if (!editingContent.trim()) return;
+    setActionBusy(true);
+    try {
+      const updated = await invoke<VaultNote>('update_voice_note', {
+        id,
+        content: editingContent.trim(),
+      });
+      setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)));
+      setEditingNoteId(null);
+    } catch (err) {
+      console.error('Failed to update voice note', err);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    setActionBusy(true);
+    try {
+      await invoke('delete_voice_note', { id });
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+      setDeletingNoteId(null);
+      if (editingNoteId === id) setEditingNoteId(null);
+      if (mergingNoteId === id) setMergingNoteId(null);
+    } catch (err) {
+      console.error('Failed to delete voice note', err);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleMerge = async (primaryId: string, secondaryId: string) => {
+    setActionBusy(true);
+    try {
+      const merged = await invoke<VaultNote>('merge_voice_notes', {
+        primaryId,
+        secondaryId,
+      });
+      setNotes((prev) =>
+        prev
+          .filter((n) => n.id !== secondaryId)
+          .map((n) => (n.id === primaryId ? merged : n))
+      );
+      setMergingNoteId(null);
+    } catch (err) {
+      console.error('Failed to merge voice notes', err);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleCopy = (note: VaultNote) => {
+    navigator.clipboard.writeText(note.content);
+    setCopiedNoteId(note.id);
+    setTimeout(() => setCopiedNoteId(null), 1800);
+  };
+
   const stats = useMemo(() => {
     const total = notes.length;
     const totalWords = notes.reduce((sum, n) => sum + countWords(n.content), 0);
@@ -180,20 +252,21 @@ export const VoiceNotePage: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
+      {/* Top Stats Overview */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">
             Total Voice Notes
           </p>
           <p className="text-2xl font-extrabold text-foreground">{stats.total}</p>
         </div>
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">
             Total Words
           </p>
           <p className="text-2xl font-extrabold text-foreground">{stats.totalWords.toLocaleString()}</p>
         </div>
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">
             Notes Today
           </p>
@@ -201,7 +274,8 @@ export const VoiceNotePage: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col min-h-0 rounded-2xl border border-border bg-card p-5">
+      {/* Main Transcript History Container */}
+      <div className="flex-1 flex flex-col min-h-0 rounded-lg border border-border bg-card p-5">
         <div className="flex items-center justify-between mb-4 shrink-0">
           <h2 className="text-sm font-bold text-foreground">Transcript History</h2>
           <Badge variant="outline" className="text-[10px] font-mono">
@@ -210,28 +284,226 @@ export const VoiceNotePage: React.FC = () => {
         </div>
 
         {notes.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center py-10 border border-dashed border-border rounded-xl text-muted-foreground">
+          <div className="flex-1 flex flex-col items-center justify-center text-center py-10 border border-dashed border-border rounded-lg text-muted-foreground">
             <Mic className="w-8 h-8 mb-2 opacity-40" />
             <p className="text-sm font-semibold">No Voice Notes yet</p>
             <p className="text-xs mt-1">Everything you dictate with Relay will show up here.</p>
           </div>
         ) : (
-          <div className="flex-1 overflow-y-auto space-y-2">
-            {notes.map((note) => (
-              <div key={note.id} className="p-4 rounded-xl border border-border bg-muted/20">
-                <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-                    Voice Note
-                  </span>
-                  <span className="text-[11px] text-muted-foreground font-mono shrink-0">
-                    {formatNoteTimestamp(note.created_at)}
-                  </span>
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+            {notes.map((note, index) => {
+              const isEditing = editingNoteId === note.id;
+              const isDeleting = deletingNoteId === note.id;
+              const isMerging = mergingNoteId === note.id;
+              const canMergeWithNext = index < notes.length - 1;
+              const nextNote = canMergeWithNext ? notes[index + 1] : null;
+
+              return (
+                <div
+                  key={note.id}
+                  className="p-4 rounded-lg border border-border bg-muted/20 hover:border-border/80 transition-all space-y-2 group"
+                >
+                  {/* Card Header without redundant 'Voice Note' label */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-foreground font-mono">
+                        {formatNoteTimestamp(note.created_at)}
+                      </span>
+                      <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0">
+                        {countWords(note.content)} words
+                      </Badge>
+                    </div>
+
+                    {/* Action Buttons Toolbar */}
+                    {!isEditing && (
+                      <div className="flex items-center gap-1">
+                        {/* Merge with adjacent earlier note */}
+                        {canMergeWithNext && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => {
+                              setMergingNoteId(isMerging ? null : note.id);
+                              setDeletingNoteId(null);
+                            }}
+                            className={`h-7 w-7 rounded-lg transition-colors ${
+                              isMerging
+                                ? 'bg-primary/10 text-primary'
+                                : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
+                            }`}
+                            title="Merge with adjacent earlier note"
+                            aria-label="Merge with adjacent earlier note"
+                          >
+                            <GitMerge className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+
+                        {/* Edit Note */}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => handleStartEdit(note)}
+                          className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
+                          title="Edit transcript"
+                          aria-label="Edit transcript"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </Button>
+
+                        {/* Copy Content */}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => handleCopy(note)}
+                          className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
+                          title="Copy transcript"
+                          aria-label="Copy transcript"
+                        >
+                          {copiedNoteId === note.id ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-500" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </Button>
+
+                        {/* Delete Note */}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => {
+                            setDeletingNoteId(isDeleting ? null : note.id);
+                            setMergingNoteId(null);
+                          }}
+                          className={`h-7 w-7 rounded-lg transition-colors ${
+                            isDeleting
+                              ? 'bg-red-500/15 text-red-600 dark:text-red-400'
+                              : 'text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10'
+                          }`}
+                          title="Delete note"
+                          aria-label="Delete note"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Body: Editing Mode vs Normal Display */}
+                  {isEditing ? (
+                    <div className="space-y-2 pt-1">
+                      <textarea
+                        value={editingContent}
+                        onChange={(e) => setEditingContent(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                            handleSaveEdit(note.id);
+                          }
+                          if (e.key === 'Escape') {
+                            handleCancelEdit();
+                          }
+                        }}
+                        disabled={actionBusy}
+                        className="w-full min-h-[90px] p-3 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-sans leading-relaxed resize-y"
+                        autoFocus
+                      />
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-muted-foreground">
+                          Press <kbd className="font-mono text-[10px] bg-muted px-1 py-0.5 rounded">Ctrl+Enter</kbd> to save, <kbd className="font-mono text-[10px] bg-muted px-1 py-0.5 rounded">Esc</kbd> to cancel
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleCancelEdit}
+                            disabled={actionBusy}
+                            className="h-7 text-xs gap-1"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Cancel</span>
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => handleSaveEdit(note.id)}
+                            disabled={actionBusy || !editingContent.trim()}
+                            className="h-7 text-xs gap-1"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            <span>Save Changes</span>
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
+                      {note.content}
+                    </p>
+                  )}
+
+                  {/* Delete Confirmation Inline Banner */}
+                  {isDeleting && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-600 dark:text-red-400 animate-in fade-in duration-150">
+                      <span className="font-medium">Are you sure you want to delete this voice note permanently?</span>
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={actionBusy}
+                          onClick={() => setDeletingNoteId(null)}
+                          className="h-7 text-xs"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={actionBusy}
+                          onClick={() => handleDelete(note.id)}
+                          className="h-7 text-xs gap-1 font-semibold"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Delete</span>
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Merge Confirmation Inline Banner */}
+                  {isMerging && nextNote && (
+                    <div className="p-3 bg-accent/40 border border-border rounded-lg text-xs space-y-2 animate-in fade-in duration-150">
+                      <div className="flex items-center gap-1.5 font-semibold text-foreground">
+                        <GitMerge className="w-4 h-4 text-primary shrink-0" />
+                        <span>Merge with adjacent note ({formatNoteTimestamp(nextNote.created_at)})?</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground line-clamp-2 italic bg-background/60 p-2 rounded border border-border/50">
+                        "{nextNote.content}"
+                      </p>
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={actionBusy}
+                          onClick={() => setMergingNoteId(null)}
+                          className="h-7 text-xs"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="default"
+                          disabled={actionBusy}
+                          onClick={() => handleMerge(note.id, nextNote.id)}
+                          className="h-7 text-xs gap-1.5"
+                        >
+                          <GitMerge className="w-3.5 h-3.5" />
+                          <span>Combine Notes</span>
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <p className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
-                  {note.content}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

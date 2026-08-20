@@ -135,7 +135,7 @@ export const App: React.FC = () => {
       >
         {/* Logo Header */}
         <div className="flex items-center gap-3 px-2 py-3 mb-4 border-b border-sidebar-border">
-          <div className="flex aspect-square size-9 items-center justify-center rounded-xl bg-card border border-border text-foreground shadow-xs">
+          <div className="flex aspect-square size-9 items-center justify-center rounded-lg bg-card border border-border text-foreground shadow-xs">
             <RelayLogo className="w-5 h-5" />
           </div>
           <div className="grid flex-1 text-left text-sm leading-tight">
@@ -196,7 +196,7 @@ export const App: React.FC = () => {
 
         {/* Pinned Account & Hybrid Sync Card Block */}
         <div className="mt-auto pt-4 border-t border-sidebar-border space-y-3">
-          <div className="p-2.5 rounded-xl bg-card border border-border flex items-center gap-2.5 shadow-xs">
+          <div className="p-2.5 rounded-lg bg-card border border-border flex items-center gap-2.5 shadow-xs">
             <div className="w-7 h-7 rounded-full bg-primary text-primary-foreground font-bold flex items-center justify-center text-xs shrink-0">
               N
             </div>

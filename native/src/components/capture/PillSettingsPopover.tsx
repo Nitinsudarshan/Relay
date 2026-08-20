@@ -56,7 +56,7 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
 
   return (
     <div
-      className="absolute left-1/2 bottom-[76px] -translate-x-1/2 w-[270px] bg-white dark:bg-[#171717] text-slate-900 dark:text-neutral-100 border border-slate-200 dark:border-[#262626] shadow-2xl rounded-2xl p-2.5 text-xs text-left select-none z-50 font-sans animate-in fade-in slide-in-from-bottom-2 duration-150"
+      className="absolute left-1/2 bottom-[76px] -translate-x-1/2 w-[270px] bg-white dark:bg-[#171717] text-slate-900 dark:text-neutral-100 border border-slate-200 dark:border-[#262626] shadow-2xl rounded-lg p-2.5 text-xs text-left select-none z-50 font-sans animate-in fade-in slide-in-from-bottom-2 duration-150"
       onClick={(e) => e.stopPropagation()}
     >
       {page === 'main' && (
@@ -179,7 +179,7 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
           <button
             type="button"
             onClick={() => setPage('main')}
-            className="flex items-center gap-2 px-2.5 py-2 cursor-pointer text-slate-600 dark:text-neutral-400 text-xs font-sans rounded-md hover:bg-slate-100 dark:hover:bg-[#262626] transition-colors w-full text-left"
+            className="flex items-center gap-2 px-2.5 py-2 cursor-pointer text-slate-600 dark:text-neutral-400 text-xs font-sans rounded-lg hover:bg-slate-100 dark:hover:bg-[#262626] transition-colors w-full text-left"
           >
             <ChevronLeft className="w-3.5 h-3.5 stroke-[2]" />
             <span>Back</span>
@@ -216,7 +216,7 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
           <button
             type="button"
             onClick={() => setPage('main')}
-            className="flex items-center gap-2 px-2.5 py-2 cursor-pointer text-slate-600 dark:text-neutral-400 text-xs font-sans rounded-md hover:bg-slate-100 dark:hover:bg-[#262626] transition-colors w-full text-left"
+            className="flex items-center gap-2 px-2.5 py-2 cursor-pointer text-slate-600 dark:text-neutral-400 text-xs font-sans rounded-lg hover:bg-slate-100 dark:hover:bg-[#262626] transition-colors w-full text-left"
           >
             <ChevronLeft className="w-3.5 h-3.5 stroke-[2]" />
             <span>Back</span>

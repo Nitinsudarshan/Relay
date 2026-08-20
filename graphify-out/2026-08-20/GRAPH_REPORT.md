@@ -1,16 +1,16 @@
 # Graph Report - Relay  (2026-08-20)
 
 ## Corpus Check
-- 156 files · ~71,871 words
+- 156 files · ~73,235 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1229 nodes · 2199 edges · 129 communities (74 shown, 55 thin omitted)
+- 1240 nodes · 2258 edges · 129 communities (73 shown, 56 thin omitted)
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS · INFERRED: 2 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `af557d18`
+- Built from commit: `e60c4837`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -25,12 +25,12 @@
 - LLMClient
 - Relay — Architectural & Product Decision Log
 - compilerOptions
-- login-form.tsx
+- web/src/lib/utils.ts
 - dropdown-menu.tsx
 - hotkeys/mod.rs
 - compilerOptions
 - tauri.conf.json
-- App.tsx
+- ProviderSettings.tsx
 - (dashboard)/layout.tsx
 - DictationPill.tsx
 - components.json
@@ -43,7 +43,7 @@
 - dependencies
 - TriggerSettings.tsx
 - index.ts
-- ProviderSettings.tsx
+- settings/mod.rs
 - reposition
 - Command Signatures
 - scripts
@@ -62,12 +62,12 @@
 - Relay — Changelog
 - Relay — Product Specification
 - 3. First task — repository reconnaissance
-- settings/mod.rs
-- (dashboard)/page.tsx
+- popover.tsx
+- component-architecture.md
 - Relay — Data Model Specification
 - loading-view.tsx
 - Relay AI Agent Guidelines
-- cn
+- App.tsx
 - Relay
 - icon.tsx
 - Relay — System Architecture
@@ -85,10 +85,9 @@
 - RBAC — Not Built, and Why
 - Testing Rules
 - Push-to-Talk Pill Inspection
-- component-architecture.md
 - forms-and-validation.md
 - responsive-design.md
-- FloatingPill.tsx
+- cn
 - security.md
 - server-client-boundary.md
 - ui-components.md
@@ -117,7 +116,7 @@
 - [0.4.7] - 2026-08-20
 - [0.4.8] - 2026-08-20
 - [0.5.0] - 2026-08-20
-- [0.6.0] - 2026-08-20
+- [0.3.8] - 2026-08-19
 - 6. RESTING STATE
 - [0.3.1] - 2026-08-19
 - [0.4.6] - 2026-08-20
@@ -137,16 +136,17 @@
 - @types/react
 - postcss.config.mjs
 - globals.d.ts
+- [0.4.2] - 2026-08-20
 - @radix-ui/react-slot
 
 ## God Nodes (most connected - your core abstractions)
 1. `cn()` - 137 edges
 2. `Relay — Push-to-Talk Pill Redesign & Interaction Overhaul` - 42 edges
 3. `Relay — Architectural & Product Decision Log` - 38 edges
-4. `Relay — Changelog` - 27 edges
-5. `AppState` - 26 edges
-6. `CommandError` - 25 edges
-7. `VaultManager` - 21 edges
+4. `AppState` - 29 edges
+5. `CommandError` - 28 edges
+6. `Relay — Changelog` - 28 edges
+7. `VaultManager` - 25 edges
 8. `compilerOptions` - 18 edges
 9. `cn()` - 17 edges
 10. `compilerOptions` - 16 edges
@@ -156,17 +156,17 @@
   native/src-tauri/src/hotkeys/mod.rs → native/src-tauri/src/commands.rs
 - `stop_dictation_session()` --calls--> `emit_capture_status_event()`  [INFERRED]
   native/src-tauri/src/hotkeys/mod.rs → native/src-tauri/src/commands.rs
+- `PopoverContent()` --calls--> `cn()`  [EXTRACTED]
+  native/src/components/ui/popover.tsx → native/src/lib/utils.ts
 - `AvatarBadge()` --calls--> `cn()`  [EXTRACTED]
   web/src/components/ui/avatar.tsx → web/src/lib/utils.ts
 - `AvatarGroup()` --calls--> `cn()`  [EXTRACTED]
-  web/src/components/ui/avatar.tsx → web/src/lib/utils.ts
-- `AvatarGroupCount()` --calls--> `cn()`  [EXTRACTED]
   web/src/components/ui/avatar.tsx → web/src/lib/utils.ts
 
 ## Import Cycles
 - None detected.
 
-## Communities (129 total, 55 thin omitted)
+## Communities (129 total, 56 thin omitted)
 
 ### Community 0 - "components/page.tsx"
 Cohesion: 0.07
@@ -174,15 +174,15 @@ Nodes (32): Accordion(), AccordionContent(), AccordionItem(), AccordionTrigger()
 
 ### Community 1 - "commands.rs"
 Cohesion: 0.14
-Nodes (50): AppSettings, HotkeySettings, KanbanCard, AppState, CaptureStatus, ChangelogEntry, ChangelogItem, choose_vault_folder() (+42 more)
+Nodes (53): AppSettings, HotkeySettings, KanbanCard, AppState, CaptureStatus, ChangelogEntry, ChangelogItem, choose_vault_folder() (+45 more)
 
 ### Community 2 - "capture/mod.rs"
 Cohesion: 0.11
 Nodes (35): Fn, Instant, ActiveSession, AudioDetectionState, AudioRecorder, brief_spike_shorter_than_min_duration_does_not_trigger_had_audio(), CapturedAudio, CaptureError (+27 more)
 
 ### Community 3 - "VaultManager"
-Cohesion: 0.22
-Nodes (18): KanbanCard, parse_debug_string_list(), Error, Mutex, Option, PathBuf, Result, Self (+10 more)
+Cohesion: 0.17
+Nodes (23): process_chat(), ProcessedPipelineResult, Result, TtsSettings, KanbanCard, parse_debug_string_list(), Error, Mutex (+15 more)
 
 ### Community 4 - "Relay — Push-to-Talk Pill Redesign & Interaction Overhaul"
 Cohesion: 0.05
@@ -194,11 +194,11 @@ Nodes (32): Field(), FieldContent(), FieldDescription(), FieldError(), FieldGrou
 
 ### Community 6 - "sidebar.tsx"
 Cohesion: 0.09
-Nodes (38): data, NavItem, NavMain(), NavSecondary(), NavUser(), Collapsible(), CollapsibleContent(), CollapsibleTrigger() (+30 more)
+Nodes (39): data, ChangelogDialog(), NavItem, NavMain(), NavSecondary(), NavUser(), Collapsible(), CollapsibleContent() (+31 more)
 
 ### Community 7 - "LLMClient"
-Cohesion: 0.12
-Nodes (25): Client, process_chat(), ProcessedPipelineResult, Result, TtsSettings, ExtractedActionItem, PipelineEngine, PipelineError (+17 more)
+Cohesion: 0.14
+Nodes (21): Client, ExtractedActionItem, PipelineEngine, PipelineError, ProcessedPipelineResult, Error, Option, Result (+13 more)
 
 ### Community 8 - "Relay — Architectural & Product Decision Log"
 Cohesion: 0.05
@@ -208,9 +208,9 @@ Nodes (38): Decision 10: Trigger Phrases are User-Customizable, Decision 11: Tar
 Cohesion: 0.07
 Nodes (28): esnext, **/*.mts, .next/dev/types/**/*.ts, next-env.d.ts, .next/types/**/*.ts, node_modules, **/*.ts, **/*.tsx (+20 more)
 
-### Community 10 - "login-form.tsx"
-Cohesion: 0.13
-Nodes (16): DEMO_NOTES, ScribbleNote, SettingsSection, AuthMode, RelayLogo(), Badge(), badgeVariants, Card() (+8 more)
+### Community 10 - "web/src/lib/utils.ts"
+Cohesion: 0.09
+Nodes (24): DEMO_NOTES, ScribbleNote, DashboardPage(), SettingsSection, CHANGELOG_DATA, ChangelogDialogProps, AuthMode, RelayLogo() (+16 more)
 
 ### Community 11 - "dropdown-menu.tsx"
 Cohesion: 0.13
@@ -228,9 +228,9 @@ Nodes (23): compilerOptions, allowImportingTsExtensions, baseUrl, isolatedModule
 Cohesion: 0.09
 Nodes (22): app, security, windows, build, beforeBuildCommand, beforeDevCommand, devUrl, frontendDist (+14 more)
 
-### Community 15 - "App.tsx"
-Cohesion: 0.15
-Nodes (14): TAB_LABELS, ChangelogModal(), RelayLogo(), RelayLogoProps, ThemeMode, ThemeToggle(), Button, ButtonProps (+6 more)
+### Community 15 - "ProviderSettings.tsx"
+Cohesion: 0.20
+Nodes (11): eventToAccelerator(), HotkeyRecorder(), HotkeyRecorderProps, MODIFIER_KEYS, NAMED_KEYS, normalizeKey(), DEFAULT_SETTINGS, ProviderSettings() (+3 more)
 
 ### Community 16 - "(dashboard)/layout.tsx"
 Cohesion: 0.15
@@ -253,8 +253,8 @@ Cohesion: 0.18
 Nodes (15): c_int, ensure_default_model(), num_cpus(), Arc, Default, Mutex, Option, Path (+7 more)
 
 ### Community 21 - "site-header.tsx"
-Cohesion: 0.18
-Nodes (14): CHANGELOG_DATA, ChangelogDialog(), ChangelogDialogProps, ModeToggle(), HeaderUserMenu, Breadcrumb(), BreadcrumbEllipsis(), BreadcrumbItem() (+6 more)
+Cohesion: 0.27
+Nodes (9): ModeToggle(), HeaderUserMenu, Breadcrumb(), BreadcrumbEllipsis(), BreadcrumbItem(), BreadcrumbLink(), BreadcrumbList(), BreadcrumbPage() (+1 more)
 
 ### Community 22 - "triggers/mod.rs"
 Cohesion: 0.24
@@ -277,12 +277,12 @@ Cohesion: 0.27
 Nodes (7): ChatTurn, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle
 
 ### Community 27 - "index.ts"
-Cohesion: 0.18
-Nodes (10): ChangelogEntry, ChangelogItem, HotkeySettings, PillPosition, ProviderSettings, SttSettings, TriggerConfig, TtsSettings (+2 more)
+Cohesion: 0.13
+Nodes (16): countWords(), formatNoteTimestamp(), VaultViewState, VoiceNotePage(), ChangelogEntry, ChangelogItem, HotkeySettings, PillPosition (+8 more)
 
-### Community 28 - "ProviderSettings.tsx"
-Cohesion: 0.18
-Nodes (12): eventToAccelerator(), HotkeyRecorder(), HotkeyRecorderProps, MODIFIER_KEYS, NAMED_KEYS, normalizeKey(), DEFAULT_SETTINGS, ProviderSettings() (+4 more)
+### Community 28 - "settings/mod.rs"
+Cohesion: 0.22
+Nodes (15): AppSettings, HotkeySettings, PillPosition, Default, Error, Option, Path, Result (+7 more)
 
 ### Community 29 - "reposition"
 Cohesion: 0.41
@@ -346,7 +346,7 @@ Nodes (8): name, private, scripts, build, dev, lint, start, version
 
 ### Community 44 - "Relay — Changelog"
 Cohesion: 0.25
-Nodes (7): [0.3.8] - 2026-08-19, [0.4.2] - 2026-08-20, [0.7.0] - 2026-08-20, Relay — Changelog, Rounded-lg Component Geometry & Simultaneous Light/Dark/System Theme Syncing, Voice Note — Universal Dictation History & Configurable Vault Directory Location, whisper-rs 0.16 Upgrade, Compilation Fixes & Open Settings Command
+Nodes (7): [0.6.0] - 2026-08-20, [0.7.0] - 2026-08-20, [0.7.1] - 2026-08-20, Dynamic Changelog, 1-Click Theme Toggle & UI Streamlining, Relay — Changelog, Toggle-to-Talk — Optional Press-Once Dictation Mode, Voice Note — Universal Dictation History & Configurable Vault Directory Location
 
 ### Community 45 - "Relay — Product Specification"
 Cohesion: 0.25
@@ -356,13 +356,9 @@ Nodes (7): Core Value Proposition & Competitive Differentiators, Deferred for Cu
 Cohesion: 0.25
 Nodes (8): 3. First task — repository reconnaissance, AI, Audio, Desktop positioning, Hotkey, Packaging, Pill, Settings
 
-### Community 47 - "settings/mod.rs"
-Cohesion: 0.22
-Nodes (15): AppSettings, HotkeySettings, PillPosition, Default, Error, Option, Path, Result (+7 more)
-
-### Community 48 - "(dashboard)/page.tsx"
-Cohesion: 0.36
-Nodes (4): DashboardPage(), getSupabaseClient(), MockSupabaseClient, SupabaseKanbanCard
+### Community 47 - "popover.tsx"
+Cohesion: 0.33
+Nodes (3): PopoverContent(), PopoverContext, PopoverProps
 
 ### Community 49 - "Relay — Data Model Specification"
 Cohesion: 0.29
@@ -372,9 +368,9 @@ Nodes (6): 1. Vault Markdown Note Schema, 2. Kanban Card Schema, 3. Trigger Phra
 Cohesion: 0.33
 Nodes (6): Knowledge Graph, Precedence, Relay AI Agent Guidelines, Rule Index, Safety Requirements, Starting State
 
-### Community 52 - "cn"
-Cohesion: 0.17
-Nodes (11): ChangelogModalProps, KanbanBoardProps, Badge(), BadgeProps, badgeVariants, PopoverContent(), PopoverContext, PopoverProps (+3 more)
+### Community 52 - "App.tsx"
+Cohesion: 0.20
+Nodes (9): App(), TAB_LABELS, DictationPill(), FloatingPill(), RelayLogo(), RelayLogoProps, ThemeMode, ThemeToggle() (+1 more)
 
 ### Community 53 - "Relay"
 Cohesion: 0.33
@@ -436,29 +432,29 @@ Nodes (3): If the team/sharing direction is ever picked up, RBAC — Not Built, 
 Cohesion: 0.50
 Nodes (3): Frontend (native/src/ and web/src/), Rust backend (native/src-tauri/), Testing Rules
 
-### Community 73 - "FloatingPill.tsx"
-Cohesion: 0.50
-Nodes (3): App(), DictationPill(), FloatingPill()
+### Community 73 - "cn"
+Cohesion: 0.20
+Nodes (12): ChangelogModal(), ChangelogModalProps, KanbanBoardProps, Badge(), BadgeProps, badgeVariants, Button, ButtonProps (+4 more)
 
 ## Knowledge Gaps
-- **427 isolated node(s):** `name`, `private`, `version`, `type`, `dev` (+422 more)
+- **428 isolated node(s):** `name`, `private`, `version`, `type`, `dev` (+423 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **55 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **56 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `cn()` connect `cn` to `components/page.tsx`, `sidebar.tsx`, `login-form.tsx`, `dropdown-menu.tsx`, `(dashboard)/layout.tsx`, `site-header.tsx`?**
+- **Why does `cn()` connect `cn` to `components/page.tsx`, `sidebar.tsx`, `web/src/lib/utils.ts`, `dropdown-menu.tsx`, `(dashboard)/layout.tsx`, `site-header.tsx`?**
   _High betweenness centrality (0.020) - this node is a cross-community bridge._
 - **Why does `VaultManager` connect `VaultManager` to `commands.rs`, `LLMClient`?**
   _High betweenness centrality (0.016) - this node is a cross-community bridge._
 - **Why does `AppState` connect `commands.rs` to `capture/mod.rs`, `VaultManager`, `SttEngine`?**
   _High betweenness centrality (0.014) - this node is a cross-community bridge._
 - **What connects `name`, `private`, `version` to the rest of the system?**
-  _427 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _428 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `components/page.tsx` be split into smaller, more focused modules?**
-  _Cohesion score 0.07102040816326531 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.0673758865248227 - nodes in this community are weakly interconnected._
 - **Should `commands.rs` be split into smaller, more focused modules?**
-  _Cohesion score 0.13872053872053872 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.1385359951603146 - nodes in this community are weakly interconnected._
 - **Should `capture/mod.rs` be split into smaller, more focused modules?**
   _Cohesion score 0.11265969802555169 - nodes in this community are weakly interconnected._
