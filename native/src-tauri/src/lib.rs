@@ -23,16 +23,29 @@ pub fn run() {
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(".relay");
 
-    let vault_dir = base_dir.join("vault");
+    let default_vault_dir = base_dir.join("vault");
     let config_dir = base_dir.join("config");
 
     let settings = AppSettings::load(&config_dir.join("settings.json")).unwrap_or_default();
     let hotkeys_config = settings.hotkeys.clone();
     let pill_position = settings.ui.pill_position;
 
+    // An explicitly configured Vault Directory Location always wins; a
+    // fresh install (or one where the user never confirmed a location)
+    // keeps using the same process-relative default this already used
+    // before Voice Notes existed, so existing notes/Kanban cards never
+    // silently move.
+    let vault_dir = settings
+        .vault
+        .directory
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_vault_dir.clone());
+
     let state = AppState {
         recorder: AudioRecorder::new(),
         vault: VaultManager::new(vault_dir),
+        default_vault_dir,
         config_dir,
         settings: Mutex::new(settings),
         stt: SttEngine::new(),
@@ -40,6 +53,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .setup(move |app| {
             hotkeys::register_hotkeys(
@@ -69,6 +83,10 @@ pub fn run() {
             commands::get_settings,
             commands::save_settings,
             commands::open_settings_window,
+            commands::get_voice_notes,
+            commands::get_vault_location,
+            commands::choose_vault_folder,
+            commands::set_vault_location,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

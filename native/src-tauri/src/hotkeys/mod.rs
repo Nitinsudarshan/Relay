@@ -357,21 +357,27 @@ fn stop_dictation_session(
         .await;
 
         match transcript {
-            Ok(Ok(text)) if !text.trim().is_empty() => match injection::inject_text(&text) {
-                Ok(()) => {
-                    emit_capture_status_event(&app, false, None, "SUCCESS", None);
+            Ok(Ok(text)) if !text.trim().is_empty() => {
+                // Voice Note persistence happens from the successful
+                // transcript itself, not from injection's outcome — it must
+                // still be saved below even if injection fails.
+                crate::commands::save_voice_note(&app, &state.vault, &text);
+                match injection::inject_text(&text) {
+                    Ok(()) => {
+                        emit_capture_status_event(&app, false, None, "SUCCESS", None);
+                    }
+                    Err(e) => {
+                        tracing::error!("Dictation text injection failed: {}", e);
+                        emit_capture_status_event(
+                            &app,
+                            false,
+                            None,
+                            "ERROR",
+                            Some("Couldn't insert text".to_string()),
+                        );
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("Dictation text injection failed: {}", e);
-                    emit_capture_status_event(
-                        &app,
-                        false,
-                        None,
-                        "ERROR",
-                        Some("Couldn't insert text".to_string()),
-                    );
-                }
-            },
+            }
             Ok(Ok(_)) => {
                 tracing::info!("Dictation produced no speech (silence or too short)");
                 emit_capture_status_event(&app, false, None, "NO_SPEECH", None);

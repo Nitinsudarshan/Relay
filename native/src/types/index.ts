@@ -10,6 +10,28 @@ export interface ProcessedPipelineResult {
   spoken_audio_base64?: string | null;
 }
 
+export interface VaultNote {
+  id: string;
+  title: string;
+  note_type: string;
+  created_at: string;
+  updated_at: string;
+  tags: string[];
+  source_audio?: string | null;
+  content: string;
+}
+
+export interface VaultLocationInfo {
+  /** Absolute path currently in use, whether chosen or defaulted. */
+  path: string;
+  /** What "Use Default Relay Vault" would set `path` to. */
+  default_path: string;
+  /** Whether the user has explicitly chosen/confirmed a location. */
+  configured: boolean;
+  /** Whether `path` currently exists (or can be created) and is usable. */
+  accessible: boolean;
+}
+
 export interface KanbanCard {
   id: string;
   title: string;
@@ -64,6 +86,12 @@ export interface UiSettings {
   pill_position: PillPosition;
 }
 
+export interface VaultSettings {
+  /** Absolute path the user explicitly chose or confirmed, or null/absent
+   * if unconfigured (Relay is using its process-relative default). */
+  directory?: string | null;
+}
+
 /** Mirrors the Rust `AppSettings` struct persisted at `.relay/config/settings.json`. */
 export interface AppSettings {
   provider: ProviderSettings;
@@ -71,4 +99,5 @@ export interface AppSettings {
   tts: TtsSettings;
   hotkeys: HotkeySettings;
   ui: UiSettings;
+  vault: VaultSettings;
 }
