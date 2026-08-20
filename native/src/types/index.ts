@@ -52,6 +52,9 @@ export interface TtsSettings {
 export interface HotkeySettings {
   show_hide_hotkey: string;
   dictation_hotkey: string;
+  /** One press starts recording, a second press stops it, instead of
+   * holding the key down the whole time. Defaults to false (hold-to-talk). */
+  toggle_to_talk: boolean;
 }
 
 export type PillPosition = 'bottom_center' | 'top_center' | 'left_center' | 'right_center';

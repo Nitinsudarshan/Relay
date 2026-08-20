@@ -32,16 +32,28 @@ pub struct HotkeyRegistrationStatus {
 /// input-method shortcut also bound to it), which would otherwise leave the
 /// microphone "stuck" recording forever — and every later start attempt,
 /// hotkey or UI, would then fail with "a recording session is already
-/// active". If no release arrives within this long, force one.
+/// active". If no release arrives within this long, force one. In
+/// toggle-to-talk mode this also bounds a single recording that was never
+/// stopped with a second press.
 const MAX_DICTATION_HOLD: Duration = Duration::from_secs(60);
+
+/// Toggle-to-talk exists specifically so longer recordings aren't tedious,
+/// so it gets a much longer safety-net timeout than hold-to-talk's — a
+/// backstop against a forgotten/stuck toggle, not a normal length limit.
+const MAX_PERSISTENT_RECORDING: Duration = Duration::from_secs(600);
 
 /// Tracks whether the dictation hotkey currently owns the microphone.
 /// `generation` lets a delayed watchdog tell "this exact press" apart from
 /// a later one, so it never force-releases a session that already ended
-/// normally and started again.
+/// normally and started again. `key_down` tracks whether the physical key
+/// is currently held (a press without a matching release yet), which is
+/// what lets a deliberate second press — toggle-to-talk's "stop" signal —
+/// be told apart from the OS re-firing "pressed" repeatedly while the key
+/// stays physically down.
 struct DictationState {
     active: bool,
     generation: u64,
+    key_down: bool,
 }
 
 type SharedDictationState = Arc<Mutex<DictationState>>;
@@ -50,11 +62,15 @@ type SharedDictationState = Arc<Mutex<DictationState>>;
 /// dictation.
 ///
 /// - `show_hide_hotkey` toggles the main window's visibility from anywhere.
-/// - `dictation_hotkey` is push-to-talk: held down it records, and on
-///   release the transcript is typed into whatever field currently has OS
-///   focus (not necessarily Relay's own window). The floating dictation
-///   pill (see `overlay::ensure_pill_window`) is the only visual surface
-///   for this — there is no separate "listening" indicator window.
+/// - `dictation_hotkey` is push-to-talk: by default, held down it records
+///   and on release the transcript is typed into whatever field currently
+///   has OS focus (not necessarily Relay's own window). If
+///   `HotkeySettings::toggle_to_talk` is enabled, one press starts
+///   recording and a second press stops it instead, with releasing the key
+///   in between doing nothing — see `on_dictation_pressed`/
+///   `on_dictation_released`. The floating dictation pill (see
+///   `overlay::ensure_pill_window`) is the only visual surface for this —
+///   there is no separate "listening" indicator window.
 ///
 /// Safe to call again after [`apply_hotkeys`] has unregistered the previous
 /// bindings — e.g. when the user changes a hotkey in Settings — since it
@@ -118,6 +134,7 @@ fn try_register_hotkeys(
     let dictation_state: SharedDictationState = Arc::new(Mutex::new(DictationState {
         active: false,
         generation: 0,
+        key_down: false,
     }));
     let dictation_result = app
         .global_shortcut()
@@ -125,7 +142,7 @@ fn try_register_hotkeys(
             dictation_hotkey,
             move |app, _shortcut, event| match event.state {
                 ShortcutState::Pressed => on_dictation_pressed(app, &dictation_state),
-                ShortcutState::Released => on_dictation_released(app, &dictation_state, None),
+                ShortcutState::Released => on_dictation_released(app, &dictation_state),
             },
         )
         .map_err(|e| format!("dictation hotkey '{}': {}", dictation_hotkey, e));
@@ -161,19 +178,40 @@ fn toggle_main_window(app: &AppHandle) {
 
 fn on_dictation_pressed(app: &AppHandle, dictation_state: &SharedDictationState) {
     tracing::debug!("[Hotkey] Ctrl+Space received (pressed)");
+
+    let (is_repeat, session_active) = {
+        let mut guard = dictation_state.lock().unwrap();
+        let is_repeat = guard.key_down;
+        guard.key_down = true;
+        (is_repeat, guard.active)
+    };
+    if is_repeat {
+        // OS key-repeat re-fires "pressed" while physically still held;
+        // ignore in both hold-to-talk and toggle-to-talk mode.
+        return;
+    }
+
+    let state = app.state::<AppState>();
+    let toggle_to_talk = state.settings.lock().unwrap().hotkeys.toggle_to_talk;
+
+    if session_active {
+        // Only reachable in toggle-to-talk mode — a hold-to-talk session is
+        // always stopped by its own key release before a genuine next press
+        // could land. This fresh press is the user's "stop now" signal.
+        if toggle_to_talk {
+            stop_dictation_session(app.clone(), dictation_state.clone(), None);
+        }
+        return;
+    }
+
     let generation = {
         let mut guard = dictation_state.lock().unwrap();
-        if guard.active {
-            // Key-repeat re-fires "pressed" while held on some platforms; ignore.
-            return;
-        }
         guard.active = true;
         guard.generation += 1;
         guard.generation
     };
 
     tracing::debug!("[Dictation] Start requested via hotkey");
-    let state = app.state::<AppState>();
     let audio_dir = state.config_dir.join("audio");
     match state.recorder.start("dictation", &audio_dir, Some(app.clone())) {
         Ok(_) => {
@@ -185,7 +223,12 @@ fn on_dictation_pressed(app: &AppHandle, dictation_state: &SharedDictationState)
             // recording visible; there's no docked/main-window fallback to
             // compensate for anymore (see docs/decisions.md Decision 36).
             emit_capture_state(app, &state.recorder);
-            spawn_release_watchdog(app.clone(), dictation_state.clone(), generation);
+            let timeout = if toggle_to_talk {
+                MAX_PERSISTENT_RECORDING
+            } else {
+                MAX_DICTATION_HOLD
+            };
+            spawn_release_watchdog(app.clone(), dictation_state.clone(), generation, timeout);
         }
         Err(e) => {
             // Most commonly: the in-app Click-to-dictate button already
@@ -197,12 +240,34 @@ fn on_dictation_pressed(app: &AppHandle, dictation_state: &SharedDictationState)
     }
 }
 
-/// `expected_generation` is set only when called from the watchdog, so it
-/// can confirm the session it's about to force-stop is still the one it
-/// started — never a later, legitimately-in-progress one.
-fn on_dictation_released(
-    app: &AppHandle,
-    dictation_state: &SharedDictationState,
+/// Handles the dictation hotkey's key-up. In the default hold-to-talk mode
+/// this is what stops recording. In toggle-to-talk mode
+/// (`HotkeySettings::toggle_to_talk`), releasing the key never stops
+/// recording by itself — only a subsequent press does, handled in
+/// `on_dictation_pressed` — so this only clears the "physically held" flag.
+fn on_dictation_released(app: &AppHandle, dictation_state: &SharedDictationState) {
+    {
+        let mut guard = dictation_state.lock().unwrap();
+        guard.key_down = false;
+    }
+
+    let state = app.state::<AppState>();
+    let toggle_to_talk = state.settings.lock().unwrap().hotkeys.toggle_to_talk;
+    if toggle_to_talk {
+        return;
+    }
+
+    stop_dictation_session(app.clone(), dictation_state.clone(), None);
+}
+
+/// Stops the current dictation session (if any) and, in the background,
+/// transcribes and injects the result. `expected_generation` is set only
+/// when called from the release watchdog, so it can confirm the session
+/// it's about to force-stop is still the one it started — never a later,
+/// legitimately-in-progress one.
+fn stop_dictation_session(
+    app: AppHandle,
+    dictation_state: SharedDictationState,
     expected_generation: Option<u64>,
 ) {
     {
@@ -218,31 +283,24 @@ fn on_dictation_released(
         guard.active = false;
     }
 
-    let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let state = app_handle.state::<AppState>();
+        let state = app.state::<AppState>();
         let captured = match state.recorder.stop().await {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("Dictation capture failed to stop cleanly: {}", e);
-                emit_capture_status_event(
-                    &app_handle,
-                    false,
-                    None,
-                    "ERROR",
-                    Some(e.to_string()),
-                );
+                emit_capture_status_event(&app, false, None, "ERROR", Some(e.to_string()));
                 return;
             }
         };
         if !captured.had_audio {
             // Recording genuinely happened, but nothing crossed the mic
-            // input threshold the whole time it was held — never hand
+            // input threshold the whole time it was open — never hand
             // silence to Whisper (which can hallucinate text on it) and
             // never claim to be transcribing something that was never said.
             tracing::info!("[Dictation] Recording stopped with no audio input");
             emit_capture_status_event(
-                &app_handle,
+                &app,
                 false,
                 Some(captured.mode.clone()),
                 "NO_SPEECH",
@@ -253,9 +311,9 @@ fn on_dictation_released(
 
         // The mic has stopped but there's real work left (transcription,
         // then injection) — without this, the pill would flash straight
-        // back to idle on key-up and stay silent while that happens.
+        // back to idle and stay silent while that happens.
         emit_capture_status_event(
-            &app_handle,
+            &app,
             false,
             Some(captured.mode.clone()),
             "TRANSCRIBING",
@@ -301,12 +359,12 @@ fn on_dictation_released(
         match transcript {
             Ok(Ok(text)) if !text.trim().is_empty() => match injection::inject_text(&text) {
                 Ok(()) => {
-                    emit_capture_status_event(&app_handle, false, None, "SUCCESS", None);
+                    emit_capture_status_event(&app, false, None, "SUCCESS", None);
                 }
                 Err(e) => {
                     tracing::error!("Dictation text injection failed: {}", e);
                     emit_capture_status_event(
-                        &app_handle,
+                        &app,
                         false,
                         None,
                         "ERROR",
@@ -316,12 +374,12 @@ fn on_dictation_released(
             },
             Ok(Ok(_)) => {
                 tracing::info!("Dictation produced no speech (silence or too short)");
-                emit_capture_status_event(&app_handle, false, None, "NO_SPEECH", None);
+                emit_capture_status_event(&app, false, None, "NO_SPEECH", None);
             }
             Ok(Err(e)) => {
                 tracing::error!("Dictation transcription failed: {}", e);
                 emit_capture_status_event(
-                    &app_handle,
+                    &app,
                     false,
                     None,
                     "ERROR",
@@ -331,7 +389,7 @@ fn on_dictation_released(
             Err(e) => {
                 tracing::error!("Dictation transcription task panicked: {}", e);
                 emit_capture_status_event(
-                    &app_handle,
+                    &app,
                     false,
                     None,
                     "ERROR",
@@ -342,19 +400,24 @@ fn on_dictation_released(
     });
 }
 
-fn spawn_release_watchdog(app: AppHandle, dictation_state: SharedDictationState, generation: u64) {
+fn spawn_release_watchdog(
+    app: AppHandle,
+    dictation_state: SharedDictationState,
+    generation: u64,
+    timeout: Duration,
+) {
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(MAX_DICTATION_HOLD).await;
+        tokio::time::sleep(timeout).await;
         let still_pending = {
             let guard = dictation_state.lock().unwrap();
             guard.active && guard.generation == generation
         };
         if still_pending {
             tracing::warn!(
-                "Dictation hotkey held past {:?} without a release event — forcing stop so the microphone isn't left stuck.",
-                MAX_DICTATION_HOLD
+                "Dictation session exceeded {:?} without being stopped — forcing stop so the microphone isn't left stuck.",
+                timeout
             );
-            on_dictation_released(&app, &dictation_state, Some(generation));
+            stop_dictation_session(app, dictation_state, Some(generation));
         }
     });
 }

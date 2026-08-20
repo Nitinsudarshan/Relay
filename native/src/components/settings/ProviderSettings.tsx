@@ -32,7 +32,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   stt: { whisper_model_path: '' },
   tts: { piper_binary_path: '', piper_voice_path: '' },
-  hotkeys: { show_hide_hotkey: 'Ctrl+Shift+Space', dictation_hotkey: 'Ctrl+Space' },
+  hotkeys: { show_hide_hotkey: 'Ctrl+Shift+Space', dictation_hotkey: 'Ctrl+Space', toggle_to_talk: false },
   ui: { pill_position: 'bottom_center' },
 };
 
@@ -269,7 +269,7 @@ export const ProviderSettings: React.FC = () => {
                   </div>
                   <div>
                     <label htmlFor="dictation-hotkey" className="block text-[11px] text-muted-foreground mb-1">
-                      Universal Dictation (hold to talk, types into focused field)
+                      Universal Dictation (types into focused field)
                     </label>
                     <HotkeyRecorder
                       id="dictation-hotkey"
@@ -281,6 +281,31 @@ export const ProviderSettings: React.FC = () => {
                 <p className="text-[10px] text-muted-foreground mt-2">
                   Click a hotkey box, then press the keys you want — it takes effect immediately, no restart needed.
                 </p>
+              </div>
+
+              <div className="py-3 border-b border-border flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Toggle-to-Talk</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Press the dictation hotkey once to start recording, press it again to stop — instead of holding
+                    it down the whole time. Useful for longer recordings.
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.hotkeys.toggle_to_talk}
+                  onCheckedChange={async (checked) => {
+                    const updated = {
+                      ...settings,
+                      hotkeys: { ...settings.hotkeys, toggle_to_talk: checked },
+                    };
+                    setSettings(updated);
+                    try {
+                      await invoke('save_settings', { settings: updated });
+                    } catch (err) {
+                      console.error('Failed to toggle toggle-to-talk mode', err);
+                    }
+                  }}
+                />
               </div>
 
               <div className="py-3 border-b border-border">

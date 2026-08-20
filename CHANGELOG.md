@@ -1,5 +1,62 @@
 # Relay — Changelog
 
+## [0.6.0] - 2026-08-20
+
+### Toggle-to-Talk — Optional Press-Once Dictation Mode
+
+Requested directly as a new capability (not part of the desktop-first
+scope reduction in the entries below): holding the dictation hotkey down
+for a long recording is tedious, so this adds an opt-in mode where one
+press starts recording and a second press stops it.
+
+- **Backend (`native/src-tauri/src/settings/mod.rs`)**: Added
+  `HotkeySettings.toggle_to_talk: bool` (default `false` — hold-to-talk
+  remains the default for everyone who doesn't opt in).
+- **Backend (`native/src-tauri/src/hotkeys/mod.rs`)**: Reworked the
+  dictation hotkey's press/release state machine. Added a `key_down` flag
+  to `DictationState` so a genuine second press (toggle mode's "stop"
+  signal) can be told apart from the OS re-firing "pressed" while a key
+  stays physically held — both modes already had to filter out the
+  latter; only toggle mode needed the former. Extracted the actual
+  stop/transcribe/inject logic (previously inline in
+  `on_dictation_released`) into a new `stop_dictation_session` function so
+  both "release stops it" (hold-to-talk) and "a second press stops it"
+  (toggle-to-talk) call the same path. Added a separate 10-minute
+  stuck-session watchdog timeout for toggle mode
+  (`MAX_PERSISTENT_RECORDING`) — the existing 60-second one
+  (`MAX_DICTATION_HOLD`, sized for hold-to-talk's short-recording
+  assumption) would have silently cut off the exact long recordings this
+  feature exists to make easier.
+- **Frontend (`native/src/components/settings/ProviderSettings.tsx`)**:
+  Added a "Toggle-to-Talk" switch in Settings → General, next to the
+  existing hotkey recorders. Applies immediately via `save_settings` (no
+  hotkey re-registration needed, since only the interpretation of
+  press/release changes, not the key combination itself). Reworded the
+  "Universal Dictation" hotkey label, since "(hold to talk...)" is no
+  longer always true.
+- **Frontend (`native/src/components/capture/DictationPill.tsx`)**: The
+  floating hint text now reads "Tap to start/stop" instead of "Hold to
+  record" when toggle-to-talk is active, so the pill never states the
+  wrong interaction model for how the hotkey actually behaves right now.
+- **Frontend (`native/src/types/index.ts`)**: Added `toggle_to_talk` to
+  the `HotkeySettings` TypeScript interface, mirroring the Rust struct.
+- **What was NOT changed**: Click-to-talk (already toggle-based — each
+  click flips start/stop, unaffected by this change), STT, text injection,
+  the `AudioRecorder` capture primitive, `overlay.rs`, and every decision
+  from the desktop-first scope reduction (Decisions 32–36).
+- **Verification**: `native/` — `npm run build` (`tsc && vite build`)
+  passes clean with zero errors. Rust — `cargo check` passes cleanly
+  (2.4s on the warm build cache). The full press/release/repeat/watchdog
+  state machine was traced by hand through every case (hold-to-talk
+  unchanged; toggle-to-talk's press→press cycle; OS key-repeat in both
+  modes; the watchdog firing in both modes) before considering this done
+  — see Decision 37 for the reasoning and one accepted, narrow edge case.
+- **Not independently tested end-to-end**: same environment limitation as
+  every other change in this session — this is a headless Linux container
+  with no display server or audio hardware, and Relay targets Windows.
+  Compiler-level correctness is verified; live hotkey/microphone behavior
+  is not.
+
 ## [0.5.0] - 2026-08-20
 
 ### Scope-Reduction Set 5 — Single Dictation Pill (Docked/Floating Mode Removed)
