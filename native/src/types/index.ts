@@ -79,7 +79,7 @@ export interface HotkeySettings {
   toggle_to_talk: boolean;
 }
 
-export type PillPosition = 'bottom_center' | 'top_center' | 'left_center' | 'right_center';
+export type PillPosition = 'bottom_left' | 'bottom_center' | 'bottom_right' | 'top_center' | 'left_center' | 'right_center';
 
 export interface UiSettings {
   /** Which edge of the active monitor's work area the floating pill anchors to. */

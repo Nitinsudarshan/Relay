@@ -41,6 +41,7 @@ const STYLE_LABELS: Record<string, string> = {
 };
 
 export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
+  settings,
   autoPaste,
   onToggleAutoPaste,
   textTransform,
@@ -56,7 +57,14 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
 
   return (
     <div
-      className="absolute left-1/2 bottom-[76px] -translate-x-1/2 w-[270px] bg-white dark:bg-[#171717] text-slate-900 dark:text-neutral-100 border border-slate-200 dark:border-[#262626] shadow-2xl rounded-lg p-2.5 text-xs text-left select-none z-50 font-sans animate-in fade-in slide-in-from-bottom-2 duration-150"
+      className={cn(
+        "absolute bottom-[76px] w-[270px] bg-white dark:bg-[#171717] text-slate-900 dark:text-neutral-100 border border-slate-200 dark:border-[#262626] shadow-2xl rounded-lg p-2.5 text-xs text-left select-none z-50 font-sans animate-in fade-in slide-in-from-bottom-2 duration-150",
+        settings?.ui?.pill_position === 'bottom_left'
+          ? 'left-4'
+          : settings?.ui?.pill_position === 'bottom_right'
+          ? 'right-4'
+          : 'left-1/2 -translate-x-1/2'
+      )}
       onClick={(e) => e.stopPropagation()}
     >
       {page === 'main' && (

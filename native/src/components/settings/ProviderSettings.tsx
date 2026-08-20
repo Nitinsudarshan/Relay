@@ -352,10 +352,9 @@ export const ProviderSettings: React.FC = () => {
                 <div className="flex bg-muted p-1 rounded-lg border border-border w-fit">
                   {(
                     [
+                      { value: 'bottom_left', label: 'Bottom Left' },
                       { value: 'bottom_center', label: 'Bottom Center' },
-                      { value: 'top_center', label: 'Top Center' },
-                      { value: 'left_center', label: 'Left Center' },
-                      { value: 'right_center', label: 'Right Center' },
+                      { value: 'bottom_right', label: 'Bottom Right' },
                     ] as const
                   ).map((opt) => (
                     <button

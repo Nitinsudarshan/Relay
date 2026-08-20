@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { AppSettings, ProcessedPipelineResult } from '../../types';
+import { AppSettings, PillPosition, ProcessedPipelineResult } from '../../types';
 import { PillSettingsPopover } from './PillSettingsPopover';
 import { 
   PillState, 
@@ -106,6 +106,14 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       if (payload) applyTheme(payload);
     });
 
+    const unlistenPositionPromise = listen<string>('pill-position-changed', ({ payload }) => {
+      if (payload) {
+        setSettings((prev) =>
+          prev ? { ...prev, ui: { ...prev.ui, pill_position: payload as PillPosition } } : prev
+        );
+      }
+    });
+
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'relay-theme') {
         applyTheme(e.newValue || 'system');
@@ -122,6 +130,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
     return () => {
       unlistenThemePromise.then((unlisten) => unlisten());
+      unlistenPositionPromise.then((unlisten) => unlisten());
       window.removeEventListener('storage', handleStorageChange);
       mediaQuery.removeEventListener('change', handleMediaChange);
     };
@@ -386,15 +395,27 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     activeApp: 'Relay',
   };
 
+  const pillPos = settings?.ui?.pill_position || 'bottom_center';
+  const isLeft = pillPos === 'bottom_left';
+  const isRight = pillPos === 'bottom_right';
+
   return (
     <div
-      className="absolute inset-0 flex items-end justify-center select-none font-sans overflow-hidden bg-transparent"
+      className={cn(
+        "absolute inset-0 flex items-end select-none font-sans overflow-hidden bg-transparent",
+        isLeft ? "justify-start" : isRight ? "justify-end" : "justify-center"
+      )}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
       {/* Dev Diagnostic HUD */}
       {showDiagnostics && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-slate-950/95 text-emerald-400 font-mono text-[10px] p-2 rounded-lg border border-emerald-500/30 shadow-xl whitespace-nowrap z-50 flex flex-col gap-0.5">
+        <div
+          className={cn(
+            "absolute top-2 bg-slate-950/95 text-emerald-400 font-mono text-[10px] p-2 rounded-lg border border-emerald-500/30 shadow-xl whitespace-nowrap z-50 flex flex-col gap-0.5",
+            isLeft ? "left-4" : isRight ? "right-4" : "left-1/2 -translate-x-1/2"
+          )}
+        >
           <div className="flex items-center gap-1 font-bold border-b border-emerald-500/20 pb-0.5">
             <Bug className="w-3 h-3 text-emerald-400" /> Relay Inspection HUD
           </div>
@@ -409,7 +430,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         className={cn(
           'absolute bottom-0 z-10 transition-all bg-black/[0.001]',
           !isExpanded
-            ? 'left-1/2 -translate-x-1/2 w-[140px] h-[16px] pointer-events-auto'
+            ? (isLeft ? 'left-0 w-[140px] h-[16px] pointer-events-auto' : isRight ? 'right-0 w-[140px] h-[16px] pointer-events-auto' : 'left-1/2 -translate-x-1/2 w-[140px] h-[16px] pointer-events-auto')
             : 'left-0 w-full h-full pointer-events-auto'
         )}
       />
@@ -417,7 +438,8 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       {/* Edge Handle / Notch — 25% wider (~96px), rounded-t-lg top part, neutral dark background in dark mode */}
       <div
         className={cn(
-          'absolute left-1/2 bottom-0 -translate-x-1/2 transition-all duration-200 pointer-events-none z-20',
+          'absolute bottom-0 transition-all duration-200 pointer-events-none z-20',
+          isLeft ? 'left-4' : isRight ? 'right-4' : 'left-1/2 -translate-x-1/2',
           'bg-white dark:bg-[#171717] border border-slate-200 dark:border-[#262626] border-b-0 shadow-[0_-1px_6px_rgba(0,0,0,0.15)]',
           !hovering ? 'w-[96px] h-[6px] rounded-t-lg' : 'w-[110px] h-[7px] rounded-t-xl shadow-[0_-2px_12px_rgba(37,99,235,0.3)]',
           isExpanded && 'opacity-0 pointer-events-none'
@@ -426,7 +448,12 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
       {/* Success Toast */}
       {phase === 'success' && (
-        <div className="absolute left-1/2 bottom-[82px] -translate-x-1/2 bg-blue-600 dark:bg-blue-500 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold tracking-wide flex items-center gap-1.5 shadow-lg pointer-events-none z-40 animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div
+          className={cn(
+            "absolute bottom-[82px] bg-blue-600 dark:bg-blue-500 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold tracking-wide flex items-center gap-1.5 shadow-lg pointer-events-none z-40 animate-in fade-in slide-in-from-bottom-2 duration-200",
+            isLeft ? "left-4" : isRight ? "right-4" : "left-1/2 -translate-x-1/2"
+          )}
+        >
           <Check className="w-3.5 h-3.5 stroke-[2.5]" />
           <span>{successMessage}</span>
         </div>
@@ -434,7 +461,12 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
       {/* Keyboard hint bar (floating above main pill, matching application dark card #171717) */}
       {isExpanded && !popoverOpen && phase !== 'success' && (
-        <div className="absolute left-1/2 bottom-[70px] -translate-x-1/2 bg-white/95 dark:bg-[#171717]/95 border border-slate-200 dark:border-[#262626] shadow-md rounded-lg px-3 py-1.5 whitespace-nowrap flex items-center gap-2 text-xs text-slate-700 dark:text-neutral-300 pointer-events-none z-30 animate-in fade-in slide-in-from-bottom-1 duration-150">
+        <div
+          className={cn(
+            "absolute bottom-[70px] bg-white/95 dark:bg-[#171717]/95 border border-slate-200 dark:border-[#262626] shadow-md rounded-lg px-3 py-1.5 whitespace-nowrap flex items-center gap-2 text-xs text-slate-700 dark:text-neutral-300 pointer-events-none z-30 animate-in fade-in slide-in-from-bottom-1 duration-150",
+            isLeft ? "left-4" : isRight ? "right-4" : "left-1/2 -translate-x-1/2"
+          )}
+        >
           <span className="text-slate-500 dark:text-neutral-400 font-medium">
             {settings?.hotkeys.toggle_to_talk ? 'Tap to start/stop' : 'Hold to record'}
           </span>
@@ -452,7 +484,8 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       {/* Main Relay Pill Surface (Process label removed, dark theme matching #171717) */}
       <div
         className={cn(
-          'absolute left-1/2 bottom-[16px] -translate-x-1/2 transition-all duration-200 ease-out pointer-events-none z-30',
+          'absolute bottom-[16px] transition-all duration-200 ease-out pointer-events-none z-30',
+          isLeft ? 'left-4' : isRight ? 'right-4' : 'left-1/2 -translate-x-1/2',
           !isExpanded
             ? 'translate-y-[28px] scale-75 opacity-0'
             : 'translate-y-0 scale-100 opacity-100 pointer-events-auto'

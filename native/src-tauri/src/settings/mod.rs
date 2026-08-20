@@ -64,8 +64,10 @@ pub struct TtsSettings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PillPosition {
+    BottomLeft,
     #[default]
     BottomCenter,
+    BottomRight,
     TopCenter,
     LeftCenter,
     RightCenter,
@@ -134,5 +136,45 @@ impl AppSettings {
         }
         fs::write(path, serde_json::to_string_pretty(self)?)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pill_position_defaults() {
+        assert_eq!(PillPosition::default(), PillPosition::BottomCenter);
+        assert_eq!(UiSettings::default().pill_position, PillPosition::BottomCenter);
+    }
+
+    #[test]
+    fn test_pill_position_serialization() {
+        assert_eq!(
+            serde_json::to_string(&PillPosition::BottomLeft).unwrap(),
+            "\"bottom_left\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PillPosition::BottomCenter).unwrap(),
+            "\"bottom_center\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PillPosition::BottomRight).unwrap(),
+            "\"bottom_right\""
+        );
+
+        assert_eq!(
+            serde_json::from_str::<PillPosition>("\"bottom_left\"").unwrap(),
+            PillPosition::BottomLeft
+        );
+        assert_eq!(
+            serde_json::from_str::<PillPosition>("\"bottom_center\"").unwrap(),
+            PillPosition::BottomCenter
+        );
+        assert_eq!(
+            serde_json::from_str::<PillPosition>("\"bottom_right\"").unwrap(),
+            PillPosition::BottomRight
+        );
     }
 }

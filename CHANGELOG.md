@@ -22,6 +22,10 @@
     theme tokens rather than hardcoded slate classes.
   - Standardized UI components across all modules and floating widgets to `rounded-lg` geometry.
   - Implemented custom minimal theme-aware scrollbars (`4px` width, transparent track, `40%` opacity `--muted-foreground` thumb) and `.no-scrollbar` utility across both native and web frontends.
+- **Pill Positioning & Alignment (`ProviderSettings.tsx`, `DictationPill.tsx`, `PillSettingsPopover.tsx`, `overlay.rs`)**:
+  - Replaced legacy position options with **Bottom Left**, **Bottom Center** (default), and **Bottom Right**.
+  - Pushed Bottom Left and Bottom Right anchor positions flush to the monitor's work area edges.
+  - Aligned internal pill components (main pill body, keyboard hint bar, notch, and settings popover) to the left on Bottom Left and to the right on Bottom Right.
 
 ## [0.7.1] - 2026-08-20
 

@@ -136,8 +136,16 @@ fn compute_anchor(app: &AppHandle, size: (f64, f64), position: PillPosition) -> 
     let wa_h = work_area.size.height as f64 / scale;
 
     let (x, y) = match position {
+        PillPosition::BottomLeft => (
+            wa_x,
+            wa_y + wa_h - size.1,
+        ),
         PillPosition::BottomCenter => (
             wa_x + (wa_w - size.0) / 2.0,
+            wa_y + wa_h - size.1,
+        ),
+        PillPosition::BottomRight => (
+            wa_x + wa_w - size.0,
             wa_y + wa_h - size.1,
         ),
         PillPosition::TopCenter => (wa_x + (wa_w - size.0) / 2.0, wa_y),
