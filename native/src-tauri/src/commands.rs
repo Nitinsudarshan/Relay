@@ -274,16 +274,29 @@ pub async fn stop_capture(
 
     emit_capture_status_event(&app, false, Some(captured.mode.clone()), "TRANSCRIBING", None);
     let result = process_captured_audio(&state, captured).await;
-    if let Ok(processed) = &result {
-        let _ = app.emit(CAPTURE_PROCESSED_EVENT, processed);
+    match &result {
+        Ok(Some(processed)) => {
+            let _ = app.emit(CAPTURE_PROCESSED_EVENT, processed);
+        }
+        Ok(None) => {
+            // had_audio was true (real, sustained energy was captured) but
+            // Whisper still produced no usable text — most commonly a short
+            // hallucination (e.g. "Hello.") on a marginal recording that
+            // whisper.cpp's own confidence/no-speech heuristics rejected
+            // internally, leaving an empty transcript. Must not run
+            // trigger-matching or the note/kanban/chat pipeline on nothing.
+            tracing::info!("[Dictation] Transcription produced no usable text");
+            emit_capture_status_event(&app, false, None, "NO_SPEECH", None);
+        }
+        Err(_) => {}
     }
-    result.map(Some)
+    result
 }
 
 async fn process_captured_audio(
     state: &State<'_, AppState>,
     captured: crate::capture::CapturedAudio,
-) -> Result<ProcessedPipelineResult, CommandError> {
+) -> Result<Option<ProcessedPipelineResult>, CommandError> {
     let settings = state.settings.lock().unwrap().clone();
     let stt = state.stt.clone();
     let samples = captured.samples.clone();
@@ -322,6 +335,15 @@ async fn process_captured_audio(
             .map_err(|e| CommandError::new("STT_TASK_FAILED", &e.to_string()))?
             .map_err(|e| CommandError::new("STT_FAILED", &e.to_string()))?;
 
+    // had_audio only proves the mic measured sustained energy — Whisper can
+    // still land on nothing (most commonly a short hallucination that its
+    // own internal confidence/no-speech heuristics then reject, leaving an
+    // empty result) on a marginal recording. An empty transcript must never
+    // reach trigger-matching or the note/kanban/chat pipeline.
+    if transcript.trim().is_empty() {
+        return Ok(None);
+    }
+
     // Trigger phrases only make sense for meeting/scribble capture, not for
     // an in-app chat question — a question that happens to contain "remind
     // me" shouldn't hijack the answer into firing an action.
@@ -339,7 +361,7 @@ async fn process_captured_audio(
             .await
             .map_err(|e| CommandError::new("MCP_EXECUTION_FAILED", &e.to_string()))?;
 
-            return Ok(ProcessedPipelineResult {
+            return Ok(Some(ProcessedPipelineResult {
                 mode: "trigger".to_string(),
                 transcript,
                 note_id: None,
@@ -347,7 +369,7 @@ async fn process_captured_audio(
                 output_markdown: mcp_res.result_summary,
                 sources: Vec::new(),
                 spoken_audio_base64: None,
-            });
+            }));
         }
     }
 
@@ -356,12 +378,15 @@ async fn process_captured_audio(
     match captured.mode.as_str() {
         "meeting" => PipelineEngine::process_meeting(&llm, &state.vault, &transcript)
             .await
+            .map(Some)
             .map_err(|e| CommandError::new("PIPELINE_ERROR", &e.to_string())),
         "chat" => crate::pipeline::process_chat(&llm, &state.vault, &settings.tts, &transcript)
             .await
+            .map(Some)
             .map_err(|e| CommandError::new("PIPELINE_ERROR", &e.to_string())),
         _ => PipelineEngine::process_scribble(&llm, &state.vault, &transcript)
             .await
+            .map(Some)
             .map_err(|e| CommandError::new("PIPELINE_ERROR", &e.to_string())),
     }
 }
