@@ -1,5 +1,22 @@
 # Relay — Changelog
 
+## [0.7.1] - 2026-08-20
+
+### Dynamic Changelog, 1-Click Theme Toggle & UI Streamlining
+
+- **Backend (`native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`)**: Added
+  `get_app_version` and `get_changelog` Tauri commands that dynamically parse `VERSION` and
+  `CHANGELOG.md` at runtime so the release notes modal and footer stay completely up to date
+  without hardcoded lists.
+- **Frontend (`native/src/components/ThemeToggle.tsx`)**: Streamlined the theme toggle into a
+  direct 1-click toggle between light and dark mode with mode-appropriate container styling
+  and icons representing the target switch mode (Moon in Light mode, Sun in Dark mode).
+- **Frontend (`native/src/components/common/ChangelogModal.tsx`)**: Converted the release notes
+  modal to load dynamically from the backend registry with categorized tags and domain pills.
+- **Frontend (`native/src/App.tsx`, `native/src/components/capture/PTTWidget.tsx`)**: Removed
+  the static `Local Mode` header badge, cleaned the `Local Vault` label, and removed obsolete
+  placeholder cards.
+
 ## [0.7.0] - 2026-08-20
 
 ### Voice Note — Universal Dictation History & Configurable Vault Directory Location

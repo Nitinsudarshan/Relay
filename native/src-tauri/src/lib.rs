@@ -87,6 +87,8 @@ pub fn run() {
             commands::get_vault_location,
             commands::choose_vault_folder,
             commands::set_vault_location,
+            commands::get_app_version,
+            commands::get_changelog,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

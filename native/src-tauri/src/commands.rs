@@ -594,3 +594,177 @@ pub async fn open_settings_window(app: AppHandle) -> Result<(), CommandError> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangelogItem {
+    pub category: String,
+    pub domain: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangelogEntry {
+    pub version: String,
+    pub date: String,
+    pub release_type: String,
+    pub title: String,
+    pub tags: Vec<String>,
+    pub domains: Vec<String>,
+    pub items: Vec<ChangelogItem>,
+}
+
+#[tauri::command]
+pub async fn get_app_version() -> Result<String, CommandError> {
+    let version = include_str!("../../../VERSION").trim().to_string();
+    Ok(version)
+}
+
+#[tauri::command]
+pub async fn get_changelog() -> Result<Vec<ChangelogEntry>, CommandError> {
+    let raw = include_str!("../../../CHANGELOG.md");
+    Ok(parse_changelog_markdown(raw))
+}
+
+fn parse_changelog_markdown(md: &str) -> Vec<ChangelogEntry> {
+    let mut entries = Vec::new();
+    let mut current_entry: Option<ChangelogEntry> = None;
+    let mut current_item: Option<ChangelogItem> = None;
+
+    for line in md.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("## [") {
+            if let Some(mut item) = current_item.take() {
+                if let Some(entry) = current_entry.as_mut() {
+                    item.text = item.text.trim().to_string();
+                    if !item.text.is_empty() {
+                        entry.items.push(item);
+                    }
+                }
+            }
+            if let Some(entry) = current_entry.take() {
+                entries.push(entry);
+            }
+
+            let rest = &trimmed[4..];
+            let (ver, date) = if let Some(close_idx) = rest.find(']') {
+                let v = &rest[..close_idx];
+                let d = if let Some(dash_idx) = rest.find(" - ") {
+                    rest[dash_idx + 3..].trim()
+                } else {
+                    ""
+                };
+                (v, d)
+            } else {
+                ("", "")
+            };
+
+            let release_type = if ver.ends_with(".0.0") || ver == "0.1.0" {
+                "major"
+            } else if ver.ends_with(".0") {
+                "minor"
+            } else {
+                "patch"
+            };
+
+            current_entry = Some(ChangelogEntry {
+                version: ver.to_string(),
+                date: date.to_string(),
+                release_type: release_type.to_string(),
+                title: String::new(),
+                tags: Vec::new(),
+                domains: Vec::new(),
+                items: Vec::new(),
+            });
+            continue;
+        }
+
+        if trimmed.starts_with("### ") {
+            if let Some(entry) = current_entry.as_mut() {
+                if entry.title.is_empty() {
+                    entry.title = trimmed[4..].trim().to_string();
+                }
+            }
+            continue;
+        }
+
+        if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+            if let Some(mut item) = current_item.take() {
+                if let Some(entry) = current_entry.as_mut() {
+                    item.text = item.text.trim().to_string();
+                    if !item.text.is_empty() {
+                        entry.items.push(item);
+                    }
+                }
+            }
+
+            let bullet_content = trimmed[2..].trim();
+            let (category, domain, text) = parse_bullet_line(bullet_content);
+
+            if let Some(entry) = current_entry.as_mut() {
+                if !category.is_empty() && !entry.tags.contains(&category) {
+                    entry.tags.push(category.clone());
+                }
+                if !domain.is_empty() && !entry.domains.contains(&domain) {
+                    entry.domains.push(domain.clone());
+                }
+            }
+
+            current_item = Some(ChangelogItem {
+                category,
+                domain,
+                text,
+            });
+            continue;
+        }
+
+        if let Some(item) = current_item.as_mut() {
+            if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                item.text.push(' ');
+                item.text.push_str(trimmed);
+            }
+        }
+    }
+
+    if let Some(mut item) = current_item.take() {
+        if let Some(entry) = current_entry.as_mut() {
+            item.text = item.text.trim().to_string();
+            if !item.text.is_empty() {
+                entry.items.push(item);
+            }
+        }
+    }
+    if let Some(entry) = current_entry.take() {
+        entries.push(entry);
+    }
+
+    entries
+}
+
+fn parse_bullet_line(content: &str) -> (String, String, String) {
+    if content.starts_with("**") {
+        if let Some(end_bold) = content[2..].find("**") {
+            let bold_text = &content[2..2 + end_bold];
+            let after_bold = &content[2 + end_bold + 2..];
+            let text = after_bold.trim_start_matches(':').trim().to_string();
+
+            if let Some(open_p) = bold_text.find('(') {
+                if let Some(close_p) = bold_text.find(')') {
+                    let cat = bold_text[..open_p].trim().to_string();
+                    let dom_raw = bold_text[open_p + 1..close_p].trim().trim_matches('`');
+                    let dom = if dom_raw.contains('/') || dom_raw.contains('\\') {
+                        dom_raw.rsplit_once(|c| c == '/' || c == '\\').map(|(_, f)| f).unwrap_or(dom_raw)
+                    } else {
+                        dom_raw
+                    };
+                    return (cat, dom.to_string(), text);
+                }
+            }
+
+            return (bold_text.to_string(), "Core".to_string(), text);
+        }
+    }
+
+    ("General".to_string(), "Relay".to_string(), content.to_string())
+}
+
+

@@ -101,3 +101,20 @@ export interface AppSettings {
   ui: UiSettings;
   vault: VaultSettings;
 }
+
+export interface ChangelogItem {
+  category: string;
+  domain: string;
+  text: string;
+}
+
+export interface ChangelogEntry {
+  version: string;
+  date: string;
+  release_type: 'major' | 'minor' | 'patch' | string;
+  title: string;
+  tags: string[];
+  domains: string[];
+  items: ChangelogItem[];
+}
+

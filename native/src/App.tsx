@@ -7,6 +7,7 @@ import { RelayLogo } from './components/common/RelayLogo';
 import { ChangelogModal } from './components/common/ChangelogModal';
 import { ProcessedPipelineResult } from './types';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import {
   Mic,
   Sparkles,
@@ -15,10 +16,6 @@ import {
   Activity,
   Sidebar as SidebarIcon,
   ChevronRight,
-  HardDrive,
-  Cloud,
-  User,
-  ArrowUpRight
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -36,6 +33,7 @@ export const App: React.FC = () => {
   const [lastResult, setLastResult] = useState<ProcessedPipelineResult | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [changelogOpen, setChangelogOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>('0.6.0');
 
   const handleProcessComplete = (result: ProcessedPipelineResult) => {
     setLastResult(result);
@@ -43,6 +41,16 @@ export const App: React.FC = () => {
       setActiveTab('scribble');
     }
   };
+
+  useEffect(() => {
+    invoke<string>('get_app_version')
+      .then((ver) => {
+        if (ver) setAppVersion(ver);
+      })
+      .catch((err) => {
+        console.warn('Could not load app version from backend:', err);
+      });
+  }, []);
 
   // The dictation pill defaults to living in its own floating desktop
   // window, separate from this one — this main window has no direct
@@ -204,7 +212,7 @@ export const App: React.FC = () => {
           <div className="flex items-center justify-between text-[10px] text-muted-foreground px-1">
             <div className="flex items-center gap-1.5 font-medium text-emerald-500">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Local Vault ($0)</span>
+              <span>Local Vault</span>
             </div>
             <button
               type="button"
@@ -213,7 +221,7 @@ export const App: React.FC = () => {
               title="View Release Notes & Changelog"
             >
               <Activity className="w-3 h-3 text-primary group-hover:animate-pulse" />
-              <span className="underline decoration-dotted underline-offset-2">v0.4.4</span>
+              <span className="underline decoration-dotted underline-offset-2">v{appVersion}</span>
             </button>
           </div>
         </div>
@@ -223,7 +231,7 @@ export const App: React.FC = () => {
       <ChangelogModal
         open={changelogOpen}
         onClose={() => setChangelogOpen(false)}
-        currentVersion="0.4.4"
+        currentVersion={appVersion}
       />
 
       {/* Main Content Area */}
@@ -251,9 +259,6 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="gap-1.5 text-xs px-2.5 py-1 font-mono border-border">
-              <HardDrive className="w-3 h-3 text-primary" /> Local Mode (LanceDB)
-            </Badge>
             <ThemeToggle />
           </div>
         </header>
