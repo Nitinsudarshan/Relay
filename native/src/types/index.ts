@@ -312,12 +312,14 @@ export interface Scribble {
 
 export interface KnowledgeNode {
   id: string;
-  node_type: 'scribble' | 'topic' | 'entity' | 'source' | 'project' | 'document' | 'task' | 'meeting' | 'voice_note' | string;
+  node_type: 'scribble' | 'topic' | 'entity' | 'source' | 'project' | 'document' | 'task' | 'meeting' | 'voice_note' | 'person' | 'organization' | 'place' | string;
   label: string;
   summary?: string | null;
   metadata: Record<string, any>;
   degree: number;
   source_type?: string | null;
+  created_at?: string | null;
+  resolved?: boolean;
 }
 
 export interface KnowledgeEdge {
@@ -327,6 +329,7 @@ export interface KnowledgeEdge {
   relationship: string;
   confidence: number;
   source: string;
+  is_explicit?: boolean;
 }
 
 export interface KnowledgeGraphData {
@@ -363,10 +366,14 @@ export interface TrashItem {
 
 export interface GraphFiltersSettings {
   searchQuery: string;
-  showTags: boolean;
+  showScribbles?: boolean;
+  showVoiceNotes?: boolean;
+  showTags: boolean; // Topics
+  showEntities?: boolean;
   showAttachments: boolean;
   existingFilesOnly: boolean;
   showOrphans: boolean;
+  showUnresolved?: boolean;
 }
 
 export interface GraphGroup {
@@ -388,6 +395,15 @@ export interface GraphForcesSettings {
   linkForce: number; // 0.00 to 1.00 (normalized)
   linkDistance: number; // 30 to 500
 }
+
+export interface LocalGraphSettings {
+  enabled: boolean;
+  rootNodeId: string | null;
+  depth: number;
+}
+
+export type GraphPositionMap = Record<string, { x: number; y: number }>;
+
 
 
 

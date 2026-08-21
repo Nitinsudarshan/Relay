@@ -1,5 +1,37 @@
 # Relay — Changelog
 
+## [0.8.1] - 2026-08-22
+
+### Obsidian-Fidelity Knowledge Graph Rework, Organic Physics & Stable Coordinate Persistence
+
+- **Force-Directed Physics & Organic Equilibrium (`native/src/components/scribble/graph/graphPhysics.ts`)**:
+  - Implemented Coulomb electrostatic repulsion with distance clamping, Hooke spring link forces with configurable link distance, center gravity, and velocity damping (`0.88`).
+  - Simulation energy decays smoothly to a stable equilibrium without persistent jitter or continuous resource consumption.
+  - Interactive force sliders dynamically reheat the live simulation with immediate physical adaptation.
+- **Persistent Node Coordinates & Graph Stability (`native/src/components/scribble/graph/graphStorage.ts`)**:
+  - Persists node `(x, y)` positions in `localStorage` (`relay_knowledge_graph_positions_v1`), preserving relative structure across sessions.
+  - New nodes are placed organically near connected neighbors without scrambling existing graph structure.
+  - Added dedicated **Reset Layout** action with confirmation modal to re-simulate positions without wiping graph settings.
+- **Independent Camera Architecture (`native/src/components/scribble/KnowledgeGraphView.tsx`)**:
+  - Decoupled camera transforms `{ x, y, k }` from node coordinates with zero auto-fitting after loading, dragging, or settling.
+  - Added cursor-centered mouse-wheel zoom, drag panning, on-screen zoom buttons, and keyboard controls (Arrow keys, `Shift + Arrow`, `+`/`-`, `0` reset view, `Space` reheat).
+- **Interactive Node Dragging & Normalized High-DPI Canvas (`graphRenderer.ts`, `KnowledgeGraphView.tsx`)**:
+  - Aligned high-DPI `devicePixelRatio` scaling and CSS world-coordinate hit testing for precision cursor grabbing.
+  - Node dragging pins the active node, applies live spring reactions to neighbors, and relaxes smoothly upon release.
+- **Obsidian Quieting Hover & Dynamic Label Fading (`graphRenderer.ts`)**:
+  - Hovering a node brightly highlights 1-hop connected neighbors/edges while quieting unrelated content to low opacity.
+  - Non-linear degree-based node sizing with upper radius limits.
+  - Dynamic zoom-dependent text fading with priority rendering (Hovered > Selected > High-degree > Normal) and clean ellipsis truncation.
+- **Filters, Dynamic Search-Driven Groups & Local Graph (`GraphSettingsPanel.tsx`, `GraphToolbar.tsx`)**:
+  - Configurable filters for Scribbles, Voice Notes, Topics, Entities, Attachments, and Orphans.
+  - Search-driven custom color groups updating matching nodes in real time.
+  - Scoped **Local Graph** exploration mode with configurable depth (`1`, `2`, `3`).
+  - Chronological **Time-lapse** animation revealing nodes by creation timestamp.
+- **Relay Context Actions & Inspector (`GraphNodeInspector.tsx`, `ScribbleViewer.tsx`)**:
+  - Contextual inspector drawer displaying node metadata, summary, and clickable 1-hop connections.
+  - Integrated direct actions: **Open in Editor**, **Connect Scribble**, **Merge Scribbles**, and **Move to Trash**.
+  - Streamlined Scribbles navigation to dedicated **Capture**, **Workspace**, and full-screen **Knowledge Graph** tabs.
+
 ## [0.8.0] - 2026-08-21
 
 ### Phase 11B: First-Class Scribbles Knowledge Layer, Provenance Model & Obsidian-Inspired Knowledge Graph

@@ -7,19 +7,11 @@ import {
 } from '../../types';
 import {
   Search,
-  Sparkles,
-  Layers,
-  Network,
   Plus,
   FileText,
-  Hash,
-  ChevronLeft,
-  ChevronRight,
-  RotateCcw,
-  RefreshCw,
   PlusCircle,
-  Columns2,
   LayoutGrid,
+  Network,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,7 +20,7 @@ import { ScribbleDetailEditor } from './ScribbleDetailEditor';
 import { KnowledgeGraphView } from './KnowledgeGraphView';
 import { CaptureHubPage } from '../capture/CaptureHubPage';
 
-type ScribbleSubTab = 'workspace' | 'capture' | 'graph' | 'split';
+type ScribbleSubTab = 'workspace' | 'capture' | 'graph';
 
 export const ScribbleViewer: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<ScribbleSubTab>('workspace');
@@ -37,10 +29,6 @@ export const ScribbleViewer: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [graphData, setGraphData] = useState<KnowledgeGraphData>({ nodes: [], edges: [] });
-
-  // Simple Split Collapse State (Requirement 13):
-  // 'none' (normal 50/50 split), 'left' (left pane collapsed), 'right' (right pane collapsed)
-  const [collapsedPane, setCollapsedPane] = useState<'none' | 'left' | 'right'>('none');
 
   // Fetch Scribbles & Graph
   const refreshData = useCallback(async () => {
@@ -130,7 +118,7 @@ export const ScribbleViewer: React.FC = () => {
     <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden">
       {/* Top Scribbles Sub-Navigation Bar */}
       <div className="flex items-center justify-between pb-2.5 shrink-0 border-b border-border">
-        {/* Sub-Tabs: Capture | Workspace | Knowledge Graph | Split View */}
+        {/* Sub-Tabs: Capture | Workspace | Knowledge Graph */}
         <div className="flex items-center bg-muted/60 p-1 rounded-lg border border-border text-xs">
           <button
             type="button"
@@ -173,22 +161,6 @@ export const ScribbleViewer: React.FC = () => {
             <Network className="w-3.5 h-3.5 text-blue-500" />
             <span>Knowledge Graph</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSubTab('split');
-              refreshData();
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
-              activeSubTab === 'split'
-                ? 'bg-card text-foreground font-bold shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Columns2 className="w-3.5 h-3.5 text-amber-500" />
-            <span>Split View</span>
-          </button>
         </div>
 
         {/* Scribble Count Badge (Shown strictly on Workspace page) */}
@@ -199,7 +171,7 @@ export const ScribbleViewer: React.FC = () => {
         )}
       </div>
 
-      {/* Surface Tab 1: Dedicated Capture Tab (Requirement 14, 15, 16) */}
+      {/* Surface Tab 1: Dedicated Capture Tab */}
       {activeSubTab === 'capture' && (
         <CaptureHubPage
           onCaptureSuccess={(scribble) => {
@@ -216,14 +188,15 @@ export const ScribbleViewer: React.FC = () => {
         <div className="flex-1 flex min-h-0">
           <KnowledgeGraphView
             graphData={graphData}
-            onSelectScribble={(id) => {
-              setSelectedScribbleId(id);
-              setActiveSubTab('workspace');
-            }}
+            allScribbles={scribbles}
+            onSelectScribble={(id) => setSelectedScribbleId(id)}
             onOpenScribbleEditor={(id) => {
               setSelectedScribbleId(id);
               setActiveSubTab('workspace');
             }}
+            onScribbleUpdated={handleScribbleUpdated}
+            onScribbleCreated={handleScribbleCreated}
+            onScribbleDeleted={handleScribbleDeleted}
           />
         </div>
       )}
@@ -233,181 +206,88 @@ export const ScribbleViewer: React.FC = () => {
         <div className="flex-1 flex min-h-0 overflow-hidden">
           <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
             {/* Left: Master Scribbles List */}
-            {collapsedPane !== 'left' && (
-              <aside
-                className={`${
-                  collapsedPane === 'right' ? 'flex-1 w-full' : 'w-full md:w-80 lg:w-96'
-                } flex flex-col shrink-0 bg-card rounded-lg border border-border overflow-hidden shadow-xs transition-all duration-150`}
-              >
-                <div className="p-3 border-b border-border">
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-muted-foreground" />
-                    <Input
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search thoughts, topics…"
-                      className="pl-8 text-xs h-8 bg-muted/30"
-                    />
+            <aside className="w-full md:w-80 lg:w-96 flex flex-col shrink-0 bg-card rounded-lg border border-border overflow-hidden shadow-xs transition-all duration-150">
+              <div className="p-3 border-b border-border">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-muted-foreground" />
+                  <Input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search thoughts, topics…"
+                    className="pl-8 text-xs h-8 bg-muted/30"
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                {filteredScribbles.length === 0 ? (
+                  <div className="text-center py-12 text-xs text-muted-foreground space-y-1.5 px-4">
+                    <p className="font-bold text-foreground">No thoughts found</p>
+                    <p className="text-[11px]">Use the Capture tab or promote a Voice Note.</p>
                   </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-                  {filteredScribbles.length === 0 ? (
-                    <div className="text-center py-12 text-xs text-muted-foreground space-y-1.5 px-4">
-                      <p className="font-bold text-foreground">No thoughts found</p>
-                      <p className="text-[11px]">Use the Capture tab or promote a Voice Note.</p>
-                    </div>
-                  ) : (
-                    filteredScribbles.map((note) => (
-                      <div
-                        key={note.id}
-                        onClick={() => {
-                          setSelectedScribbleId(note.id);
-                          if (collapsedPane === 'right') setCollapsedPane('none');
-                        }}
-                        className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${
-                          selectedScribbleId === note.id
-                            ? 'bg-accent/60 border-primary/50 shadow-xs'
-                            : 'bg-card border-transparent hover:bg-muted/40'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-2 mb-1">
-                          <h4 className="text-xs font-bold text-foreground line-clamp-1 flex-1">
-                            {note.title}
-                          </h4>
-                          <Badge variant="outline" className="text-[8px] font-mono uppercase px-1 py-0 bg-muted">
-                            {note.source_type}
-                          </Badge>
-                        </div>
-
-                        <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed mb-2">
-                          {note.summary || note.content}
-                        </p>
-
-                        <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
-                          <span>
-                            {new Date(note.created_at).toLocaleDateString([], {
-                              month: 'short',
-                              day: 'numeric',
-                            })}
-                          </span>
-
-                          {note.topics.length > 0 && (
-                            <span className="text-amber-500 truncate max-w-[120px] font-sans">
-                              {note.topics[0]}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </aside>
-            )}
-
-            {/* Right: Detail Editor Pane */}
-            {collapsedPane !== 'right' && (
-              selectedScribble ? (
-                <div className="flex-1 flex min-h-0 transition-all duration-150">
-                  <ScribbleDetailEditor
-                    scribble={selectedScribble}
-                    allScribbles={scribbles}
-                    onUpdate={handleScribbleUpdated}
-                    onDelete={handleScribbleDeleted}
-                    onSelectScribble={(id) => setSelectedScribbleId(id)}
-                    onScribbleCreated={handleScribbleCreated}
-                  />
-                </div>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-card rounded-lg border border-border text-muted-foreground">
-                  <FileText className="w-10 h-10 mb-2 opacity-30" />
-                  <p className="text-sm font-semibold text-foreground">Select a scribble to inspect</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Click any thought from the list or create one from the Capture tab.
-                  </p>
-                </div>
-              )
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Surface Tab 4: Split View (Workspace on left, Knowledge Graph on right, with < and > controls) */}
-      {activeSubTab === 'split' && (
-        <div className="flex-1 flex flex-col gap-2 min-h-0 overflow-hidden">
-          <div className="flex items-center justify-between px-1 text-xs">
-            <span className="font-mono text-[10px] text-muted-foreground">
-              Split View: Workspace + Living Graph
-            </span>
-
-            <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg border border-border">
-              <button
-                type="button"
-                onClick={() => setCollapsedPane(collapsedPane === 'left' ? 'none' : 'left')}
-                className={`p-1 rounded text-muted-foreground hover:text-foreground transition-all ${
-                  collapsedPane === 'left' ? 'bg-card text-foreground font-bold shadow-xs' : ''
-                }`}
-                title="< Collapse workspace (Full graph)"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-
-              {collapsedPane !== 'none' && (
-                <button
-                  type="button"
-                  onClick={() => setCollapsedPane('none')}
-                  className="px-2 py-0.5 text-[10px] font-mono text-primary font-bold hover:underline"
-                  title="Restore 50/50 split"
-                >
-                  Restore 50/50
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setCollapsedPane(collapsedPane === 'right' ? 'none' : 'right')}
-                className={`p-1 rounded text-muted-foreground hover:text-foreground transition-all ${
-                  collapsedPane === 'right' ? 'bg-card text-foreground font-bold shadow-xs' : ''
-                }`}
-                title="> Collapse graph (Full workspace)"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
-            {/* Left Pane: Workspace */}
-            {collapsedPane !== 'left' && (
-              <div className={`${collapsedPane === 'right' ? 'w-full flex-1' : 'w-full md:w-1/2'} flex min-h-0`}>
-                {selectedScribble ? (
-                  <ScribbleDetailEditor
-                    scribble={selectedScribble}
-                    allScribbles={scribbles}
-                    onUpdate={handleScribbleUpdated}
-                    onDelete={handleScribbleDeleted}
-                    onSelectScribble={(id) => setSelectedScribbleId(id)}
-                    onScribbleCreated={handleScribbleCreated}
-                  />
                 ) : (
-                  <div className="flex-1 flex items-center justify-center p-8 bg-card rounded-lg border border-border text-muted-foreground">
-                    <p className="text-xs">No scribble selected.</p>
-                  </div>
+                  filteredScribbles.map((note) => (
+                    <div
+                      key={note.id}
+                      onClick={() => setSelectedScribbleId(note.id)}
+                      className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${
+                        selectedScribbleId === note.id
+                          ? 'bg-accent/60 border-primary/50 shadow-xs'
+                          : 'bg-card border-transparent hover:bg-muted/40'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <h4 className="text-xs font-bold text-foreground line-clamp-1 flex-1">
+                          {note.title}
+                        </h4>
+                        <Badge variant="outline" className="text-[8px] font-mono uppercase px-1 py-0 bg-muted">
+                          {note.source_type}
+                        </Badge>
+                      </div>
+
+                      <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed mb-2">
+                        {note.summary || note.content}
+                      </p>
+
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
+                        <span>
+                          {new Date(note.created_at).toLocaleDateString([], {
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </span>
+
+                        {note.topics.length > 0 && (
+                          <span className="text-amber-500 truncate max-w-[120px] font-sans">
+                            {note.topics[0]}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
-            )}
+            </aside>
 
-            {/* Right Pane: Graph */}
-            {collapsedPane !== 'right' && (
-              <div className={`${collapsedPane === 'left' ? 'w-full flex-1' : 'w-full md:w-1/2'} flex min-h-0`}>
-                <KnowledgeGraphView
-                  graphData={graphData}
+            {/* Right: Detail Editor Pane */}
+            {selectedScribble ? (
+              <div className="flex-1 flex min-h-0 transition-all duration-150">
+                <ScribbleDetailEditor
+                  scribble={selectedScribble}
+                  allScribbles={scribbles}
+                  onUpdate={handleScribbleUpdated}
+                  onDelete={handleScribbleDeleted}
                   onSelectScribble={(id) => setSelectedScribbleId(id)}
-                  onOpenScribbleEditor={(id) => {
-                    setSelectedScribbleId(id);
-                    setCollapsedPane('right');
-                  }}
+                  onScribbleCreated={handleScribbleCreated}
                 />
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-card rounded-lg border border-border text-muted-foreground">
+                <FileText className="w-10 h-10 mb-2 opacity-30" />
+                <p className="text-sm font-semibold text-foreground">Select a scribble to inspect</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Click any thought from the list or create one from the Capture tab.
+                </p>
               </div>
             )}
           </div>
