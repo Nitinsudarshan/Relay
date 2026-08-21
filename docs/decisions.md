@@ -345,3 +345,78 @@ This log records material architectural, technical, and product decisions for Re
 - **Explicitly Not Changed**: Kanban, Voice Chat, Triggers/MCP navigation (still deferred per Decisions 33–35), LanceDB (still not implemented — Voice Notes use the same keyword-search-capable Markdown store as every other note type, nothing vector-related was added), and no migration of notes already on disk when a vault location changes.
 - **Deferred**: Whether click-to-talk should ever also perform OS text injection (or the hotkey path should ever gain a vault-note-cleanup step) remains the same open product question Decision 36 flagged — this decision only guarantees both paths produce a Voice Note, not that they converge into one pipeline.
 
+---
+
+### Decision 39: Phase 11B — Scribbles Knowledge Layer, Provenance Model & Obsidian-Inspired Knowledge Graph
+
+- **Context**: Need to establish Relay's persistent knowledge architecture. A Scribble is Relay's smallest persistent unit of thinking (idea, observation, question, reference, thought). The architecture strictly separates the Capture Layer (how info entered Relay: Voice, Text, File, Clipboard, Browser, Meeting), Knowledge Layer (Scribbles, Relationships, Topics, Entities, Provenance, Knowledge Graph), and Output Layer (Notes, Syntheses, Prompts, Documents, Tasks).
+- **Decision made**:
+  - **Zero Change to Voice Note / Capture UX**: The existing `Ctrl + Space` hotkey, Dictation Pill, Whisper STT, VAD, and Voice Note lifecycle remain 100% untouched. No second global hotkey is added. Users are never forced to choose between a Voice Note and a Scribble during capture.
+  - **"Save as Scribble" Promotion**: Voice Notes can be promoted into first-class Scribbles via a dedicated "Save as Scribble" action in `VoiceNotePage.tsx`, preserving provenance to the originating Voice Note without modifying or deleting original audio/transcripts.
+  - **Obsidian-Compatible Vault Storage**: Scribbles are persisted in `.relay/vault/scribbles/<id>.md` with structured YAML frontmatter and Markdown body. Scribbles are flat, independently addressable, and survive application restarts.
+  - **Asynchronous AI Enrichment**: Scribbles are persisted and displayed immediately. Non-blocking AI enrichment derives concise titles, summaries, topics, named entities, and suggested relationships in the background using `LLMClient`. All AI metadata is fully editable by the user (AI suggests, user decides).
+  - **Relationship Graph Model**: Supports explicit relationship links (`RELATED_TO`, `MENTIONS`, `SAME_TOPIC`, `SAME_PROJECT`, `CONTRADICTS`, `EXTENDS`, `DERIVED_FROM`) with origin (`ai`, `user`, `system`) and confidence, connecting independent knowledge objects without auto-merging them.
+  - **Obsidian-Inspired Knowledge Graph**: High-performance 2D Canvas graph with force simulation physics, circular nodes sized by connectivity/degree, subtle low-weight edges, zoom-dependent muted labels, natural dense clustering, visible orphan nodes, interactive 1-hop neighborhood highlight, node inspector panel, double-click editing, and node/orphan filtering.
+- **Existing Functionality Preserved**: All Voice Note capture, STT, Dictation Pill, hotkey bindings, settings, and vault repointing continue to operate seamlessly.
+
+---
+
+### Decision 40: Phase 11B UX Refinement — 30-Day Trash Lifecycle, Scribble Merge Engine, Visual Connect Flow, and Obsidian Graph Controls
+
+- **Context**: UX feedback requested refining the Phase 11B Knowledge foundation: removing internal IDs from primary badges, replacing bulky text actions with subtle icons, implementing a real 30-day soft-delete Trash lifecycle under Settings, adding first-class Scribble Merging with provenance preservation, visual candidate card selection for connecting Scribbles, adding a dedicated multi-source Capture Hub tab, flexible Split View controls, and adding Obsidian-inspired physics and display sliders to the Knowledge Graph.
+- **Decision made**:
+  - **Human-Readable Source Badges**: Primary UI displays clean, uppercase source chips (`VOICE NOTE`, `TEXT`, `FILE`, `CLIPBOARD`, `BROWSER`, `MEETING`) without technical UUIDs. Internal note IDs, filenames, and timestamps are exclusively accessible in an expandable "Provenance Details" section.
+  - **Subtle Voice Note Promotion**: Replaced large text button with a subtle, icon-based action consistent with existing Voice Note card controls. Promoted notes display a subtle `SCRIBBLE` chip linking to the Knowledge Workspace without duplicating card content.
+  - **30-Day Trash Lifecycle**: Deleted Voice Notes and Scribbles are moved to `.relay/vault/trash/` with metadata (`deleted_at`, `expires_at`). Added Settings → "Trash & Deleted Items" surface allowing users to view days remaining, Restore items to active, permanently delete with confirmation, and Empty Trash with confirmation. Automatic expiry purges items older than 30 days.
+  - **Visual Candidate Selection for Connect**: Clicking "Connect Scribble" opens a modal displaying candidate cards ranked by relevance (shared topics and entities) with search filtering and optional relationship typing, rather than abstract empty dropdowns.
+  - **First-Class Scribble Merge**: Added `merge_scribbles` command creating a synthesized Scribble combining content, unioning topics/entities, linking `DERIVED_FROM` relationships to source Scribbles, setting `source_metadata.source_scribble_ids`, and running async AI enrichment without deleting original source Scribbles.
+  - **Dedicated Multi-Source Capture Hub**: Moved multi-source capture into its own top-level tab (`Capture Hub`) showcasing Voice PTT (`Ctrl + Space`), direct text compose, file drag & drop (with discoverable supported formats: `.txt`, `.md`, `.json`, `.csv`, `.pdf`, `.docx`, `.png`, `.jpg`), clipboard paste, and future Browser/Meeting capture indicators.
+  - **Flexible Split View**: Added collapse left, collapse right, and ratio selectors (30/70, 50/50, 70/30) with session persistence.
+  - **Obsidian Graph Controls**: Added working collapsible **Display** controls (directional arrows toggle, text fade threshold slider, node size multiplier, link thickness) and **Forces** controls (center gravity, repel force, link spring force, link distance) with 60fps simulation reheating.
+  - **Meaningful Title Generation**: Fallback title set to `"Generating title…"` during async AI processing, replaced upon enrichment with a 3–8 word distilled concept title rather than a truncated sentence excerpt.
+- **Reason**: Elevates usability, safety, and visual polish across the Knowledge Layer without compromising Relay's core capture guarantees or local Obsidian compatibility.
+- **Existing Functionality Preserved**: All Voice Note dictation, Push-to-Talk, Whisper STT, VAD, hotkeys, and vault persistence continue to operate seamlessly; all 11 backend unit tests and frontend production builds pass cleanly.
+
+---
+
+### Decision 41: Phase 11B UX Correction — Viewport Modals, Merge Retirement Semantics, Restored Sidenav & Exact Obsidian Graph Controls
+
+- **Context**: Pass addressing UX interaction issues: ensuring confirmation dialogs are always rendered as viewport-level modals with backdrops and Escape key handling rather than scrollable inline elements; retiring merged source Scribbles to Trash while preserving `DERIVED_FROM` provenance; providing individual copy actions on AI exploration questions; restoring the clean 3-item Relay sidebar navigation (`capture`, `scribble`, `settings`) while embedding `Workspace`, `Capture`, `Knowledge Graph`, and `Split View` as internal sub-tabs inside Scribbles; simplifying Split View to `<` and `>` pane collapse controls; and reproducing Obsidian Graph View's exact 4-section settings hierarchy (`Filters`, `Groups`, `Display`, `Forces`) with live dynamic color grouping and real physics controls.
+- **Decision made**:
+  - **Viewport-Level Confirmation Modals**: Built `ConfirmationModal.tsx` rendered as a fixed overlay centered in the viewport with backdrop blur, keyboard accessibility (`Escape` closes), and clear destructive action differentiation for Delete, Permanent Delete, Empty Trash, and Merge.
+  - **Merge Retirement Semantics**: Merging `A + B` creates new consolidated Scribble `C` and moves `A` and `B` into Trash (recoverable for 30 days) with `DERIVED_FROM` links, removing duplicates from the active workspace without hard deletion.
+  - **Individual AI Question Copy**: Each AI exploration question features an independent copy button providing immediate checkmark feedback.
+  - **Restored 3-Item Sidenav**: Restored the sidebar navigation to the 3-tab layout: `Voice Note`, `Scribble Notes`, `Settings`.
+  - **Scribble Sub-Navigation**: Integrated `Workspace`, `Capture`, `Knowledge Graph`, and `Split View` inside the Scribbles surface.
+  - **Simple Split View Controls**: Replaced complex resizing with simple `<` (collapse left) and `>` (collapse right) buttons and a clear restore action.
+  - **Exact Obsidian Graph Settings Hierarchy**: Implemented one unified panel with 4 collapsible sections:
+    - **Filters**: Search files input, `Tags` toggle, `Attachments` toggle, `Existing files only` toggle, `Orphans` toggle.
+    - **Groups**: Color grouping by query with dynamic node tinting (`New group`, query input, color picker pill, remove).
+    - **Display**: `Arrows` toggle, `Text fade threshold` slider, `Node size` slider, `Link thickness` slider, `Animate` reheat button.
+    - **Forces**: `Center force` slider, `Repel force` slider, `Link force` slider, `Link distance` slider.
+- **Reason**: Aligns Relay's knowledge interaction model with Obsidian's proven UX standards, enforces safety through viewport modals, and keeps the navigation truthful and uncluttered.
+- **Existing Functionality Preserved**: All Voice Note dictation, Push-to-Talk, Whisper STT, VAD, hotkeys, and vault persistence continue to operate seamlessly; all 11 backend unit tests and frontend production builds pass cleanly.
+
+---
+
+### Decision 42: Phase 11B Final Merge Semantics, Active Clipboard Capture, Tag Removal & Obsidian Graph Polish
+
+- **Context**: Final correction pass aligning merge semantics, capture layer modalities, semantic organization, and Obsidian Graph fidelity:
+  - Merging `A + B + C` creates a brand-new Scribble without graph edges (e.g. no `DERIVED_FROM`), storing merge inputs strictly in provenance metadata (`creation_method: "merge"`, `source_scribble_ids`).
+  - Source Scribbles move to Trash (recoverable for 30 days).
+  - Merged Scribble runs fresh async AI enrichment to synthesize a 3–8 word title, summary, topics, and independent connections to other existing Scribbles, with non-recursive fallback title resolution upon error.
+  - Renamed "Suggested Candidates" to "Suggested Scribbles".
+  - Maintained AI exploration questions with individual instant-copy buttons.
+  - Maintained capture provenance (`VOICE`, `CLIPBOARD`, `FILE`, `TEXT`).
+  - Restored Clipboard as an **Active** capture modality (alongside Voice, Text, Files).
+  - Enforced tab order: `Capture | Workspace | Knowledge Graph | Split View` with `Workspace` as default.
+  - Removed user-facing Tags from the Scribbles UX in favor of Topics and Named Entities.
+  - Renamed product terminology everywhere from "Scribble Notes" to "Scribbles".
+  - Knowledge Graph: Fixed dynamic zoom-dependent label text fade threshold, collapsed all 4 settings sections (`Filters`, `Groups`, `Display`, `Forces`) by default, added persistent `Save Graph Settings` to `localStorage`, added full-screen mode toggle (with `Escape` key handling), and replaced "Tags" toggle with "Topics".
+- **Reason**: Guarantees truthful knowledge architecture without graph pollution, provides genuine Obsidian Graph fidelity, and unifies the entire Scribbles interface.
+- **Existing Functionality Preserved**: All 11 backend tests pass, production frontend builds cleanly.
+
+
+
+
+

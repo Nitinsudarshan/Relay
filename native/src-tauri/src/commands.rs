@@ -4,7 +4,10 @@ use crate::pipeline::{PipelineEngine, ProcessedPipelineResult};
 use crate::providers::{LLMClient, OllamaStatus, ProviderType};
 use crate::settings::{AppSettings, HotkeySettings, PillPosition};
 use crate::triggers::{TriggerConfig, TriggerEngine};
-use crate::vault::{KanbanCard, VaultManager, VaultNote};
+use crate::vault::{
+    GraphFilter, KanbanCard, KnowledgeGraphData, KnowledgeSearchResult, Scribble,
+    ScribbleRelationship, TrashItem, VaultManager, VaultNote,
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -68,6 +71,8 @@ impl CommandError {
     }
 }
 
+pub const STT_DIAGNOSTICS_EVENT: &str = "stt-diagnostics-updated";
+
 pub struct AppState {
     pub recorder: AudioRecorder,
     pub vault: VaultManager,
@@ -78,12 +83,31 @@ pub struct AppState {
     pub config_dir: PathBuf,
     pub settings: Mutex<AppSettings>,
     pub stt: SttEngine,
+    pub last_stt_diagnostics: Mutex<Option<crate::capture::SttDiagnosticSnapshot>>,
 }
 
 impl AppState {
     fn settings_path(&self) -> PathBuf {
         self.config_dir.join("settings.json")
     }
+}
+
+pub fn record_stt_diagnostics(
+    app: &AppHandle,
+    state: &AppState,
+    snapshot: crate::capture::SttDiagnosticSnapshot,
+) {
+    let mut guard = state.last_stt_diagnostics.lock().unwrap();
+    *guard = Some(snapshot.clone());
+    let _ = app.emit(STT_DIAGNOSTICS_EVENT, &snapshot);
+}
+
+#[tauri::command]
+pub async fn get_last_stt_diagnostics(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::capture::SttDiagnosticSnapshot>, CommandError> {
+    let guard = state.last_stt_diagnostics.lock().unwrap();
+    Ok(guard.clone())
 }
 
 #[tauri::command]
@@ -317,17 +341,32 @@ async fn process_captured_audio(
     let samples = captured.samples.clone();
 
     // Nobody should have to go find and download a GGML file themselves
-    // before dictation produces any text at all — if Settings doesn't have
-    // one configured, fetch a small default and remember it for next time.
+    let models_dir = state.config_dir.join("models");
     let model_path = match settings
         .stt
         .whisper_model_path
         .clone()
         .filter(|p| !p.trim().is_empty())
     {
-        Some(configured) => Some(configured),
+        Some(configured) => {
+            let path = std::path::Path::new(&configured);
+            if crate::capture::stt::is_legacy_default_model(path) {
+                // Promote legacy default model (e.g. ggml-base.bin) to production ggml-small.bin
+                match crate::capture::stt::ensure_default_model(&models_dir).await {
+                    Ok(small_path) => {
+                        let path_str = small_path.to_string_lossy().to_string();
+                        let mut guard = state.settings.lock().unwrap();
+                        guard.stt.whisper_model_path = Some(path_str.clone());
+                        let _ = guard.save(&state.settings_path());
+                        Some(path_str)
+                    }
+                    Err(_) => Some(configured),
+                }
+            } else {
+                Some(configured)
+            }
+        }
         None => {
-            let models_dir = state.config_dir.join("models");
             match crate::capture::stt::ensure_default_model(&models_dir).await {
                 Ok(path) => {
                     let path_str = path.to_string_lossy().to_string();
@@ -337,18 +376,52 @@ async fn process_captured_audio(
                     Some(path_str)
                 }
                 Err(e) => {
-                    tracing::warn!("Could not auto-provision a default Whisper model: {}", e);
+                    tracing::warn!("Could not auto-provision production Whisper model: {}", e);
                     None
                 }
             }
         }
     };
 
-    let transcript =
-        tokio::task::spawn_blocking(move || stt.transcribe(model_path.as_deref(), &samples))
-            .await
-            .map_err(|e| CommandError::new("STT_TASK_FAILED", &e.to_string()))?
-            .map_err(|e| CommandError::new("STT_FAILED", &e.to_string()))?;
+    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
+    let decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
+
+    let mp_clone = model_path.clone();
+    let lang_clone = language_config.clone();
+    let dec_clone = decoding_config.clone();
+
+    let (transcript, diag, err) = tokio::task::spawn_blocking(move || {
+        match stt.transcribe_with_config(
+            mp_clone.as_deref(),
+            &samples,
+            &lang_clone,
+            &dec_clone,
+        ) {
+            Ok((t, d)) => (t, Some(d), None),
+            Err(e) => (String::new(), None, Some(e.to_string())),
+        }
+    })
+    .await
+    .map_err(|e| CommandError::new("STT_TASK_FAILED", &e.to_string()))?;
+
+    let model_str = model_path.as_deref().unwrap_or(crate::capture::stt::DEFAULT_MODEL_FILENAME);
+    let snapshot = crate::capture::build_diagnostic_snapshot(
+        &captured.mode,
+        Some(captured.audio_path.clone()),
+        &captured,
+        &settings.language,
+        &language_config,
+        &decoding_config,
+        model_str,
+        &transcript,
+        diag.as_ref(),
+        err.clone(),
+    );
+    record_stt_diagnostics(app, state, snapshot);
+
+    if let Some(err_msg) = err {
+        return Err(CommandError::new("STT_FAILED", &err_msg));
+    }
 
     // had_audio only proves the mic measured sustained energy — Whisper can
     // still land on nothing (most commonly a short hallucination that its
@@ -421,10 +494,10 @@ pub async fn update_voice_note(
 pub async fn delete_voice_note(
     id: String,
     state: State<'_, AppState>,
-) -> Result<(), CommandError> {
+) -> Result<TrashItem, CommandError> {
     state
         .vault
-        .delete_note(&id)
+        .move_to_trash("voice_note", &id)
         .map_err(|e| CommandError::new("VAULT_DELETE_FAILED", &e.to_string()))
 }
 
@@ -438,6 +511,273 @@ pub async fn merge_voice_notes(
         .vault
         .merge_notes(&primary_id, &secondary_id)
         .map_err(|e| CommandError::new("VAULT_MERGE_FAILED", &e.to_string()))
+}
+
+pub const SCRIBBLE_SAVED_EVENT: &str = "scribble-saved";
+pub const SCRIBBLE_ENRICHED_EVENT: &str = "scribble-enriched";
+
+pub fn spawn_scribble_enrichment(
+    app: AppHandle,
+    state: &AppState,
+    scribble_id: String,
+) {
+    let settings = state.settings.lock().unwrap().clone();
+    let llm = LLMClient::new(settings.provider);
+    let vault_dir = state.vault.vault_dir();
+
+    tauri::async_runtime::spawn(async move {
+        let vault = VaultManager::new(vault_dir);
+        match crate::pipeline::enrich_scribble(&llm, &vault, &scribble_id).await {
+            Ok(enriched) => {
+                let _ = app.emit(SCRIBBLE_ENRICHED_EVENT, &enriched);
+            }
+            Err(e) => {
+                tracing::warn!("Async scribble enrichment failed for {}: {}", scribble_id, e);
+            }
+        }
+    });
+}
+
+#[tauri::command]
+pub async fn get_scribbles(state: State<'_, AppState>) -> Result<Vec<Scribble>, CommandError> {
+    state
+        .vault
+        .list_scribbles()
+        .map_err(|e| CommandError::new("VAULT_READ_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn get_scribble(id: String, state: State<'_, AppState>) -> Result<Scribble, CommandError> {
+    state
+        .vault
+        .get_scribble(&id)
+        .map_err(|e| CommandError::new("VAULT_READ_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn create_scribble(
+    app: AppHandle,
+    content: String,
+    title: Option<String>,
+    source_type: Option<String>,
+    source_metadata: Option<serde_json::Value>,
+    tags: Option<Vec<String>>,
+    topics: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<Scribble, CommandError> {
+    let mut scribble = Scribble::new_text(&content, title.as_deref());
+    if let Some(st) = source_type {
+        scribble.source_type = st;
+    }
+    if let Some(sm) = source_metadata {
+        scribble.source_metadata = sm;
+    }
+    if let Some(tg) = tags {
+        scribble.tags = tg;
+    }
+    if let Some(tp) = topics {
+        scribble.topics = tp;
+    }
+
+    state
+        .vault
+        .save_scribble(&scribble)
+        .map_err(|e| CommandError::new("VAULT_SAVE_FAILED", &e.to_string()))?;
+
+    let _ = app.emit(SCRIBBLE_SAVED_EVENT, &scribble);
+    spawn_scribble_enrichment(app, &state, scribble.id.clone());
+
+    Ok(scribble)
+}
+
+#[tauri::command]
+pub async fn promote_voice_note_to_scribble(
+    app: AppHandle,
+    voice_note_id: String,
+    custom_title: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Scribble, CommandError> {
+    let voice_note = state
+        .vault
+        .get_note(&voice_note_id)
+        .map_err(|e| CommandError::new("NOTE_NOT_FOUND", &e.to_string()))?;
+
+    let scribble = Scribble::from_voice_note(&voice_note.id, &voice_note.content, custom_title.as_deref());
+    state
+        .vault
+        .save_scribble(&scribble)
+        .map_err(|e| CommandError::new("VAULT_SAVE_FAILED", &e.to_string()))?;
+
+    let _ = app.emit(SCRIBBLE_SAVED_EVENT, &scribble);
+    spawn_scribble_enrichment(app, &state, scribble.id.clone());
+
+    Ok(scribble)
+}
+
+#[tauri::command]
+pub async fn create_file_scribble(
+    app: AppHandle,
+    filename: String,
+    content: String,
+    mime_type: Option<String>,
+    size_bytes: Option<u64>,
+    state: State<'_, AppState>,
+) -> Result<Scribble, CommandError> {
+    let scribble = Scribble::from_file(&filename, &content, mime_type.as_deref(), size_bytes);
+    state
+        .vault
+        .save_scribble(&scribble)
+        .map_err(|e| CommandError::new("VAULT_SAVE_FAILED", &e.to_string()))?;
+
+    let _ = app.emit(SCRIBBLE_SAVED_EVENT, &scribble);
+    spawn_scribble_enrichment(app, &state, scribble.id.clone());
+
+    Ok(scribble)
+}
+
+#[tauri::command]
+pub async fn update_scribble(
+    app: AppHandle,
+    scribble: Scribble,
+    state: State<'_, AppState>,
+) -> Result<Scribble, CommandError> {
+    let updated = state
+        .vault
+        .update_scribble(&scribble)
+        .map_err(|e| CommandError::new("VAULT_UPDATE_FAILED", &e.to_string()))?;
+
+    let _ = app.emit(SCRIBBLE_SAVED_EVENT, &updated);
+    Ok(updated)
+}
+
+#[tauri::command]
+pub async fn delete_scribble(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<TrashItem, CommandError> {
+    state
+        .vault
+        .move_to_trash("scribble", &id)
+        .map_err(|e| CommandError::new("VAULT_DELETE_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn merge_scribbles(
+    app: AppHandle,
+    source_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Scribble, CommandError> {
+    let merged = state
+        .vault
+        .merge_scribbles(&source_ids)
+        .map_err(|e| CommandError::new("VAULT_MERGE_FAILED", &e.to_string()))?;
+
+    let _ = app.emit(SCRIBBLE_SAVED_EVENT, &merged);
+    spawn_scribble_enrichment(app, &state, merged.id.clone());
+
+    Ok(merged)
+}
+
+#[tauri::command]
+pub async fn get_trash_items(state: State<'_, AppState>) -> Result<Vec<TrashItem>, CommandError> {
+    state
+        .vault
+        .get_trash_items()
+        .map_err(|e| CommandError::new("TRASH_READ_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn restore_trash_item(
+    trash_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    state
+        .vault
+        .restore_trash_item(&trash_id)
+        .map_err(|e| CommandError::new("TRASH_RESTORE_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn delete_trash_item_permanently(
+    trash_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    state
+        .vault
+        .delete_trash_item_permanently(&trash_id)
+        .map_err(|e| CommandError::new("TRASH_DELETE_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn empty_trash(state: State<'_, AppState>) -> Result<usize, CommandError> {
+    state
+        .vault
+        .empty_trash()
+        .map_err(|e| CommandError::new("TRASH_EMPTY_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn add_scribble_relationship(
+    app: AppHandle,
+    source_id: String,
+    relationship: ScribbleRelationship,
+    state: State<'_, AppState>,
+) -> Result<Scribble, CommandError> {
+    let updated = state
+        .vault
+        .add_scribble_relationship(&source_id, relationship)
+        .map_err(|e| CommandError::new("VAULT_UPDATE_FAILED", &e.to_string()))?;
+
+    let _ = app.emit(SCRIBBLE_SAVED_EVENT, &updated);
+    Ok(updated)
+}
+
+#[tauri::command]
+pub async fn remove_scribble_relationship(
+    app: AppHandle,
+    source_id: String,
+    relationship_id: String,
+    state: State<'_, AppState>,
+) -> Result<Scribble, CommandError> {
+    let updated = state
+        .vault
+        .remove_scribble_relationship(&source_id, &relationship_id)
+        .map_err(|e| CommandError::new("VAULT_UPDATE_FAILED", &e.to_string()))?;
+
+    let _ = app.emit(SCRIBBLE_SAVED_EVENT, &updated);
+    Ok(updated)
+}
+
+#[tauri::command]
+pub async fn search_knowledge(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<KnowledgeSearchResult, CommandError> {
+    state
+        .vault
+        .search_knowledge(&query)
+        .map_err(|e| CommandError::new("VAULT_SEARCH_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn get_knowledge_graph(
+    filter: Option<GraphFilter>,
+    state: State<'_, AppState>,
+) -> Result<KnowledgeGraphData, CommandError> {
+    state
+        .vault
+        .get_knowledge_graph(filter.as_ref())
+        .map_err(|e| CommandError::new("GRAPH_BUILD_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn trigger_enrich_scribble(
+    app: AppHandle,
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    spawn_scribble_enrichment(app, &state, id);
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -561,6 +901,7 @@ pub enum SttModelStatus {
 /// user finding out only when a capture silently fails.
 #[tauri::command]
 pub async fn ensure_stt_model_ready(state: State<'_, AppState>) -> Result<SttModelStatus, CommandError> {
+    let models_dir = state.config_dir.join("models");
     let configured = state
         .settings
         .lock()
@@ -569,13 +910,28 @@ pub async fn ensure_stt_model_ready(state: State<'_, AppState>) -> Result<SttMod
         .whisper_model_path
         .clone()
         .filter(|p| !p.trim().is_empty());
-    if let Some(path) = configured {
-        if std::path::Path::new(&path).exists() {
-            return Ok(SttModelStatus::Ready { path });
+
+    if let Some(ref path_str) = configured {
+        let path = std::path::Path::new(path_str);
+        if path.exists() {
+            if !crate::capture::stt::is_legacy_default_model(path) {
+                // User has an explicit custom model that exists
+                return Ok(SttModelStatus::Ready {
+                    path: path_str.clone(),
+                });
+            }
+            // If it's a legacy default model (e.g. ggml-base.bin), proceed to ensure production ggml-small.bin
+        } else {
+            return Ok(SttModelStatus::Failed {
+                message: format!(
+                    "Configured model path not found: '{}'. Expected production model: '{}'.",
+                    path_str,
+                    crate::capture::stt::DEFAULT_MODEL_FILENAME
+                ),
+            });
         }
     }
 
-    let models_dir = state.config_dir.join("models");
     match crate::capture::stt::ensure_default_model(&models_dir).await {
         Ok(path) => {
             let path_str = path.to_string_lossy().to_string();
@@ -609,13 +965,15 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, Com
 
 #[tauri::command]
 pub async fn save_settings(
+    app: AppHandle,
     settings: AppSettings,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     settings
         .save(&state.settings_path())
         .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
-    *state.settings.lock().unwrap() = settings;
+    *state.settings.lock().unwrap() = settings.clone();
+    let _ = app.emit("settings-changed", &settings);
     Ok(())
 }
 
@@ -801,5 +1159,178 @@ fn parse_bullet_line(content: &str) -> (String, String, String) {
 
     ("General".to_string(), "Relay".to_string(), content.to_string())
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SttDiagnosticResult {
+    pub model_used: String,
+    pub auto_transcript: String,
+    pub auto_duration_ms: u64,
+    pub hindi_locked_transcript: String,
+    pub hindi_locked_duration_ms: u64,
+    pub english_locked_transcript: String,
+    pub english_locked_duration_ms: u64,
+}
+
+/// Diagnostic development helper: runs an existing recorded WAV through Auto (None),
+/// Hindi-locked ("hi"), and English-locked ("en") STT configurations to compare raw model emissions.
+#[tauri::command]
+pub async fn diagnose_stt_variants(
+    wav_path: String,
+    custom_model_path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<SttDiagnosticResult, CommandError> {
+    let settings = state.settings.lock().unwrap().clone();
+    let stt = state.stt.clone();
+    let model_path = custom_model_path
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| settings.stt.whisper_model_path.clone());
+
+    let samples = tokio::task::spawn_blocking(move || -> Result<Vec<f32>, String> {
+        let mut reader = hound::WavReader::open(&wav_path)
+            .map_err(|e| format!("Failed to open WAV: {}", e))?;
+        let spec = reader.spec();
+        let raw_samples: Vec<f32> = match spec.sample_format {
+            hound::SampleFormat::Float => reader.samples::<f32>().filter_map(|s| s.ok()).collect(),
+            hound::SampleFormat::Int => reader
+                .samples::<i16>()
+                .filter_map(|s| s.ok())
+                .map(|s| s as f32 / i16::MAX as f32)
+                .collect(),
+        };
+        Ok(raw_samples)
+    })
+    .await
+    .map_err(|e| CommandError::new("IO_ERROR", &e.to_string()))?
+    .map_err(|e| CommandError::new("WAV_ERROR", &e))?;
+
+    let model_label = model_path
+        .as_deref()
+        .map(|p| p.split(['/', '\\']).last().unwrap_or(p))
+        .unwrap_or("default")
+        .to_string();
+
+    let stt1 = stt.clone();
+    let mp1 = model_path.clone();
+    let s1 = samples.clone();
+    let (auto_res, auto_duration_ms) = tokio::task::spawn_blocking(move || {
+        let start = std::time::Instant::now();
+        let cfg = crate::capture::SttLanguageConfig {
+            whisper_language: None,
+            translate: false,
+        };
+        let res = stt1.transcribe(mp1.as_deref(), &s1, &cfg).unwrap_or_default();
+        (res, start.elapsed().as_millis() as u64)
+    })
+    .await
+    .map_err(|e| CommandError::new("STT_FAILED", &e.to_string()))?;
+
+    let stt2 = stt.clone();
+    let mp2 = model_path.clone();
+    let s2 = samples.clone();
+    let (hi_res, hindi_locked_duration_ms) = tokio::task::spawn_blocking(move || {
+        let start = std::time::Instant::now();
+        let cfg = crate::capture::SttLanguageConfig {
+            whisper_language: Some("hi".to_string()),
+            translate: false,
+        };
+        let res = stt2.transcribe(mp2.as_deref(), &s2, &cfg).unwrap_or_default();
+        (res, start.elapsed().as_millis() as u64)
+    })
+    .await
+    .map_err(|e| CommandError::new("STT_FAILED", &e.to_string()))?;
+
+    let stt3 = stt.clone();
+    let mp3 = model_path.clone();
+    let s3 = samples.clone();
+    let (en_res, english_locked_duration_ms) = tokio::task::spawn_blocking(move || {
+        let start = std::time::Instant::now();
+        let cfg = crate::capture::SttLanguageConfig {
+            whisper_language: Some("en".to_string()),
+            translate: false,
+        };
+        let res = stt3.transcribe(mp3.as_deref(), &s3, &cfg).unwrap_or_default();
+        (res, start.elapsed().as_millis() as u64)
+    })
+    .await
+    .map_err(|e| CommandError::new("STT_FAILED", &e.to_string()))?;
+
+    Ok(SttDiagnosticResult {
+        model_used: model_label,
+        auto_transcript: auto_res,
+        auto_duration_ms,
+        hindi_locked_transcript: hi_res,
+        hindi_locked_duration_ms,
+        english_locked_transcript: en_res,
+        english_locked_duration_ms,
+    })
+}
+
+/// Evaluates a recorded WAV file against a specific STT decoding configuration variant
+/// (e.g. baseline, relay_prompt, best_of_3, beam_2, temperature_fallback) using the Phase 5 harness.
+#[tauri::command]
+pub async fn run_stt_evaluation(
+    wav_path: String,
+    variant: String,
+    reference_text: Option<String>,
+    custom_model_path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::capture::EvaluationResult, CommandError> {
+    let settings = state.settings.lock().unwrap().clone();
+    let stt = state.stt.clone();
+    let model_path = custom_model_path
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| settings.stt.whisper_model_path.clone());
+
+    let (samples, sample_rate) = tokio::task::spawn_blocking(move || -> Result<(Vec<f32>, u32), String> {
+        let mut reader = hound::WavReader::open(&wav_path)
+            .map_err(|e| format!("Failed to open WAV: {}", e))?;
+        let spec = reader.spec();
+        let raw_samples: Vec<f32> = match spec.sample_format {
+            hound::SampleFormat::Float => reader.samples::<f32>().filter_map(|s| s.ok()).collect(),
+            hound::SampleFormat::Int => reader
+                .samples::<i16>()
+                .filter_map(|s| s.ok())
+                .map(|s| s as f32 / i16::MAX as f32)
+                .collect(),
+        };
+        Ok((raw_samples, spec.sample_rate))
+    })
+    .await
+    .map_err(|e| CommandError::new("IO_ERROR", &e.to_string()))?
+    .map_err(|e| CommandError::new("WAV_ERROR", &e))?;
+
+    let eval_variant = match variant.to_lowercase().as_str() {
+        "relay_prompt" | "prompt" => crate::capture::EvalConfigVariant::RelayPrompt,
+        "best_of_3" | "best_of" => crate::capture::EvalConfigVariant::BestOf3,
+        "beam_2" | "beam" => crate::capture::EvalConfigVariant::Beam2,
+        "temperature_fallback" | "fallback" => crate::capture::EvalConfigVariant::TemperatureFallback,
+        _ => crate::capture::EvalConfigVariant::Baseline,
+    };
+
+    let result = tokio::task::spawn_blocking(move || {
+        crate::capture::evaluate_audio_buffer(
+            "manual_eval",
+            "eval_audio.wav",
+            &samples,
+            sample_rate,
+            eval_variant,
+            &settings.language,
+            model_path.as_deref(),
+            reference_text.as_deref(),
+            &stt,
+        )
+    })
+    .await
+    .map_err(|e| CommandError::new("EVAL_ERROR", &e.to_string()))?;
+
+    Ok(result)
+}
+
+/// Retrieves the full 35-item curated evaluation corpus manifest for UI test-bench selection.
+#[tauri::command]
+pub async fn get_stt_corpus() -> Result<Vec<crate::capture::CorpusItem>, CommandError> {
+    Ok(crate::capture::get_curated_corpus())
+}
+
 
 

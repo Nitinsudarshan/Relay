@@ -49,6 +49,7 @@ pub fn run() {
         config_dir,
         settings: Mutex::new(settings),
         stt: SttEngine::new(),
+        last_stt_diagnostics: Mutex::new(None),
     };
 
     tauri::Builder::default()
@@ -92,6 +93,27 @@ pub fn run() {
             commands::set_vault_location,
             commands::get_app_version,
             commands::get_changelog,
+            commands::diagnose_stt_variants,
+            commands::run_stt_evaluation,
+            commands::get_last_stt_diagnostics,
+            commands::get_stt_corpus,
+            commands::get_scribbles,
+            commands::get_scribble,
+            commands::create_scribble,
+            commands::promote_voice_note_to_scribble,
+            commands::create_file_scribble,
+            commands::update_scribble,
+            commands::delete_scribble,
+            commands::merge_scribbles,
+            commands::get_trash_items,
+            commands::restore_trash_item,
+            commands::delete_trash_item_permanently,
+            commands::empty_trash,
+            commands::add_scribble_relationship,
+            commands::remove_scribble_relationship,
+            commands::search_knowledge,
+            commands::get_knowledge_graph,
+            commands::trigger_enrich_scribble,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

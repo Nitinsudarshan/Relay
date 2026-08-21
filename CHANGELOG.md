@@ -1,5 +1,47 @@
 # Relay — Changelog
 
+## [0.8.0] - 2026-08-21
+
+### Phase 11B: First-Class Scribbles Knowledge Layer, Provenance Model & Obsidian-Inspired Knowledge Graph
+
+- **First-Class Persistent Scribbles (`native/src-tauri/src/vault/scribble.rs`, `vault/mod.rs`)**:
+  - Implemented the `Scribble` data model with full frontmatter Markdown serialization in `.relay/vault/scribbles/<id>.md`, compatible with Obsidian.
+  - Implemented CRUD persistence (`save_scribble`, `get_scribble`, `list_scribbles`, `update_scribble`, `delete_scribble`).
+  - Supports multiple capture source types (`voice`, `text`, `file`, `clipboard`, `browser_selection`, `browser_page`, `screenshot`, `meeting`) while preserving complete provenance in `source_metadata`.
+- **Zero Impact on Voice Note / Capture UX (`VoiceNotePage.tsx`)**:
+  - The `Ctrl + Space` hotkey and Dictation Pill flow remain 100% unchanged with zero modal prompts during recording.
+  - Added dedicated **"Save as Scribble"** promotion action to Voice Note cards in `VoiceNotePage.tsx`, creating a new linked Scribble while keeping the original Voice Note and raw audio intact.
+- **Asynchronous AI Enrichment (`native/src-tauri/src/pipeline/enrichment.rs`, `commands.rs`)**:
+  - Non-blocking background AI enrichment extracts concise titles, summaries, topics, named entities, and suggested concept connections via `LLMClient`.
+  - All AI metadata is fully editable by the user (AI suggests, user decides) and resilient to offline/error states.
+- **Explicit Relationships Model (`vault/scribble.rs`, `commands.rs`)**:
+  - Supported relationship types: `RELATED_TO`, `MENTIONS`, `SAME_TOPIC`, `SAME_PROJECT`, `CONTRADICTS`, `EXTENDS`, `DERIVED_FROM` with origin and confidence tracking without merging independent knowledge objects.
+- **Obsidian-Inspired Knowledge Graph View (`native/src/components/scribble/KnowledgeGraphView.tsx`)**:
+  - High-performance 2D Canvas graph renderer with real-time force simulation physics.
+  - Circular nodes with connectivity-driven sizing (degree scaling), subtle low-weight edges, restrained color-coded node categories, and zoom-dependent intelligent labels.
+  - Interactive 1-hop neighborhood highlighting, dragging, zoom/pan controls, and side inspector drawer.
+  - Specialized filtering including node types and a dedicated **Orphans** filter for discovering isolated thoughts.
+- **Knowledge Workspace Surface (`native/src/components/scribble/ScribbleViewer.tsx`, `ScribbleComposer.tsx`, `ScribbleDetailEditor.tsx`)**:
+  - Rebuilt the Scribbles view into a complete Knowledge Workspace with 3 view modes: **Workspace** (List + Detail Editor), **Knowledge Graph** (full-screen Obsidian canvas), and **Split View** (Canvas + Editor).
+  - Quick-Create bar supporting instant typed thoughts and file uploads.
+  - Real-time search across thoughts, topics, and entities.
+
+## [0.7.3] - 2026-08-21
+
+### STT Reliability: Language Wiring Sync, Audio Telemetry & Frame-Based Voice Activity Detection (VAD)
+
+- **Language Settings Synchronization (`commands.rs`, `stt.rs`, `DictationPill.tsx`, `ProviderSettings.tsx`)**:
+  - Connected Dictation Pill language popover to Tauri IPC `save_settings` backend commands and event broadcast (`settings-changed`), ensuring settings persist to `settings.json` and sync live across all windows.
+  - Hardened Whisper language configuration in `SttLanguageConfig::from_settings`: auto/empty maps to Whisper auto-detection (`None`), single language maps to locked language tag (e.g. `Some("hi")`), and multilingual pairs (e.g. Hinglish `["en", "hi"]`) safely default to multilingual auto-detection without passing invalid token tags.
+- **Audio Measurement & Telemetry (`capture/mod.rs`)**:
+  - Implemented `AudioStats` telemetry calculating sample count, duration, RMS, peak amplitude, near-zero percentage, and near-clipping percentage on captured and analyzed audio buffers.
+  - Sanitized audio buffers against non-finite values (`NaN`/`Inf`) and clamped samples to `[-1.0, 1.0]`.
+  - Analyzed 233 real microphone recordings on disk to verify dynamic range (average RMS 0.0254, max peak 0.7477, 0.00% clipping).
+- **Speech Boundary Detection / VAD (`capture/mod.rs`)**:
+  - Implemented deterministic frame-based energy VAD (`VadConfig`, `VadResult`) with 20ms frames, adaptive background noise floor estimation (bottom 20% frames), onset requirement (80ms), hangover duration (300ms), and safe pre/post-speech padding (250ms).
+  - Validated with an offline batch experiment over 233 real user recordings, achieving an average of 24.1% dead air reduction (~1.77s saved per recording) with $<1\text{ ms}$ processing overhead and zero speech truncation.
+  - Short-circuits accidental empty/click recordings (50 files identified) to prevent Whisper hallucinations on silence.
+
 ## [0.7.2] - 2026-08-20
 
 ### Voice Note Actions (Edit, Delete, Merge), High-Contrast Destructive Tokens & Geometry Polish

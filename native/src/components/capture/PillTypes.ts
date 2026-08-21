@@ -10,7 +10,7 @@ export type PillState =
   | 'warning';
 
 export type CleanupStyle = 'faithful' | 'clean' | 'professional' | 'concise';
-export type SpeechLanguage = 'english' | 'hinglish' | 'auto';
+export type SpeechLanguage = 'english' | 'hinglish' | 'hindi' | 'es' | 'auto';
 
 export interface WhisperStatusInfo {
   status: 'ready' | 'download_required' | 'downloading' | 'failed' | 'checking';

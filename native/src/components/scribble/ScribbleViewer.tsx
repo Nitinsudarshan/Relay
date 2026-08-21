@@ -1,308 +1,418 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import {
+  Scribble,
+  KnowledgeGraphData,
+} from '../../types';
 import {
   Search,
-  SlidersHorizontal,
-  Star,
-  Trash2,
-  Copy,
-  Check,
-  FileText,
   Sparkles,
-  Edit3,
+  Layers,
+  Network,
+  Plus,
+  FileText,
+  Hash,
+  ChevronLeft,
+  ChevronRight,
+  RotateCcw,
   RefreshCw,
-  Languages,
-  Share2,
-  Folder,
-  Download,
-  ShieldCheck,
-  MessageSquarePlus,
-  ArrowRight,
+  PlusCircle,
+  Columns2,
+  LayoutGrid,
 } from 'lucide-react';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { ScribbleDetailEditor } from './ScribbleDetailEditor';
+import { KnowledgeGraphView } from './KnowledgeGraphView';
+import { CaptureHubPage } from '../capture/CaptureHubPage';
 
-interface ScribbleViewerProps {
-  content: string;
-  transcript: string;
-  isLoading?: boolean;
-}
+type ScribbleSubTab = 'workspace' | 'capture' | 'graph' | 'split';
 
-interface ScribbleNote {
-  id: string;
-  title: string;
-  date: string;
-  cleanedText: string;
-  rawTranscript: string;
-  isStarred?: boolean;
-}
-
-const DEMO_NOTES: ScribbleNote[] = [
-  {
-    id: 'note-1',
-    title: 'Q3 Product Strategy & Roadmap Sync',
-    date: 'Today, 2:15 PM',
-    cleanedText: `# Q3 Product Strategy & Roadmap Sync\n\n## Key Takeaways\n- Focus on Windows Native dictation pill performance.\n- LanceDB vector RAG search for Obsidian vault notes.\n- Supabase cloud auth for hybrid remote access.\n\n## Action Items\n- [x] Refactor UI tokens to Monochrome & Electric Blue.\n- [ ] Wire audio level meter keyframes to Rust WASAPI recorder.\n- [ ] Finalize Kanban priority badge 3-way semantic split.`,
-    rawTranscript: 'Okay so for Q3 we really need to focus on native dictation pill performance and getting the LanceDB RAG search working over Obsidian notes...',
-    isStarred: true,
-  },
-  {
-    id: 'note-2',
-    title: 'Architecture Review: MCP Trigger Routing',
-    date: 'Yesterday, 4:30 PM',
-    cleanedText: `# Architecture Review: MCP Trigger Routing\n\n## Overview\nDynamic phrase matching maps user voice input (e.g. "Schedule quick sync") to Google Calendar tool calls via JSON-RPC MCP handlers.`,
-    rawTranscript: 'Let us make sure the trigger engine properly extracts parameters and routes to google calendar mcp server without blocking the main looper thread...',
-    isStarred: false,
-  },
-];
-
-export const ScribbleViewer: React.FC<ScribbleViewerProps> = ({
-  content,
-  transcript,
-  isLoading = false,
-}) => {
+export const ScribbleViewer: React.FC = () => {
+  const [activeSubTab, setActiveSubTab] = useState<ScribbleSubTab>('workspace');
+  const [scribbles, setScribbles] = useState<Scribble[]>([]);
+  const [selectedScribbleId, setSelectedScribbleId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedNoteId, setSelectedNoteId] = useState<string>('note-1');
-  const [copied, setCopied] = useState(false);
-  const [notes, setNotes] = useState<ScribbleNote[]>(() => {
-    if (content) {
-      return [
-        {
-          id: 'note-live',
-          title: content.split('\n')[0].replace(/^#\s*/, '') || 'Latest Voice Scribble',
-          date: 'Just now',
-          cleanedText: content,
-          rawTranscript: transcript || 'Live push-to-talk voice recording',
-          isStarred: false,
-        },
-        ...DEMO_NOTES,
-      ];
+  const [loading, setLoading] = useState(true);
+  const [graphData, setGraphData] = useState<KnowledgeGraphData>({ nodes: [], edges: [] });
+
+  // Simple Split Collapse State (Requirement 13):
+  // 'none' (normal 50/50 split), 'left' (left pane collapsed), 'right' (right pane collapsed)
+  const [collapsedPane, setCollapsedPane] = useState<'none' | 'left' | 'right'>('none');
+
+  // Fetch Scribbles & Graph
+  const refreshData = useCallback(async () => {
+    try {
+      const [loadedScribbles, loadedGraph] = await Promise.all([
+        invoke<Scribble[]>('get_scribbles'),
+        invoke<KnowledgeGraphData>('get_knowledge_graph', { filter: null }),
+      ]);
+      setScribbles(loadedScribbles);
+      setGraphData(loadedGraph);
+
+      if (loadedScribbles.length > 0 && !selectedScribbleId) {
+        setSelectedScribbleId(loadedScribbles[0].id);
+      }
+    } catch (err) {
+      console.error('Failed to load scribbles or graph:', err);
+    } finally {
+      setLoading(false);
     }
-    return DEMO_NOTES;
+  }, [selectedScribbleId]);
+
+  useEffect(() => {
+    refreshData();
+  }, [refreshData]);
+
+  // Live updates from backend
+  useEffect(() => {
+    const unlistenSaved = listen<Scribble>('scribble-saved', ({ payload }) => {
+      setScribbles((prev) => {
+        const filtered = prev.filter((s) => s.id !== payload.id);
+        return [payload, ...filtered];
+      });
+      setSelectedScribbleId((prev) => prev || payload.id);
+      refreshData();
+    });
+
+    const unlistenEnriched = listen<Scribble>('scribble-enriched', ({ payload }) => {
+      setScribbles((prev) => prev.map((s) => (s.id === payload.id ? payload : s)));
+      refreshData();
+    });
+
+    return () => {
+      unlistenSaved.then((u) => u());
+      unlistenEnriched.then((u) => u());
+    };
+  }, [refreshData]);
+
+  const handleScribbleCreated = (newScribble: Scribble) => {
+    setScribbles((prev) => [newScribble, ...prev.filter((s) => s.id !== newScribble.id)]);
+    setSelectedScribbleId(newScribble.id);
+    setActiveSubTab('workspace');
+    refreshData();
+  };
+
+  const handleScribbleUpdated = (updated: Scribble) => {
+    setScribbles((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    refreshData();
+  };
+
+  const handleScribbleDeleted = async (id: string) => {
+    try {
+      await invoke('delete_scribble', { id });
+      setScribbles((prev) => prev.filter((s) => s.id !== id));
+      if (selectedScribbleId === id) {
+        const remaining = scribbles.filter((s) => s.id !== id);
+        setSelectedScribbleId(remaining.length > 0 ? remaining[0].id : null);
+      }
+      refreshData();
+    } catch (err) {
+      console.error('Failed to move scribble to trash:', err);
+    }
+  };
+
+  // Filtered Scribbles
+  const filteredScribbles = scribbles.filter((s) => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const haystack = `${s.title} ${s.content} ${s.topics.join(' ')} ${s.entities.join(' ')}`.toLowerCase();
+      return haystack.includes(q);
+    }
+    return true;
   });
 
-  const selectedNote = notes.find((n) => n.id === selectedNoteId) || notes[0];
-
-  const handleCopy = () => {
-    if (!selectedNote) return;
-    navigator.clipboard.writeText(selectedNote.cleanedText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const toggleStar = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setNotes((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, isStarred: !n.isStarred } : n))
-    );
-  };
+  const selectedScribble = scribbles.find((s) => s.id === selectedScribbleId) || null;
 
   return (
-    <div className="flex-1 flex flex-col md:flex-row gap-4 min-h-0 overflow-hidden">
-      {/* Master List Pane */}
-      <aside className="w-full md:w-80 flex flex-col shrink-0 bg-card rounded-lg border border-border overflow-hidden">
-        {/* Master List Header: Search & Filter Row */}
-        <div className="p-3 border-b border-border space-y-2">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-muted-foreground" />
-            <Input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search vault scribbles..."
-              className="pl-8 text-xs h-8 bg-muted/30"
-            />
-          </div>
+    <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden">
+      {/* Top Scribbles Sub-Navigation Bar */}
+      <div className="flex items-center justify-between pb-2.5 shrink-0 border-b border-border">
+        {/* Sub-Tabs: Capture | Workspace | Knowledge Graph | Split View */}
+        <div className="flex items-center bg-muted/60 p-1 rounded-lg border border-border text-xs">
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('capture')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
+              activeSubTab === 'capture'
+                ? 'bg-card text-foreground font-bold shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <PlusCircle className="w-3.5 h-3.5 text-primary" />
+            <span>Capture</span>
+          </button>
 
-          <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1 pt-1">
-            <span className="font-mono uppercase tracking-wider text-[10px] font-bold">
-              {notes.length} VAULT SCRIBBLES
-            </span>
-            <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] gap-1">
-              <SlidersHorizontal className="w-3 h-3" />
-              <span>Sort</span>
-            </Button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('workspace')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
+              activeSubTab === 'workspace'
+                ? 'bg-card text-foreground font-bold shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+            <span>Workspace</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveSubTab('graph');
+              refreshData();
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
+              activeSubTab === 'graph'
+                ? 'bg-card text-foreground font-bold shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Network className="w-3.5 h-3.5 text-blue-500" />
+            <span>Knowledge Graph</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveSubTab('split');
+              refreshData();
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
+              activeSubTab === 'split'
+                ? 'bg-card text-foreground font-bold shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Columns2 className="w-3.5 h-3.5 text-amber-500" />
+            <span>Split View</span>
+          </button>
         </div>
 
-        {/* Master List Items */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {notes
-            .filter((n) => n.title.toLowerCase().includes(searchQuery.toLowerCase()))
-            .map((note) => (
-              <div
-                key={note.id}
-                onClick={() => setSelectedNoteId(note.id)}
-                className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${
-                  selectedNoteId === note.id
-                    ? 'bg-accent/60 border-primary/50 shadow-xs'
-                    : 'bg-card border-transparent hover:bg-muted/40'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <h4 className="text-xs font-bold text-foreground line-clamp-1 flex-1">
-                    {note.title}
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={(e) => toggleStar(note.id, e)}
-                    className="text-muted-foreground hover:text-amber-500 transition-colors"
-                  >
-                    <Star
-                      className={`w-3.5 h-3.5 ${
-                        note.isStarred ? 'fill-amber-400 text-amber-400' : ''
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <p className="text-[11px] text-muted-foreground line-clamp-2 leading-snug mb-2">
-                  {note.rawTranscript}
-                </p>
-
-                <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
-                  <span>{note.date}</span>
-                  <Badge variant="outline" className="text-[9px] px-1 py-0 border-border">
-                    Markdown
-                  </Badge>
-                </div>
-              </div>
-            ))}
-        </div>
-      </aside>
-
-      {/* Detail Pane */}
-      <main className="flex-1 flex flex-col bg-card rounded-lg border border-border p-6 overflow-y-auto min-h-0">
-        {selectedNote ? (
-          <div className="space-y-6 flex-1 flex flex-col">
-            {/* Breadcrumb & Top Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-border">
-              <div>
-                <p className="font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">
-                  RELAY · VAULT NOTE · {selectedNote.date.toUpperCase()}
-                </p>
-                <h2 className="text-xl font-extrabold text-foreground tracking-tight">
-                  {selectedNote.title}
-                </h2>
-              </div>
-
-              {/* Action Toolbar of Buttons */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <Button size="sm" variant="outline" className="rounded-lg text-xs gap-1.5 h-8">
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>Edit</span>
-                </Button>
-                <Button size="sm" variant="outline" className="rounded-lg text-xs gap-1.5 h-8">
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Transform</span>
-                </Button>
-                <Button size="sm" variant="outline" className="rounded-lg text-xs gap-1.5 h-8">
-                  <Languages className="w-3.5 h-3.5" />
-                  <span>Translate</span>
-                </Button>
-                <Button size="sm" variant="outline" className="rounded-lg text-xs gap-1.5 h-8">
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>Share</span>
-                </Button>
-                <Button size="sm" variant="default" className="rounded-lg text-xs gap-1.5 h-8">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Ask Relay</span>
-                </Button>
-
-                <div className="h-4 w-px bg-border mx-1" />
-
-                {/* Icon-Only Quick Actions */}
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={handleCopy}
-                  className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
-                  title="Copy Markdown"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
-                  title="Folder Location"
-                >
-                  <Folder className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
-                  title="Export File"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </div>
-
-            {/* Cleaned Structured Markdown View */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                  STRUCTURED MARKNOWN NOTE
-                </span>
-                <Badge variant="outline" className="text-[10px] font-mono border-primary/30 text-primary">
-                  Obsidian Compatible
-                </Badge>
-              </div>
-              <div className="p-5 rounded-lg bg-muted/30 border border-border font-mono text-xs text-foreground whitespace-pre-wrap leading-relaxed">
-                {selectedNote.cleanedText}
-              </div>
-            </div>
-
-            {/* Labeled Raw Transcript Section */}
-            <div className="space-y-2">
-              <span className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                LABELED RAW TRANSCRIPT
-              </span>
-              <div className="p-4 rounded-lg bg-card border border-border text-xs text-muted-foreground italic leading-relaxed">
-                "{selectedNote.rawTranscript}"
-              </div>
-            </div>
-
-            {/* Standing "Ask Relay to Reshape" Suggestions Block */}
-            <div className="p-4 rounded-lg bg-accent/30 border border-accent-foreground/20 space-y-3">
-              <div className="flex items-center gap-2 text-xs font-bold text-foreground">
-                <MessageSquarePlus className="w-4 h-4 text-primary" />
-                <span>Ask Relay to Reshape</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" className="rounded-lg text-xs bg-card gap-1.5">
-                  <span>Pull out action items</span>
-                  <ArrowRight className="w-3 h-3 text-primary" />
-                </Button>
-                <Button variant="outline" size="sm" className="rounded-lg text-xs bg-card gap-1.5">
-                  <span>Draft executive summary email</span>
-                  <ArrowRight className="w-3 h-3 text-primary" />
-                </Button>
-                <Button variant="outline" size="sm" className="rounded-lg text-xs bg-card gap-1.5">
-                  <span>Summarize in 3 key bullet points</span>
-                  <ArrowRight className="w-3 h-3 text-primary" />
-                </Button>
-              </div>
-            </div>
-
-            {/* Quiet Reassurance Line Near Export */}
-            <div className="pt-4 border-t border-border flex items-center justify-between text-[11px] text-muted-foreground">
-              <div className="flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                <span>Both versions kept — your raw voice is never overwritten</span>
-              </div>
-              <span className="font-mono text-[10px]">Vault Storage: .relay/vault/notes</span>
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-muted-foreground">
-            <FileText className="w-10 h-10 mb-2 opacity-40" />
-            <p className="text-sm font-semibold">Select a scribble note to view</p>
-          </div>
+        {/* Scribble Count Badge (Shown strictly on Workspace page) */}
+        {activeSubTab === 'workspace' && (
+          <Badge variant="outline" className="text-[11px] font-mono text-muted-foreground border-border bg-card/60 px-2.5 py-1 animate-in fade-in duration-150">
+            {scribbles.length} Scribble{scribbles.length === 1 ? '' : 's'}
+          </Badge>
         )}
-      </main>
+      </div>
+
+      {/* Surface Tab 1: Dedicated Capture Tab (Requirement 14, 15, 16) */}
+      {activeSubTab === 'capture' && (
+        <CaptureHubPage
+          onCaptureSuccess={(scribble) => {
+            handleScribbleCreated(scribble);
+            setSelectedScribbleId(scribble.id);
+            setActiveSubTab('workspace');
+          }}
+          onNavigateToScribbles={() => setActiveSubTab('workspace')}
+        />
+      )}
+
+      {/* Surface Tab 2: Living Knowledge Graph Tab */}
+      {activeSubTab === 'graph' && (
+        <div className="flex-1 flex min-h-0">
+          <KnowledgeGraphView
+            graphData={graphData}
+            onSelectScribble={(id) => {
+              setSelectedScribbleId(id);
+              setActiveSubTab('workspace');
+            }}
+            onOpenScribbleEditor={(id) => {
+              setSelectedScribbleId(id);
+              setActiveSubTab('workspace');
+            }}
+          />
+        </div>
+      )}
+
+      {/* Surface Tab 3: Main Workspace (List + Editor) */}
+      {activeSubTab === 'workspace' && (
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
+            {/* Left: Master Scribbles List */}
+            {collapsedPane !== 'left' && (
+              <aside
+                className={`${
+                  collapsedPane === 'right' ? 'flex-1 w-full' : 'w-full md:w-80 lg:w-96'
+                } flex flex-col shrink-0 bg-card rounded-lg border border-border overflow-hidden shadow-xs transition-all duration-150`}
+              >
+                <div className="p-3 border-b border-border">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-muted-foreground" />
+                    <Input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search thoughts, topics…"
+                      className="pl-8 text-xs h-8 bg-muted/30"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                  {filteredScribbles.length === 0 ? (
+                    <div className="text-center py-12 text-xs text-muted-foreground space-y-1.5 px-4">
+                      <p className="font-bold text-foreground">No thoughts found</p>
+                      <p className="text-[11px]">Use the Capture tab or promote a Voice Note.</p>
+                    </div>
+                  ) : (
+                    filteredScribbles.map((note) => (
+                      <div
+                        key={note.id}
+                        onClick={() => {
+                          setSelectedScribbleId(note.id);
+                          if (collapsedPane === 'right') setCollapsedPane('none');
+                        }}
+                        className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${
+                          selectedScribbleId === note.id
+                            ? 'bg-accent/60 border-primary/50 shadow-xs'
+                            : 'bg-card border-transparent hover:bg-muted/40'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <h4 className="text-xs font-bold text-foreground line-clamp-1 flex-1">
+                            {note.title}
+                          </h4>
+                          <Badge variant="outline" className="text-[8px] font-mono uppercase px-1 py-0 bg-muted">
+                            {note.source_type}
+                          </Badge>
+                        </div>
+
+                        <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed mb-2">
+                          {note.summary || note.content}
+                        </p>
+
+                        <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
+                          <span>
+                            {new Date(note.created_at).toLocaleDateString([], {
+                              month: 'short',
+                              day: 'numeric',
+                            })}
+                          </span>
+
+                          {note.topics.length > 0 && (
+                            <span className="text-amber-500 truncate max-w-[120px] font-sans">
+                              {note.topics[0]}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </aside>
+            )}
+
+            {/* Right: Detail Editor Pane */}
+            {collapsedPane !== 'right' && (
+              selectedScribble ? (
+                <div className="flex-1 flex min-h-0 transition-all duration-150">
+                  <ScribbleDetailEditor
+                    scribble={selectedScribble}
+                    allScribbles={scribbles}
+                    onUpdate={handleScribbleUpdated}
+                    onDelete={handleScribbleDeleted}
+                    onSelectScribble={(id) => setSelectedScribbleId(id)}
+                    onScribbleCreated={handleScribbleCreated}
+                  />
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-card rounded-lg border border-border text-muted-foreground">
+                  <FileText className="w-10 h-10 mb-2 opacity-30" />
+                  <p className="text-sm font-semibold text-foreground">Select a scribble to inspect</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Click any thought from the list or create one from the Capture tab.
+                  </p>
+                </div>
+              )
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Surface Tab 4: Split View (Workspace on left, Knowledge Graph on right, with < and > controls) */}
+      {activeSubTab === 'split' && (
+        <div className="flex-1 flex flex-col gap-2 min-h-0 overflow-hidden">
+          <div className="flex items-center justify-between px-1 text-xs">
+            <span className="font-mono text-[10px] text-muted-foreground">
+              Split View: Workspace + Living Graph
+            </span>
+
+            <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg border border-border">
+              <button
+                type="button"
+                onClick={() => setCollapsedPane(collapsedPane === 'left' ? 'none' : 'left')}
+                className={`p-1 rounded text-muted-foreground hover:text-foreground transition-all ${
+                  collapsedPane === 'left' ? 'bg-card text-foreground font-bold shadow-xs' : ''
+                }`}
+                title="< Collapse workspace (Full graph)"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+
+              {collapsedPane !== 'none' && (
+                <button
+                  type="button"
+                  onClick={() => setCollapsedPane('none')}
+                  className="px-2 py-0.5 text-[10px] font-mono text-primary font-bold hover:underline"
+                  title="Restore 50/50 split"
+                >
+                  Restore 50/50
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setCollapsedPane(collapsedPane === 'right' ? 'none' : 'right')}
+                className={`p-1 rounded text-muted-foreground hover:text-foreground transition-all ${
+                  collapsedPane === 'right' ? 'bg-card text-foreground font-bold shadow-xs' : ''
+                }`}
+                title="> Collapse graph (Full workspace)"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
+            {/* Left Pane: Workspace */}
+            {collapsedPane !== 'left' && (
+              <div className={`${collapsedPane === 'right' ? 'w-full flex-1' : 'w-full md:w-1/2'} flex min-h-0`}>
+                {selectedScribble ? (
+                  <ScribbleDetailEditor
+                    scribble={selectedScribble}
+                    allScribbles={scribbles}
+                    onUpdate={handleScribbleUpdated}
+                    onDelete={handleScribbleDeleted}
+                    onSelectScribble={(id) => setSelectedScribbleId(id)}
+                    onScribbleCreated={handleScribbleCreated}
+                  />
+                ) : (
+                  <div className="flex-1 flex items-center justify-center p-8 bg-card rounded-lg border border-border text-muted-foreground">
+                    <p className="text-xs">No scribble selected.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Right Pane: Graph */}
+            {collapsedPane !== 'right' && (
+              <div className={`${collapsedPane === 'left' ? 'w-full flex-1' : 'w-full md:w-1/2'} flex min-h-0`}>
+                <KnowledgeGraphView
+                  graphData={graphData}
+                  onSelectScribble={(id) => setSelectedScribbleId(id)}
+                  onOpenScribbleEditor={(id) => {
+                    setSelectedScribbleId(id);
+                    setCollapsedPane('right');
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

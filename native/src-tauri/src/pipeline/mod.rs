@@ -6,6 +6,9 @@ use thiserror::Error;
 mod chat;
 pub use chat::process_chat;
 
+mod enrichment;
+pub use enrichment::enrich_scribble;
+
 #[derive(Error, Debug)]
 pub enum PipelineError {
     #[error("LLM Provider error: {0}")]

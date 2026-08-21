@@ -18,8 +18,10 @@ pub enum SettingsError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HotkeySettings {
     /// Toggles the main window's visibility/focus from anywhere in the OS.
+    #[serde(default = "default_show_hide_hotkey")]
     pub show_hide_hotkey: String,
     /// Push-to-talk: hold to dictate into whatever field currently has OS focus.
+    #[serde(default = "default_dictation_hotkey")]
     pub dictation_hotkey: String,
     /// When true, the dictation hotkey toggles instead of requiring a
     /// press-and-hold: one press starts recording, a second press stops it,
@@ -31,23 +33,37 @@ pub struct HotkeySettings {
     pub toggle_to_talk: bool,
 }
 
+fn default_show_hide_hotkey() -> String {
+    "Ctrl+Shift+Space".to_string()
+}
+
+fn default_dictation_hotkey() -> String {
+    "Ctrl+Space".to_string()
+}
+
 impl Default for HotkeySettings {
     fn default() -> Self {
         Self {
-            show_hide_hotkey: "Ctrl+Shift+Space".to_string(),
-            dictation_hotkey: "Ctrl+Space".to_string(),
+            show_hide_hotkey: default_show_hide_hotkey(),
+            dictation_hotkey: default_dictation_hotkey(),
             toggle_to_talk: false,
         }
     }
 }
 
 /// Local speech-to-text configuration (whisper.cpp via whisper-rs).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct SttSettings {
-    /// Path to a GGML Whisper model file (e.g. `ggml-base.en.bin`). Download
+    /// Path to a GGML Whisper model file (e.g. `ggml-small.bin`). Download
     /// one from https://huggingface.co/ggerganov/whisper.cpp/tree/main and
     /// point this at it — Relay does not bundle a model.
     pub whisper_model_path: Option<String>,
+    /// Whether domain vocabulary initial prompting is enabled. Defaults to false.
+    #[serde(default, alias = "enableInitialPrompt")]
+    pub enable_initial_prompt: bool,
+    /// Optional user-defined technical vocabulary prompt.
+    #[serde(default, alias = "customInitialPrompt")]
+    pub custom_initial_prompt: Option<String>,
 }
 
 /// Local text-to-speech configuration (Piper). Both fields must be set for
@@ -100,6 +116,53 @@ pub struct VaultSettings {
     pub directory: Option<String>,
 }
 
+/// Language and script preferences.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LanguageSettings {
+    /// Primary language for dictation: ISO code (e.g. "en", "hi", "kn", "ta").
+    #[serde(default = "default_primary_dictation_language", alias = "primaryDictationLanguage")]
+    pub primary_dictation_language: String,
+
+    /// Languages the user speaks: ISO codes (e.g. ["en", "hi"]).
+    #[serde(default = "default_spoken_languages", alias = "spokenLanguages")]
+    pub spoken_languages: Vec<String>,
+
+    /// Target language for generated notes and summaries: ISO code (e.g. "en", "hi").
+    #[serde(default = "default_notes_language", alias = "notesLanguage")]
+    pub notes_language: String,
+
+    /// Writing script rule for dictation/notes: "latin" (Romanized) or "native".
+    #[serde(default = "default_output_script", alias = "outputScript")]
+    pub output_script: String,
+}
+
+fn default_primary_dictation_language() -> String {
+    "en".to_string()
+}
+
+fn default_spoken_languages() -> Vec<String> {
+    vec!["en".to_string()]
+}
+
+fn default_notes_language() -> String {
+    "en".to_string()
+}
+
+fn default_output_script() -> String {
+    "latin".to_string()
+}
+
+impl Default for LanguageSettings {
+    fn default() -> Self {
+        Self {
+            primary_dictation_language: default_primary_dictation_language(),
+            spoken_languages: default_spoken_languages(),
+            notes_language: default_notes_language(),
+            output_script: default_output_script(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppSettings {
     #[serde(default)]
@@ -114,6 +177,8 @@ pub struct AppSettings {
     pub ui: UiSettings,
     #[serde(default)]
     pub vault: VaultSettings,
+    #[serde(default)]
+    pub language: LanguageSettings,
 }
 
 impl AppSettings {
@@ -176,5 +241,88 @@ mod tests {
             serde_json::from_str::<PillPosition>("\"bottom_right\"").unwrap(),
             PillPosition::BottomRight
         );
+    }
+
+    #[test]
+    fn test_language_settings_defaults() {
+        let defaults = LanguageSettings::default();
+        assert_eq!(defaults.primary_dictation_language, "en");
+        assert_eq!(defaults.spoken_languages, vec!["en".to_string()]);
+        assert_eq!(defaults.notes_language, "en");
+        assert_eq!(defaults.output_script, "latin");
+    }
+
+    #[test]
+    fn test_language_settings_backward_compatibility() {
+        // Empty JSON should deserialize with full defaults
+        let app_settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(app_settings.language.primary_dictation_language, "en");
+        assert_eq!(app_settings.language.spoken_languages, vec!["en".to_string()]);
+        assert_eq!(app_settings.language.notes_language, "en");
+        assert_eq!(app_settings.language.output_script, "latin");
+
+        // Partial JSON with legacy settings and no language field
+        let legacy_json = r#"{
+            "stt": { "whisper_model_path": "models/ggml-base.bin" },
+            "hotkeys": { "dictation_hotkey": "Ctrl+Space" }
+        }"#;
+        let loaded: AppSettings = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(loaded.language.primary_dictation_language, "en");
+        assert_eq!(loaded.language.spoken_languages, vec!["en"]);
+        assert_eq!(loaded.stt.whisper_model_path.as_deref(), Some("models/ggml-base.bin"));
+    }
+
+    #[test]
+    fn test_language_settings_camel_case_aliases() {
+        let camel_json = r#"{
+            "language": {
+                "primaryDictationLanguage": "hi",
+                "spokenLanguages": ["en", "hi"],
+                "notesLanguage": "en",
+                "outputScript": "latin"
+            }
+        }"#;
+        let loaded: AppSettings = serde_json::from_str(camel_json).unwrap();
+        assert_eq!(loaded.language.primary_dictation_language, "hi");
+        assert_eq!(loaded.language.spoken_languages, vec!["en", "hi"]);
+        assert_eq!(loaded.language.notes_language, "en");
+        assert_eq!(loaded.language.output_script, "latin");
+    }
+
+    #[test]
+    fn test_language_settings_roundtrip() {
+        let custom = LanguageSettings {
+            primary_dictation_language: "kn".to_string(),
+            spoken_languages: vec!["en".to_string(), "hi".to_string(), "kn".to_string()],
+            notes_language: "en".to_string(),
+            output_script: "latin".to_string(),
+        };
+        let json = serde_json::to_string(&custom).unwrap();
+        let deserialized: LanguageSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(custom, deserialized);
+    }
+
+    #[test]
+    fn test_language_settings_file_persistence_and_reload() {
+        let dir = std::env::temp_dir().join(format!("relay_test_settings_{}", uuid::Uuid::new_v4()));
+        let settings_path = dir.join("settings.json");
+
+        let mut app_settings = AppSettings::default();
+        app_settings.language = LanguageSettings {
+            primary_dictation_language: "hi".to_string(),
+            spoken_languages: vec!["hi".to_string(), "en".to_string()],
+            notes_language: "en".to_string(),
+            output_script: "latin".to_string(),
+        };
+
+        app_settings.save(&settings_path).expect("failed to save settings file");
+        let reloaded = AppSettings::load(&settings_path).expect("failed to reload settings file");
+
+        assert_eq!(reloaded.language.primary_dictation_language, "hi");
+        assert_eq!(reloaded.language.spoken_languages, vec!["hi", "en"]);
+        assert_eq!(reloaded.language.notes_language, "en");
+        assert_eq!(reloaded.language.output_script, "latin");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

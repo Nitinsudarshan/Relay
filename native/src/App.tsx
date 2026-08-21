@@ -6,7 +6,6 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { RelayLogo } from './components/common/RelayLogo';
 import { ChangelogModal } from './components/common/ChangelogModal';
 import { ProcessedPipelineResult } from './types';
-import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import {
   Mic,
@@ -20,27 +19,20 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
-const TAB_LABELS: Record<'capture' | 'scribble' | 'settings', string> = {
+export type MainTabType = 'capture' | 'scribble' | 'settings';
+
+const TAB_LABELS: Record<MainTabType, string> = {
   capture: 'Voice Note',
-  scribble: 'Scribble Notes',
+  scribble: 'Scribbles',
   settings: 'Settings',
 };
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<
-    'capture' | 'scribble' | 'settings'
-  >('capture');
+  const [activeTab, setActiveTab] = useState<MainTabType>('capture');
   const [lastResult, setLastResult] = useState<ProcessedPipelineResult | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [changelogOpen, setChangelogOpen] = useState(false);
-  const [appVersion, setAppVersion] = useState<string>('0.6.0');
-
-  const handleProcessComplete = (result: ProcessedPipelineResult) => {
-    setLastResult(result);
-    if (result.mode === 'scribble') {
-      setActiveTab('scribble');
-    }
-  };
+  const [appVersion, setAppVersion] = useState<string>('0.8.0');
 
   useEffect(() => {
     invoke<string>('get_app_version')
@@ -52,74 +44,66 @@ export const App: React.FC = () => {
       });
   }, []);
 
-  // The dictation pill defaults to living in its own floating desktop
-  // window, separate from this one — this main window has no direct
-  // handle to it, so it learns a capture finished (and switches to the
-  // Scribble tab) from the backend event instead of a prop callback.
-  // Also covers the in-app fallback pill for free.
-  useEffect(() => {
-    const unlistenPromise = listen<ProcessedPipelineResult>('capture-processed', ({ payload }) =>
-      handleProcessComplete(payload)
-    );
-    const unlistenTabPromise = listen<string>('navigate-tab', ({ payload }) => {
-      if (
-        payload === 'capture' ||
-        payload === 'scribble' ||
-        payload === 'settings'
-      ) {
-        setActiveTab(payload as any);
-      }
-    });
-    return () => {
-      unlistenPromise.then((unlisten) => unlisten());
-      unlistenTabPromise.then((unlisten) => unlisten());
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-
   const renderHeroHeader = () => {
     switch (activeTab) {
       case 'capture':
         return (
-          <div className="mb-6">
-            <p className="font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">
-              RELAY · VOICE NOTES
-            </p>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">
-              Voice <span className="italic text-primary">Notes</span>
-            </h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              Everything you dictate, captured in one place.
-            </p>
+          <div className="relative rounded-lg border border-border/80 bg-gradient-to-br from-card via-card/95 to-emerald-500/5 p-5 md:p-6 shadow-xs overflow-hidden mb-5 shrink-0">
+            <div className="absolute -right-10 -top-10 w-40 h-40 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] font-mono uppercase tracking-wider text-emerald-500 border-emerald-500/30 bg-emerald-500/5 gap-1.5 py-0.5 px-2">
+                  <Mic className="w-3 h-3 text-emerald-500" />
+                  <span>Capture Surface</span>
+                </Badge>
+              </div>
+              <h1 className="text-xl md:text-2xl font-extrabold tracking-tight text-foreground">
+                Voice <span className="italic text-primary">Notes</span>
+              </h1>
+              <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
+                Everything you dictate, captured in one truthful history.
+              </p>
+            </div>
           </div>
         );
       case 'scribble':
         return (
-          <div className="mb-6">
-            <p className="font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">
-              RELAY · SCRIBBLES
-            </p>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">
-              Raw thoughts, <span className="italic text-primary">polished</span> state.
-            </h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              Structured markdown notes with raw audio backstop intact.
-            </p>
+          <div className="relative rounded-lg border border-border/80 bg-gradient-to-br from-card via-card/95 to-primary/5 p-5 md:p-6 shadow-xs overflow-hidden mb-5 shrink-0">
+            <div className="absolute -right-10 -top-10 w-40 h-40 bg-primary/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] font-mono uppercase tracking-wider text-primary border-primary/30 bg-primary/5 gap-1.5 py-0.5 px-2">
+                  <Sparkles className="w-3 h-3 text-primary" />
+                  <span>Knowledge Layer</span>
+                </Badge>
+              </div>
+              <h1 className="text-xl md:text-2xl font-extrabold tracking-tight text-foreground">
+                Connected thoughts, <span className="italic text-primary">living</span> knowledge.
+              </h1>
+              <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
+                Capture atomic thoughts, connect related ideas, and explore your Obsidian-compatible knowledge graph.
+              </p>
+            </div>
           </div>
         );
       case 'settings':
         return (
-          <div className="mb-6">
-            <p className="font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">
-              RELAY · SETTINGS
-            </p>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">
-              How Relay <span className="italic text-primary">behaves</span>.
-            </h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              Configure local LLMs, cloud fallback providers, triggers, and privacy bounds.
-            </p>
+          <div className="relative rounded-lg border border-border/80 bg-gradient-to-br from-card via-card/95 to-purple-500/5 p-5 md:p-6 shadow-xs overflow-hidden mb-5 shrink-0">
+            <div className="absolute -right-10 -top-10 w-40 h-40 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] font-mono uppercase tracking-wider text-purple-500 border-purple-500/30 bg-purple-500/5 gap-1.5 py-0.5 px-2">
+                  <Settings className="w-3 h-3 text-purple-500" />
+                  <span>Preferences & Vault</span>
+                </Badge>
+              </div>
+              <h1 className="text-xl md:text-2xl font-extrabold tracking-tight text-foreground">
+                How Relay <span className="italic text-primary">behaves</span>.
+              </h1>
+              <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
+                Configure local LLMs, triggers, privacy bounds, and manage 30-day trash recovery.
+              </p>
+            </div>
           </div>
         );
     }
@@ -127,7 +111,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex h-screen w-screen bg-background text-foreground overflow-hidden font-sans">
-      {/* Navigation Sidebar */}
+      {/* Navigation Sidebar (Original Relay 3-item Structure) */}
       <aside
         className={`${
           sidebarOpen ? 'w-64 p-4 border-r border-sidebar-border opacity-100' : 'w-0 p-0 border-none opacity-0 pointer-events-none'
@@ -146,8 +130,9 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Navigation Items with active accent dot */}
+        {/* Navigation Items (Voice Note, Scribble Notes, Settings) */}
         <nav className="flex-1 space-y-1">
+          {/* 1. Voice Note */}
           <button
             onClick={() => setActiveTab('capture')}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
@@ -157,12 +142,13 @@ export const App: React.FC = () => {
             }`}
           >
             <div className="flex items-center gap-2.5">
-              <Mic className="w-4 h-4" />
+              <Mic className="w-4 h-4 text-emerald-500" />
               <span>Voice Note</span>
             </div>
             {activeTab === 'capture' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
           </button>
 
+          {/* 2. Scribbles */}
           <button
             onClick={() => setActiveTab('scribble')}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
@@ -172,12 +158,13 @@ export const App: React.FC = () => {
             }`}
           >
             <div className="flex items-center gap-2.5">
-              <Sparkles className="w-4 h-4" />
-              <span>Scribble Notes</span>
+              <Sparkles className="w-4 h-4 text-amber-500" />
+              <span>Scribbles</span>
             </div>
             {activeTab === 'scribble' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
           </button>
 
+          {/* 3. Settings */}
           <button
             onClick={() => setActiveTab('settings')}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
@@ -265,22 +252,12 @@ export const App: React.FC = () => {
 
         {/* View Surface Container */}
         <main className="flex-1 p-4 md:p-6 overflow-y-auto flex flex-col bg-background">
-          {/* Top Hero Banner */}
           {renderHeroHeader()}
 
-          {/* The Dictation Pill (its own always-on-top floating window) is
-              the sole capture/control surface and owns its own listeners
-              regardless of which main-window tab is active — this tab is
-              purely the history/review surface, so it can mount/unmount
-              normally like the other tabs. */}
           {activeTab === 'capture' && <VoiceNotePage />}
 
-          {activeTab === 'scribble' && (
-            <ScribbleViewer
-              content={lastResult?.output_markdown || ''}
-              transcript={lastResult?.transcript || ''}
-            />
-          )}
+          {activeTab === 'scribble' && <ScribbleViewer />}
+
           {activeTab === 'settings' && <ProviderSettings />}
         </main>
       </div>

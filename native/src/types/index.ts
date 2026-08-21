@@ -62,8 +62,120 @@ export interface ProviderSettings {
 }
 
 export interface SttSettings {
-  /** Path to a GGML Whisper model file (e.g. ggml-base.en.bin). */
+  /** Path to a GGML Whisper model file (e.g. ggml-small.bin). */
   whisper_model_path?: string | null;
+  /** Whether domain vocabulary initial prompting is enabled. Defaults to false. */
+  enable_initial_prompt?: boolean;
+  /** Optional user-defined technical vocabulary prompt. */
+  custom_initial_prompt?: string | null;
+  enableInitialPrompt?: boolean;
+  customInitialPrompt?: string | null;
+}
+
+export interface SttDiagnosticSnapshot {
+  timestamp_epoch_ms: number;
+  session_mode: string;
+  audio_file?: string | null;
+
+  // Audio characteristics
+  original_duration_seconds: number;
+  processed_duration_seconds: number;
+  sample_rate: number;
+  channels: number;
+  rms: number;
+  peak_amplitude: number;
+  near_zero_percent: number;
+  has_non_finite: boolean;
+
+  // VAD activity
+  speech_detected: boolean;
+  vad_start_seconds: number;
+  vad_end_seconds: number;
+  vad_trimmed_duration_seconds: number;
+  silence_removed_percent: number;
+  noise_floor: number;
+  onset_threshold: number;
+
+  // Model & language resolution
+  model_filename: string;
+  model_path: string;
+  primary_dictation_language: string;
+  spoken_languages: string[];
+  resolved_whisper_language?: string | null;
+  translate: boolean;
+
+  // Effective decoding configuration
+  strategy: string;
+  best_of: number;
+  beam_size?: number | null;
+  temperature: number;
+  temperature_inc: number;
+  used_initial_prompt: boolean;
+  initial_prompt_text?: string | null;
+  no_speech_thold: number;
+  entropy_thold: number;
+  logprob_thold: number;
+
+  // Performance & transcription outcome
+  inference_duration_ms: number;
+  real_time_factor: number;
+  segment_count: number;
+  transcript: string;
+  transcript_char_count: number;
+  error?: string | null;
+}
+
+export interface AccuracyMetrics {
+  reference: string;
+  hypothesis: string;
+  word_count: number;
+  substitutions: number;
+  deletions: number;
+  insertions: number;
+  wer: number;
+  cer: number;
+  technical_term_accuracy?: number | null;
+}
+
+export interface EvaluationResult {
+  test_id: string;
+  audio_file: string;
+  configuration: string;
+  language_setting: string;
+  resolved_whisper_language?: string | null;
+  original_duration_seconds: number;
+  processed_duration_seconds: number;
+  inference_duration_ms: number;
+  real_time_factor: number;
+  transcript: string;
+  audio_rms: number;
+  audio_peak: number;
+  near_zero_percent: number;
+  speech_detected: boolean;
+  vad_trimmed_duration: number;
+  model_filename: string;
+  sampling_strategy: string;
+  best_of: number;
+  beam_size?: number | null;
+  temperature: number;
+  temperature_increment: number;
+  initial_prompt_used: boolean;
+  no_speech_threshold: number;
+  entropy_threshold: number;
+  logprob_threshold: number;
+  accuracy?: AccuracyMetrics | null;
+  fallback_triggered: boolean;
+  error?: string | null;
+}
+
+export interface CorpusItem {
+  test_id: string;
+  audio_filename: string;
+  category: string;
+  language: string;
+  reference?: string | null;
+  reference_available: boolean;
+  description: string;
 }
 
 export interface TtsSettings {
@@ -92,6 +204,22 @@ export interface VaultSettings {
   directory?: string | null;
 }
 
+export interface LanguageSettings {
+  /** Primary language for dictation (ISO code, e.g. "en", "hi", "kn", "ta"). */
+  primary_dictation_language: string;
+  /** Languages the user speaks (ISO codes, e.g. ["en", "hi"]). */
+  spoken_languages: string[];
+  /** Target language for generated notes and summaries (ISO code, e.g. "en", "hi"). */
+  notes_language: string;
+  /** Writing script rule for dictation/notes: "latin" (Romanized) or "native". */
+  output_script: string;
+  // Optional camelCase aliases for interoperability
+  primaryDictationLanguage?: string;
+  spokenLanguages?: string[];
+  notesLanguage?: string;
+  outputScript?: string;
+}
+
 /** Mirrors the Rust `AppSettings` struct persisted at `.relay/config/settings.json`. */
 export interface AppSettings {
   provider: ProviderSettings;
@@ -100,6 +228,7 @@ export interface AppSettings {
   hotkeys: HotkeySettings;
   ui: UiSettings;
   vault: VaultSettings;
+  language: LanguageSettings;
 }
 
 export interface ChangelogItem {
@@ -117,4 +246,148 @@ export interface ChangelogEntry {
   domains: string[];
   items: ChangelogItem[];
 }
+
+export type ScribbleSourceType =
+  | 'voice'
+  | 'text'
+  | 'file'
+  | 'clipboard'
+  | 'browser_selection'
+  | 'browser_page'
+  | 'browser_conversation'
+  | 'screenshot'
+  | 'image'
+  | 'meeting';
+
+export type ScribbleRelationshipType =
+  | 'RELATED_TO'
+  | 'MENTIONS'
+  | 'SAME_TOPIC'
+  | 'SAME_PROJECT'
+  | 'CONTRADICTS'
+  | 'EXTENDS'
+  | 'DERIVED_FROM';
+
+export interface ScribbleRelationship {
+  id: string;
+  target_id: string;
+  relationship_type: ScribbleRelationshipType | string;
+  confidence: number;
+  source: 'ai' | 'user' | 'system' | string;
+}
+
+export interface ScribbleAttachment {
+  id: string;
+  filename: string;
+  path: string;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+}
+
+export interface ScribbleAiMetadata {
+  enrichment_status: 'pending' | 'enriched' | 'failed' | 'none' | string;
+  suggested_concepts: string[];
+  suggested_questions: string[];
+  suggested_relations: string[];
+  last_enriched_at?: string | null;
+}
+
+export interface Scribble {
+  id: string;
+  title: string;
+  content: string;
+  summary?: string | null;
+  source_type: ScribbleSourceType | string;
+  source_metadata: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+  tags: string[];
+  topics: string[];
+  entities: string[];
+  relationships: ScribbleRelationship[];
+  attachments: ScribbleAttachment[];
+  status: 'active' | 'archived' | string;
+  ai_metadata: ScribbleAiMetadata;
+}
+
+export interface KnowledgeNode {
+  id: string;
+  node_type: 'scribble' | 'topic' | 'entity' | 'source' | 'project' | 'document' | 'task' | 'meeting' | 'voice_note' | string;
+  label: string;
+  summary?: string | null;
+  metadata: Record<string, any>;
+  degree: number;
+  source_type?: string | null;
+}
+
+export interface KnowledgeEdge {
+  id: string;
+  source_id: string;
+  target_id: string;
+  relationship: string;
+  confidence: number;
+  source: string;
+}
+
+export interface KnowledgeGraphData {
+  nodes: KnowledgeNode[];
+  edges: KnowledgeEdge[];
+}
+
+export interface GraphFilter {
+  include_scribbles?: boolean;
+  include_topics?: boolean;
+  include_entities?: boolean;
+  include_sources?: boolean;
+  orphans_only?: boolean;
+  query?: string;
+}
+
+export interface KnowledgeSearchResult {
+  direct_matches: Scribble[];
+  related_scribbles: Scribble[];
+  matched_topics: string[];
+  matched_entities: string[];
+  total_count: number;
+}
+
+export interface TrashItem {
+  id: string;
+  original_id: string;
+  item_type: 'scribble' | 'voice_note' | string;
+  title: string;
+  snippet: string;
+  deleted_at: string;
+  expires_at: string;
+}
+
+export interface GraphFiltersSettings {
+  searchQuery: string;
+  showTags: boolean;
+  showAttachments: boolean;
+  existingFilesOnly: boolean;
+  showOrphans: boolean;
+}
+
+export interface GraphGroup {
+  id: string;
+  query: string;
+  color: string;
+}
+
+export interface GraphDisplaySettings {
+  showArrows: boolean;
+  textFadeThreshold: number; // 0.00 to 2.00
+  nodeSizeMultiplier: number; // 0.50 to 3.00
+  linkThickness: number; // 0.50 to 3.00
+}
+
+export interface GraphForcesSettings {
+  centerForce: number; // 0.00 to 1.00 (normalized)
+  repelForce: number; // 0.00 to 20.00 (normalized)
+  linkForce: number; // 0.00 to 1.00 (normalized)
+  linkDistance: number; // 30 to 500
+}
+
+
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { HardDrive, Mic, ShieldCheck, Edit3, Trash2, GitMerge, Copy, Check, X, Save } from 'lucide-react';
+import { HardDrive, Mic, ShieldCheck, Edit3, Trash2, GitMerge, Copy, Check, X, Save, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { VaultLocationInfo, VaultNote } from '../../types';
@@ -80,7 +80,22 @@ export const VoiceNotePage: React.FC = () => {
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const [mergingNoteId, setMergingNoteId] = useState<string | null>(null);
   const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
+  const [promotedNoteIds, setPromotedNoteIds] = useState<Set<string>>(new Set());
   const [actionBusy, setActionBusy] = useState(false);
+
+  const handlePromoteToScribble = async (note: VaultNote) => {
+    setActionBusy(true);
+    try {
+      await invoke('promote_voice_note_to_scribble', {
+        voiceNoteId: note.id,
+      });
+      setPromotedNoteIds((prev) => new Set(prev).add(note.id));
+    } catch (err) {
+      console.error('Failed to promote Voice Note to Scribble:', err);
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
   const refreshLocation = async () => {
     try {
@@ -109,6 +124,18 @@ export const VoiceNotePage: React.FC = () => {
     invoke<VaultNote[]>('get_voice_notes')
       .then(setNotes)
       .catch((err) => console.error('Failed to load Voice Notes', err));
+
+    invoke<{ source_metadata?: { source_voice_note_id?: string } }[]>('get_scribbles')
+      .then((scribbles) => {
+        const ids = new Set<string>();
+        for (const s of scribbles) {
+          if (s.source_metadata?.source_voice_note_id) {
+            ids.add(s.source_metadata.source_voice_note_id);
+          }
+        }
+        setPromotedNoteIds(ids);
+      })
+      .catch((err) => console.error('Failed to load Scribble promotion mapping', err));
   }, [vaultState.status]);
 
   useEffect(() => {
@@ -312,6 +339,12 @@ export const VoiceNotePage: React.FC = () => {
                       <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0">
                         {countWords(note.content)} words
                       </Badge>
+                      {promotedNoteIds.has(note.id) && (
+                        <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 bg-primary/10 text-primary border-primary/25 gap-1">
+                          <Sparkles className="w-2.5 h-2.5" />
+                          <span>SCRIBBLE</span>
+                        </Badge>
+                      )}
                     </div>
 
                     {/* Action Buttons Toolbar */}
@@ -337,6 +370,27 @@ export const VoiceNotePage: React.FC = () => {
                             <GitMerge className="w-3.5 h-3.5" />
                           </Button>
                         )}
+
+                        {/* Save / Promote as Scribble */}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => handlePromoteToScribble(note)}
+                          disabled={actionBusy || promotedNoteIds.has(note.id)}
+                          className={`h-7 w-7 rounded-lg transition-colors ${
+                            promotedNoteIds.has(note.id)
+                              ? 'bg-primary/10 text-primary cursor-default'
+                              : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
+                          }`}
+                          title={promotedNoteIds.has(note.id) ? 'Promoted to Scribble' : 'Save as Scribble (Promote into Knowledge Layer)'}
+                          aria-label="Save as Scribble"
+                        >
+                          {promotedNoteIds.has(note.id) ? (
+                            <Check className="w-3.5 h-3.5 text-primary" />
+                          ) : (
+                            <Sparkles className="w-3.5 h-3.5" />
+                          )}
+                        </Button>
 
                         {/* Edit Note */}
                         <Button
@@ -443,7 +497,7 @@ export const VoiceNotePage: React.FC = () => {
                   {/* Delete Confirmation Inline Banner */}
                   {isDeleting && (
                     <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-600 dark:text-red-400 animate-in fade-in duration-150">
-                      <span className="font-medium">Are you sure you want to delete this voice note permanently?</span>
+                      <span className="font-medium">Move this Voice Note to Trash? (Kept for 30 days before permanent deletion)</span>
                       <div className="flex items-center gap-1.5">
                         <Button
                           size="sm"
@@ -462,7 +516,7 @@ export const VoiceNotePage: React.FC = () => {
                           className="h-7 text-xs gap-1 font-semibold"
                         >
                           <Trash2 className="w-3 h-3" />
-                          <span>Delete</span>
+                          <span>Move to Trash</span>
                         </Button>
                       </div>
                     </div>

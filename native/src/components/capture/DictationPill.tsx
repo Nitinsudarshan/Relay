@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { AppSettings, PillPosition, ProcessedPipelineResult } from '../../types';
+import { AppSettings, LanguageSettings, PillPosition, ProcessedPipelineResult } from '../../types';
 import { PillSettingsPopover } from './PillSettingsPopover';
 import { 
   PillState, 
@@ -23,6 +23,19 @@ import {
 } from 'lucide-react';
 import { cn, applyThemeWithoutTransition } from '@/lib/utils';
 
+export function getPillLanguageFromSettings(lang?: LanguageSettings): SpeechLanguage {
+  if (!lang) return 'auto';
+  const primary = (lang.primary_dictation_language || '').trim().toLowerCase();
+  const spoken = (lang.spoken_languages || []).map((s) => s.trim().toLowerCase());
+
+  if (primary === 'auto' || !primary) return 'auto';
+  if (spoken.includes('en') && spoken.includes('hi')) return 'hinglish';
+  if (primary === 'hi') return 'hindi';
+  if (primary === 'es') return 'es';
+  if (primary === 'en') return 'english';
+  return (primary as SpeechLanguage);
+}
+
 interface CaptureStatePayload {
   active: boolean;
   mode: string | null;
@@ -38,6 +51,8 @@ const PROCESSING_CAPTIONS = [
   'transcribing speech...',
   'extracting kanban tasks...',
   'writing note to vault...',
+  'summarizing voice note...',
+  'running pipeline triggers...',
 ];
 
 const HOVER_EXPAND_DELAY_MS = 150;
@@ -60,7 +75,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const [textTransform, setTextTransform] = useState(true);
   const [cleanupStyle, setCleanupStyle] = useState<CleanupStyle>('faithful');
   const [promptMode, setPromptMode] = useState(false);
-  const [language, setLanguage] = useState<SpeechLanguage>('english');
+  const [language, setLanguage] = useState<SpeechLanguage>('auto');
   const [dictationShortcut, setDictationShortcut] = useState('Ctrl+Space');
 
   // Audio Level & Captions
@@ -91,6 +106,63 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
   const isExpanded = (phase !== 'collapsed' && phase !== 'hidden_notch' && phase !== 'error' && phase !== 'warning') || hovering || popoverOpen;
 
+  const handleLanguageChange = async (newLang: SpeechLanguage) => {
+    setLanguage(newLang);
+
+    let currentSettings = settings;
+    if (!currentSettings) {
+      try {
+        currentSettings = await invoke<AppSettings>('get_settings');
+      } catch {
+        return;
+      }
+    }
+
+    let primary = 'en';
+    let spoken = ['en'];
+
+    if (newLang === 'auto') {
+      primary = 'auto';
+      spoken = ['en'];
+    } else if (newLang === 'hindi') {
+      primary = 'hi';
+      spoken = ['hi'];
+    } else if (newLang === 'hinglish') {
+      primary = 'en';
+      spoken = ['en', 'hi'];
+    } else if (newLang === 'english') {
+      primary = 'en';
+      spoken = ['en'];
+    } else if (newLang === 'es') {
+      primary = 'es';
+      spoken = ['es'];
+    } else {
+      primary = newLang;
+      spoken = [newLang];
+    }
+
+    const updatedLanguage: LanguageSettings = {
+      ...currentSettings.language,
+      primary_dictation_language: primary,
+      spoken_languages: spoken,
+      notes_language: currentSettings.language?.notes_language || 'en',
+      output_script: currentSettings.language?.output_script || 'latin',
+    };
+
+    const updatedSettings: AppSettings = {
+      ...currentSettings,
+      language: updatedLanguage,
+    };
+
+    setSettings(updatedSettings);
+
+    try {
+      await invoke('save_settings', { settings: updatedSettings });
+    } catch (err) {
+      console.error('Failed to save language settings from pill', err);
+    }
+  };
+
   // Real-time Theme Syncing (Light / Dark / System)
   useEffect(() => {
     const applyTheme = (mode: string) => {
@@ -114,6 +186,15 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       }
     });
 
+    const unlistenSettingsPromise = listen<AppSettings>('settings-changed', ({ payload }) => {
+      if (payload) {
+        setSettings(payload);
+        if (payload.language) {
+          setLanguage(getPillLanguageFromSettings(payload.language));
+        }
+      }
+    });
+
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'relay-theme') {
         applyTheme(e.newValue || 'system');
@@ -131,6 +212,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     return () => {
       unlistenThemePromise.then((unlisten) => unlisten());
       unlistenPositionPromise.then((unlisten) => unlisten());
+      unlistenSettingsPromise.then((unlisten) => unlisten());
       window.removeEventListener('storage', handleStorageChange);
       mediaQuery.removeEventListener('change', handleMediaChange);
     };
@@ -140,6 +222,9 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     try {
       const appSettings = await invoke<AppSettings>('get_settings');
       setSettings(appSettings);
+      if (appSettings?.language) {
+        setLanguage(getPillLanguageFromSettings(appSettings.language));
+      }
       if (appSettings?.hotkeys?.dictation_hotkey) {
         setDictationShortcut(appSettings.hotkeys.dictation_hotkey);
         setHotkeyStatus({ status: 'registered', hotkey: appSettings.hotkeys.dictation_hotkey });
@@ -627,7 +712,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
           promptMode={promptMode}
           onTogglePromptMode={handleTogglePromptMode}
           language={language}
-          onChangeLanguage={setLanguage}
+          onChangeLanguage={handleLanguageChange}
           whisperStatus={whisperStatus}
           ollamaStatus={ollamaStatus}
           hotkeyStatus={hotkeyStatus}

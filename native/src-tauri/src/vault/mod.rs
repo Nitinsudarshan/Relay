@@ -10,6 +10,12 @@ use thiserror::Error;
 /// note types, which remain unchanged.
 pub const VOICE_NOTE_TYPE: &str = "voice_note";
 
+pub mod scribble;
+pub use scribble::*;
+
+pub mod trash;
+pub use trash::*;
+
 #[derive(Error, Debug)]
 pub enum VaultError {
     #[error("Vault IO error: {0}")]
@@ -117,6 +123,8 @@ impl VaultManager {
         let dir = self.vault_dir();
         fs::create_dir_all(dir.join("notes"))?;
         fs::create_dir_all(dir.join("kanban"))?;
+        fs::create_dir_all(dir.join("scribbles"))?;
+        fs::create_dir_all(dir.join("trash"))?;
         Ok(())
     }
 
@@ -465,6 +473,456 @@ impl VaultManager {
             source_note_id,
         })
     }
+
+    pub fn save_scribble(&self, scribble: &Scribble) -> Result<PathBuf, VaultError> {
+        self.init()?;
+        let file_path = self
+            .vault_dir()
+            .join("scribbles")
+            .join(format!("{}.md", scribble.id));
+        let content = scribble.format_markdown();
+        fs::write(&file_path, content)?;
+        tracing::info!("Saved scribble note to {:?}", file_path);
+        Ok(file_path)
+    }
+
+    pub fn get_scribble(&self, id: &str) -> Result<Scribble, VaultError> {
+        self.init()?;
+        let file_path = self
+            .vault_dir()
+            .join("scribbles")
+            .join(format!("{}.md", id));
+        if !file_path.exists() {
+            return Err(VaultError::NotFound(id.to_string()));
+        }
+        let content = fs::read_to_string(&file_path)?;
+        Scribble::parse_markdown(&content)
+            .ok_or_else(|| VaultError::FrontmatterError(format!("Failed to parse scribble {}", id)))
+    }
+
+    pub fn list_scribbles(&self) -> Result<Vec<Scribble>, VaultError> {
+        self.init()?;
+        let scribbles_dir = self.vault_dir().join("scribbles");
+        let mut scribbles = Vec::new();
+
+        if !scribbles_dir.exists() {
+            return Ok(scribbles);
+        }
+
+        for entry in fs::read_dir(scribbles_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "md") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Some(scribble) = Scribble::parse_markdown(&content) {
+                        scribbles.push(scribble);
+                    }
+                }
+            }
+        }
+
+        // Sort newest updated / created first
+        scribbles.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(scribbles)
+    }
+
+    pub fn update_scribble(&self, scribble: &Scribble) -> Result<Scribble, VaultError> {
+        let mut updated = scribble.clone();
+        updated.updated_at = chrono::Utc::now().to_rfc3339();
+        self.save_scribble(&updated)?;
+        Ok(updated)
+    }
+
+    pub fn delete_scribble(&self, id: &str) -> Result<(), VaultError> {
+        self.init()?;
+        let file_path = self
+            .vault_dir()
+            .join("scribbles")
+            .join(format!("{}.md", id));
+        if file_path.exists() {
+            fs::remove_file(&file_path)?;
+            tracing::info!("Deleted scribble {:?}", file_path);
+        }
+        Ok(())
+    }
+
+    pub fn search_scribbles(&self, query: &str, top_k: usize) -> Result<Vec<Scribble>, VaultError> {
+        let scribbles = self.list_scribbles()?;
+        let query_terms = tokenize(query);
+        if query_terms.is_empty() || scribbles.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut scored: Vec<(usize, Scribble)> = scribbles
+            .into_iter()
+            .map(|scribble| {
+                let haystack = format!(
+                    "{} {} {} {} {} {}",
+                    scribble.title,
+                    scribble.content,
+                    scribble.summary.as_deref().unwrap_or(""),
+                    scribble.topics.join(" "),
+                    scribble.entities.join(" "),
+                    scribble.tags.join(" ")
+                )
+                .to_lowercase();
+
+                let score = query_terms
+                    .iter()
+                    .filter(|t| haystack.contains(t.as_str()))
+                    .count();
+                (score, scribble)
+            })
+            .filter(|(score, _)| *score > 0)
+            .collect();
+
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        Ok(scored.into_iter().take(top_k).map(|(_, s)| s).collect())
+    }
+
+    pub fn search_knowledge(&self, query: &str) -> Result<KnowledgeSearchResult, VaultError> {
+        let all_scribbles = self.list_scribbles()?;
+        let query_terms = tokenize(query);
+        if query_terms.is_empty() {
+            return Ok(KnowledgeSearchResult {
+                direct_matches: all_scribbles.clone(),
+                related_scribbles: Vec::new(),
+                matched_topics: Vec::new(),
+                matched_entities: Vec::new(),
+                total_count: all_scribbles.len(),
+            });
+        }
+
+        let mut direct_matches = Vec::new();
+        let mut matched_topics = Vec::new();
+        let mut matched_entities = Vec::new();
+        let mut matched_topic_set = std::collections::HashSet::new();
+
+        for s in &all_scribbles {
+            let haystack = format!("{} {}", s.title, s.content).to_lowercase();
+            let matches_direct = query_terms.iter().any(|t| haystack.contains(t));
+
+            if matches_direct {
+                direct_matches.push(s.clone());
+            }
+
+            for topic in &s.topics {
+                let topic_lower = topic.to_lowercase();
+                if query_terms.iter().any(|t| topic_lower.contains(t)) && !matched_topic_set.contains(topic) {
+                    matched_topic_set.insert(topic.clone());
+                    matched_topics.push(topic.clone());
+                }
+            }
+
+            for entity in &s.entities {
+                let entity_lower = entity.to_lowercase();
+                if query_terms.iter().any(|t| entity_lower.contains(t)) && !matched_entities.contains(entity) {
+                    matched_entities.push(entity.clone());
+                }
+            }
+        }
+
+        // Related scribbles: scribbles that share topics/entities with direct matches or are connected via relationships in either direction
+        let direct_ids: std::collections::HashSet<String> = direct_matches.iter().map(|s| s.id.clone()).collect();
+        let direct_topics: std::collections::HashSet<String> = direct_matches.iter().flat_map(|s| s.topics.clone()).collect();
+        let direct_target_ids: std::collections::HashSet<String> = direct_matches.iter().flat_map(|s| s.relationships.iter().map(|r| r.target_id.clone())).collect();
+        let mut related_scribbles = Vec::new();
+
+        for s in &all_scribbles {
+            if direct_ids.contains(&s.id) {
+                continue;
+            }
+            let shares_topic = s.topics.iter().any(|t| matched_topic_set.contains(t) || direct_topics.contains(t));
+            let links_to_direct = s.relationships.iter().any(|r| direct_ids.contains(&r.target_id));
+            let linked_from_direct = direct_target_ids.contains(&s.id);
+
+            if shares_topic || links_to_direct || linked_from_direct {
+                related_scribbles.push(s.clone());
+            }
+        }
+
+        let total_count = direct_matches.len() + related_scribbles.len();
+
+        Ok(KnowledgeSearchResult {
+            direct_matches,
+            related_scribbles,
+            matched_topics,
+            matched_entities,
+            total_count,
+        })
+    }
+
+    pub fn get_knowledge_graph(&self, filter: Option<&GraphFilter>) -> Result<KnowledgeGraphData, VaultError> {
+        let scribbles = self.list_scribbles()?;
+        Ok(KnowledgeGraphData::from_scribbles(&scribbles, filter))
+    }
+
+    pub fn add_scribble_relationship(
+        &self,
+        source_id: &str,
+        relationship: ScribbleRelationship,
+    ) -> Result<Scribble, VaultError> {
+        let mut scribble = self.get_scribble(source_id)?;
+        scribble.relationships.retain(|r| r.id != relationship.id && r.target_id != relationship.target_id);
+        scribble.relationships.push(relationship);
+        scribble.updated_at = chrono::Utc::now().to_rfc3339();
+        self.save_scribble(&scribble)?;
+        Ok(scribble)
+    }
+
+    pub fn remove_scribble_relationship(
+        &self,
+        source_id: &str,
+        relationship_id: &str,
+    ) -> Result<Scribble, VaultError> {
+        let mut scribble = self.get_scribble(source_id)?;
+        scribble.relationships.retain(|r| r.id != relationship_id);
+        scribble.updated_at = chrono::Utc::now().to_rfc3339();
+        self.save_scribble(&scribble)?;
+        Ok(scribble)
+    }
+
+    /// Moves a scribble or voice note to the 30-day Trash.
+    pub fn move_to_trash(&self, item_type: &str, id: &str) -> Result<TrashItem, VaultError> {
+        self.init()?;
+        let trash_dir = self.vault_dir().join("trash");
+
+        match item_type {
+            "scribble" => {
+                let scribble = self.get_scribble(id)?;
+                let trash_item = TrashItem::new(id, "scribble", &scribble.title, &scribble.content);
+                let meta_path = trash_dir.join(format!("{}.json", trash_item.id));
+                let src_md = self.vault_dir().join("scribbles").join(format!("{}.md", id));
+                let dest_md = trash_dir.join(format!("{}.md", trash_item.id));
+
+                fs::write(&meta_path, serde_json::to_string_pretty(&trash_item).map_err(|e| VaultError::FrontmatterError(e.to_string()))?)?;
+                if src_md.exists() {
+                    fs::rename(&src_md, &dest_md)?;
+                }
+                Ok(trash_item)
+            }
+            "voice_note" | "note" => {
+                let note = self.get_note(id)?;
+                let trash_item = TrashItem::new(id, "voice_note", &note.title, &note.content);
+                let meta_path = trash_dir.join(format!("{}.json", trash_item.id));
+                let src_md = self.vault_dir().join("notes").join(format!("{}.md", id));
+                let dest_md = trash_dir.join(format!("{}.md", trash_item.id));
+
+                fs::write(&meta_path, serde_json::to_string_pretty(&trash_item).map_err(|e| VaultError::FrontmatterError(e.to_string()))?)?;
+                if src_md.exists() {
+                    fs::rename(&src_md, &dest_md)?;
+                }
+                Ok(trash_item)
+            }
+            _ => Err(VaultError::NotFound(format!("Unknown item type: {}", item_type))),
+        }
+    }
+
+    /// Lists all active items currently in Trash, auto-purging any items expired past 30 days.
+    pub fn get_trash_items(&self) -> Result<Vec<TrashItem>, VaultError> {
+        self.init()?;
+        let _ = self.purge_expired_trash();
+        let trash_dir = self.vault_dir().join("trash");
+        let mut items = Vec::new();
+
+        if !trash_dir.exists() {
+            return Ok(items);
+        }
+
+        for entry in fs::read_dir(trash_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(item) = serde_json::from_str::<TrashItem>(&content) {
+                        items.push(item);
+                    }
+                }
+            }
+        }
+
+        items.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+        Ok(items)
+    }
+
+    /// Restores a deleted item from Trash back to its active folder.
+    pub fn restore_trash_item(&self, trash_id: &str) -> Result<(), VaultError> {
+        self.init()?;
+        let trash_dir = self.vault_dir().join("trash");
+        let meta_path = trash_dir.join(format!("{}.json", trash_id));
+        if !meta_path.exists() {
+            return Err(VaultError::NotFound(trash_id.to_string()));
+        }
+
+        let content = fs::read_to_string(&meta_path)?;
+        let item: TrashItem = serde_json::from_str(&content).map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
+
+        let trash_md = trash_dir.join(format!("{}.md", trash_id));
+        match item.item_type.as_str() {
+            "scribble" => {
+                let active_md = self.vault_dir().join("scribbles").join(format!("{}.md", item.original_id));
+                if trash_md.exists() {
+                    fs::rename(&trash_md, &active_md)?;
+                }
+            }
+            "voice_note" | "note" => {
+                let active_md = self.vault_dir().join("notes").join(format!("{}.md", item.original_id));
+                if trash_md.exists() {
+                    fs::rename(&trash_md, &active_md)?;
+                }
+            }
+            _ => {}
+        }
+
+        let _ = fs::remove_file(&meta_path);
+        let _ = fs::remove_file(&trash_md);
+        Ok(())
+    }
+
+    /// Permanently deletes a single item from Trash.
+    pub fn delete_trash_item_permanently(&self, trash_id: &str) -> Result<(), VaultError> {
+        self.init()?;
+        let trash_dir = self.vault_dir().join("trash");
+        let meta_path = trash_dir.join(format!("{}.json", trash_id));
+        let trash_md = trash_dir.join(format!("{}.md", trash_id));
+
+        if meta_path.exists() {
+            fs::remove_file(&meta_path)?;
+        }
+        if trash_md.exists() {
+            fs::remove_file(&trash_md)?;
+        }
+        Ok(())
+    }
+
+    /// Empties all items from Trash.
+    pub fn empty_trash(&self) -> Result<usize, VaultError> {
+        self.init()?;
+        let trash_dir = self.vault_dir().join("trash");
+        let mut count = 0;
+
+        if !trash_dir.exists() {
+            return Ok(0);
+        }
+
+        for entry in fs::read_dir(trash_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                count += 1;
+            }
+            let _ = fs::remove_file(&path);
+        }
+
+        Ok(count)
+    }
+
+    /// Purges items in Trash that have expired past their 30-day window.
+    pub fn purge_expired_trash(&self) -> Result<usize, VaultError> {
+        let trash_dir = self.vault_dir().join("trash");
+        if !trash_dir.exists() {
+            return Ok(0);
+        }
+
+        let mut purged = 0;
+        for entry in fs::read_dir(&trash_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(item) = serde_json::from_str::<TrashItem>(&content) {
+                        if item.is_expired() {
+                            let trash_md = trash_dir.join(format!("{}.md", item.id));
+                            let _ = fs::remove_file(&path);
+                            let _ = fs::remove_file(&trash_md);
+                            purged += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(purged)
+    }
+
+    /// Merges two or more source Scribbles into a brand new synthesized Scribble.
+    /// Preserves full provenance to the source Scribbles and links them with DERIVED_FROM.
+    pub fn merge_scribbles(&self, source_ids: &[String]) -> Result<Scribble, VaultError> {
+        if source_ids.len() < 2 {
+            return Err(VaultError::FrontmatterError("At least 2 scribbles are required to merge.".to_string()));
+        }
+
+        let mut source_scribbles = Vec::new();
+        for id in source_ids {
+            source_scribbles.push(self.get_scribble(id)?);
+        }
+
+        let mut content_parts = Vec::new();
+        let mut combined_topics = std::collections::HashSet::new();
+        let mut combined_entities = std::collections::HashSet::new();
+        let mut combined_tags = std::collections::HashSet::new();
+        let mut derived_relationships = Vec::new();
+
+        for s in &source_scribbles {
+            content_parts.push(format!("### {}\n\n{}", s.title, s.content));
+            for t in &s.topics {
+                combined_topics.insert(t.clone());
+            }
+            for e in &s.entities {
+                combined_entities.insert(e.clone());
+            }
+            for tag in &s.tags {
+                combined_tags.insert(tag.clone());
+            }
+            derived_relationships.push(ScribbleRelationship {
+                id: format!("rel_merge_{}", uuid::Uuid::new_v4()),
+                target_id: s.id.clone(),
+                relationship_type: REL_DERIVED_FROM.to_string(),
+                confidence: 1.0,
+                source: "user".to_string(),
+            });
+        }
+
+        let combined_content = content_parts.join("\n\n---\n\n");
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Clean initial semantic fallback title (3-8 words, never recursive Synthesis:)
+        let default_title = if !combined_topics.is_empty() {
+            let top_topics: Vec<String> = combined_topics.iter().take(2).cloned().collect();
+            format!("Consolidated: {}", top_topics.join(" & "))
+        } else {
+            let first_line = source_scribbles[0].title.as_str();
+            let clean = first_line.trim_start_matches('#').trim();
+            if clean.is_empty() || clean == "Untitled Thought" || clean == "Generating title…" {
+                "Consolidated Thought".to_string()
+            } else {
+                format!("Consolidated: {}", clean)
+            }
+        };
+
+        let mut merged_scribble = Scribble::new_text(&combined_content, Some(&default_title));
+        merged_scribble.topics = combined_topics.into_iter().collect();
+        merged_scribble.entities = combined_entities.into_iter().collect();
+        merged_scribble.tags = combined_tags.into_iter().collect();
+        // IMPORTANT: DO NOT create knowledge graph relationships to the merge inputs.
+        // Merge relationship is purely provenance metadata, not graph edges.
+        merged_scribble.relationships = Vec::new();
+        merged_scribble.source_metadata = serde_json::json!({
+            "creation_method": "merge",
+            "source_scribble_ids": source_ids,
+            "merged_at": now,
+            "source_count": source_ids.len(),
+        });
+
+        self.save_scribble(&merged_scribble)?;
+
+        // Retire the source scribbles to Trash so they do not remain active as independent duplicates
+        for id in source_ids {
+            let _ = self.move_to_trash("scribble", id);
+        }
+
+        Ok(merged_scribble)
+    }
 }
 
 fn tokenize(text: &str) -> Vec<String> {
@@ -649,6 +1107,166 @@ mod tests {
         // Delete merged note
         manager.delete_note(&note_a.id).unwrap();
         assert_eq!(manager.list_notes().unwrap().len(), 0);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_scribble_crud_and_relationships_in_vault() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+
+        // 1. Create text scribble
+        let mut scribble1 = Scribble::new_text("Observation on local LLM speeds.", Some("LLM Latency"));
+        scribble1.topics = vec!["AI".to_string(), "Performance".to_string()];
+        scribble1.entities = vec!["Ollama".to_string(), "Relay".to_string()];
+        manager.save_scribble(&scribble1).unwrap();
+
+        // 2. Promote voice note to scribble
+        let voice_note = VaultNote::new_voice_note("We should connect ideas automatically.");
+        manager.save_note(&voice_note).unwrap();
+
+        let mut scribble2 = Scribble::from_voice_note(&voice_note.id, &voice_note.content, Some("Idea Connections"));
+        scribble2.topics = vec!["AI".to_string(), "Knowledge".to_string()];
+        manager.save_scribble(&scribble2).unwrap();
+
+        // 3. List scribbles
+        let all_scribbles = manager.list_scribbles().unwrap();
+        assert_eq!(all_scribbles.len(), 2);
+
+        // 4. Add relationship between scribble1 and scribble2
+        let rel = ScribbleRelationship {
+            id: "rel_1_2".to_string(),
+            target_id: scribble2.id.clone(),
+            relationship_type: REL_RELATED_TO.to_string(),
+            confidence: 0.95,
+            source: "user".to_string(),
+        };
+        let updated1 = manager.add_scribble_relationship(&scribble1.id, rel.clone()).unwrap();
+        assert_eq!(updated1.relationships.len(), 1);
+        assert_eq!(updated1.relationships[0].target_id, scribble2.id);
+
+        // 5. Knowledge Graph extraction
+        let graph = manager.get_knowledge_graph(None).unwrap();
+        assert!(graph.nodes.iter().any(|n| n.id == scribble1.id));
+        assert!(graph.nodes.iter().any(|n| n.id == scribble2.id));
+        assert!(graph.nodes.iter().any(|n| n.label == "AI")); // Topic node
+        assert!(graph.nodes.iter().any(|n| n.label == "Ollama")); // Entity node
+
+        // 6. Search knowledge
+        let search_res = manager.search_knowledge("Latency").unwrap();
+        assert_eq!(search_res.direct_matches.len(), 1);
+        assert_eq!(search_res.direct_matches[0].id, scribble1.id);
+        // scribble2 is related via rel_1_2 or topic AI
+        assert!(search_res.related_scribbles.iter().any(|s| s.id == scribble2.id));
+
+        // 7. Remove relationship
+        let updated1_no_rel = manager.remove_scribble_relationship(&scribble1.id, "rel_1_2").unwrap();
+        assert_eq!(updated1_no_rel.relationships.len(), 0);
+
+        // 8. Delete scribble (direct removal)
+        manager.delete_scribble(&scribble1.id).unwrap();
+        assert_eq!(manager.list_scribbles().unwrap().len(), 1);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_trash_lifecycle_and_recovery() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+
+        // 1. Create a voice note and a scribble
+        let voice_note = VaultNote::new_voice_note("Thought to be moved to trash.");
+        manager.save_note(&voice_note).unwrap();
+
+        let scribble = Scribble::new_text("Scribble to be soft deleted.", Some("Trash Test"));
+        manager.save_scribble(&scribble).unwrap();
+
+        assert_eq!(manager.list_notes().unwrap().len(), 1);
+        assert_eq!(manager.list_scribbles().unwrap().len(), 1);
+
+        // 2. Move scribble to trash
+        let trash_scribble = manager.move_to_trash("scribble", &scribble.id).unwrap();
+        assert_eq!(trash_scribble.item_type, "scribble");
+        assert_eq!(trash_scribble.days_remaining(), 30);
+        // Active list should now be empty
+        assert_eq!(manager.list_scribbles().unwrap().len(), 0);
+
+        // 3. Move voice note to trash
+        let trash_note = manager.move_to_trash("voice_note", &voice_note.id).unwrap();
+        assert_eq!(trash_note.item_type, "voice_note");
+        assert_eq!(manager.list_notes().unwrap().len(), 0);
+
+        // 4. List trash items
+        let trash_items = manager.get_trash_items().unwrap();
+        assert_eq!(trash_items.len(), 2);
+
+        // 5. Restore voice note
+        manager.restore_trash_item(&trash_note.id).unwrap();
+        assert_eq!(manager.list_notes().unwrap().len(), 1);
+        assert_eq!(manager.get_trash_items().unwrap().len(), 1);
+
+        // 6. Permanently delete scribble
+        manager.delete_trash_item_permanently(&trash_scribble.id).unwrap();
+        assert_eq!(manager.get_trash_items().unwrap().len(), 0);
+        assert_eq!(manager.list_scribbles().unwrap().len(), 0);
+
+        // 7. Test Empty Trash
+        let scribble2 = Scribble::new_text("Another to delete", Some("Empty Trash Test"));
+        manager.save_scribble(&scribble2).unwrap();
+        manager.move_to_trash("scribble", &scribble2.id).unwrap();
+        assert_eq!(manager.get_trash_items().unwrap().len(), 1);
+
+        let purged = manager.empty_trash().unwrap();
+        assert_eq!(purged, 1);
+        assert_eq!(manager.get_trash_items().unwrap().len(), 0);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_scribble_merge_preserves_provenance() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+
+        // 1. Create 2 scribbles
+        let mut s1 = Scribble::new_text("First concept on local RAG.", Some("Local RAG"));
+        s1.topics = vec!["AI".to_string(), "Search".to_string()];
+        s1.entities = vec!["Ollama".to_string()];
+        manager.save_scribble(&s1).unwrap();
+
+        let mut s2 = Scribble::new_text("Second concept on vector caching.", Some("Vector Caching"));
+        s2.topics = vec!["AI".to_string(), "Performance".to_string()];
+        s2.entities = vec!["LanceDB".to_string()];
+        manager.save_scribble(&s2).unwrap();
+
+        // 2. Merge s1 and s2
+        let merged = manager.merge_scribbles(&[s1.id.clone(), s2.id.clone()]).unwrap();
+
+        // 3. Verify merged attributes
+        assert!(merged.content.contains("First concept on local RAG."));
+        assert!(merged.content.contains("Second concept on vector caching."));
+        assert_eq!(merged.topics.len(), 3); // AI, Search, Performance
+        assert_eq!(merged.entities.len(), 2); // Ollama, LanceDB
+        // Merge must NOT create graph edges to source scribbles
+        assert_eq!(merged.relationships.len(), 0);
+
+        // Verify source provenance metadata
+        assert_eq!(merged.source_metadata.get("creation_method").unwrap().as_str().unwrap(), "merge");
+        let source_ids = merged.source_metadata.get("source_scribble_ids").unwrap().as_array().unwrap();
+        assert_eq!(source_ids.len(), 2);
+        assert_eq!(source_ids[0].as_str().unwrap(), s1.id);
+        assert_eq!(source_ids[1].as_str().unwrap(), s2.id);
+
+        // Verify active list now has only the 1 merged scribble
+        let active_scribbles = manager.list_scribbles().unwrap();
+        assert_eq!(active_scribbles.len(), 1);
+        assert_eq!(active_scribbles[0].id, merged.id);
+
+        // Verify source scribbles are retired to Trash and recoverable
+        let trash_items = manager.get_trash_items().unwrap();
+        assert_eq!(trash_items.len(), 2);
 
         let _ = fs::remove_dir_all(temp_dir);
     }

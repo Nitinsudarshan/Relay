@@ -328,10 +328,27 @@ fn stop_dictation_session(
             .whisper_model_path
             .clone()
             .filter(|p| !p.trim().is_empty());
+        let models_dir = state.config_dir.join("models");
         let model_path = match configured_model_path {
-            Some(path) => Some(path),
+            Some(path) => {
+                let p = std::path::Path::new(&path);
+                if crate::capture::stt::is_legacy_default_model(p) {
+                    match crate::capture::stt::ensure_default_model(&models_dir).await {
+                        Ok(small_path) => {
+                            let path_str = small_path.to_string_lossy().to_string();
+                            let settings_path = state.config_dir.join("settings.json");
+                            let mut guard = state.settings.lock().unwrap();
+                            guard.stt.whisper_model_path = Some(path_str.clone());
+                            let _ = guard.save(&settings_path);
+                            Some(path_str)
+                        }
+                        Err(_) => Some(path),
+                    }
+                } else {
+                    Some(path)
+                }
+            }
             None => {
-                let models_dir = state.config_dir.join("models");
                 match crate::capture::stt::ensure_default_model(&models_dir).await {
                     Ok(path) => {
                         let path_str = path.to_string_lossy().to_string();
@@ -342,66 +359,87 @@ fn stop_dictation_session(
                         Some(path_str)
                     }
                     Err(e) => {
-                        tracing::warn!("Could not auto-provision a default Whisper model: {}", e);
+                        tracing::warn!("Could not auto-provision production Whisper model: {}", e);
                         None
                     }
                 }
             }
         };
+        let language_settings = state.settings.lock().unwrap().language.clone();
+        let stt_settings = state.settings.lock().unwrap().stt.clone();
+        let language_config = crate::capture::SttLanguageConfig::from_settings(&language_settings);
+        let decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&stt_settings);
+
         let stt = state.stt.clone();
-        let samples = captured.samples;
+        let samples = captured.samples.clone();
+        let mp_clone = model_path.clone();
+        let lang_clone = language_config.clone();
+        let dec_clone = decoding_config.clone();
 
-        let transcript = tauri::async_runtime::spawn_blocking(move || {
-            stt.transcribe(model_path.as_deref(), &samples)
+        let (text_res, diag, err) = tauri::async_runtime::spawn_blocking(move || {
+            match stt.transcribe_with_config(
+                mp_clone.as_deref(),
+                &samples,
+                &lang_clone,
+                &dec_clone,
+            ) {
+                Ok((t, d)) => (t, Some(d), None),
+                Err(e) => (String::new(), None, Some(e.to_string())),
+            }
         })
-        .await;
+        .await
+        .unwrap_or_else(|e| (String::new(), None, Some(e.to_string())));
 
-        match transcript {
-            Ok(Ok(text)) if !text.trim().is_empty() => {
-                // Voice Note persistence happens from the successful
-                // transcript itself, not from injection's outcome — it must
-                // still be saved below even if injection fails.
-                crate::commands::save_voice_note(&app, &state.vault, &text);
-                match injection::inject_text(&text) {
-                    Ok(()) => {
-                        emit_capture_status_event(&app, false, None, "SUCCESS", None);
-                    }
-                    Err(e) => {
-                        tracing::error!("Dictation text injection failed: {}", e);
-                        emit_capture_status_event(
-                            &app,
-                            false,
-                            None,
-                            "ERROR",
-                            Some("Couldn't insert text".to_string()),
-                        );
-                    }
+        let model_str = model_path.as_deref().unwrap_or(crate::capture::stt::DEFAULT_MODEL_FILENAME);
+        let snapshot = crate::capture::build_diagnostic_snapshot(
+            &captured.mode,
+            Some(captured.audio_path.clone()),
+            &captured,
+            &language_settings,
+            &language_config,
+            &decoding_config,
+            model_str,
+            &text_res,
+            diag.as_ref(),
+            err.clone(),
+        );
+        crate::commands::record_stt_diagnostics(&app, &state, snapshot);
+
+        if let Some(err_msg) = err {
+            tracing::error!("Dictation transcription failed: {}", err_msg);
+            emit_capture_status_event(
+                &app,
+                false,
+                None,
+                "ERROR",
+                Some("Transcription failed".to_string()),
+            );
+            return;
+        }
+
+        if !text_res.trim().is_empty() {
+            // Voice Note persistence happens from the successful
+            // transcript itself, not from injection's outcome — it must
+            // still be saved below even if injection fails.
+            crate::commands::save_voice_note(&app, &state.vault, &text_res);
+            match injection::inject_text(&text_res) {
+                Ok(()) => {
+                    emit_capture_status_event(&app, false, None, "SUCCESS", None);
+                }
+                Err(e) => {
+                    tracing::error!("Dictation text injection failed: {}", e);
+                    emit_capture_status_event(
+                        &app,
+                        false,
+                        None,
+                        "ERROR",
+                        Some("Couldn't insert text".to_string()),
+                    );
                 }
             }
-            Ok(Ok(_)) => {
-                tracing::info!("Dictation produced no speech (silence or too short)");
-                emit_capture_status_event(&app, false, None, "NO_SPEECH", None);
-            }
-            Ok(Err(e)) => {
-                tracing::error!("Dictation transcription failed: {}", e);
-                emit_capture_status_event(
-                    &app,
-                    false,
-                    None,
-                    "ERROR",
-                    Some("Transcription failed".to_string()),
-                );
-            }
-            Err(e) => {
-                tracing::error!("Dictation transcription task panicked: {}", e);
-                emit_capture_status_event(
-                    &app,
-                    false,
-                    None,
-                    "ERROR",
-                    Some("Transcription failed".to_string()),
-                );
-            }
+        } else {
+            tracing::info!("Dictation produced no speech (silence or too short)");
+            emit_capture_status_event(&app, false, None, "NO_SPEECH", None);
         }
     });
 }
