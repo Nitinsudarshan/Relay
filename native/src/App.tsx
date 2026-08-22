@@ -9,7 +9,7 @@ import { RelayLogo } from './components/common/RelayLogo';
 import { ChangelogModal } from './components/common/ChangelogModal';
 import { WelcomeModal } from './components/common/WelcomeModal';
 import { AccountExplanationModal } from './components/common/AccountExplanationModal';
-import { ProcessedPipelineResult, DetectedMeetingPayload, Meeting, RelayAccount, AppSettings } from './types';
+import { ProcessedPipelineResult, DetectedMeetingPayload, Meeting, RelayAccount, RelayProfile, DeveloperSettings, AppSettings } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -40,35 +40,47 @@ export const App: React.FC = () => {
   const [lastResult, setLastResult] = useState<ProcessedPipelineResult | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [changelogOpen, setChangelogOpen] = useState(false);
-  const [appVersion, setAppVersion] = useState<string>('0.8.2');
+  const [appVersion, setAppVersion] = useState<string>('0.9.0');
   const [account, setAccount] = useState<RelayAccount | null>(null);
+  const [profile, setProfile] = useState<RelayProfile | null>(null);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [explanationOpen, setExplanationOpen] = useState(false);
 
   const refreshAccountAndSettings = async () => {
     try {
-      const [ver, acc, setts] = await Promise.all([
+      const [ver, acc, prof, devSetts] = await Promise.all([
         invoke<string>('get_app_version'),
         invoke<RelayAccount>('get_account_state'),
-        invoke<AppSettings>('get_settings'),
+        invoke<RelayProfile>('get_relay_profile'),
+        invoke<DeveloperSettings>('get_developer_settings'),
       ]);
       if (ver) setAppVersion(ver);
       if (acc) setAccount(acc);
-      if (setts && setts.diagnostics && setts.diagnostics.first_run_completed === false) {
+      if (prof) setProfile(prof);
+
+      // Onboarding visibility: developer override forces replay, or first-run incomplete
+      const shouldShowOnboarding = devSetts?.force_onboarding_on_launch || !prof?.onboarding_completed;
+      if (shouldShowOnboarding) {
         setWelcomeOpen(true);
       }
     } catch (err) {
-      console.warn('Could not load initial account/settings:', err);
+      console.warn('Could not load initial profile/settings:', err);
     }
   };
 
   useEffect(() => {
     refreshAccountAndSettings();
 
-    // 1. Listen for backend Tauri account-changed events (sign-in, sign-out, delete-account)
-    const unlistenPromise = listen<RelayAccount>('account-changed', (event) => {
+    // 1. Listen for backend Tauri account & profile events
+    const unlistenAccount = listen<RelayAccount>('account-changed', (event) => {
       if (event.payload) {
         setAccount(event.payload);
+      }
+    });
+
+    const unlistenProfile = listen<RelayProfile>('profile-changed', (event) => {
+      if (event.payload) {
+        setProfile(event.payload);
       }
     });
 
@@ -79,25 +91,54 @@ export const App: React.FC = () => {
         setAccount(customEvent.detail);
       }
     };
+    const handleDomProfileChange = (e: Event) => {
+      const customEvent = e as CustomEvent<RelayProfile>;
+      if (customEvent.detail) {
+        setProfile(customEvent.detail);
+      }
+    };
+
     window.addEventListener('relay-account-changed', handleDomAccountChange);
+    window.addEventListener('relay-profile-changed', handleDomProfileChange);
 
     return () => {
-      unlistenPromise.then((unlisten) => unlisten());
+      unlistenAccount.then((unlisten) => unlisten());
+      unlistenProfile.then((unlisten) => unlisten());
       window.removeEventListener('relay-account-changed', handleDomAccountChange);
+      window.removeEventListener('relay-profile-changed', handleDomProfileChange);
     };
   }, []);
 
-  const handleWelcomeGoogle = async () => {
-    const acc = await invoke<RelayAccount>('start_google_sign_in');
-    await invoke('complete_first_run');
-    setAccount(acc);
-    setWelcomeOpen(false);
-    setExplanationOpen(true);
+  const handleWelcomeGoogle = async (displayName: string) => {
+    try {
+      await invoke('update_profile_display_name', { displayName });
+      const acc = await invoke<RelayAccount>('start_google_sign_in');
+      const updatedProfile = await invoke<RelayProfile>('complete_profile_onboarding', {
+        displayName,
+        accountMode: 'local',
+      });
+      setProfile(updatedProfile);
+      setAccount(acc);
+      setWelcomeOpen(false);
+      setExplanationOpen(true);
+    } catch (err) {
+      console.error('Failed to complete Google onboarding:', err);
+      throw err;
+    }
   };
 
-  const handleWelcomeLocally = async () => {
-    await invoke('complete_first_run');
-    setWelcomeOpen(false);
+  const handleWelcomeLocally = async (displayName: string) => {
+    try {
+      const updatedProfile = await invoke<RelayProfile>('complete_profile_onboarding', {
+        displayName,
+        accountMode: 'local',
+      });
+      setProfile(updatedProfile);
+      setWelcomeOpen(false);
+    } catch (err) {
+      console.error('Failed to complete local onboarding:', err);
+      throw err;
+    }
   };
 
   const handleCreateAndStartDetectedMeeting = async (detected: DetectedMeetingPayload) => {
@@ -319,14 +360,16 @@ export const App: React.FC = () => {
               />
             ) : (
               <div className="w-7 h-7 rounded-full bg-primary/20 text-primary font-bold flex items-center justify-center text-xs shrink-0">
-                {account?.authenticated && account.display_name
+                {profile?.display_name && profile.display_name !== 'Local User'
+                  ? profile.display_name.charAt(0).toUpperCase()
+                  : account?.display_name
                   ? account.display_name.charAt(0).toUpperCase()
                   : <User className="w-3.5 h-3.5" />}
               </div>
             )}
             <div className="grid flex-1 leading-tight min-w-0">
               <span className="text-xs font-bold text-foreground truncate group-hover:text-primary transition-colors">
-                {account?.authenticated ? account.display_name || account.email : 'Local Mode'}
+                {profile?.display_name || account?.display_name || 'Local User'}
               </span>
               <span className="text-[10px] text-muted-foreground truncate font-mono">
                 {account?.authenticated ? account.email : '100% On-Device'}
@@ -358,6 +401,7 @@ export const App: React.FC = () => {
       {/* Welcome First-Launch Onboarding Modal */}
       <WelcomeModal
         isOpen={welcomeOpen}
+        initialDisplayName={profile?.display_name && profile.display_name !== 'Local User' ? profile.display_name : ''}
         onContinueGoogle={handleWelcomeGoogle}
         onContinueLocally={handleWelcomeLocally}
       />

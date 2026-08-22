@@ -26,6 +26,7 @@ import {
   FileAudio,
   Check,
   Lock,
+  Terminal,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,6 +37,7 @@ import { SttDiagnosticsView } from './SttDiagnosticsView';
 import { TriggerSettings } from './TriggerSettings';
 import { TrashSettings } from './TrashSettings';
 import { AccountSettings } from './AccountSettings';
+import { DeveloperSettingsView } from './DeveloperSettingsView';
 
 export type SettingsSection =
   | 'account'
@@ -46,7 +48,8 @@ export type SettingsSection =
   | 'meetings'
   | 'privacy'
   | 'trash'
-  | 'advanced';
+  | 'advanced'
+  | 'developer';
 
 const DEFAULT_LANGUAGE_SETTINGS: LanguageSettings = {
   primary_dictation_language: 'en',
@@ -500,6 +503,20 @@ export const ProviderSettings: React.FC = () => {
         >
           <Cpu className="w-4 h-4 text-primary" />
           <span>Advanced</span>
+        </button>
+
+        {/* 9. Developer */}
+        <button
+          type="button"
+          onClick={() => setActiveSection('developer')}
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
+            activeSection === 'developer'
+              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          }`}
+        >
+          <Terminal className="w-4 h-4 text-amber-500" />
+          <span>Developer</span>
         </button>
       </aside>
 
@@ -1671,6 +1688,9 @@ export const ProviderSettings: React.FC = () => {
 
         {/* 7. TRASH SECTION */}
         {activeSection === 'trash' && <TrashSettings />}
+
+        {/* 8. DEVELOPER SECTION */}
+        {activeSection === 'developer' && <DeveloperSettingsView />}
       </main>
     </div>
   );

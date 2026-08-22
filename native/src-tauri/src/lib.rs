@@ -1,5 +1,6 @@
 pub mod capture;
 pub mod commands;
+pub mod developer;
 pub mod diagnostics;
 pub mod hotkeys;
 pub mod identity;
@@ -143,6 +144,11 @@ pub fn run() {
             commands::sync_google_calendar,
             commands::get_google_oauth_config,
             commands::save_google_oauth_config,
+            commands::get_relay_profile,
+            commands::update_profile_display_name,
+            commands::complete_profile_onboarding,
+            commands::get_developer_settings,
+            commands::set_developer_force_onboarding,
             commands::get_account_state,
             commands::start_google_sign_in,
             commands::sign_out_account,

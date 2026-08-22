@@ -1716,6 +1716,66 @@ pub async fn check_meeting_detection(
 }
 
 #[tauri::command]
+pub async fn get_relay_profile(
+    state: State<'_, AppState>,
+) -> Result<crate::identity::RelayProfile, CommandError> {
+    Ok(crate::identity::load_relay_profile(&state.config_dir))
+}
+
+#[tauri::command]
+pub async fn update_profile_display_name(
+    app: tauri::AppHandle,
+    display_name: String,
+    state: State<'_, AppState>,
+) -> Result<crate::identity::RelayProfile, CommandError> {
+    let profile = crate::identity::update_profile_display_name(&state.config_dir, &display_name)
+        .map_err(|e| CommandError::new("UPDATE_NAME_FAILED", &e))?;
+
+    let _ = app.emit("profile-changed", &profile);
+    Ok(profile)
+}
+
+#[tauri::command]
+pub async fn complete_profile_onboarding(
+    app: tauri::AppHandle,
+    display_name: String,
+    account_mode: Option<crate::identity::AccountMode>,
+    state: State<'_, AppState>,
+) -> Result<crate::identity::RelayProfile, CommandError> {
+    let profile = crate::identity::complete_profile_onboarding(
+        &state.config_dir,
+        &display_name,
+        account_mode,
+    )
+    .map_err(|e| CommandError::new("ONBOARDING_FAILED", &e))?;
+
+    // Also mark first_run_completed in settings
+    if let Ok(mut settings) = state.settings.lock() {
+        settings.diagnostics.first_run_completed = true;
+        let _ = settings.save(&state.config_dir.join("settings.json"));
+    }
+
+    let _ = app.emit("profile-changed", &profile);
+    Ok(profile)
+}
+
+#[tauri::command]
+pub async fn get_developer_settings(
+    state: State<'_, AppState>,
+) -> Result<crate::developer::DeveloperSettings, CommandError> {
+    Ok(crate::developer::load_developer_settings(&state.config_dir))
+}
+
+#[tauri::command]
+pub async fn set_developer_force_onboarding(
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<crate::developer::DeveloperSettings, CommandError> {
+    crate::developer::set_force_onboarding(&state.config_dir, enabled)
+        .map_err(|e| CommandError::new("DEV_SETTINGS_FAILED", &e))
+}
+
+#[tauri::command]
 pub async fn get_account_state(
     state: State<'_, AppState>,
 ) -> Result<crate::identity::RelayAccount, CommandError> {

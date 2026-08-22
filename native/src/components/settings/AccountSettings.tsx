@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   RelayAccount,
+  RelayProfile,
   InstallationInfo,
   UpdateInfo,
   AppSettings,
@@ -10,19 +11,19 @@ import {
   User,
   ShieldCheck,
   HardDrive,
-  Cloud,
   CheckCircle2,
   RefreshCw,
   Copy,
   Check,
   LogOut,
   Sparkles,
-  ArrowRight,
   AlertCircle,
-  ExternalLink,
   Laptop,
+  Save,
+  Info,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 
@@ -38,25 +39,35 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
   onOpenExplanation,
 }) => {
   const [account, setAccount] = useState<RelayAccount | null>(null);
+  const [profile, setProfile] = useState<RelayProfile | null>(null);
   const [installation, setInstallation] = useState<InstallationInfo | null>(null);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [displayNameInput, setDisplayNameInput] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [savedNameSuccess, setSavedNameSuccess] = useState(false);
   const [loading, setLoading] = useState(true);
   const [signingIn, setSigningIn] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
+  const [copiedDiagnostics, setCopiedDiagnostics] = useState(false);
   const [showHybridModal, setShowHybridModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [acc, inst] = await Promise.all([
+      const [acc, prof, inst] = await Promise.all([
         invoke<RelayAccount>('get_account_state'),
+        invoke<RelayProfile>('get_relay_profile'),
         invoke<InstallationInfo>('get_installation_info'),
       ]);
       setAccount(acc);
+      setProfile(prof);
       setInstallation(inst);
+      if (prof?.display_name) {
+        setDisplayNameInput(prof.display_name);
+      }
     } catch (err) {
       console.error('Failed to load account/installation state:', err);
     } finally {
@@ -68,13 +79,40 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
     loadData();
   }, []);
 
+  const handleSaveDisplayName = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = displayNameInput.trim();
+    if (!trimmed) return;
+
+    try {
+      setSavingName(true);
+      const updated = await invoke<RelayProfile>('update_profile_display_name', {
+        displayName: trimmed,
+      });
+      setProfile(updated);
+      window.dispatchEvent(new CustomEvent('relay-profile-changed', { detail: updated }));
+      setSavedNameSuccess(true);
+      setTimeout(() => setSavedNameSuccess(false), 2500);
+    } catch (err) {
+      console.error('Failed to update display name:', err);
+    } finally {
+      setSavingName(false);
+    }
+  };
+
   const handleSignIn = async () => {
     try {
       setSigningIn(true);
       setErrorMsg(null);
       const acc = await invoke<RelayAccount>('start_google_sign_in');
       setAccount(acc);
+      const updatedProfile = await invoke<RelayProfile>('get_relay_profile');
+      setProfile(updatedProfile);
+      if (updatedProfile.display_name) {
+        setDisplayNameInput(updatedProfile.display_name);
+      }
       window.dispatchEvent(new CustomEvent('relay-account-changed', { detail: acc }));
+      window.dispatchEvent(new CustomEvent('relay-profile-changed', { detail: updatedProfile }));
       if (onOpenExplanation) {
         onOpenExplanation();
       }
@@ -92,7 +130,10 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       setErrorMsg(null);
       const acc = await invoke<RelayAccount>('sign_out_account');
       setAccount(acc);
+      const updatedProfile = await invoke<RelayProfile>('get_relay_profile');
+      setProfile(updatedProfile);
       window.dispatchEvent(new CustomEvent('relay-account-changed', { detail: acc }));
+      window.dispatchEvent(new CustomEvent('relay-profile-changed', { detail: updatedProfile }));
       setShowSignOutConfirm(false);
     } catch (err: unknown) {
       console.error('Sign-out failed:', err);
@@ -130,27 +171,45 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
     }
   };
 
+  const copyDiagnosticsSummary = () => {
+    const summary = {
+      app_version: installation?.app_version || '0.9.0',
+      platform: installation?.platform || 'windows',
+      os_version: installation?.os_version || 'x86_64',
+      installation_id: installation?.installation_id || 'unknown',
+      account_mode: profile?.account_mode || 'local',
+      authenticated: account?.authenticated ?? false,
+      auth_provider: profile?.auth_provider || null,
+      diagnostics_enabled: settings.diagnostics?.allow_anonymous_diagnostics ?? false,
+      timestamp: new Date().toISOString(),
+    };
+
+    navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+    setCopiedDiagnostics(true);
+    setTimeout(() => setCopiedDiagnostics(false), 2000);
+  };
+
   const maskedId = installation?.installation_id
     ? installation.installation_id.length > 8
       ? `••••••••-••••-${installation.installation_id.slice(-4)}`
       : installation.installation_id
     : '••••••••••••';
 
-  const isDiagnosticsAllowed = settings.diagnostics?.allow_anonymous_diagnostics ?? true;
+  const isDiagnosticsAllowed = settings.diagnostics?.allow_anonymous_diagnostics ?? false;
 
   return (
     <div className="space-y-8 animate-in fade-in-50 duration-200">
       {/* Header & Invariant Statement */}
       <div className="border-b border-border/40 pb-5">
         <div className="flex items-center gap-3 mb-1.5">
-          <h2 className="text-xl font-bold tracking-tight text-foreground">Relay Account & Identity</h2>
+          <h2 className="text-xl font-bold tracking-tight text-foreground">Your Profile & Identity</h2>
           <Badge variant="outline" className="text-[10px] font-mono border-primary/30 text-primary bg-primary/5 uppercase">
-            {account?.authenticated ? 'Google Authenticated' : 'Local Mode'}
+            {account?.authenticated ? 'Google Connected' : 'Local Mode'}
           </Badge>
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed max-w-2xl">
-          Your Relay account manages your installation identity, updates, and cloud service access.
-          <strong className="text-foreground ml-1">Your Scribbles, Voice Notes, and Meetings remain 100% local on this device.</strong>
+          Personalize Relay, manage your account relationship, and monitor version updates.
+          <strong className="text-foreground ml-1">Your local markdown notes, scribbles, audio, and vectors remain strictly on this device.</strong>
         </p>
       </div>
 
@@ -164,7 +223,46 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
         </div>
       )}
 
-      {/* 1. Account Profile Card */}
+      {/* 1. PERSONALIZATION: DISPLAY NAME */}
+      <div className="p-5 rounded-xl border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <User className="w-4 h-4 text-primary" />
+              <span>Personalization</span>
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              What Relay calls you. This is stored locally and is separate from your account identity.
+            </p>
+          </div>
+          {savedNameSuccess && (
+            <Badge variant="secondary" className="text-[10px] gap-1 bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
+              <Check className="w-3 h-3" />
+              <span>Saved</span>
+            </Badge>
+          )}
+        </div>
+
+        <form onSubmit={handleSaveDisplayName} className="flex gap-2 max-w-md">
+          <Input
+            value={displayNameInput}
+            onChange={(e) => setDisplayNameInput(e.target.value)}
+            placeholder="Enter your name (e.g. Nitin)"
+            className="h-9 text-xs bg-muted/40"
+          />
+          <Button
+            type="submit"
+            size="sm"
+            className="h-9 text-xs gap-1.5 shrink-0"
+            disabled={savingName || !displayNameInput.trim() || displayNameInput.trim() === profile?.display_name}
+          >
+            {savingName ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            <span>Save Name</span>
+          </Button>
+        </form>
+      </div>
+
+      {/* 2. AUTHENTICATION & ACCOUNT CARD */}
       <div className="p-5 rounded-xl border border-border/80 bg-card/60 backdrop-blur-xs space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -175,8 +273,10 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
                 className="w-14 h-14 rounded-full border-2 border-primary/30 object-cover shadow-xs"
               />
             ) : (
-              <div className="w-14 h-14 rounded-full bg-muted border border-border flex items-center justify-center text-muted-foreground shadow-xs">
-                <User className="w-7 h-7" />
+              <div className="w-14 h-14 rounded-full bg-primary/10 border border-primary/20 text-primary flex items-center justify-center text-lg font-bold shadow-xs">
+                {profile?.display_name && profile.display_name !== 'Local User'
+                  ? profile.display_name.charAt(0).toUpperCase()
+                  : <User className="w-7 h-7" />}
               </div>
             )}
 
@@ -185,15 +285,19 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
                 <h3 className="text-base font-semibold text-foreground">
                   {account?.authenticated ? account.display_name || account.email : 'Local User'}
                 </h3>
-                {account?.authenticated && (
+                {account?.authenticated ? (
                   <Badge variant="secondary" className="text-[10px] gap-1 py-0 px-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
                     <CheckCircle2 className="w-3 h-3" />
                     <span>Google Connected</span>
                   </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[10px] py-0 px-2 font-mono text-muted-foreground">
+                    No Account Connected
+                  </Badge>
                 )}
               </div>
               <p className="text-xs text-muted-foreground font-mono">
-                {account?.authenticated ? account.email : 'No Relay account connected. Operating locally.'}
+                {account?.authenticated ? account.email : 'Local — no account connected. Your data stays on this device.'}
               </p>
             </div>
           </div>
@@ -236,7 +340,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
                     />
                   </svg>
                 )}
-                <span>{signingIn ? 'Connecting...' : 'Sign in with Google'}</span>
+                <span>{signingIn ? 'Connecting...' : 'Connect with Google'}</span>
               </Button>
             )}
           </div>
@@ -248,16 +352,16 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
             <div className="space-y-1">
               <h4 className="text-xs font-bold text-destructive flex items-center gap-1.5">
                 <AlertCircle className="w-4 h-4" />
-                <span>Sign out of Relay?</span>
+                <span>Disconnect Google Account?</span>
               </h4>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Your local Scribbles, Voice Notes, and Meetings will remain untouched on this device.
-                You will only be disconnected from your Relay identity and Google Calendar sync.
+                Your local Scribbles, Voice Notes, and Meetings will remain 100% untouched on this device.
+                You will return to Local Mode.
               </p>
             </div>
             <div className="flex items-center gap-2">
               <Button size="sm" variant="destructive" className="text-xs h-8" onClick={handleSignOut}>
-                Confirm Sign Out
+                Confirm Disconnect
               </Button>
               <Button size="sm" variant="ghost" className="text-xs h-8" onClick={() => setShowSignOutConfirm(false)}>
                 Cancel
@@ -267,7 +371,31 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
         )}
       </div>
 
-      {/* 2. Installation & Version Metadata */}
+      {/* 3. USAGE MODE */}
+      <div className="p-5 rounded-xl border border-border/80 bg-gradient-to-br from-card/80 to-primary/5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <HardDrive className="w-4 h-4 text-primary" />
+              <h3 className="text-sm font-semibold text-foreground">Current Operating Mode: Local</h3>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Your markdown files, vector embeddings, meeting audio, and knowledge graph live exclusively on this computer.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-xs gap-1.5 border-primary/40 text-primary hover:bg-primary/10 shadow-xs shrink-0"
+            onClick={() => setShowHybridModal(true)}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Explore Hybrid</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* 4. UPDATES & VERSION AWARENESS */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* App Version & Update Card */}
         <div className="p-5 rounded-xl border border-border/80 bg-card/60 space-y-4">
@@ -277,7 +405,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
               <span className="text-xs font-semibold text-foreground">Relay Application</span>
             </div>
             <Badge variant="outline" className="text-[10px] font-mono">
-              v{installation?.app_version || '0.8.2'}
+              v{installation?.app_version || '0.9.0'}
             </Badge>
           </div>
 
@@ -321,7 +449,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
               <span className="text-xs font-semibold text-foreground">Installation Identity</span>
             </div>
             <Badge variant="outline" className="text-[10px] font-mono text-muted-foreground">
-              Anonymous
+              Stable
             </Badge>
           </div>
 
@@ -345,32 +473,31 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
         </div>
       </div>
 
-      {/* 3. Account Mode & Hybrid Architecture */}
-      <div className="p-5 rounded-xl border border-border/80 bg-gradient-to-br from-card/80 to-primary/5 space-y-4">
-        <div className="flex items-center justify-between">
+      {/* 5. DIAGNOSTICS & SUPPORT */}
+      <div className="p-5 rounded-xl border border-border/80 bg-card/60 space-y-4">
+        <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <HardDrive className="w-4 h-4 text-primary" />
-              <h3 className="text-sm font-semibold text-foreground">Current Operating Mode: Local</h3>
+              <Info className="w-4 h-4 text-primary" />
+              <h3 className="text-sm font-semibold text-foreground">Diagnostics & Support</h3>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Your notes, vector embeddings, meeting audio, and knowledge graph live exclusively on this computer.
+            <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
+              Export system metadata for bug reporting. Invariant: Secrets, tokens, passwords, and private keys are NEVER included.
             </p>
           </div>
           <Button
             size="sm"
             variant="outline"
-            className="text-xs gap-1.5 border-primary/40 text-primary hover:bg-primary/10 shadow-xs"
-            onClick={() => setShowHybridModal(true)}
+            className="text-xs gap-1.5 h-8 shrink-0"
+            onClick={copyDiagnosticsSummary}
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Explore Hybrid</span>
+            {copiedDiagnostics ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+            <span>{copiedDiagnostics ? 'Copied Summary' : 'Copy Diagnostic Info'}</span>
           </Button>
         </div>
       </div>
 
-
-      {/* 5. Privacy & Diagnostics Consent */}
+      {/* 6. PRIVACY & TELEMETRY CONSENT */}
       <div className="p-5 rounded-xl border border-border/80 bg-card/60 space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
@@ -381,7 +508,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
             <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
               Share anonymous diagnostic telemetry (Relay version, app crashes, performance metadata) to help fix bugs.
               <strong className="text-foreground block mt-1">
-                Your notes, scribbles, audio recordings, and transcripts are NEVER included.
+                Your notes, scribbles, audio recordings, and transcripts are NEVER transmitted.
               </strong>
             </p>
           </div>

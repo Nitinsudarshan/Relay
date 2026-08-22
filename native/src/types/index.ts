@@ -271,6 +271,23 @@ export interface RelayAccount {
   capabilities: string[];
 }
 
+export interface RelayProfile {
+  id: string;
+  display_name: string;
+  onboarding_completed: boolean;
+  account_mode: AccountMode;
+  auth_provider?: string | null;
+  email?: string | null;
+  profile_image?: string | null;
+  installation_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeveloperSettings {
+  force_onboarding_on_launch: boolean;
+}
+
 export interface InstallationInfo {
   installation_id: string;
   first_installed_at: string;

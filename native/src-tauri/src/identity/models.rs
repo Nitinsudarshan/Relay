@@ -98,6 +98,43 @@ pub struct InstallationInfo {
     pub app_version: String,
 }
 
+/// Single unified Relay Profile model.
+///
+/// Invariants:
+/// - Personalization (`display_name`) != Authentication (`auth_provider`).
+/// - Local users have a complete `RelayProfile` with `display_name` and stable `installation_id`.
+/// - The profile NEVER contains OAuth tokens, secrets, or credentials.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelayProfile {
+    pub id: String,
+    pub display_name: String,
+    pub onboarding_completed: bool,
+    pub account_mode: AccountMode,
+    pub auth_provider: Option<String>,
+    pub email: Option<String>,
+    pub profile_image: Option<String>,
+    pub installation_id: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl Default for RelayProfile {
+    fn default() -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            display_name: "Local User".to_string(),
+            onboarding_completed: false,
+            account_mode: AccountMode::Local,
+            auth_provider: None,
+            email: None,
+            profile_image: None,
+            installation_id: String::new(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,5 +145,14 @@ mod tests {
         assert!(!account.authenticated);
         assert_eq!(account.account_mode, AccountMode::Local);
         assert_eq!(account.subscription.plan, SubscriptionPlan::Free);
+    }
+
+    #[test]
+    fn test_default_profile_is_local_with_uncompleted_onboarding() {
+        let profile = RelayProfile::default();
+        assert!(!profile.onboarding_completed);
+        assert_eq!(profile.account_mode, AccountMode::Local);
+        assert_eq!(profile.auth_provider, None);
+        assert_eq!(profile.display_name, "Local User");
     }
 }
