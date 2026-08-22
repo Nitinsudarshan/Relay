@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   GitMerge,
   ChevronDown,
+  ChevronUp,
   ChevronRight,
   Upload,
   Clipboard,
@@ -66,6 +67,7 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
   const [modalMode, setModalMode] = useState<'connect' | 'merge' | null>(null);
   const [showTechnicalProvenance, setShowTechnicalProvenance] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isContentExpanded, setIsContentExpanded] = useState(false);
 
   // Copy feedback states
   const [copiedContent, setCopiedContent] = useState(false);
@@ -89,14 +91,16 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
   useEffect(() => {
     setIsEditing(false);
     setConfirmDelete(false);
+    setIsContentExpanded(false);
   }, [scribble.id]);
 
-  // Word count & threshold for summarization button (100+ words required)
+  // Word count & thresholds (100+ for summary, >200 for read more toggle)
   const wordCount = useMemo(() => {
     return scribble.content.trim().split(/\s+/).filter(Boolean).length;
   }, [scribble.content]);
 
   const isLongScribble = wordCount >= 100;
+  const isVeryLongScribble = wordCount > 200;
 
   // Guaranteed effective exploration questions with dynamic fallback
   const effectiveQuestions = useMemo(() => {
@@ -493,6 +497,46 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
                   className="w-full min-h-[160px] p-4 text-xs font-sans bg-muted/20 border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-ring leading-relaxed resize-y"
                 />
               </div>
+            </div>
+          ) : isVeryLongScribble ? (
+            <div className="space-y-2">
+              <div className="relative">
+                <div
+                  className={`p-4 rounded-lg bg-muted/20 border border-border font-sans text-xs text-foreground whitespace-pre-wrap leading-relaxed transition-all duration-300 ${
+                    !isContentExpanded ? 'max-h-52 overflow-hidden' : ''
+                  }`}
+                >
+                  {scribble.content}
+                </div>
+
+                {!isContentExpanded && (
+                  <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-card via-card/85 to-transparent flex items-end justify-center pb-2.5 rounded-b-lg">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setIsContentExpanded(true)}
+                      className="h-7 text-xs px-3.5 gap-1.5 font-semibold shadow-xs bg-card border border-border text-foreground hover:bg-muted"
+                    >
+                      <span>Read More ({wordCount} words)</span>
+                      <ChevronDown className="w-3.5 h-3.5 text-primary" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {isContentExpanded && (
+                <div className="flex justify-center pt-0.5">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setIsContentExpanded(false)}
+                    className="h-6 text-[11px] px-3 gap-1 text-muted-foreground hover:text-foreground"
+                  >
+                    <span>Show Less</span>
+                    <ChevronUp className="w-3 h-3" />
+                  </Button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="p-4 rounded-lg bg-muted/20 border border-border font-sans text-xs text-foreground whitespace-pre-wrap leading-relaxed">
