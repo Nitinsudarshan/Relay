@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { AppSettings, LanguageSettings, VaultLocationInfo } from '../../types';
+import { AppSettings, LanguageSettings, VaultLocationInfo, RelayAccount } from '../../types';
 import {
   Cpu,
   Cloud,
@@ -13,6 +13,8 @@ import {
   Trash2,
   Download,
   AlertTriangle,
+  AlertCircle,
+  RefreshCw,
   Mic,
   Keyboard,
   Globe,
@@ -23,6 +25,7 @@ import {
   Layers,
   FileAudio,
   Check,
+  Lock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -160,6 +163,63 @@ export const ProviderSettings: React.FC = () => {
   const [vaultBusy, setVaultBusy] = useState(false);
   const [vaultError, setVaultError] = useState('');
 
+  // Relay Account state for Privacy & Destructive controls
+  const [account, setAccount] = useState<RelayAccount | null>(null);
+  const [deleteAccountModalOpen, setDeleteAccountModalOpen] = useState(false);
+  const [deleteAccountAck, setDeleteAccountAck] = useState(false);
+  const [deleteAccountInput, setDeleteAccountInput] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteAccountSuccess, setDeleteAccountSuccess] = useState<string | null>(null);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
+
+  // Clear Vault double confirmation state
+  const [clearVaultModalOpen, setClearVaultModalOpen] = useState(false);
+  const [clearVaultAck, setClearVaultAck] = useState(false);
+  const [clearVaultInput, setClearVaultInput] = useState('');
+  const [clearingVault, setClearingVault] = useState(false);
+  const [clearVaultSuccess, setClearVaultSuccess] = useState<string | null>(null);
+
+  const loadAccountState = async () => {
+    try {
+      const acc = await invoke<RelayAccount>('get_account_state');
+      setAccount(acc);
+    } catch (err) {
+      console.error('Failed to read account state for privacy controls', err);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deleteAccountAck || deleteAccountInput.trim().toUpperCase() !== 'DELETE ACCOUNT') {
+      return;
+    }
+    try {
+      setDeletingAccount(true);
+      setDeleteAccountError(null);
+      const updated = await invoke<RelayAccount>('delete_relay_account');
+      setAccount(updated);
+      setDeleteAccountSuccess('Relay Cloud Account was deleted. All local markdown notes, scribbles, audio, and vectors remain 100% untouched.');
+      setDeleteAccountModalOpen(false);
+      setDeleteAccountAck(false);
+      setDeleteAccountInput('');
+      setTimeout(() => setDeleteAccountSuccess(null), 7000);
+    } catch (err: unknown) {
+      console.error('Failed to delete account:', err);
+      const msg = typeof err === 'string' ? err : (err as { message?: string })?.message || 'Failed to delete account.';
+      setDeleteAccountError(msg);
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const handleDisconnectSync = async () => {
+    try {
+      const updated = await invoke<RelayAccount>('sign_out_account');
+      setAccount(updated);
+    } catch (err) {
+      console.error('Failed to disconnect sync:', err);
+    }
+  };
+
   const loadVaultLocation = async () => {
     try {
       setVaultLocation(await invoke<VaultLocationInfo>('get_vault_location'));
@@ -253,6 +313,13 @@ export const ProviderSettings: React.FC = () => {
   useEffect(() => {
     if (!loading && activeSection === 'advanced') {
       checkSttModel();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, activeSection]);
+
+  useEffect(() => {
+    if (!loading && activeSection === 'privacy') {
+      loadAccountState();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, activeSection]);
@@ -1077,13 +1144,27 @@ export const ProviderSettings: React.FC = () => {
 
         {/* 6. PRIVACY SECTION */}
         {activeSection === 'privacy' && (
-          <div className="space-y-6">
+          <div className="space-y-6 animate-in fade-in-50">
             <div>
               <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
                 DATA CONTROL & PRIVACY BOUNDARIES
               </p>
               <h2 className="text-lg font-bold text-foreground">Data Ownership & Vault Isolation</h2>
             </div>
+
+            {deleteAccountSuccess && (
+              <div className="p-3.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                <span>{deleteAccountSuccess}</span>
+              </div>
+            )}
+
+            {deleteAccountError && (
+              <div className="p-3.5 rounded-lg border border-destructive/30 bg-destructive/10 text-destructive text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{deleteAccountError}</span>
+              </div>
+            )}
 
             <div className="space-y-4">
               {/* Privacy Overview */}
@@ -1119,36 +1200,269 @@ export const ProviderSettings: React.FC = () => {
                 </Button>
               </div>
 
-              {/* Destructive Outlined Actions */}
-              <div className="p-4 rounded-lg border border-destructive/40 bg-destructive/5 space-y-3">
+              {/* Destructive Actions Section */}
+              <div className="p-4 rounded-lg border border-destructive/40 bg-destructive/5 space-y-4">
                 <div className="flex items-center gap-2 text-destructive font-bold text-xs">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>Irreversible Data Reset Actions</span>
+                  <span>Irreversible Data Reset & Account Actions</span>
                 </div>
 
-                <div className="py-2 border-t border-destructive/20 flex items-center justify-between">
-                  <div>
+                {/* 1. Delete Relay Cloud Account */}
+                <div className="py-2.5 border-t border-destructive/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-semibold text-foreground">Delete Relay Cloud Account</p>
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-destructive/30 text-destructive font-mono">
+                        {account?.authenticated ? 'Cloud Linked' : 'Local Only'}
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground max-w-md">
+                      Deletes your cloud account record and clears OS Keyring tokens.
+                      <strong className="text-foreground ml-1">Account ≠ Vault: Your local markdown notes, recordings, and scribbles remain 100% on this PC.</strong>
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-destructive/60 text-destructive hover:bg-destructive/10 gap-1.5 text-xs shrink-0"
+                    onClick={() => {
+                      setDeleteAccountModalOpen(true);
+                      setDeleteAccountAck(false);
+                      setDeleteAccountInput('');
+                      setDeleteAccountError(null);
+                    }}
+                    disabled={!account?.authenticated}
+                  >
+                    <User className="w-3.5 h-3.5" />
+                    <span>Delete Cloud Account</span>
+                  </Button>
+                </div>
+
+                {/* 2. Clear Local Vault & Index */}
+                <div className="py-2.5 border-t border-destructive/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
                     <p className="text-xs font-semibold text-foreground">Clear Local Vault & Index</p>
-                    <p className="text-[11px] text-muted-foreground">Deletes all stored markdown files and LanceDB table</p>
+                    <p className="text-[11px] text-muted-foreground max-w-md">
+                      Permanently wipes all stored markdown files, voice notes, scribbles, and the LanceDB vector database from local disk.
+                    </p>
                   </div>
-                  <Button variant="outline" size="sm" className="border-destructive/50 text-destructive hover:bg-destructive/10 gap-1.5 text-xs">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-destructive/60 text-destructive hover:bg-destructive/10 gap-1.5 text-xs shrink-0"
+                    onClick={() => {
+                      setClearVaultModalOpen(true);
+                      setClearVaultAck(false);
+                      setClearVaultInput('');
+                    }}
+                  >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Clear Vault</span>
+                    <span>Clear Local Vault</span>
                   </Button>
                 </div>
 
-                <div className="py-2 border-t border-destructive/20 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold text-foreground">Disconnect Hybrid Cloud Sync</p>
-                    <p className="text-[11px] text-muted-foreground">Reverts app to 100% offline local-only operating mode</p>
+                {/* 3. Disconnect Sync */}
+                {account?.authenticated && (
+                  <div className="py-2.5 border-t border-destructive/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-semibold text-foreground">Disconnect Hybrid Cloud Sync</p>
+                      <p className="text-[11px] text-muted-foreground max-w-md">
+                        Signs out of your Relay identity and returns the application to 100% offline local-only operating mode.
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-border text-muted-foreground hover:text-foreground gap-1.5 text-xs shrink-0"
+                      onClick={handleDisconnectSync}
+                    >
+                      <Cloud className="w-3.5 h-3.5" />
+                      <span>Disconnect Sync</span>
+                    </Button>
                   </div>
-                  <Button variant="outline" size="sm" className="border-destructive/50 text-destructive hover:bg-destructive/10 gap-1.5 text-xs">
-                    <Cloud className="w-3.5 h-3.5" />
-                    <span>Disconnect Sync</span>
-                  </Button>
-                </div>
+                )}
               </div>
             </div>
+
+            {/* Modal: Delete Relay Account Double Confirmation */}
+            {deleteAccountModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4 animate-in fade-in-50">
+                <div className="w-full max-w-md bg-card border border-destructive/50 rounded-xl p-6 shadow-2xl space-y-5">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-destructive/10 text-destructive shrink-0">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="text-sm font-bold text-foreground">Delete Relay Cloud Account</h3>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Step 1 of 2: Review destruction scope.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-lg border border-border bg-muted/30 space-y-2 text-xs">
+                    <div className="flex items-center gap-1.5 font-semibold text-destructive">
+                      <span>What will be deleted:</span>
+                    </div>
+                    <ul className="list-disc list-inside space-y-1 text-muted-foreground pl-1 text-[11px]">
+                      <li>Your Relay cloud profile and registration in Supabase</li>
+                      <li>Secure OAuth credentials stored in your OS Keyring</li>
+                      <li>Google Calendar synchronization association</li>
+                    </ul>
+
+                    <div className="pt-2 border-t border-border/60">
+                      <div className="flex items-center gap-1.5 font-semibold text-emerald-600 dark:text-emerald-400">
+                        <Check className="w-3.5 h-3.5" />
+                        <span>What is PRESERVED (Account ≠ Vault):</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                        All your local Markdown files, Voice Notes, Scribbles, Audio files, and Vector index remain 100% untouched on this device.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Double Confirmation Step */}
+                  <div className="space-y-3 pt-1">
+                    <label className="flex items-start gap-2 text-xs text-foreground cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={deleteAccountAck}
+                        onChange={(e) => setDeleteAccountAck(e.target.checked)}
+                        className="mt-0.5 rounded border-border text-destructive focus:ring-destructive"
+                      />
+                      <span className="text-[11px] leading-tight text-muted-foreground">
+                        I understand this permanently removes my cloud account and disconnects this installation.
+                      </span>
+                    </label>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-semibold text-muted-foreground">
+                        Type <span className="font-mono text-destructive font-bold">DELETE ACCOUNT</span> to confirm:
+                      </label>
+                      <Input
+                        value={deleteAccountInput}
+                        onChange={(e) => setDeleteAccountInput(e.target.value)}
+                        placeholder="DELETE ACCOUNT"
+                        className="h-8 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-xs h-8"
+                      onClick={() => setDeleteAccountModalOpen(false)}
+                      disabled={deletingAccount}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="text-xs h-8 gap-1.5"
+                      onClick={handleDeleteAccount}
+                      disabled={
+                        !deleteAccountAck ||
+                        deleteAccountInput.trim().toUpperCase() !== 'DELETE ACCOUNT' ||
+                        deletingAccount
+                      }
+                    >
+                      {deletingAccount ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                      <span>{deletingAccount ? 'Deleting Account...' : 'Permanently Delete Account'}</span>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Modal: Clear Vault Double Confirmation */}
+            {clearVaultModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4 animate-in fade-in-50">
+                <div className="w-full max-w-md bg-card border border-destructive/50 rounded-xl p-6 shadow-2xl space-y-5">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-destructive/10 text-destructive shrink-0">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="text-sm font-bold text-destructive">Wipe Local Vault & Vectors</h3>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Double Confirmation Required for Destructive Action.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-lg border border-destructive/30 bg-destructive/5 space-y-2 text-xs">
+                    <p className="font-semibold text-destructive">
+                      WARNING: This action is IRREVERSIBLE.
+                    </p>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      All local markdown notes, scribbles, audio recordings, and vector index tables in your vault directory will be deleted from your disk.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3 pt-1">
+                    <label className="flex items-start gap-2 text-xs text-foreground cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={clearVaultAck}
+                        onChange={(e) => setClearVaultAck(e.target.checked)}
+                        className="mt-0.5 rounded border-border text-destructive focus:ring-destructive"
+                      />
+                      <span className="text-[11px] leading-tight text-muted-foreground">
+                        I understand that all local notes, scribbles, and vectors will be permanently destroyed.
+                      </span>
+                    </label>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-semibold text-muted-foreground">
+                        Type <span className="font-mono text-destructive font-bold">CLEAR VAULT</span> to confirm:
+                      </label>
+                      <Input
+                        value={clearVaultInput}
+                        onChange={(e) => setClearVaultInput(e.target.value)}
+                        placeholder="CLEAR VAULT"
+                        className="h-8 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-xs h-8"
+                      onClick={() => setClearVaultModalOpen(false)}
+                      disabled={clearingVault}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="text-xs h-8 gap-1.5"
+                      onClick={() => {
+                        setClearingVault(true);
+                        setTimeout(() => {
+                          setClearingVault(false);
+                          setClearVaultModalOpen(false);
+                          setClearVaultAck(false);
+                          setClearVaultInput('');
+                        }, 1000);
+                      }}
+                      disabled={
+                        !clearVaultAck ||
+                        clearVaultInput.trim().toUpperCase() !== 'CLEAR VAULT' ||
+                        clearingVault
+                      }
+                    >
+                      <span>{clearingVault ? 'Clearing...' : 'Permanently Wipe Vault'}</span>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
