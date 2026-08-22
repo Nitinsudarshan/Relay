@@ -220,6 +220,20 @@ export interface LanguageSettings {
   outputScript?: string;
 }
 
+export interface DiagnosticsSettings {
+  allow_anonymous_diagnostics: boolean;
+  first_run_completed: boolean;
+  allowAnonymousDiagnostics?: boolean;
+  firstRunCompleted?: boolean;
+}
+
+export interface CloudSettings {
+  supabase_url?: string | null;
+  supabase_anon_key?: string | null;
+  supabaseUrl?: string | null;
+  supabaseAnonKey?: string | null;
+}
+
 /** Mirrors the Rust `AppSettings` struct persisted at `.relay/config/settings.json`. */
 export interface AppSettings {
   provider: ProviderSettings;
@@ -229,6 +243,50 @@ export interface AppSettings {
   ui: UiSettings;
   vault: VaultSettings;
   language: LanguageSettings;
+  diagnostics: DiagnosticsSettings;
+  cloud?: CloudSettings;
+}
+
+export type AccountMode = 'local' | 'hybrid';
+export type SubscriptionPlan = 'free' | 'hybrid';
+
+export interface SubscriptionInfo {
+  plan: SubscriptionPlan;
+  status: string;
+  renewal_date?: string | null;
+  capabilities: string[];
+}
+
+export interface RelayAccount {
+  authenticated: boolean;
+  user_id?: string | null;
+  email?: string | null;
+  display_name?: string | null;
+  profile_image?: string | null;
+  provider?: string | null;
+  created_at?: string | null;
+  last_authenticated_at?: string | null;
+  subscription: SubscriptionInfo;
+  account_mode: AccountMode;
+  capabilities: string[];
+}
+
+export interface InstallationInfo {
+  installation_id: string;
+  first_installed_at: string;
+  platform: string;
+  os_version: string;
+  app_version: string;
+}
+
+export interface UpdateInfo {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  release_notes?: string | null;
+  minimum_supported_version: string;
+  download_url?: string | null;
+  is_offline: boolean;
 }
 
 export interface ChangelogItem {
@@ -357,11 +415,110 @@ export interface KnowledgeSearchResult {
 export interface TrashItem {
   id: string;
   original_id: string;
-  item_type: 'scribble' | 'voice_note' | string;
+  item_type: 'scribble' | 'voice_note' | 'meeting' | string;
   title: string;
   snippet: string;
   deleted_at: string;
   expires_at: string;
+}
+
+export type MeetingProvider =
+  | 'google_meet'
+  | 'zoom'
+  | 'teams'
+  | 'webex'
+  | 'in_person'
+  | 'other'
+  | string;
+
+export type MeetingStatus =
+  | 'scheduled'
+  | 'detected'
+  | 'recording'
+  | 'processing'
+  | 'completed'
+  | 'cancelled'
+  | string;
+
+export interface MeetingActionItem {
+  id: string;
+  title: string;
+  assignee?: string | null;
+  due_date?: string | null;
+  priority: 'high' | 'medium' | 'low' | string;
+  status: 'todo' | 'done' | string;
+}
+
+export interface MeetingSeries {
+  id: string;
+  title: string;
+  provider?: string | null;
+  calendar_series_id?: string | null;
+  recurrence_rule?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Meeting {
+  id: string;
+  series_id?: string | null;
+  title: string;
+  provider: MeetingProvider;
+  provider_metadata: Record<string, any>;
+  calendar_event_id?: string | null;
+  scheduled_start?: string | null;
+  scheduled_end?: string | null;
+  actual_start?: string | null;
+  actual_end?: string | null;
+  status: MeetingStatus;
+  participants: string[];
+  recording_path?: string | null;
+  transcript: string;
+  notes: string;
+  summary?: string | null;
+  decisions: string[];
+  action_items: MeetingActionItem[];
+  questions: string[];
+  candidate_scribbles: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CalendarMeetingEvent {
+  id: string;
+  title: string;
+  provider: string;
+  meeting_url?: string | null;
+  scheduled_start: string;
+  scheduled_end: string;
+  participants: string[];
+  recurrence_rule?: string | null;
+  calendar_series_id?: string | null;
+}
+
+export interface DetectedMeetingPayload {
+  event_id: string;
+  title: string;
+  provider: string;
+  meeting_url?: string | null;
+  scheduled_start?: string | null;
+  scheduled_end?: string | null;
+  participants: string[];
+  confidence: number;
+  detection_source: string;
+}
+
+export interface CalendarConnectionStatus {
+  connected: boolean;
+  account_email?: string | null;
+  account_name?: string | null;
+  has_custom_credentials: boolean;
+  last_synced_at?: string | null;
+}
+
+export interface GoogleCalendarConfig {
+  client_id?: string | null;
+  client_secret?: string | null;
 }
 
 export interface GraphFiltersSettings {

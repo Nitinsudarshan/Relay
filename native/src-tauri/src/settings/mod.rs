@@ -163,6 +163,41 @@ impl Default for LanguageSettings {
     }
 }
 
+/// Privacy-safe diagnostic telemetry and onboarding consent preferences.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiagnosticsSettings {
+    /// Whether anonymous diagnostics (app crashes, version, platform) are enabled.
+    /// STRICT PRIVACY: User notes, scribbles, and audio are never transmitted.
+    #[serde(default = "default_allow_anonymous_diagnostics", alias = "allowAnonymousDiagnostics")]
+    pub allow_anonymous_diagnostics: bool,
+
+    /// Whether the user has completed or dismissed the initial first-run onboarding screen.
+    #[serde(default, alias = "firstRunCompleted")]
+    pub first_run_completed: bool,
+}
+
+fn default_allow_anonymous_diagnostics() -> bool {
+    true
+}
+
+impl Default for DiagnosticsSettings {
+    fn default() -> Self {
+        Self {
+            allow_anonymous_diagnostics: default_allow_anonymous_diagnostics(),
+            first_run_completed: false,
+        }
+    }
+}
+
+/// Supabase Cloud configuration for Relay Hybrid authentication and sync.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CloudSettings {
+    #[serde(default, alias = "supabaseUrl")]
+    pub supabase_url: Option<String>,
+    #[serde(default, alias = "supabaseAnonKey")]
+    pub supabase_anon_key: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppSettings {
     #[serde(default)]
@@ -179,6 +214,10 @@ pub struct AppSettings {
     pub vault: VaultSettings,
     #[serde(default)]
     pub language: LanguageSettings,
+    #[serde(default)]
+    pub diagnostics: DiagnosticsSettings,
+    #[serde(default)]
+    pub cloud: CloudSettings,
 }
 
 impl AppSettings {

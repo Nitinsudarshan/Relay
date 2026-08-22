@@ -32,8 +32,10 @@ import { HotkeyRecorder } from './HotkeyRecorder';
 import { SttDiagnosticsView } from './SttDiagnosticsView';
 import { TriggerSettings } from './TriggerSettings';
 import { TrashSettings } from './TrashSettings';
+import { AccountSettings } from './AccountSettings';
 
 export type SettingsSection =
+  | 'account'
   | 'general'
   | 'dictation'
   | 'voicenotes'
@@ -94,6 +96,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   ui: { pill_position: 'bottom_center' },
   vault: { directory: null },
   language: DEFAULT_LANGUAGE_SETTINGS,
+  diagnostics: {
+    allow_anonymous_diagnostics: true,
+    first_run_completed: false,
+  },
 };
 
 export const ProviderSettings: React.FC = () => {
@@ -301,6 +307,20 @@ export const ProviderSettings: React.FC = () => {
           </span>
         </div>
 
+        {/* 0. Account & Identity */}
+        <button
+          type="button"
+          onClick={() => setActiveSection('account')}
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
+            activeSection === 'account'
+              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          }`}
+        >
+          <User className="w-4 h-4 text-primary" />
+          <span>Account & Identity</span>
+        </button>
+
         {/* 1. General */}
         <button
           type="button"
@@ -429,6 +449,14 @@ export const ProviderSettings: React.FC = () => {
         )}
 
         {error && <p className="mb-4 text-xs text-amber-500">{error}</p>}
+
+        {/* 0. ACCOUNT & IDENTITY SECTION */}
+        {activeSection === 'account' && (
+          <AccountSettings
+            settings={settings}
+            onUpdateSettings={setSettings}
+          />
+        )}
 
         {/* 1. GENERAL SECTION */}
         {activeSection === 'general' && (

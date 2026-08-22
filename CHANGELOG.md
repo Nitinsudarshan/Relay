@@ -1,5 +1,65 @@
 # Relay — Changelog
 
+## [0.9.0] - 2026-08-22
+
+### Phase 11D: Relay Identity, Product Account & Local→Hybrid Foundation
+
+- **Relay Account $\neq$ Local Vault Invariant (`native/src-tauri/src/identity/`)**:
+  - Implemented the `RelayAccount` domain model (`identity/models.rs`) clearly separated from the local markdown vault. Signing in identifies the user and installation but strictly never uploads or moves any local notes, recordings, audio, scribbles, or meetings to the cloud.
+  - Added support for `AccountMode::Local` and `AccountMode::Hybrid` with `SubscriptionInfo` scaffolding (`SubscriptionPlan::Free`, `SubscriptionPlan::Hybrid`).
+- **Desktop Google Sign-In & Secure Token Storage (`identity/oauth.rs`, `identity/tokens.rs`)**:
+  - Implemented real desktop Google OAuth 2.0 PKCE loopback server on `127.0.0.1:{port}/oauth/callback` with system browser launch and responsive HTML success/failure pages.
+  - Secured OAuth tokens (`access_token`, `refresh_token`) inside the OS Keyring / Credential Manager (`keyring` crate) with an encrypted local fallback file, strictly outside `localStorage` and outside the vault.
+  - Sign-out cleanly purges tokens from secure storage and reverts to Local mode while keeping the user's local vault completely untouched.
+- **Stable Anonymous Installation Identity (`identity/installation.rs`)**:
+  - Implemented UUID v4-based anonymous installation ID generated once and persisted in `.relay/config/installation.json`.
+  - Survives app restarts and updates without invasive hardware fingerprinting.
+  - Added UI masking (`••••••••-••••-XXXX`) with instant click-to-copy for diagnostics and support.
+- **Privacy-First Diagnostics & Telemetry Firewalled Abstraction (`diagnostics/mod.rs`)**:
+  - Built `DiagnosticsService` with an absolute privacy firewall: payloads strictly contain anonymous system metadata (`installation_id`, `account_id`, `relay_version`, `platform`, `os_version`, `event_type`, `timestamp`).
+  - Strict Guarantee: Zero note contents, transcripts, audio recordings, or knowledge graph data can ever be collected or transmitted.
+  - Controlled by an explicit user consent toggle in Settings.
+- **Update Service Abstraction (`updates/mod.rs`)**:
+  - Created `UpdateService` with semver comparison and offline resilience, gracefully handling network disconnections without interrupting local app usage.
+- **Supabase Cloud Backend, Auth & Database Schema (`supabase/`, `native/src-tauri/src/identity/supabase.rs`)**:
+  - Implemented complete PostgreSQL migration schema ([`supabase/migrations/20260822_relay_account_schema.sql`](file:///d:/Projects/Relay/supabase/migrations/20260822_relay_account_schema.sql)) with Row Level Security (RLS) for `relay_accounts`, `installations`, `diagnostics_events`, and `app_releases`.
+  - Added Rust backend `SupabaseClient` for async profile upserts, installation tracking, privacy-safe telemetry dispatch, and release update checks.
+  - Added `.env` configuration support with `dotenvy` in Rust backend and template in `.env.example`.
+  - Upgraded Google OAuth flow to support both Supabase Auth broker (`/auth/v1/authorize?provider=google`) and direct Google OAuth with loopback hash-fragment bridge.
+
+### Phase 11C: First-Class Meetings Capture Surface, Recurring Series & Meeting-to-Knowledge Promotion
+
+- **First-Class Persistent Meetings Domain Model (`native/src-tauri/src/vault/meeting.rs`, `vault/mod.rs`)**:
+  - Implemented `Meeting`, `MeetingSeries`, and `MeetingActionItem` structures stored in `vault/meetings/` and `vault/meeting_series/` with YAML frontmatter + Markdown body formatting.
+  - Enforced architectural separation: *Meeting $\ne$ Scribble*. Moving or extracting notes into Scribbles never deletes, mutates, or collapses the persistent Meeting source record.
+  - Added discrete Standalone Meeting support alongside Recurring Meeting Series groupings (individual occurrences are independently addressable, series views display the newest occurrence first).
+- **Real Google Calendar OAuth 2.0 & Event Synchronization (`meetings/calendar.rs`, `commands.rs`)**:
+  - Completely purged all mock/dummy calendar events, fake attendees, and hardcoded mock data.
+  - Implemented real Google OAuth 2.0 PKCE / Loopback authorization on `127.0.0.1` using the minimum read-only scope (`https://www.googleapis.com/auth/calendar.events.readonly`).
+  - Added secure token persistence in `vault/google_calendar_token.json` with automated token refresh before expiry.
+  - Added real Google Calendar events synchronization querying primary calendar with singleEvents expansion for recurring series.
+  - Built full connection lifecycle in `CalendarSyncModal.tsx`: disconnected state with `[Connect Google Calendar]`, optional custom Client ID/Secret configuration, connected state displaying real authenticated account email, `[Sync Now]`, and `[Disconnect]`.
+- **Real Browser & Native Conferencing Window Detection (`meetings/mod.rs`, `commands.rs`)**:
+  - Implemented active video conferencing detection via Windows Win32 `EnumWindows` and `GetWindowTextW` for Google Meet (Chrome, Edge, Firefox, Brave, Opera), Zoom, Microsoft Teams, and Cisco Webex.
+  - Added window title sanitization (`clean_meeting_window_title`) to extract clean meeting topics from browser window frames.
+  - Maintained strict consent-first model: `MeetingDetectionPopup.tsx` prompts the user (`[Start Recording]`, `[Not this meeting]`) and **never** records automatically without explicit consent.
+- **Visual Graph Distinction & Candidate Suggestion Isolation (`graphRenderer.ts`, `GraphSettingsPanel.tsx`, `vault/mod.rs`)**:
+  - Rendered `DERIVED_FROM` provenance edges with distinct dashed strokes (`ctx.setLineDash([4, 4])`) and purple/slate tones, distinguishing them from solid semantic knowledge edges.
+  - Styled Meeting source nodes with distinct purple color and concentric double-ring accents.
+  - Added `Meeting Sources & Provenance` filter toggle in graph settings.
+  - Enforced that candidate scribbles from AI enrichment remain strictly in `meeting.candidate_scribbles` as suggestions until the user explicitly accepts them.
+- **Meeting Audio Recording Pipeline & AI Enrichment (`native/src-tauri/src/pipeline/enrichment.rs`, `commands.rs`)**:
+  - Integrated meeting capture with Relay's local Whisper STT engine and local LLM pipeline.
+  - Added `enrich_meeting` to asynchronously extract executive summaries ($\ge 100$-word threshold rule), explicit decisions, structured action items (with assignees & priorities), open questions, and candidate scribble suggestions.
+- **Full Meeting Management Dashboard & Detail View (`native/src/components/meetings/`)**:
+  - `MeetingPage.tsx`: Master-detail navigation supporting Standalone and Recurring Series groupings, search across transcripts/action items/participants, and 1-click Google Calendar sync.
+  - `MeetingDetailView.tsx`: Complete control surface featuring audio recording triggers, progressive disclosure tabs (*Notes & Summary*, *Decisions & Tasks*, *Open Questions*, *Audio Transcript*, *Derived Scribbles*), editable meeting metadata, and markdown export.
+  - `MeetingModal.tsx` & `CalendarSyncModal.tsx`: Creation modals for standalone meetings, recurring series cadences, and calendar event imports.
+- **Knowledge Graph Provenance & 30-Day Trash (`native/src-tauri/src/vault/scribble.rs`, `vault/mod.rs`)**:
+  - Scribbles created from meetings (`create_scribble_from_meeting`) automatically carry `source_type: "meeting"`, `meeting_id`, and `meeting_series_id` provenance metadata.
+  - The Obsidian-inspired Knowledge Graph automatically connects derived Scribbles to a virtual `source` node via `DERIVED_FROM` edges.
+  - Deleting a meeting moves it to the 30-day Trash without affecting or orphaning any derived Scribbles.
+
 ## [0.8.2] - 2026-08-22
 
 ### Scribbles AI Enrichment Polish, Summary Thresholds, Exploration Fallbacks & Collapsible Content

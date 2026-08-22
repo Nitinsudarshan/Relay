@@ -1,28 +1,35 @@
 import React, { useState, useEffect } from 'react';
 import { VoiceNotePage } from './components/voicenotes/VoiceNotePage';
+import { MeetingPage } from './components/meetings/MeetingPage';
+import { MeetingDetectionPopup } from './components/meetings/MeetingDetectionPopup';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RelayLogo } from './components/common/RelayLogo';
 import { ChangelogModal } from './components/common/ChangelogModal';
-import { ProcessedPipelineResult } from './types';
+import { WelcomeModal } from './components/common/WelcomeModal';
+import { AccountExplanationModal } from './components/common/AccountExplanationModal';
+import { ProcessedPipelineResult, DetectedMeetingPayload, Meeting, RelayAccount, AppSettings } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import {
   Mic,
+  Calendar,
   Sparkles,
   Settings,
   ShieldCheck,
   Activity,
   Sidebar as SidebarIcon,
   ChevronRight,
+  User,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
-export type MainTabType = 'capture' | 'scribble' | 'settings';
+export type MainTabType = 'capture' | 'meetings' | 'scribble' | 'settings';
 
 const TAB_LABELS: Record<MainTabType, string> = {
   capture: 'Voice Note',
+  meetings: 'Meetings',
   scribble: 'Scribbles',
   settings: 'Settings',
 };
@@ -32,17 +39,65 @@ export const App: React.FC = () => {
   const [lastResult, setLastResult] = useState<ProcessedPipelineResult | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [changelogOpen, setChangelogOpen] = useState(false);
-  const [appVersion, setAppVersion] = useState<string>('0.8.0');
+  const [appVersion, setAppVersion] = useState<string>('0.8.2');
+  const [account, setAccount] = useState<RelayAccount | null>(null);
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  const [explanationOpen, setExplanationOpen] = useState(false);
+
+  const refreshAccountAndSettings = async () => {
+    try {
+      const [ver, acc, setts] = await Promise.all([
+        invoke<string>('get_app_version'),
+        invoke<RelayAccount>('get_account_state'),
+        invoke<AppSettings>('get_settings'),
+      ]);
+      if (ver) setAppVersion(ver);
+      if (acc) setAccount(acc);
+      if (setts && setts.diagnostics && setts.diagnostics.first_run_completed === false) {
+        setWelcomeOpen(true);
+      }
+    } catch (err) {
+      console.warn('Could not load initial account/settings:', err);
+    }
+  };
 
   useEffect(() => {
-    invoke<string>('get_app_version')
-      .then((ver) => {
-        if (ver) setAppVersion(ver);
-      })
-      .catch((err) => {
-        console.warn('Could not load app version from backend:', err);
-      });
+    refreshAccountAndSettings();
   }, []);
+
+  const handleWelcomeGoogle = async () => {
+    const acc = await invoke<RelayAccount>('start_google_sign_in');
+    await invoke('complete_first_run');
+    setAccount(acc);
+    setWelcomeOpen(false);
+    setExplanationOpen(true);
+  };
+
+  const handleWelcomeLocally = async () => {
+    await invoke('complete_first_run');
+    setWelcomeOpen(false);
+  };
+
+  const handleCreateAndStartDetectedMeeting = async (detected: DetectedMeetingPayload) => {
+    try {
+      const newMeeting = await invoke<Meeting>('create_meeting', {
+        title: detected.title,
+        provider: detected.provider,
+        seriesId: null,
+      });
+
+      if (detected.meeting_url || detected.scheduled_start) {
+        newMeeting.provider_metadata = { meeting_url: detected.meeting_url };
+        newMeeting.scheduled_start = detected.scheduled_start || newMeeting.scheduled_start;
+        await invoke('save_meeting', { meeting: newMeeting });
+      }
+
+      setActiveTab('meetings');
+      await invoke('start_meeting_recording', { meetingId: newMeeting.id });
+    } catch (err) {
+      console.error('Failed to create and start detected meeting:', err);
+    }
+  };
 
   const renderHeroHeader = () => {
     switch (activeTab) {
@@ -62,6 +117,26 @@ export const App: React.FC = () => {
               </h1>
               <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
                 Everything you dictate, captured in one truthful history.
+              </p>
+            </div>
+          </div>
+        );
+      case 'meetings':
+        return (
+          <div className="relative rounded-lg border border-border/80 bg-gradient-to-br from-card via-card/95 to-blue-500/5 p-5 md:p-6 shadow-xs overflow-hidden mb-5 shrink-0">
+            <div className="absolute -right-10 -top-10 w-40 h-40 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] font-mono uppercase tracking-wider text-blue-500 border-blue-500/30 bg-blue-500/5 gap-1.5 py-0.5 px-2">
+                  <Calendar className="w-3 h-3 text-blue-500" />
+                  <span>Source & Capture Surface</span>
+                </Badge>
+              </div>
+              <h1 className="text-xl md:text-2xl font-extrabold tracking-tight text-foreground">
+                Meetings & <span className="italic text-primary">Conferences</span>
+              </h1>
+              <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
+                Capture standalone and recurring meetings, preserve truthful source context, and extract living knowledge.
               </p>
             </div>
           </div>
@@ -111,7 +186,16 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex h-screen w-screen bg-background text-foreground overflow-hidden font-sans">
-      {/* Navigation Sidebar (Original Relay 3-item Structure) */}
+      {/* Non-blocking Meeting Detection Popup Notification */}
+      <MeetingDetectionPopup
+        onStartMeetingRecording={async (mId) => {
+          setActiveTab('meetings');
+          await invoke('start_meeting_recording', { meetingId: mId });
+        }}
+        onCreateAndStartMeeting={handleCreateAndStartDetectedMeeting}
+      />
+
+      {/* Navigation Sidebar (Relay 4-item Structure: Voice Note, Meetings, Scribbles, Settings) */}
       <aside
         className={`${
           sidebarOpen ? 'w-64 p-4 border-r border-sidebar-border opacity-100' : 'w-0 p-0 border-none opacity-0 pointer-events-none'
@@ -130,7 +214,7 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Navigation Items (Voice Note, Scribble Notes, Settings) */}
+        {/* Navigation Items (Voice Note, Meetings, Scribbles, Settings) */}
         <nav className="flex-1 space-y-1">
           {/* 1. Voice Note */}
           <button
@@ -148,7 +232,23 @@ export const App: React.FC = () => {
             {activeTab === 'capture' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
           </button>
 
-          {/* 2. Scribbles */}
+          {/* 2. Meetings */}
+          <button
+            onClick={() => setActiveTab('meetings')}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+              activeTab === 'meetings'
+                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold shadow-xs'
+                : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Calendar className="w-4 h-4 text-blue-500" />
+              <span>Meetings</span>
+            </div>
+            {activeTab === 'meetings' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
+          </button>
+
+          {/* 3. Scribbles */}
           <button
             onClick={() => setActiveTab('scribble')}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
@@ -164,7 +264,7 @@ export const App: React.FC = () => {
             {activeTab === 'scribble' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
           </button>
 
-          {/* 3. Settings */}
+          {/* 4. Settings */}
           <button
             onClick={() => setActiveTab('settings')}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
@@ -183,18 +283,37 @@ export const App: React.FC = () => {
 
         {/* Pinned Account & Hybrid Sync Card Block */}
         <div className="mt-auto pt-4 border-t border-sidebar-border space-y-3">
-          <div className="p-2.5 rounded-lg bg-card border border-border flex items-center gap-2.5 shadow-xs">
-            <div className="w-7 h-7 rounded-full bg-primary text-primary-foreground font-bold flex items-center justify-center text-xs shrink-0">
-              N
-            </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('settings')}
+            className="w-full p-2.5 rounded-lg bg-card hover:bg-card/80 border border-border flex items-center gap-2.5 shadow-xs text-left transition-colors cursor-pointer group"
+            title="Open Account & Settings"
+          >
+            {account?.authenticated && account.profile_image ? (
+              <img
+                src={account.profile_image}
+                alt="Profile"
+                className="w-7 h-7 rounded-full border border-primary/30 object-cover shrink-0"
+              />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-primary/20 text-primary font-bold flex items-center justify-center text-xs shrink-0">
+                {account?.authenticated && account.display_name
+                  ? account.display_name.charAt(0).toUpperCase()
+                  : <User className="w-3.5 h-3.5" />}
+              </div>
+            )}
             <div className="grid flex-1 leading-tight min-w-0">
-              <span className="text-xs font-bold text-foreground truncate">Nitin Sudarshan</span>
-              <span className="text-[10px] text-muted-foreground truncate">nitin@example.com</span>
+              <span className="text-xs font-bold text-foreground truncate group-hover:text-primary transition-colors">
+                {account?.authenticated ? account.display_name || account.email : 'Local Mode'}
+              </span>
+              <span className="text-[10px] text-muted-foreground truncate font-mono">
+                {account?.authenticated ? account.email : '100% On-Device'}
+              </span>
             </div>
             <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 border-primary/30 text-primary">
-              Pro
+              {account?.authenticated ? 'Google' : 'Local'}
             </Badge>
-          </div>
+          </button>
 
           <div className="flex items-center justify-between text-[10px] text-muted-foreground px-1">
             <div className="flex items-center gap-1.5 font-medium text-emerald-500">
@@ -213,6 +332,19 @@ export const App: React.FC = () => {
           </div>
         </div>
       </aside>
+
+      {/* Welcome First-Launch Onboarding Modal */}
+      <WelcomeModal
+        isOpen={welcomeOpen}
+        onContinueGoogle={handleWelcomeGoogle}
+        onContinueLocally={handleWelcomeLocally}
+      />
+
+      {/* Account Trust & Privacy Explanation Modal */}
+      <AccountExplanationModal
+        isOpen={explanationOpen}
+        onClose={() => setExplanationOpen(false)}
+      />
 
       {/* Changelog Modal */}
       <ChangelogModal
@@ -255,6 +387,10 @@ export const App: React.FC = () => {
           {renderHeroHeader()}
 
           {activeTab === 'capture' && <VoiceNotePage />}
+
+          {activeTab === 'meetings' && (
+            <MeetingPage onNavigateToScribbles={() => setActiveTab('scribble')} />
+          )}
 
           {activeTab === 'scribble' && <ScribbleViewer />}
 

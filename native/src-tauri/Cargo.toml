@@ -1,6 +1,6 @@
 [package]
 name = "relay-native-backend"
-version = "0.8.2"
+version = "0.9.0"
 description = "Relay AI Voice and Memory Assistant Rust Backend"
 authors = ["Relay Team"]
 edition = "2021"
@@ -33,6 +33,9 @@ uuid = { version = "1.8", features = ["v4", "serde"] }
 whisper-rs = { version = "0.16", optional = true }
 enigo = "0.2"
 base64 = "0.22"
+keyring = "2.1"
+urlencoding = "2.1"
+dotenvy = "0.15"
 
 [features]
 default = ["whisper-local"]

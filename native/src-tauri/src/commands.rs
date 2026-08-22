@@ -5,8 +5,8 @@ use crate::providers::{LLMClient, OllamaStatus, ProviderType};
 use crate::settings::{AppSettings, HotkeySettings, PillPosition};
 use crate::triggers::{TriggerConfig, TriggerEngine};
 use crate::vault::{
-    GraphFilter, KanbanCard, KnowledgeGraphData, KnowledgeSearchResult, Scribble,
-    ScribbleRelationship, TrashItem, VaultManager, VaultNote,
+    GraphFilter, KanbanCard, KnowledgeGraphData, KnowledgeSearchResult, Meeting,
+    MeetingSeries, Scribble, ScribbleRelationship, TrashItem, VaultManager, VaultNote,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -1355,6 +1355,476 @@ pub async fn run_stt_evaluation(
 #[tauri::command]
 pub async fn get_stt_corpus() -> Result<Vec<crate::capture::CorpusItem>, CommandError> {
     Ok(crate::capture::get_curated_corpus())
+}
+
+pub const MEETING_UPDATED_EVENT: &str = "meeting-updated";
+pub const MEETING_DETECTED_EVENT: &str = "meeting-detected";
+
+#[tauri::command]
+pub async fn get_meetings(state: State<'_, AppState>) -> Result<Vec<Meeting>, CommandError> {
+    state
+        .vault
+        .list_meetings()
+        .map_err(|e| CommandError::new("VAULT_ERROR", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn get_meeting(meeting_id: String, state: State<'_, AppState>) -> Result<Meeting, CommandError> {
+    state
+        .vault
+        .get_meeting(&meeting_id)
+        .map_err(|e| CommandError::new("NOT_FOUND", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn create_meeting(
+    title: String,
+    provider: String,
+    series_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Meeting, CommandError> {
+    let meeting = Meeting::new(&title, &provider, series_id.as_deref());
+    state
+        .vault
+        .save_meeting(&meeting)
+        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
+    Ok(meeting)
+}
+
+#[tauri::command]
+pub async fn save_meeting(meeting: Meeting, state: State<'_, AppState>) -> Result<Meeting, CommandError> {
+    state
+        .vault
+        .save_meeting(&meeting)
+        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
+    Ok(meeting)
+}
+
+#[tauri::command]
+pub async fn update_meeting(meeting: Meeting, state: State<'_, AppState>) -> Result<Meeting, CommandError> {
+    state
+        .vault
+        .update_meeting(&meeting)
+        .map_err(|e| CommandError::new("UPDATE_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn delete_meeting(
+    meeting_id: String,
+    state: State<'_, AppState>,
+) -> Result<TrashItem, CommandError> {
+    state
+        .vault
+        .move_to_trash("meeting", &meeting_id)
+        .map_err(|e| CommandError::new("DELETE_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn get_meeting_series(state: State<'_, AppState>) -> Result<Vec<MeetingSeries>, CommandError> {
+    state
+        .vault
+        .list_meeting_series()
+        .map_err(|e| CommandError::new("VAULT_ERROR", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn save_meeting_series(
+    series: MeetingSeries,
+    state: State<'_, AppState>,
+) -> Result<MeetingSeries, CommandError> {
+    state
+        .vault
+        .save_meeting_series(&series)
+        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
+    Ok(series)
+}
+
+#[tauri::command]
+pub async fn delete_meeting_series(
+    series_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    state
+        .vault
+        .delete_meeting_series(&series_id)
+        .map_err(|e| CommandError::new("DELETE_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn start_meeting_recording(
+    app: AppHandle,
+    meeting_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, CommandError> {
+    if state.recorder.is_active() {
+        return Err(CommandError::new(
+            "RECORDER_ACTIVE",
+            "Audio recording is already in progress.",
+        ));
+    }
+
+    let mut meeting = state
+        .vault
+        .get_meeting(&meeting_id)
+        .map_err(|e| CommandError::new("NOT_FOUND", &e.to_string()))?;
+
+    let audio_dir = state.config_dir.join("audio");
+    let result = state
+        .recorder
+        .start("meeting", &audio_dir, Some(app.clone()))
+        .map_err(|e| CommandError::new("CAPTURE_FAILED", &e.to_string()));
+
+    emit_capture_state(&app, &state.recorder);
+
+    if result.is_ok() {
+        meeting.status = crate::vault::MEETING_STATUS_RECORDING.to_string();
+        meeting.actual_start = Some(chrono::Utc::now().to_rfc3339());
+        meeting.updated_at = chrono::Utc::now().to_rfc3339();
+        let _ = state.vault.save_meeting(&meeting);
+        let _ = app.emit(MEETING_UPDATED_EVENT, &meeting);
+    }
+
+    result
+}
+
+#[tauri::command]
+pub async fn stop_meeting_recording(
+    app: AppHandle,
+    meeting_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<Meeting>, CommandError> {
+    let captured = state
+        .recorder
+        .stop()
+        .await
+        .map_err(|e| CommandError::new("CAPTURE_STOP_FAILED", &e.to_string()));
+    emit_capture_state(&app, &state.recorder);
+    let captured = captured?;
+
+    let mut meeting = state
+        .vault
+        .get_meeting(&meeting_id)
+        .map_err(|e| CommandError::new("NOT_FOUND", &e.to_string()))?;
+
+    meeting.actual_end = Some(chrono::Utc::now().to_rfc3339());
+    meeting.recording_path = Some(captured.audio_path.clone());
+
+    if !captured.had_audio {
+        meeting.status = crate::vault::MEETING_STATUS_COMPLETED.to_string();
+        meeting.updated_at = chrono::Utc::now().to_rfc3339();
+        let _ = state.vault.save_meeting(&meeting);
+        let _ = app.emit(MEETING_UPDATED_EVENT, &meeting);
+        return Ok(Some(meeting));
+    }
+
+    meeting.status = crate::vault::MEETING_STATUS_PROCESSING.to_string();
+    meeting.updated_at = chrono::Utc::now().to_rfc3339();
+    let _ = state.vault.save_meeting(&meeting);
+    let _ = app.emit(MEETING_UPDATED_EVENT, &meeting);
+
+    let settings = state.settings.lock().unwrap().clone();
+    let stt = state.stt.clone();
+    let samples = captured.samples.clone();
+    let models_dir = state.config_dir.join("models");
+    let model_path = match settings
+        .stt
+        .whisper_model_path
+        .clone()
+        .filter(|p| !p.trim().is_empty())
+    {
+        Some(p) => Some(p),
+        None => crate::capture::stt::ensure_default_model(&models_dir).await.ok().map(|p| p.to_string_lossy().to_string()),
+    };
+
+    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
+    let decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
+
+    let mp_clone = model_path.clone();
+    let lang_clone = language_config.clone();
+    let dec_clone = decoding_config.clone();
+
+    let (transcript, _, _) = tokio::task::spawn_blocking(move || {
+        match stt.transcribe_with_config(
+            mp_clone.as_deref(),
+            &samples,
+            &lang_clone,
+            &dec_clone,
+        ) {
+            Ok((t, d)) => (t, Some(d), None),
+            Err(e) => (String::new(), None, Some(e.to_string())),
+        }
+    })
+    .await
+    .map_err(|e| CommandError::new("STT_TASK_FAILED", &e.to_string()))?;
+
+    if !transcript.trim().is_empty() {
+        meeting.transcript = transcript.clone();
+        if meeting.notes.trim().is_empty() {
+            meeting.notes = format!("Auto-generated meeting notes from transcript:\n\n{}", transcript);
+        }
+    }
+
+    meeting.status = crate::vault::MEETING_STATUS_COMPLETED.to_string();
+    meeting.updated_at = chrono::Utc::now().to_rfc3339();
+    let _ = state.vault.save_meeting(&meeting);
+    let _ = app.emit(MEETING_UPDATED_EVENT, &meeting);
+
+    // Auto-trigger background AI enrichment if LLM is configured
+    let app_clone = app.clone();
+    let mid_clone = meeting.id.clone();
+    let config_dir = state.config_dir.clone();
+    let default_vault = state.vault.vault_dir();
+    tauri::async_runtime::spawn(async move {
+        let vault = VaultManager::new(default_vault);
+        let settings = AppSettings::load(&config_dir.join("settings.json")).unwrap_or_default();
+        let llm = LLMClient::new(settings.provider);
+        if let Ok(enriched) = crate::pipeline::enrich_meeting(&llm, &vault, &mid_clone).await {
+            let _ = app_clone.emit(MEETING_UPDATED_EVENT, &enriched);
+        }
+    });
+
+    Ok(Some(meeting))
+}
+
+#[tauri::command]
+pub async fn trigger_enrich_meeting(
+    app: AppHandle,
+    meeting_id: String,
+    state: State<'_, AppState>,
+) -> Result<Meeting, CommandError> {
+    let settings = state.settings.lock().unwrap().clone();
+    let llm = LLMClient::new(settings.provider);
+    let enriched = crate::pipeline::enrich_meeting(&llm, &state.vault, &meeting_id)
+        .await
+        .map_err(|e| CommandError::new("ENRICH_FAILED", &e))?;
+
+    let _ = app.emit(MEETING_UPDATED_EVENT, &enriched);
+    Ok(enriched)
+}
+
+#[tauri::command]
+pub async fn create_scribble_from_meeting(
+    meeting_id: String,
+    content: String,
+    title: Option<String>,
+    segment: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Scribble, CommandError> {
+    let meeting = state
+        .vault
+        .get_meeting(&meeting_id)
+        .map_err(|e| CommandError::new("NOT_FOUND", &e.to_string()))?;
+
+    let scribble = meeting.create_scribble(&content, title.as_deref(), segment.as_deref());
+    state
+        .vault
+        .save_scribble(&scribble)
+        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
+
+    Ok(scribble)
+}
+
+#[tauri::command]
+pub async fn get_calendar_connection_status(
+    state: State<'_, AppState>,
+) -> Result<crate::meetings::calendar::CalendarConnectionStatus, CommandError> {
+    Ok(crate::meetings::calendar::get_calendar_connection_status(&state.vault.vault_dir()))
+}
+
+#[tauri::command]
+pub async fn start_google_calendar_oauth(
+    custom_client_id: Option<String>,
+    custom_client_secret: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings::calendar::CalendarConnectionStatus, CommandError> {
+    crate::meetings::calendar::start_google_oauth_flow(
+        &state.vault.vault_dir(),
+        custom_client_id,
+        custom_client_secret,
+    )
+    .await
+    .map_err(|e| CommandError::new("OAUTH_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn disconnect_google_calendar(
+    state: State<'_, AppState>,
+) -> Result<crate::meetings::calendar::CalendarConnectionStatus, CommandError> {
+    crate::meetings::calendar::delete_calendar_tokens(&state.vault.vault_dir())
+        .map_err(|e| CommandError::new("DISCONNECT_FAILED", &e))?;
+    Ok(crate::meetings::calendar::get_calendar_connection_status(&state.vault.vault_dir()))
+}
+
+#[tauri::command]
+pub async fn sync_google_calendar(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::meetings::CalendarMeetingEvent>, CommandError> {
+    crate::meetings::calendar::sync_real_google_calendar_events(&state.vault.vault_dir())
+        .await
+        .map_err(|e| CommandError::new("SYNC_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn get_google_oauth_config(
+    state: State<'_, AppState>,
+) -> Result<crate::meetings::calendar::GoogleCalendarConfig, CommandError> {
+    Ok(crate::meetings::calendar::load_calendar_config(&state.vault.vault_dir()))
+}
+
+#[tauri::command]
+pub async fn save_google_oauth_config(
+    config: crate::meetings::calendar::GoogleCalendarConfig,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    crate::meetings::calendar::save_calendar_config(&state.vault.vault_dir(), &config)
+        .map_err(|e| CommandError::new("SAVE_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn get_upcoming_calendar_events(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::meetings::CalendarMeetingEvent>, CommandError> {
+    crate::meetings::calendar::sync_real_google_calendar_events(&state.vault.vault_dir())
+        .await
+        .map_err(|e| CommandError::new("CALENDAR_SYNC_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn check_meeting_detection(
+    app: AppHandle,
+) -> Result<Vec<crate::meetings::DetectedMeetingPayload>, CommandError> {
+    let raw_found = crate::meetings::detect_active_conferencing_windows();
+    let mut detected = Vec::new();
+
+    for (provider, title, source) in raw_found {
+        let payload = crate::meetings::DetectedMeetingPayload {
+            event_id: format!("detected_{}_{}", provider, title.replace(' ', "_")),
+            title: title.clone(),
+            provider: provider.clone(),
+            meeting_url: None,
+            scheduled_start: Some(chrono::Utc::now().to_rfc3339()),
+            participants: Vec::new(),
+            confidence: 0.95,
+            detection_source: source,
+        };
+
+        let _ = app.emit(MEETING_DETECTED_EVENT, &payload);
+        detected.push(payload);
+    }
+
+    Ok(detected)
+}
+
+#[tauri::command]
+pub async fn get_account_state(
+    state: State<'_, AppState>,
+) -> Result<crate::identity::RelayAccount, CommandError> {
+    Ok(crate::identity::load_relay_account(&state.config_dir))
+}
+
+#[tauri::command]
+pub async fn start_google_sign_in(
+    custom_client_id: Option<String>,
+    custom_client_secret: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::identity::RelayAccount, CommandError> {
+    let settings = state.settings.lock().unwrap().clone();
+    let supabase_url = settings.cloud.supabase_url;
+    let supabase_anon = settings.cloud.supabase_anon_key;
+
+    let account = crate::identity::sign_in_with_google(
+        &state.config_dir,
+        custom_client_id,
+        custom_client_secret,
+        supabase_url,
+        supabase_anon,
+    )
+    .await
+    .map_err(|e| CommandError::new("AUTH_FAILED", &e))?;
+
+    // Report diagnostics event if enabled
+    let settings = state.settings.lock().unwrap().clone();
+    let inst = crate::identity::get_or_create_installation_info(
+        &state.config_dir,
+        env!("CARGO_PKG_VERSION"),
+    );
+    crate::diagnostics::DiagnosticsService::report_event(
+        settings.diagnostics.allow_anonymous_diagnostics,
+        &inst.installation_id,
+        account.user_id.as_deref(),
+        env!("CARGO_PKG_VERSION"),
+        "account_sign_in",
+        std::collections::HashMap::new(),
+    );
+
+    Ok(account)
+}
+
+#[tauri::command]
+pub async fn sign_out_account(
+    state: State<'_, AppState>,
+) -> Result<crate::identity::RelayAccount, CommandError> {
+    let account = crate::identity::sign_out_account(&state.config_dir)
+        .map_err(|e| CommandError::new("SIGNOUT_FAILED", &e))?;
+
+    let settings = state.settings.lock().unwrap().clone();
+    let inst = crate::identity::get_or_create_installation_info(
+        &state.config_dir,
+        env!("CARGO_PKG_VERSION"),
+    );
+    crate::diagnostics::DiagnosticsService::report_event(
+        settings.diagnostics.allow_anonymous_diagnostics,
+        &inst.installation_id,
+        None,
+        env!("CARGO_PKG_VERSION"),
+        "account_sign_out",
+        std::collections::HashMap::new(),
+    );
+
+    Ok(account)
+}
+
+#[tauri::command]
+pub async fn get_installation_info(
+    state: State<'_, AppState>,
+) -> Result<crate::identity::InstallationInfo, CommandError> {
+    Ok(crate::identity::get_or_create_installation_info(
+        &state.config_dir,
+        env!("CARGO_PKG_VERSION"),
+    ))
+}
+
+#[tauri::command]
+pub async fn check_for_app_updates(
+    _state: State<'_, AppState>,
+) -> Result<crate::updates::UpdateInfo, CommandError> {
+    let current_ver = env!("CARGO_PKG_VERSION");
+    Ok(crate::updates::UpdateService::check_for_updates(current_ver).await)
+}
+
+#[tauri::command]
+pub async fn set_diagnostics_consent(
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<AppSettings, CommandError> {
+    let mut settings = state.settings.lock().unwrap();
+    settings.diagnostics.allow_anonymous_diagnostics = enabled;
+    settings
+        .save(&state.config_dir.join("settings.json"))
+        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
+    Ok(settings.clone())
+}
+
+#[tauri::command]
+pub async fn complete_first_run(
+    state: State<'_, AppState>,
+) -> Result<AppSettings, CommandError> {
+    let mut settings = state.settings.lock().unwrap();
+    settings.diagnostics.first_run_completed = true;
+    settings
+        .save(&state.config_dir.join("settings.json"))
+        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
+    Ok(settings.clone())
 }
 
 

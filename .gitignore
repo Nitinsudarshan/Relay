@@ -23,8 +23,16 @@ native/src-tauri/gen/schemas/
 graphify-out/
 
 # environment & secrets
-.env*
+.env
+.env.*
+.env.local
+.env.*.local
+**/.env
+**/.env.*
+**/.env.local
+**/.env.*.local
 !.env.example
+!**/.env.example
 
 # logs
 *.log

@@ -448,6 +448,32 @@ impl KnowledgeGraphData {
                     *degrees.entry(scribble.id.clone()).or_insert(0) += 1;
                     *degrees.entry(source_node_id).or_insert(0) += 1;
                 }
+            } else if scribble.source_type == SOURCE_TYPE_MEETING {
+                let meeting_id = scribble.source_metadata.get("meeting_id").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let meeting_title = scribble.source_metadata.get("meeting_title").and_then(|v| v.as_str()).unwrap_or("Meeting");
+                let source_node_id = format!("meeting_{}", meeting_id);
+
+                nodes_map.entry(source_node_id.clone()).or_insert_with(|| KnowledgeNode {
+                    id: source_node_id.clone(),
+                    node_type: "source".to_string(),
+                    label: meeting_title.to_string(),
+                    summary: Some(format!("Meeting source: {}", meeting_title)),
+                    metadata: scribble.source_metadata.clone(),
+                    degree: 0,
+                    source_type: Some("meeting".to_string()),
+                });
+
+                edges.push(KnowledgeEdge {
+                    id: format!("edge_{}_{}", scribble.id, source_node_id),
+                    source_id: scribble.id.clone(),
+                    target_id: source_node_id.clone(),
+                    relationship: REL_DERIVED_FROM.to_string(),
+                    confidence: 1.0,
+                    source: "system".to_string(),
+                });
+
+                *degrees.entry(scribble.id.clone()).or_insert(0) += 1;
+                *degrees.entry(source_node_id).or_insert(0) += 1;
             }
 
             // 5. Process Explicit Relationships between Scribbles

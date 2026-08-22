@@ -414,9 +414,18 @@ This log records material architectural, technical, and product decisions for Re
   - Renamed product terminology everywhere from "Scribble Notes" to "Scribbles".
   - Knowledge Graph: Fixed dynamic zoom-dependent label text fade threshold, collapsed all 4 settings sections (`Filters`, `Groups`, `Display`, `Forces`) by default, added persistent `Save Graph Settings` to `localStorage`, added full-screen mode toggle (with `Escape` key handling), and replaced "Tags" toggle with "Topics".
 - **Reason**: Guarantees truthful knowledge architecture without graph pollution, provides genuine Obsidian Graph fidelity, and unifies the entire Scribbles interface.
-- **Existing Functionality Preserved**: All 11 backend tests pass, production frontend builds cleanly.
+---
 
+### Decision 43: Phase 11D — Relay Identity, Product Account & Local→Hybrid Foundation (Relay Account != Relay Vault)
 
-
-
-
+- **Context**: Introducing a first-class identity and account foundation using desktop Google Sign-In, stable installation identification, diagnostics, and update services without compromising Relay's zero-cost, local-first privacy promise.
+- **Decision made**:
+  - **Relay Account $\neq$ Local Vault Invariant**: A Relay account identifies the user and installation; **it does not automatically upload or synchronize the user's knowledge, audio recordings, transcripts, meetings, scribbles, or vault**. The local vault remains 100% functional without an internet connection or authenticated session.
+  - **Desktop Google OAuth Flow**: Standard Desktop Authorization Code Flow with PKCE using a local loopback server (`127.0.0.1:{port}/oauth/callback`). Tokens (`access_token`, `refresh_token`) are stored in the OS Keyring / Credential Manager with an encrypted local fallback, completely outside the user's markdown vault and `localStorage`.
+  - **Stable Anonymous Installation ID**: Generated once per installation (UUID v4) and persisted in `.relay/config/installation.json`. Masked in the UI (`••••••••-••••-XXXX`) with click-to-copy for customer support. Not derived from hardware identifiers.
+  - **Strict Privacy-First Diagnostics**: Central `DiagnosticsService` strictly firewalls user content. Diagnostic payloads contain only anonymous metadata (`installation_id`, `account_id`, `relay_version`, `platform`, `event_type`, `timestamp`). Scribble text, voice notes, audio waveforms, transcripts, and graph contents are **never** collected. Controlled by an explicit user toggle in Settings.
+  - **Update Service Abstraction**: `UpdateService` handles version checking and compares semver release manifests, degrading gracefully to offline status without blocking or throwing unhandled errors.
+  - **Settings → Account Section**: Embedded directly in Settings sidebar with Google profile card, Installation ID, Operating Mode (`Local` with Hybrid preview), Update checker, Diagnostics consent toggle, and Sign Out confirmation modal (explaining local notes remain intact).
+  - **First-Run Welcome Experience**: Introduces `WelcomeModal` on fresh install offering "Continue with Google" or "Continue Locally", followed by `AccountExplanationModal` reinforcing local data guarantees upon sign-in.
+- **Reason**: Establishes a unified identity layer for upcoming Google Calendar sync, meeting detection, and eventual Hybrid cloud synchronization, while maintaining the strongest part of Relay's value proposition: *Relay can know who you are without needing to know what you know.*
+- **Existing Functionality Preserved**: All 91 Rust backend tests pass; frontend builds with zero TypeScript errors.

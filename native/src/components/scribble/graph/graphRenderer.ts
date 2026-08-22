@@ -114,13 +114,20 @@ export function renderGraph(rc: RenderContext) {
       highlightSet.has(edge.target_id);
 
     const isDimmed = isQuietingActive && !isConnectedToActive;
+    const isDerived = edge.relationship === 'DERIVED_FROM';
 
     ctx.beginPath();
     ctx.moveTo(source.x, source.y);
     ctx.lineTo(target.x, target.y);
 
+    if (isDerived) {
+      ctx.setLineDash([4, 4]); // Dashed stroke for provenance/derived links
+    } else {
+      ctx.setLineDash([]); // Solid stroke for semantic knowledge relationships
+    }
+
     if (isConnectedToActive) {
-      ctx.strokeStyle = '#60a5fa'; // Bright highlight blue
+      ctx.strokeStyle = isDerived ? '#c084fc' : '#60a5fa'; // Distinct purple for derived provenance highlight
       ctx.lineWidth = 1.8 * baseLinkThickness;
       ctx.globalAlpha = 0.95;
     } else if (isDimmed) {
@@ -129,12 +136,13 @@ export function renderGraph(rc: RenderContext) {
       ctx.globalAlpha = 0.08; // Quieted
     } else {
       const isExplicit = edge.relationship !== 'SAME_TOPIC' && edge.relationship !== 'MENTIONS';
-      ctx.strokeStyle = isExplicit ? '#64748b' : '#475569';
-      ctx.lineWidth = (isExplicit ? 0.9 : 0.7) * baseLinkThickness;
-      ctx.globalAlpha = isExplicit ? 0.45 : 0.28;
+      ctx.strokeStyle = isDerived ? '#94a3b8' : isExplicit ? '#64748b' : '#475569';
+      ctx.lineWidth = (isDerived ? 0.8 : isExplicit ? 0.9 : 0.7) * baseLinkThickness;
+      ctx.globalAlpha = isDerived ? 0.35 : isExplicit ? 0.45 : 0.28;
     }
 
     ctx.stroke();
+    ctx.setLineDash([]); // Reset line dash
 
     // Optional directional arrows
     if (display.showArrows && !isDimmed) {
@@ -152,6 +160,7 @@ export function renderGraph(rc: RenderContext) {
     const isHovered = node.id === hoveredNodeId;
     const isHighlighted = isQuietingActive && highlightSet.has(node.id);
     const isDimmed = isQuietingActive && !isHighlighted;
+    const isMeetingSource = node.node_type === 'source' || node.node_type === 'meeting';
 
     ctx.save();
     ctx.beginPath();
@@ -188,6 +197,15 @@ export function renderGraph(rc: RenderContext) {
         ? '#ffffff'
         : 'rgba(255, 255, 255, 0.22)';
       ctx.stroke();
+
+      // Double-ring accent for Meeting/Source containers to visually distinguish source records
+      if (isMeetingSource) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius + 3, 0, Math.PI * 2);
+        ctx.lineWidth = 1.0;
+        ctx.strokeStyle = isSelected ? '#c084fc' : 'rgba(168, 85, 247, 0.45)'; // Purple accent ring
+        ctx.stroke();
+      }
     }
 
     ctx.restore();

@@ -168,7 +168,10 @@ export const GraphSettingsPanel: React.FC<GraphSettingsPanelProps> = ({
               </label>
 
               <label className="flex items-center justify-between text-muted-foreground hover:text-foreground cursor-pointer">
-                <span>Attachments & Sources</span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" />
+                  <span>Meeting Sources & Provenance</span>
+                </span>
                 <input
                   type="checkbox"
                   checked={filters.showAttachments}

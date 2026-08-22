@@ -283,3 +283,146 @@ A[Input] --> B[Process] --> C[Result]
 
     Ok(scribble)
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MeetingAiEnrichmentResponse {
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub decisions: Vec<String>,
+    #[serde(default)]
+    pub action_items: Vec<ExtractedMeetingActionItem>,
+    #[serde(default)]
+    pub questions: Vec<String>,
+    #[serde(default)]
+    pub candidate_scribbles: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ExtractedMeetingActionItem {
+    pub title: String,
+    #[serde(default)]
+    pub assignee: Option<String>,
+    #[serde(default)]
+    pub due_date: Option<String>,
+    #[serde(default)]
+    pub priority: Option<String>,
+}
+
+/// Asynchronously enriches a Meeting with AI-derived structured summary,
+/// key decisions, action items, open questions, and candidate scribbles.
+pub async fn enrich_meeting(
+    llm: &LLMClient,
+    vault: &VaultManager,
+    meeting_id: &str,
+) -> Result<crate::vault::Meeting, String> {
+    let mut meeting = vault
+        .get_meeting(meeting_id)
+        .map_err(|e| format!("Meeting not found: {}", e))?;
+
+    let combined_content = format!(
+        "Meeting Title: {}\n\nNotes:\n{}\n\nTranscript:\n{}",
+        meeting.title, meeting.notes, meeting.transcript
+    );
+
+    let system_prompt = r#"
+You are Relay's Executive Meeting Intelligence Assistant.
+Analyze this meeting record (notes and transcript) and derive structured meeting intelligence.
+
+Return ONLY a valid JSON object with the following fields:
+- "summary": a crisp executive summary (2-3 concise bullet points with bold lead-ins). If the discussion involves a workflow or process, you may include a compact 2-4 node Mermaid diagram.
+- "decisions": an array of explicit decisions agreed upon during the meeting (e.g. ["Deploy v0.8.3 to staging on Tuesday", "Keep local-only storage as default"]).
+- "action_items": an array of tasks with structure:
+  [
+    {
+      "title": "Task description",
+      "assignee": "Person's name or null",
+      "due_date": "YYYY-MM-DD or null",
+      "priority": "high" | "medium" | "low"
+    }
+  ]
+- "questions": an array of 2-4 open, unresolved questions or discussion points.
+- "candidate_scribbles": an array of 2-4 atomic, high-value insights or concepts from this meeting that are worth preserving as independent permanent thoughts in a knowledge base.
+
+Return ONLY raw JSON or JSON within a markdown code block.
+"#;
+
+    let response = match llm.complete(&combined_content, Some(system_prompt)).await {
+        Ok(res) => res,
+        Err(err) => {
+            tracing::warn!("AI enrichment failed for meeting {}: {}", meeting_id, err);
+            return Ok(meeting);
+        }
+    };
+
+    let text = response.text.trim();
+    let json_str = if text.contains("```json") {
+        text.split("```json")
+            .nth(1)
+            .unwrap_or("")
+            .split("```")
+            .next()
+            .unwrap_or("")
+            .trim()
+    } else if text.contains("```") {
+        text.split("```")
+            .nth(1)
+            .unwrap_or("")
+            .split("```")
+            .next()
+            .unwrap_or("")
+            .trim()
+    } else {
+        text
+    };
+
+    let word_count = combined_content.split_whitespace().count();
+
+    if let Ok(parsed) = serde_json::from_str::<MeetingAiEnrichmentResponse>(json_str) {
+        // Summary rule: only save if meeting content is >= 100 words
+        if word_count >= 100 {
+            if let Some(s) = parsed.summary {
+                let s_clean = s.trim().to_string();
+                if !s_clean.is_empty() && s_clean != "null" {
+                    meeting.summary = Some(s_clean);
+                }
+            }
+        }
+
+        if !parsed.decisions.is_empty() {
+            meeting.decisions = parsed.decisions;
+        }
+
+        if !parsed.action_items.is_empty() {
+            meeting.action_items = parsed
+                .action_items
+                .into_iter()
+                .map(|item| crate::vault::MeetingActionItem {
+                    id: format!("act_{}", uuid::Uuid::new_v4()),
+                    title: item.title,
+                    assignee: item.assignee,
+                    due_date: item.due_date,
+                    priority: item.priority.unwrap_or_else(|| "medium".to_string()),
+                    status: "todo".to_string(),
+                })
+                .collect();
+        }
+
+        if !parsed.questions.is_empty() {
+            meeting.questions = parsed.questions;
+        }
+
+        if !parsed.candidate_scribbles.is_empty() {
+            meeting.candidate_scribbles = parsed.candidate_scribbles;
+        }
+    } else {
+        tracing::warn!("Could not parse meeting AI enrichment JSON for meeting {}", meeting_id);
+    }
+
+    meeting.updated_at = chrono::Utc::now().to_rfc3339();
+    meeting.status = crate::vault::MEETING_STATUS_COMPLETED.to_string();
+    vault
+        .save_meeting(&meeting)
+        .map_err(|e| format!("Failed to save enriched meeting: {}", e))?;
+
+    Ok(meeting)
+}

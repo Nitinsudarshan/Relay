@@ -1,13 +1,17 @@
 pub mod capture;
 pub mod commands;
+pub mod diagnostics;
 pub mod hotkeys;
+pub mod identity;
 pub mod mcp;
+pub mod meetings;
 pub mod overlay;
 pub mod pipeline;
 pub mod providers;
 pub mod settings;
 pub mod triggers;
 pub mod tts;
+pub mod updates;
 pub mod vault;
 
 use capture::{AudioRecorder, SttEngine};
@@ -19,6 +23,9 @@ use vault::VaultManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load environment variables from .env if present
+    dotenvy::dotenv().ok();
+
     let base_dir = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(".relay");
@@ -115,6 +122,34 @@ pub fn run() {
             commands::get_knowledge_graph,
             commands::trigger_enrich_scribble,
             commands::summarize_scribble,
+            commands::get_meetings,
+            commands::get_meeting,
+            commands::create_meeting,
+            commands::save_meeting,
+            commands::update_meeting,
+            commands::delete_meeting,
+            commands::get_meeting_series,
+            commands::save_meeting_series,
+            commands::delete_meeting_series,
+            commands::start_meeting_recording,
+            commands::stop_meeting_recording,
+            commands::trigger_enrich_meeting,
+            commands::create_scribble_from_meeting,
+            commands::get_upcoming_calendar_events,
+            commands::check_meeting_detection,
+            commands::get_calendar_connection_status,
+            commands::start_google_calendar_oauth,
+            commands::disconnect_google_calendar,
+            commands::sync_google_calendar,
+            commands::get_google_oauth_config,
+            commands::save_google_oauth_config,
+            commands::get_account_state,
+            commands::start_google_sign_in,
+            commands::sign_out_account,
+            commands::get_installation_info,
+            commands::check_for_app_updates,
+            commands::set_diagnostics_consent,
+            commands::complete_first_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
