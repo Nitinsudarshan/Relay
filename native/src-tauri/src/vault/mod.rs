@@ -864,7 +864,18 @@ impl VaultManager {
         let mut derived_relationships = Vec::new();
 
         for s in &source_scribbles {
-            content_parts.push(format!("### {}\n\n{}", s.title, s.content));
+            let raw_t = s.title.trim().trim_start_matches('[').trim_end_matches(']').trim();
+            let clean_t = if raw_t.is_empty()
+                || raw_t == "Untitled Thought"
+                || raw_t.starts_with("Generating title")
+                || raw_t.starts_with("Synthesis:")
+                || raw_t.starts_with("Consolidated:")
+            {
+                "Thought Section".to_string()
+            } else {
+                raw_t.to_string()
+            };
+            content_parts.push(format!("### {}\n\n{}", clean_t, s.content));
             for t in &s.topics {
                 combined_topics.insert(t.clone());
             }
@@ -886,17 +897,42 @@ impl VaultManager {
         let combined_content = content_parts.join("\n\n---\n\n");
         let now = chrono::Utc::now().to_rfc3339();
 
-        // Clean initial semantic fallback title (3-8 words, never recursive Synthesis:)
+        // Clean initial semantic fallback title (3-8 words, never recursive brackets/Generating title)
         let default_title = if !combined_topics.is_empty() {
             let top_topics: Vec<String> = combined_topics.iter().take(2).cloned().collect();
             format!("Consolidated: {}", top_topics.join(" & "))
         } else {
-            let first_line = source_scribbles[0].title.as_str();
-            let clean = first_line.trim_start_matches('#').trim();
-            if clean.is_empty() || clean == "Untitled Thought" || clean == "Generating title…" {
-                "Consolidated Thought".to_string()
+            let valid_titles: Vec<String> = source_scribbles
+                .iter()
+                .map(|s| s.title.trim())
+                .filter(|t| {
+                    !t.is_empty()
+                        && *t != "Untitled Thought"
+                        && *t != "Generating title…"
+                        && !t.starts_with("Generating title")
+                        && !t.starts_with("Synthesis:")
+                        && !t.starts_with("[Synthesis:")
+                        && !t.starts_with("Consolidated:")
+                        && !t.starts_with("[")
+                })
+                .map(|t| t.to_string())
+                .collect();
+
+            if !valid_titles.is_empty() {
+                if valid_titles.len() == 1 {
+                    format!("Consolidated: {}", valid_titles[0])
+                } else {
+                    format!("Consolidated: {} & {}", valid_titles[0], valid_titles[1])
+                }
             } else {
-                format!("Consolidated: {}", clean)
+                let first_line = source_scribbles[0].content.lines().next().unwrap_or("Consolidated Thought");
+                let clean = first_line.trim_start_matches('#').trim();
+                let words: Vec<&str> = clean.split_whitespace().take(6).collect();
+                if !words.is_empty() {
+                    format!("Consolidated: {}", words.join(" "))
+                } else {
+                    "Consolidated Thought".to_string()
+                }
             }
         };
 

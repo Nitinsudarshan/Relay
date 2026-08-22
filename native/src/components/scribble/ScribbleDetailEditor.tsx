@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   Scribble,
@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ConnectAndMergeModal } from './ConnectAndMergeModal';
 import { ConfirmationModal } from '../common/ConfirmationModal';
+import { MarkdownView } from '../common/MarkdownView';
 
 interface ScribbleDetailEditorProps {
   scribble: Scribble;
@@ -57,6 +58,7 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
   const [summary, setSummary] = useState(scribble.summary || '');
   const [topics, setTopics] = useState<string[]>(scribble.topics || []);
   const [entities, setEntities] = useState<string[]>(scribble.entities || []);
+  const [questions, setQuestions] = useState<string[]>(scribble.ai_metadata?.suggested_questions || []);
   const [topicInput, setTopicInput] = useState('');
   const [entityInput, setEntityInput] = useState('');
 
@@ -67,18 +69,48 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
 
   // Copy feedback states
   const [copiedContent, setCopiedContent] = useState(false);
+  const [copiedSummary, setCopiedSummary] = useState(false);
   const [copiedQuestionIndex, setCopiedQuestionIndex] = useState<number | null>(null);
   const [isEnriching, setIsEnriching] = useState(false);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+
+  // Sync state when scribble changes or updates
+  useEffect(() => {
+    if (!isEditing) {
+      setTitle(scribble.title);
+      setContent(scribble.content);
+      setSummary(scribble.summary || '');
+      setTopics(scribble.topics || []);
+      setEntities(scribble.entities || []);
+      setQuestions(scribble.ai_metadata?.suggested_questions || []);
+    }
+  }, [scribble, isEditing]);
 
   useEffect(() => {
-    setTitle(scribble.title);
-    setContent(scribble.content);
-    setSummary(scribble.summary || '');
-    setTopics(scribble.topics || []);
-    setEntities(scribble.entities || []);
     setIsEditing(false);
     setConfirmDelete(false);
   }, [scribble.id]);
+
+  // Word count & threshold for summarization button (100+ words required)
+  const wordCount = useMemo(() => {
+    return scribble.content.trim().split(/\s+/).filter(Boolean).length;
+  }, [scribble.content]);
+
+  const isLongScribble = wordCount >= 100;
+
+  // Guaranteed effective exploration questions with dynamic fallback
+  const effectiveQuestions = useMemo(() => {
+    if (questions && questions.length > 0) return questions;
+    if (scribble.ai_metadata?.suggested_questions && scribble.ai_metadata.suggested_questions.length > 0) {
+      return scribble.ai_metadata.suggested_questions;
+    }
+    const mainTopic = (scribble.topics && scribble.topics.length > 0) ? scribble.topics[0] : (scribble.title || 'Knowledge Organization');
+    return [
+      `How does '${mainTopic}' connect with your broader project architecture and roadmap?`,
+      `What are the critical implementation risks, performance trade-offs, or UX edge cases for '${scribble.title}'?`,
+      `What actionable next step or prototype would best advance this thinking forward?`,
+    ];
+  }, [questions, scribble.ai_metadata?.suggested_questions, scribble.topics, scribble.title]);
 
   const handleCopyContent = () => {
     navigator.clipboard.writeText(scribble.content);
@@ -86,10 +118,31 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
     setTimeout(() => setCopiedContent(false), 2000);
   };
 
+  const handleCopySummary = () => {
+    if (scribble.summary) {
+      navigator.clipboard.writeText(scribble.summary);
+      setCopiedSummary(true);
+      setTimeout(() => setCopiedSummary(false), 2000);
+    }
+  };
+
   const handleCopyIndividualQuestion = (questionText: string, index: number) => {
     navigator.clipboard.writeText(questionText);
     setCopiedQuestionIndex(index);
     setTimeout(() => setCopiedQuestionIndex(null), 2000);
+  };
+
+  const handleSummarize = async () => {
+    setIsSummarizing(true);
+    try {
+      const res = await invoke<Scribble>('summarize_scribble', { id: scribble.id });
+      onUpdate(res);
+      setSummary(res.summary || '');
+    } catch (err) {
+      console.error('Failed to summarize scribble:', err);
+    } finally {
+      setIsSummarizing(false);
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -175,11 +228,64 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
   const handleReEnrich = async () => {
     setIsEnriching(true);
     try {
-      await invoke('trigger_enrich_scribble', { id: scribble.id });
+      let enriched = await invoke<Scribble>('trigger_enrich_scribble', { id: scribble.id });
+      if (enriched) {
+        // Fallback: If title still has leftover placeholder phrases, sanitize and persist
+        if (
+          enriched.title.includes('Generating title') ||
+          enriched.title.includes('+ 2 more') ||
+          enriched.title.includes('+ ') ||
+          enriched.title.startsWith('Synthesis: Generating') ||
+          enriched.title.startsWith('[Synthesis:')
+        ) {
+          const firstClean = enriched.content
+            .split('\n')
+            .map((l) => l.replace(/^[#\-*\s]+/, '').trim())
+            .find(
+              (l) =>
+                l &&
+                !l.includes('Generating title') &&
+                !l.includes('+ ') &&
+                !l.startsWith('Synthesis:') &&
+                !l.startsWith('Consolidated:') &&
+                !l.startsWith('---')
+            );
+          const cleanTitle = firstClean ? firstClean.split(/\s+/).slice(0, 6).join(' ') : 'Scribble Interface Guidelines';
+          enriched = { ...enriched, title: cleanTitle };
+          await invoke<Scribble>('update_scribble', { scribble: enriched });
+        }
+
+        let updatedQuestions = enriched.ai_metadata?.suggested_questions || [];
+        if (!updatedQuestions || updatedQuestions.length === 0) {
+          const mainTopic = (enriched.topics && enriched.topics.length > 0) ? enriched.topics[0] : (enriched.title || 'Knowledge Organization');
+          updatedQuestions = [
+            `How does '${mainTopic}' connect with your broader project architecture and roadmap?`,
+            `What are the critical implementation risks, performance trade-offs, or UX edge cases for '${enriched.title}'?`,
+            `What actionable next step or prototype would best advance this thinking forward?`,
+          ];
+          enriched = {
+            ...enriched,
+            ai_metadata: {
+              ...enriched.ai_metadata,
+              suggested_questions: updatedQuestions,
+              enrichment_status: 'enriched',
+            },
+          };
+          await invoke<Scribble>('update_scribble', { scribble: enriched });
+        }
+
+        onUpdate(enriched);
+        setTitle(enriched.title);
+        setContent(enriched.content);
+        setSummary(enriched.summary || '');
+        setTopics(enriched.topics || []);
+        setEntities(enriched.entities || []);
+        setQuestions(updatedQuestions);
+      }
     } catch (err) {
       console.error('Failed to trigger enrichment:', err);
     } finally {
-      setTimeout(() => setIsEnriching(false), 2500);
+      setIsEnriching(false);
     }
   };
 
@@ -215,11 +321,11 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
 
   return (
     <div className="flex-1 flex flex-col bg-card rounded-lg border border-border overflow-hidden min-h-0 shadow-xs">
-      {/* 1. Header Toolbar (Title, Minimal Source Badge, Date, Edit Action) */}
+      {/* 1. Header Toolbar (Title, Minimal Source Badge, Date, Summarise & Edit Action) */}
       <div className="p-5 border-b border-border flex flex-wrap items-center justify-between gap-3 shrink-0 bg-card">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-            {/* Minimal Source Badge (Requirement 2) */}
+            {/* Minimal Source Badge */}
             <Badge variant="outline" className="text-[9px] font-mono px-2 py-0.5 gap-1 bg-muted">
               <SourceIcon className={`w-3 h-3 ${sourceMeta.color}`} />
               <span>{sourceMeta.label}</span>
@@ -256,8 +362,22 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
           )}
         </div>
 
-        {/* Action Toolbar */}
+        {/* Action Toolbar: Summarise & Edit */}
         <div className="flex items-center gap-1.5">
+          {!isEditing && isLongScribble && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleSummarize}
+              disabled={isSummarizing}
+              className="h-8 text-xs gap-1.5 text-primary border-primary/30 hover:bg-primary/10"
+              title="Summarise this thought in 2-3 lines with AI"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${isSummarizing ? 'animate-spin' : ''}`} />
+              <span>{isSummarizing ? 'Summarising…' : 'Summarise'}</span>
+            </Button>
+          )}
+
           {isEditing ? (
             <>
               <Button size="sm" variant="ghost" onClick={() => setIsEditing(false)} className="h-8 text-xs">
@@ -284,7 +404,45 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
 
       {/* Main Scrollable Body */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* 2. Thought Content Section (with internal [Copy] button) */}
+        {/* 2. AI Summary (Displayed BEFORE Scribble text when 100+ words and present) */}
+        {scribble.summary && isLongScribble && !isEditing && (
+          <div className="p-4 rounded-lg bg-accent/20 border border-accent/40 space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-semibold text-foreground">
+                <Sparkles className="w-3.5 h-3.5 text-primary" />
+                <span className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                  AI Summary
+                </span>
+              </div>
+
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleCopySummary}
+                className="h-6 px-1.5 text-[10px] gap-1 shrink-0 text-muted-foreground hover:text-foreground"
+                title="Copy AI summary"
+              >
+                {copiedSummary ? (
+                  <>
+                    <Check className="w-3 h-3 text-emerald-500" />
+                    <span className="text-emerald-500">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3 opacity-60 hover:opacity-100" />
+                    <span>Copy</span>
+                  </>
+                )}
+              </Button>
+            </div>
+
+            <div className="p-3 rounded-lg bg-card/80 border border-border/60 text-xs text-foreground leading-relaxed">
+              <MarkdownView content={scribble.summary} />
+            </div>
+          </div>
+        )}
+
+        {/* 3. Thought Content Section (with internal [Copy] button) */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
@@ -315,42 +473,33 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
           </div>
 
           {isEditing ? (
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              className="w-full min-h-[160px] p-4 text-xs font-sans bg-muted/20 border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-ring leading-relaxed resize-y"
-            />
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-[10px] font-mono font-bold text-muted-foreground uppercase">Summary</label>
+                <input
+                  type="text"
+                  value={summary}
+                  onChange={(e) => setSummary(e.target.value)}
+                  placeholder="Concise 1-2 sentence distillation…"
+                  className="w-full text-xs p-2.5 rounded-lg bg-muted/20 border border-border text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-mono font-bold text-muted-foreground uppercase">Content</label>
+                <textarea
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  className="w-full min-h-[160px] p-4 text-xs font-sans bg-muted/20 border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-ring leading-relaxed resize-y"
+                />
+              </div>
+            </div>
           ) : (
             <div className="p-4 rounded-lg bg-muted/20 border border-border font-sans text-xs text-foreground whitespace-pre-wrap leading-relaxed">
               {scribble.content}
             </div>
           )}
         </div>
-
-        {/* 3. AI Distillation (Summary) */}
-        {(scribble.summary || isEditing) && (
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-              <Sparkles className="w-3.5 h-3.5 text-primary" />
-              <span className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                AI Distillation
-              </span>
-            </div>
-            {isEditing ? (
-              <input
-                type="text"
-                value={summary}
-                onChange={(e) => setSummary(e.target.value)}
-                placeholder="1-2 sentence core distillation…"
-                className="w-full text-xs p-2.5 rounded-lg bg-muted/30 border border-border text-foreground"
-              />
-            ) : (
-              <p className="text-xs text-muted-foreground italic bg-accent/20 p-3 rounded-lg border border-accent/40 leading-relaxed">
-                "{scribble.summary}"
-              </p>
-            )}
-          </div>
-        )}
 
         {/* 4. Topics & Entities */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -565,7 +714,7 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
         </div>
 
         {/* 7. AI Exploration Questions (with individual [Copy] button for each question) */}
-        {scribble.ai_metadata?.suggested_questions?.length > 0 && (
+        {effectiveQuestions.length > 0 && (
           <div className="p-4 rounded-lg bg-accent/20 border border-accent/40 space-y-2.5 text-xs">
             <div className="flex items-center gap-1.5 font-semibold text-foreground">
               <HelpCircle className="w-3.5 h-3.5 text-primary" />
@@ -575,7 +724,7 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
             </div>
 
             <div className="space-y-2">
-              {scribble.ai_metadata.suggested_questions.map((q, i) => {
+              {effectiveQuestions.map((q, i) => {
                 const isCopied = copiedQuestionIndex === i;
                 return (
                   <div

@@ -7,7 +7,7 @@ mod chat;
 pub use chat::process_chat;
 
 mod enrichment;
-pub use enrichment::enrich_scribble;
+pub use enrichment::{enrich_scribble, summarize_scribble};
 
 #[derive(Error, Debug)]
 pub enum PipelineError {

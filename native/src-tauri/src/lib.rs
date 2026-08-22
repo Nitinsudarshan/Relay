@@ -114,6 +114,7 @@ pub fn run() {
             commands::search_knowledge,
             commands::get_knowledge_graph,
             commands::trigger_enrich_scribble,
+            commands::summarize_scribble,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

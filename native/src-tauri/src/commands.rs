@@ -775,9 +775,34 @@ pub async fn trigger_enrich_scribble(
     app: AppHandle,
     id: String,
     state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    spawn_scribble_enrichment(app, &state, id);
-    Ok(())
+) -> Result<Scribble, CommandError> {
+    let settings = state.settings.lock().unwrap().clone();
+    let llm = LLMClient::new(settings.provider);
+
+    let enriched = crate::pipeline::enrich_scribble(&llm, &state.vault, &id)
+        .await
+        .map_err(|e| CommandError::new("ENRICH_FAILED", &e))?;
+
+    let _ = app.emit(SCRIBBLE_ENRICHED_EVENT, &enriched);
+    let _ = app.emit(SCRIBBLE_SAVED_EVENT, &enriched);
+    Ok(enriched)
+}
+
+#[tauri::command]
+pub async fn summarize_scribble(
+    app: AppHandle,
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<Scribble, CommandError> {
+    let settings = state.settings.lock().unwrap().clone();
+    let llm = LLMClient::new(settings.provider);
+
+    let updated = crate::pipeline::summarize_scribble(&llm, &state.vault, &id)
+        .await
+        .map_err(|e| CommandError::new("SUMMARIZE_FAILED", &e))?;
+
+    let _ = app.emit(SCRIBBLE_SAVED_EVENT, &updated);
+    Ok(updated)
 }
 
 #[derive(Debug, Clone, Serialize)]
