@@ -1,5 +1,26 @@
 # Relay — Changelog
 
+## [0.8.2] - 2026-08-22
+
+### Scribbles AI Enrichment Polish, Summary Thresholds, Exploration Fallbacks & Collapsible Content
+
+- **Structured AI Summarization & Threshold Enforcement (`native/src-tauri/src/pipeline/enrichment.rs`, `ScribbleDetailEditor.tsx`)**:
+  - Added strict $\ge 100$-word threshold: the "Summarise" action button only appears and triggers for long thoughts ($\ge 100$ words).
+  - Short notes under 100 words bypass automatic summarization during enrichment.
+  - Summaries render concise takeaways with bold lead-ins, numbered badges, structured bullets, and dark-theme Mermaid flowcharts via the custom `MarkdownView` component.
+- **Synchronous Full-Refresh on Re-Enrichment (`native/src-tauri/src/commands.rs`, `ScribbleDetailEditor.tsx`)**:
+  - `trigger_enrich_scribble` returns the enriched `Scribble` directly, enabling immediate state synchronization for title, topics, entities, summary, and questions without waiting for async event listeners.
+- **Merged Note Title Derivation & Section Header Sanitization (`native/src-tauri/src/vault/mod.rs`, `enrichment.rs`)**:
+  - Sanitized internal merge section headers to prevent placeholder markers (e.g. `### [Synthesis: Generating title… + 2 more]`) from leaking into synthesized markdown content.
+  - Hardened LLM title derivation to strictly reject echoed placeholder phrases and derive clean concept titles directly from content.
+- **Guaranteed AI Exploration Questions (`enrichment.rs`, `ScribbleDetailEditor.tsx`)**:
+  - Added flexible serde deserialization aliases (`exploration_questions`, `suggested_questions`, `open_questions`) and dynamic topic-based fallback generation so exploration questions always populate and persist.
+- **Collapsible Long Thought Content (`ScribbleDetailEditor.tsx`)**:
+  - Added a collapsible **"Read More" / "Show Less"** toggle with bottom gradient fade for thoughts exceeding 200 words, preventing infinite scroll while preserving full detail on demand.
+- **Dangling Knowledge Connections Cleanup (`vault/mod.rs`, `ScribbleDetailEditor.tsx`)**:
+  - Cleaned up dangling relationship pointers when source notes are merged or moved to Trash.
+  - Filtered rendered knowledge connections to strictly display active, non-trashed notes in the vault.
+
 ## [0.8.1] - 2026-08-22
 
 ### Obsidian-Fidelity Knowledge Graph Rework, Organic Physics & Stable Coordinate Persistence
