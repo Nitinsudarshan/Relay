@@ -525,12 +525,20 @@ export interface DetectedMeetingPayload {
   detection_source: string;
 }
 
+export type GoogleCalendarStatus =
+  | 'not_configured'
+  | 'disconnected'
+  | 'authorizing'
+  | 'connected'
+  | 'auth_error';
+
 export interface CalendarConnectionStatus {
   connected: boolean;
+  status: GoogleCalendarStatus;
   account_email?: string | null;
   account_name?: string | null;
-  has_custom_credentials: boolean;
   last_synced_at?: string | null;
+  error_message?: string | null;
 }
 
 export interface GoogleCalendarConfig {

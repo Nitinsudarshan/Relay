@@ -333,6 +333,9 @@ mod tests {
             token_type: "Bearer".to_string(),
             expires_at: Utc::now().timestamp() + 3600,
             scope: None,
+            account_email: Some("user@example.com".to_string()),
+            account_name: Some("Test User".to_string()),
+            last_synced_at: None,
         };
         save_oauth_tokens(&config_dir, &sample_tokens).unwrap();
 

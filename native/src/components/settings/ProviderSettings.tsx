@@ -241,23 +241,15 @@ export const ProviderSettings: React.FC = () => {
   // Calendar status & controls
   const [calendarStatus, setCalendarStatus] = useState<CalendarConnectionStatus>({
     connected: false,
-    has_custom_credentials: false,
+    status: 'disconnected',
   });
   const [calendarBusy, setCalendarBusy] = useState(false);
   const [calendarError, setCalendarError] = useState<string | null>(null);
-  const [showCalendarCreds, setShowCalendarCreds] = useState(false);
-  const [calClientId, setCalClientId] = useState('');
-  const [calClientSecret, setCalClientSecret] = useState('');
 
   const loadCalendarState = async () => {
     try {
-      const [status, cfg] = await Promise.all([
-        invoke<CalendarConnectionStatus>('get_calendar_connection_status'),
-        invoke<GoogleCalendarConfig>('get_google_oauth_config'),
-      ]);
+      const status = await invoke<CalendarConnectionStatus>('get_calendar_connection_status');
       setCalendarStatus(status);
-      if (cfg?.client_id) setCalClientId(cfg.client_id);
-      if (cfg?.client_secret) setCalClientSecret(cfg.client_secret);
     } catch (err) {
       console.error('Failed to load calendar status in settings:', err);
     }
@@ -267,21 +259,15 @@ export const ProviderSettings: React.FC = () => {
     setCalendarBusy(true);
     setCalendarError(null);
     try {
-      const cId = calClientId.trim() || undefined;
-      const cSec = calClientSecret.trim() || undefined;
-      if (cId) {
-        await invoke('save_google_oauth_config', {
-          config: { client_id: cId || null, client_secret: cSec || null },
-        });
-      }
-      const updated = await invoke<CalendarConnectionStatus>('start_google_calendar_oauth', {
-        customClientId: cId || null,
-        customClientSecret: cSec || null,
-      });
+      const updated = await invoke<CalendarConnectionStatus>('start_google_calendar_oauth');
       setCalendarStatus(updated);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to connect Google Calendar:', err);
-      setCalendarError(typeof err === 'string' ? err : err?.message || 'Google OAuth connection failed.');
+      setCalendarError(
+        typeof err === 'string'
+          ? err
+          : (err as { message?: string })?.message || 'Google OAuth connection failed.'
+      );
     } finally {
       setCalendarBusy(false);
     }
@@ -293,9 +279,13 @@ export const ProviderSettings: React.FC = () => {
     try {
       const updated = await invoke<CalendarConnectionStatus>('disconnect_google_calendar');
       setCalendarStatus(updated);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to disconnect Google Calendar:', err);
-      setCalendarError(typeof err === 'string' ? err : err?.message || 'Failed to disconnect.');
+      setCalendarError(
+        typeof err === 'string'
+          ? err
+          : (err as { message?: string })?.message || 'Failed to disconnect.'
+      );
     } finally {
       setCalendarBusy(false);
     }
@@ -308,25 +298,15 @@ export const ProviderSettings: React.FC = () => {
       await invoke('sync_google_calendar');
       const updated = await invoke<CalendarConnectionStatus>('get_calendar_connection_status');
       setCalendarStatus(updated);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to sync Google Calendar:', err);
-      setCalendarError(typeof err === 'string' ? err : err?.message || 'Sync failed.');
+      setCalendarError(
+        typeof err === 'string'
+          ? err
+          : (err as { message?: string })?.message || 'Sync failed.'
+      );
     } finally {
       setCalendarBusy(false);
-    }
-  };
-
-  const handleSaveCalendarConfig = async () => {
-    try {
-      await invoke('save_google_oauth_config', {
-        config: {
-          client_id: calClientId.trim() || null,
-          client_secret: calClientSecret.trim() || null,
-        },
-      });
-      setCalendarError(null);
-    } catch (err: any) {
-      setCalendarError(typeof err === 'string' ? err : err?.message || 'Failed to save OAuth credentials.');
     }
   };
 
@@ -1218,30 +1198,44 @@ export const ProviderSettings: React.FC = () => {
               <h2 className="text-lg font-bold text-foreground">Google Calendar Integration & Meeting Capture</h2>
             </div>
 
-            {/* Google Calendar Integration Card */}
-            <div className="p-5 rounded-xl border border-border bg-gradient-to-br from-card via-card/95 to-blue-500/5 space-y-4">
-              <div className="flex items-start justify-between gap-3">
+            {/* Google Calendar Sync Card */}
+            <div className="p-4 rounded-xl border border-border bg-card space-y-4 shadow-xs">
+              <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-500">
+                  <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-500">
                     <Calendar className="w-5 h-5" />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold text-foreground">Google Calendar Sync</h3>
+                      <h3 className="text-sm font-bold text-foreground">Google Calendar</h3>
                       <Badge
                         variant={calendarStatus.connected ? 'outline' : 'secondary'}
                         className={`text-[10px] font-mono uppercase py-0 px-1.5 ${
                           calendarStatus.connected
                             ? 'border-emerald-500/40 text-emerald-500 bg-emerald-500/5'
+                            : calendarStatus.status === 'not_configured'
+                            ? 'border-amber-500/40 text-amber-500 bg-amber-500/5'
+                            : calendarStatus.status === 'auth_error'
+                            ? 'border-destructive/40 text-destructive bg-destructive/5'
                             : ''
                         }`}
                       >
-                        {calendarStatus.connected ? 'Connected' : 'Not Connected'}
+                        {calendarStatus.connected
+                          ? 'Connected'
+                          : calendarStatus.status === 'not_configured'
+                          ? 'Setup Required'
+                          : calendarStatus.status === 'auth_error'
+                          ? 'Needs Attention'
+                          : 'Not Connected'}
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {calendarStatus.connected
-                        ? `Connected as ${calendarStatus.account_email || 'Google User'}`
+                        ? `Connected to your Google Calendar (${calendarStatus.account_email || 'Active'})`
+                        : calendarStatus.status === 'not_configured'
+                        ? 'Google Calendar has not been configured for this Relay installation.'
+                        : calendarStatus.status === 'auth_error'
+                        ? 'Calendar authorization expired or needs reconnecting.'
                         : 'Connect your Google Calendar to automatically recognize scheduled meetings and invite metadata.'}
                     </p>
                   </div>
@@ -1271,6 +1265,10 @@ export const ProviderSettings: React.FC = () => {
                         <span>Disconnect</span>
                       </Button>
                     </>
+                  ) : calendarStatus.status === 'not_configured' ? (
+                    <Badge variant="outline" className="text-xs text-muted-foreground">
+                      Unavailable
+                    </Badge>
                   ) : (
                     <Button
                       size="sm"
@@ -1279,7 +1277,13 @@ export const ProviderSettings: React.FC = () => {
                       className="text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 h-8"
                     >
                       <Calendar className="w-3.5 h-3.5" />
-                      <span>{calendarBusy ? 'Connecting…' : 'Connect Google Calendar'}</span>
+                      <span>
+                        {calendarBusy
+                          ? 'Connecting…'
+                          : calendarStatus.status === 'auth_error'
+                          ? 'Reconnect Google Calendar'
+                          : 'Connect Google Calendar'}
+                      </span>
                     </Button>
                   )}
                 </div>
@@ -1298,54 +1302,6 @@ export const ProviderSettings: React.FC = () => {
                   <span className="font-mono text-[10px]">Incremental & Idempotent Sync</span>
                 </div>
               )}
-
-              {/* Custom Google OAuth Credentials Drawer */}
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCalendarCreds(!showCalendarCreds)}
-                  className="text-[11px] text-primary hover:underline flex items-center gap-1 font-medium cursor-pointer"
-                >
-                  <span>{showCalendarCreds ? 'Hide custom OAuth client credentials' : 'Configure custom OAuth client ID (Optional)'}</span>
-                </button>
-
-                {showCalendarCreds && (
-                  <div className="mt-3 p-3.5 rounded-lg bg-background/80 border border-border space-y-3">
-                    <p className="text-[10px] text-muted-foreground">
-                      By default, Relay uses loopback OAuth 2.0 PKCE authentication. You may optionally supply your own Google Cloud OAuth 2.0 Client ID and Secret:
-                    </p>
-                    <div className="space-y-2">
-                      <div>
-                        <label className="text-[10px] font-mono text-muted-foreground block mb-0.5">GOOGLE CLIENT ID</label>
-                        <Input
-                          value={calClientId}
-                          onChange={(e) => setCalClientId(e.target.value)}
-                          placeholder="xxxxxxxxxxxx.apps.googleusercontent.com"
-                          className="h-8 text-xs font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-mono text-muted-foreground block mb-0.5">GOOGLE CLIENT SECRET</label>
-                        <Input
-                          type="password"
-                          value={calClientSecret}
-                          onChange={(e) => setCalClientSecret(e.target.value)}
-                          placeholder="Optional client secret"
-                          className="h-8 text-xs font-mono"
-                        />
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleSaveCalendarConfig}
-                        className="text-xs h-7 mt-1"
-                      >
-                        Save Credentials
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
 
             <form onSubmit={handleSave} className="space-y-4">

@@ -13,6 +13,7 @@ import {
 import { MeetingDetailView } from './MeetingDetailView';
 import { MeetingModal } from './MeetingModal';
 import { CalendarSyncModal } from './CalendarSyncModal';
+import { CalendarView } from './CalendarView';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -38,7 +39,7 @@ interface MeetingPageProps {
   onNavigateToScribbles?: (scribbleId?: string) => void;
 }
 
-type FilterType = 'all' | 'standalone' | 'series' | 'calendar';
+type FilterType = 'all' | 'scheduled' | 'completed';
 
 export const MeetingPage: React.FC<MeetingPageProps> = ({ onNavigateToScribbles }) => {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -47,7 +48,7 @@ export const MeetingPage: React.FC<MeetingPageProps> = ({ onNavigateToScribbles 
   const [calendarEvents, setCalendarEvents] = useState<CalendarMeetingEvent[]>([]);
   const [calendarAuthStatus, setCalendarAuthStatus] = useState<CalendarConnectionStatus>({
     connected: false,
-    has_custom_credentials: false,
+    status: 'disconnected',
   });
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -76,7 +77,7 @@ export const MeetingPage: React.FC<MeetingPageProps> = ({ onNavigateToScribbles 
       setCalendarAuthStatus(loadedAuth);
 
       // Only fetch events if connected
-      if (loadedAuth.connected) {
+      if (loadedAuth.connected && loadedAuth.status === 'connected') {
         try {
           const loadedCal = await invoke<CalendarMeetingEvent[]>('get_upcoming_calendar_events');
           setCalendarEvents(loadedCal);
@@ -98,11 +99,8 @@ export const MeetingPage: React.FC<MeetingPageProps> = ({ onNavigateToScribbles 
     }
   }, [selectedMeetingId]);
 
-  const handleConnectGoogle = async (clientId?: string, clientSecret?: string) => {
-    const status = await invoke<CalendarConnectionStatus>('start_google_calendar_oauth', {
-      customClientId: clientId || null,
-      customClientSecret: clientSecret || null,
-    });
+  const handleConnectGoogle = async () => {
+    const status = await invoke<CalendarConnectionStatus>('start_google_calendar_oauth');
     setCalendarAuthStatus(status);
     await refreshData();
   };
@@ -393,41 +391,30 @@ export const MeetingPage: React.FC<MeetingPageProps> = ({ onNavigateToScribbles 
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            All ({meetings.length})
+            All ({meetings.length + calendarEvents.length})
           </button>
           <button
             type="button"
-            onClick={() => setFilterType('standalone')}
-            className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all ${
-              filterType === 'standalone'
-                ? 'bg-card text-foreground font-semibold shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Standalone ({standaloneMeetings.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterType('series')}
-            className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all ${
-              filterType === 'series'
-                ? 'bg-card text-foreground font-semibold shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Series ({seriesList.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterType('calendar')}
+            onClick={() => setFilterType('scheduled')}
             className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1 ${
-              filterType === 'calendar'
+              filterType === 'scheduled'
                 ? 'bg-card text-foreground font-semibold shadow-xs'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             <Calendar className="w-3 h-3 text-blue-500" />
-            <span>Calendar ({calendarEvents.length})</span>
+            <span>Scheduled ({calendarEvents.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilterType('completed')}
+            className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all ${
+              filterType === 'completed'
+                ? 'bg-card text-foreground font-semibold shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Completed/Recorded ({meetings.length})
           </button>
         </div>
 
@@ -439,8 +426,8 @@ export const MeetingPage: React.FC<MeetingPageProps> = ({ onNavigateToScribbles 
             onClick={() => setIsCalendarModalOpen(true)}
             className="text-xs h-9 gap-1.5"
           >
-            <CalendarDays className="w-3.5 h-3.5 text-blue-500" />
-            <span>Calendar Sync</span>
+            <CalendarDays className={`w-3.5 h-3.5 ${calendarAuthStatus.connected ? 'text-green-500' : 'text-blue-500'}`} />
+            <span>{calendarAuthStatus.connected ? 'Calendar Connected' : 'Calendar Sync'}</span>
           </Button>
 
           <Button
@@ -460,58 +447,51 @@ export const MeetingPage: React.FC<MeetingPageProps> = ({ onNavigateToScribbles 
         <div className="w-80 md:w-96 flex flex-col shrink-0 bg-card rounded-xl border border-border overflow-hidden shadow-xs">
           <div className="p-3 border-b border-border/80 bg-muted/20 flex items-center justify-between">
             <span className="text-xs font-bold text-foreground uppercase tracking-wider font-mono">
-              {filterType === 'calendar' ? 'Upcoming Calendar Events' : 'Meetings Directory'}
+              {filterType === 'scheduled' ? 'Scheduled Meetings' : filterType === 'completed' ? 'Completed Meetings' : 'All Meetings'}
             </span>
             <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5">
-              {filterType === 'calendar' ? calendarEvents.length : filteredMeetings.length}
+              {filterType === 'scheduled' ? calendarEvents.length : filterType === 'completed' ? filteredMeetings.length : calendarEvents.length + filteredMeetings.length}
             </Badge>
           </div>
-
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
-            {filterType === 'calendar' ? (
-              /* Calendar Events View */
-              !calendarAuthStatus.connected ? (
-                <div className="p-6 text-center border border-dashed border-border rounded-xl space-y-3 bg-muted/5">
-                  <Calendar className="w-8 h-8 text-blue-500/60 mx-auto" />
-                  <div className="space-y-1">
-                    <h4 className="text-xs font-bold text-foreground">Google Calendar Disconnected</h4>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Connect your Google Calendar to detect upcoming meetings and import conferencing links.
-                    </p>
+            {(() => {
+              // Create combined list
+              let displayList: Array<CalendarMeetingEvent | Meeting> = [];
+              if (filterType === 'all') {
+                displayList = [...calendarEvents, ...filteredMeetings].sort((a, b) => {
+                  const aDate = new Date('scheduled_start' in a && typeof a.scheduled_start === 'string' && a.scheduled_start.includes('T') ? a.scheduled_start : ('created_at' in a ? a.created_at : 0)).getTime();
+                  const bDate = new Date('scheduled_start' in b && typeof b.scheduled_start === 'string' && b.scheduled_start.includes('T') ? b.scheduled_start : ('created_at' in b ? b.created_at : 0)).getTime();
+                  return bDate - aDate;
+                });
+              } else if (filterType === 'scheduled') {
+                displayList = [...calendarEvents].sort((a, b) => {
+                  return new Date(a.scheduled_start).getTime() - new Date(b.scheduled_start).getTime();
+                });
+              } else {
+                displayList = [...filteredMeetings].sort((a, b) => {
+                  const aDate = new Date(a.scheduled_start || a.created_at).getTime();
+                  const bDate = new Date(b.scheduled_start || b.created_at).getTime();
+                  return bDate - aDate;
+                });
+              }
+
+              if (displayList.length === 0) {
+                return (
+                  <div className="text-center py-12 text-xs text-muted-foreground space-y-2">
+                    <Calendar className="w-8 h-8 text-muted-foreground/30 mx-auto" />
+                    <p>No meetings found for this filter.</p>
                   </div>
-                  <Button
-                    size="sm"
-                    onClick={() => setIsCalendarModalOpen(true)}
-                    className="text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5"
-                  >
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>Connect Google Calendar</span>
-                  </Button>
-                </div>
-              ) : calendarEvents.length === 0 ? (
-                <div className="text-center py-12 text-xs text-muted-foreground space-y-2">
-                  <Calendar className="w-8 h-8 text-muted-foreground/30 mx-auto" />
-                  <p>No upcoming meetings found on your connected Google Calendar.</p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleSyncGoogle}
-                    className="text-xs"
-                  >
-                    Sync Now
-                  </Button>
-                </div>
-              ) : (
-                calendarEvents.map((evt) => {
-                  const sTime = new Date(evt.scheduled_start).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  });
+                );
+              }
+
+              return displayList.map((item) => {
+                const isCalendarEvent = 'scheduled_start' in item && 'provider' in item && !('created_at' in item);
+                
+                if (isCalendarEvent) {
+                  const evt = item as CalendarMeetingEvent;
+                  const sTime = new Date(evt.scheduled_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                   return (
-                    <div
-                      key={evt.id}
-                      className="p-3 rounded-lg border border-border hover:border-primary/50 transition-all bg-card space-y-2 shadow-xs"
-                    >
+                    <div key={evt.id} className="p-3 rounded-lg border border-border hover:border-primary/50 transition-all bg-card space-y-2 shadow-xs">
                       <div className="flex items-center justify-between">
                         <Badge variant="outline" className="text-[9px] uppercase font-mono text-primary border-primary/30 py-0 px-1.5">
                           {evt.provider.replace('_', ' ')}
@@ -519,178 +499,46 @@ export const MeetingPage: React.FC<MeetingPageProps> = ({ onNavigateToScribbles 
                         <span className="text-[10px] text-muted-foreground font-mono">{sTime}</span>
                       </div>
                       <h4 className="text-xs font-bold text-foreground line-clamp-1">{evt.title}</h4>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleImportCalendarEvent(evt)}
-                        className="w-full text-xs h-7 gap-1 text-primary border-primary/30"
-                      >
+                      <Button size="sm" variant="outline" onClick={() => handleImportCalendarEvent(evt)} className="w-full text-xs h-7 gap-1 text-primary border-primary/30">
                         <Plus className="w-3 h-3" />
-                        <span>Add & Start in Relay</span>
+                        <span>Start Capturing</span>
                       </Button>
                     </div>
                   );
-                })
-              )
-            ) : (
-              <>
-                {/* 1. Recurring Meeting Series Section (if filter matches) */}
-                {(filterType === 'all' || filterType === 'series') && seriesList.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground px-1">
-                      <Repeat className="w-3 h-3 text-purple-500" />
-                      <span>Meeting Series</span>
+                } else {
+                  const m = item as Meeting;
+                  const mDate = new Date(m.scheduled_start || m.created_at);
+                  const mFormatted = mDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                  const isSelected = m.id === selectedMeetingId;
+                  
+                  return (
+                    <div
+                      key={m.id}
+                      onClick={() => setSelectedMeetingId(m.id)}
+                      className={`p-3 rounded-lg cursor-pointer transition-all flex flex-col gap-1 border shadow-xs ${
+                        isSelected
+                          ? 'bg-primary/10 border-primary/40'
+                          : 'bg-card border-border/40 hover:border-border hover:bg-muted/20'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <Badge variant={m.series_id ? 'secondary' : 'outline'} className="text-[9px] uppercase font-mono py-0 px-1.5 border-border">
+                          {m.provider.replace('_', ' ')}
+                        </Badge>
+                        <span className="text-[10px] text-muted-foreground font-mono">{mFormatted}</span>
+                      </div>
+                      <h4 className={`text-xs font-bold line-clamp-1 ${isSelected ? 'text-foreground font-extrabold' : 'text-foreground'}`}>
+                        {m.title}
+                      </h4>
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1">
+                        <span className="capitalize">{m.status}</span>
+                        {m.action_items && m.action_items.length > 0 && <span>{m.action_items.length} tasks</span>}
+                      </div>
                     </div>
-
-                    {seriesList.map((series) => {
-                      const occurrences = seriesGroupedMeetings.get(series.id) || [];
-                      const isCollapsed = collapsedSeries.has(series.id);
-
-                      return (
-                        <div
-                          key={series.id}
-                          className="rounded-xl border border-border/80 bg-muted/10 overflow-hidden shadow-xs"
-                        >
-                          {/* Series Header Bar */}
-                          <div
-                            onClick={() => toggleSeriesCollapse(series.id)}
-                            className="p-2.5 flex items-center justify-between cursor-pointer hover:bg-muted/30 transition-colors select-none"
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              {isCollapsed ? (
-                                <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-                              ) : (
-                                <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-                              )}
-                              <span className="text-xs font-bold text-foreground truncate">
-                                {series.title}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              {series.recurrence_rule && (
-                                <span className="text-[9px] text-muted-foreground font-mono">
-                                  {series.recurrence_rule}
-                                </span>
-                              )}
-                              <Badge variant="secondary" className="text-[9px] py-0 px-1.5 h-4">
-                                {occurrences.length}
-                              </Badge>
-                            </div>
-                          </div>
-
-                          {/* Series Occurrences (Latest First) */}
-                          {!isCollapsed && (
-                            <div className="p-1.5 space-y-1.5 border-t border-border/60 bg-card">
-                              {occurrences.length === 0 ? (
-                                <p className="text-[11px] text-muted-foreground italic px-2 py-1">
-                                  No recorded occurrences yet.
-                                </p>
-                              ) : (
-                                occurrences.map((occ) => {
-                                  const occDate = new Date(occ.scheduled_start || occ.created_at);
-                                  const occFormatted = occDate.toLocaleDateString(undefined, {
-                                    month: 'short',
-                                    day: 'numeric',
-                                  });
-                                  const isSelected = occ.id === selectedMeetingId;
-
-                                  return (
-                                    <div
-                                      key={occ.id}
-                                      onClick={() => setSelectedMeetingId(occ.id)}
-                                      className={`p-2 rounded-lg cursor-pointer transition-all flex items-center justify-between gap-2 border ${
-                                        isSelected
-                                          ? 'bg-primary/10 border-primary/40 text-foreground font-semibold shadow-xs'
-                                          : 'bg-card border-border/40 hover:border-border hover:bg-muted/20 text-muted-foreground hover:text-foreground'
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-2 min-w-0">
-                                        <span className="text-[11px] font-mono text-primary font-bold">
-                                          {occFormatted}
-                                        </span>
-                                        <span className="text-xs truncate">{occ.title}</span>
-                                      </div>
-
-                                      {occ.status === 'recording' && (
-                                        <span className="w-2 h-2 rounded-full bg-red-500 animate-ping shrink-0" />
-                                      )}
-                                    </div>
-                                  );
-                                })
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* 2. Standalone Meetings Section */}
-                {(filterType === 'all' || filterType === 'standalone') && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground px-1 pt-2">
-                      <Calendar className="w-3 h-3 text-emerald-500" />
-                      <span>Standalone Meetings</span>
-                    </div>
-
-                    {standaloneMeetings.length === 0 ? (
-                      <p className="text-[11px] text-muted-foreground italic px-2 py-2">
-                        No standalone meetings found.
-                      </p>
-                    ) : (
-                      standaloneMeetings.map((meeting) => {
-                        const mDate = new Date(meeting.scheduled_start || meeting.created_at);
-                        const mFormatted = mDate.toLocaleDateString(undefined, {
-                          month: 'short',
-                          day: 'numeric',
-                        });
-                        const isSelected = meeting.id === selectedMeetingId;
-
-                        return (
-                          <div
-                            key={meeting.id}
-                            onClick={() => setSelectedMeetingId(meeting.id)}
-                            className={`p-3 rounded-xl cursor-pointer transition-all border space-y-1.5 shadow-xs ${
-                              isSelected
-                                ? 'bg-primary/10 border-primary/50 text-foreground shadow-xs'
-                                : 'bg-card border-border/80 hover:border-primary/40 hover:bg-muted/10'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <Badge
-                                variant="outline"
-                                className="text-[9px] uppercase font-mono py-0 px-1.5 border-border/80 text-muted-foreground"
-                              >
-                                {meeting.provider.replace('_', ' ')}
-                              </Badge>
-                              <span className="text-[10px] text-muted-foreground font-mono">
-                                {mFormatted}
-                              </span>
-                            </div>
-
-                            <h4
-                              className={`text-xs font-bold truncate ${
-                                isSelected ? 'text-foreground font-extrabold' : 'text-foreground'
-                              }`}
-                            >
-                              {meeting.title}
-                            </h4>
-
-                            <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1">
-                              <span className="capitalize">{meeting.status}</span>
-                              {meeting.action_items.length > 0 && (
-                                <span>{meeting.action_items.length} tasks</span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-              </>
-            )}
+                  );
+                }
+              });
+            })()}
           </div>
         </div>
 
@@ -710,17 +558,12 @@ export const MeetingPage: React.FC<MeetingPageProps> = ({ onNavigateToScribbles 
               onNavigateToScribble={(scId) => onNavigateToScribbles?.(scId)}
             />
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-card rounded-xl border border-border text-muted-foreground space-y-3">
-              <Calendar className="w-12 h-12 text-muted-foreground/30" />
-              <h3 className="text-base font-bold text-foreground">No Meeting Selected</h3>
-              <p className="text-xs max-w-sm">
-                Select a meeting from the list on the left, or create a new meeting to start recording notes and extracting knowledge.
-              </p>
-              <Button size="sm" onClick={() => setIsMeetingModalOpen(true)} className="text-xs gap-1.5">
-                <Plus className="w-3.5 h-3.5" />
-                <span>Create Meeting</span>
-              </Button>
-            </div>
+            <CalendarView 
+              meetings={meetings} 
+              calendarEvents={calendarEvents}
+              onSelectCalendarEvent={handleImportCalendarEvent}
+              onSelectMeeting={(m) => setSelectedMeetingId(m.id)}
+            />
           )}
         </div>
       </div>

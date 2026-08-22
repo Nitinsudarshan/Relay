@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { DeveloperSettings } from '../../types';
-import { Terminal, RefreshCw, AlertCircle, Check } from 'lucide-react';
+import { Terminal, RefreshCw, Check } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 

@@ -6,6 +6,7 @@ pub mod hotkeys;
 pub mod identity;
 pub mod mcp;
 pub mod meetings;
+pub mod oauth;
 pub mod overlay;
 pub mod pipeline;
 pub mod providers;
@@ -24,8 +25,23 @@ use vault::VaultManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Load environment variables from .env if present
-    dotenvy::dotenv().ok();
+    // Load environment variables from .env — search CWD and ancestor directories
+    // so the repo-root .env is found even when Tauri runs from native/src-tauri/.
+    if dotenvy::dotenv().is_err() {
+        // Walk up parent directories looking for .env
+        if let Ok(mut dir) = std::env::current_dir() {
+            loop {
+                let candidate = dir.join(".env");
+                if candidate.exists() {
+                    let _ = dotenvy::from_filename_override(candidate);
+                    break;
+                }
+                if !dir.pop() {
+                    break;
+                }
+            }
+        }
+    }
 
     let base_dir = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))

@@ -1830,10 +1830,14 @@ pub async fn start_google_sign_in(
     let supabase_url = settings.cloud.supabase_url;
     let supabase_anon = settings.cloud.supabase_anon_key;
 
+    let cal_config = crate::meetings::calendar::load_calendar_config(&state.vault.vault_dir());
+    let effective_client_id = custom_client_id.or(cal_config.client_id).filter(|s| !s.trim().is_empty());
+    let effective_client_secret = custom_client_secret.or(cal_config.client_secret).filter(|s| !s.trim().is_empty());
+
     let account = crate::identity::sign_in_with_google(
         &state.config_dir,
-        custom_client_id,
-        custom_client_secret,
+        effective_client_id,
+        effective_client_secret,
         supabase_url,
         supabase_anon,
     )

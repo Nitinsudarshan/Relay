@@ -1,5 +1,18 @@
 # Relay — Changelog
 
+## [0.9.1] - 2026-08-23
+
+### Meetings Directory UI Restructure & Calendar View
+
+- **Simplified Meeting Filters (`native/src/components/meetings/MeetingPage.tsx`)**:
+  - Replaced the nested Standalone/Series/Calendar filter system with a flat, unified view.
+  - Implemented intuitive top-level tabs: `All`, `Scheduled`, and `Completed/Recorded`.
+- **Custom Agenda Calendar View (`native/src/components/meetings/CalendarView.tsx`)**:
+  - Implemented a custom `CalendarView` component that renders on the right-hand side when no specific meeting is selected.
+  - Replaced the blank empty state with a lightweight, visual schedule of upcoming meetings grouped by day.
+- **Streamlined Capture Actions**:
+  - Simplified the calendar import button text from `+ Add & start in Relay` to a cleaner `Start Capturing`.
+  - Refined the "Calendar Sync" modal trigger button to dynamically display a green `Calendar Connected` state.
 ## [0.9.0] - 2026-08-22
 
 ### Phase 11D.1: Relay Security & Foundation Hardening Pass

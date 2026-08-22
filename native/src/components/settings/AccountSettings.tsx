@@ -21,6 +21,7 @@ import {
   Laptop,
   Save,
   Info,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -118,8 +119,12 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       }
     } catch (err: unknown) {
       console.error('Google Sign-In failed:', err);
-      const msg = typeof err === 'string' ? err : (err as { message?: string })?.message || 'Sign-in failed. Please try again.';
-      setErrorMsg(msg);
+      const raw = typeof err === 'string' ? err : (err as { message?: string })?.message || '';
+      if (raw.toLowerCase().includes('configured') || raw.toLowerCase().includes('not configured')) {
+        setErrorMsg('Sign-in with Google is not configured for this Relay installation.');
+      } else {
+        setErrorMsg('Google Sign-In could not be completed. Please try again.');
+      }
     } finally {
       setSigningIn(false);
     }
@@ -214,12 +219,18 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       </div>
 
       {errorMsg && (
-        <div className="p-3.5 rounded-lg border border-destructive/30 bg-destructive/10 text-destructive text-xs flex items-start gap-2.5">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <span className="font-semibold">Authentication Message:</span>
+        <div className="p-3.5 rounded-lg border border-destructive/30 bg-destructive/10 text-destructive text-xs flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
             <p>{errorMsg}</p>
           </div>
+          <button
+            onClick={() => setErrorMsg(null)}
+            className="p-1 hover:bg-destructive/20 rounded text-destructive cursor-pointer"
+            aria-label="Dismiss error"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
