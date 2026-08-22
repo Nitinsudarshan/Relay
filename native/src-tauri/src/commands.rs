@@ -1785,6 +1785,31 @@ pub async fn sign_out_account(
 }
 
 #[tauri::command]
+pub async fn delete_relay_account(
+    state: State<'_, AppState>,
+) -> Result<crate::identity::RelayAccount, CommandError> {
+    let account = crate::identity::delete_relay_account(&state.config_dir)
+        .await
+        .map_err(|e| CommandError::new("DELETE_ACCOUNT_FAILED", &e))?;
+
+    let settings = state.settings.lock().unwrap().clone();
+    let inst = crate::identity::get_or_create_installation_info(
+        &state.config_dir,
+        env!("CARGO_PKG_VERSION"),
+    );
+    crate::diagnostics::DiagnosticsService::report_event(
+        settings.diagnostics.allow_anonymous_diagnostics,
+        &inst.installation_id,
+        None,
+        env!("CARGO_PKG_VERSION"),
+        "account_deleted",
+        std::collections::HashMap::new(),
+    );
+
+    Ok(account)
+}
+
+#[tauri::command]
 pub async fn get_installation_info(
     state: State<'_, AppState>,
 ) -> Result<crate::identity::InstallationInfo, CommandError> {

@@ -429,3 +429,22 @@ This log records material architectural, technical, and product decisions for Re
   - **First-Run Welcome Experience**: Introduces `WelcomeModal` on fresh install offering "Continue with Google" or "Continue Locally", followed by `AccountExplanationModal` reinforcing local data guarantees upon sign-in.
 - **Reason**: Establishes a unified identity layer for upcoming Google Calendar sync, meeting detection, and eventual Hybrid cloud synchronization, while maintaining the strongest part of Relay's value proposition: *Relay can know who you are without needing to know what you know.*
 - **Existing Functionality Preserved**: All 91 Rust backend tests pass; frontend builds with zero TypeScript errors.
+
+---
+
+### Decision 44: Phase 11D.1 — Relay Security & Foundation Hardening (RLS Lockdown, Keyring Secrets & Account Deletion)
+
+- **Context**: Hardening the identity, cloud database, and credential architecture following review:
+  - Disallowing open RLS policies on Supabase tables in favor of rate-guarded and validated PostgreSQL RPC functions.
+  - Relocating all Google Calendar OAuth tokens from the markdown vault directory to the secure OS Keyring.
+  - Reinforcing that Desktop OAuth flows operate as public PKCE clients without expecting secret confidentiality.
+  - Formally separating **Delete Relay Account** (deletes cloud profile + keyring credentials, disassociates installation) from **Delete Local Vault Data** (destructive vault action).
+  - Clarifying the First-Run Onboarding UX to clearly present "Continue with Google" vs "Continue Locally" with no "Skip" terminology.
+  - Setting anonymous telemetry to strictly opt-in (`false` by default).
+- **Decision made**:
+  - **Supabase RPC & RLS Lockdown**: Revoked open write policies; implemented `register_installation_heartbeat` and `ingest_diagnostic_event` RPC endpoints with input validation. Table `SELECT` on `installations` and `diagnostics_events` is strictly locked to `service_role` (or authenticated installation owner).
+  - **Zero Secrets in Vault Invariant**: Migrated `GoogleCalendarTokens` out of `vault/google_calendar_token.json` to the OS Keyring / Credential Manager (`keyring` crate) with an encrypted fallback in `.relay/config/`, permanently purging any legacy token files in the user's markdown vault.
+  - **Account Deletion $\ne$ Vault Deletion**: Added `delete_relay_account` Tauri command and Settings UI modal that deletes cloud profile state while leaving local markdown notes, recordings, scribbles, and meetings 100% untouched.
+  - **Opt-In Telemetry by Default**: Changed `default_allow_anonymous_diagnostics` to `false` in `settings/mod.rs`.
+- **Reason**: Closes all cloud ingestion security gaps, guarantees zero sensitive tokens in user-accessible markdown directories, and solidifies Relay's local-first privacy guarantees.
+- **Verification**: All 93 Rust unit tests pass cleanly; `npm run build` succeeds with zero errors.

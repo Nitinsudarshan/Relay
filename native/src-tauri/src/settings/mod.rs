@@ -177,7 +177,7 @@ pub struct DiagnosticsSettings {
 }
 
 fn default_allow_anonymous_diagnostics() -> bool {
-    true
+    false
 }
 
 impl Default for DiagnosticsSettings {

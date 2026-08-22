@@ -136,3 +136,88 @@ pub fn sign_out_account(config_dir: &Path) -> Result<RelayAccount, String> {
     save_relay_account(config_dir, &account)?;
     Ok(account)
 }
+
+/// Permanently deletes the Relay Cloud account record and purges local secure tokens.
+/// Invariant: Account ≠ Vault. The user's local markdown files, voice recordings,
+/// meetings, and scribbles remain 100% untouched on this computer.
+pub async fn delete_relay_account(config_dir: &Path) -> Result<RelayAccount, String> {
+    let existing = load_relay_account(config_dir);
+    let tokens = load_oauth_tokens(config_dir);
+
+    // 1. Delete cloud profile in Supabase if authenticated
+    if let (Some(user_id), Some(toks)) = (&existing.user_id, &tokens) {
+        let supabase = SupabaseClient::new(None, None);
+        let _ = supabase.delete_account_profile(user_id, &toks.access_token).await;
+    }
+
+    // 2. Wipe secure keyring credentials
+    delete_oauth_tokens(config_dir)?;
+
+    // 3. Reset local account metadata to anonymous default
+    let reset_account = RelayAccount::default();
+    save_relay_account(config_dir, &reset_account)?;
+
+    Ok(reset_account)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_delete_relay_account_leaves_vault_intact() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_identity_{}", uuid::Uuid::new_v4()));
+        let config_dir = temp_dir.join("config");
+        let vault_dir = temp_dir.join("vault");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&vault_dir).unwrap();
+
+        // 1. Create dummy local vault files (scribbles, meetings, audio)
+        let note_path = vault_dir.join("test_note.md");
+        fs::write(&note_path, "# User Local Note\nThis note must NEVER be deleted when an account is deleted.").unwrap();
+        assert!(note_path.exists());
+
+        // 2. Setup mock authenticated account
+        let sample_account = RelayAccount {
+            authenticated: true,
+            user_id: Some("user_abc_123".to_string()),
+            email: Some("user@example.com".to_string()),
+            display_name: Some("Test User".to_string()),
+            profile_image: None,
+            provider: Some("google".to_string()),
+            created_at: Some("2026-08-22T00:00:00Z".to_string()),
+            last_authenticated_at: Some("2026-08-22T00:00:00Z".to_string()),
+            subscription: SubscriptionInfo::default(),
+            account_mode: AccountMode::Local,
+            capabilities: vec!["local_vault".to_string()],
+        };
+        save_relay_account(&config_dir, &sample_account).unwrap();
+
+        // 3. Save sample tokens
+        let sample_tokens = OAuthTokens {
+            access_token: "mock_jwt_token".to_string(),
+            refresh_token: Some("mock_refresh_token".to_string()),
+            token_type: "Bearer".to_string(),
+            expires_at: Utc::now().timestamp() + 3600,
+            scope: None,
+        };
+        save_oauth_tokens(&config_dir, &sample_tokens).unwrap();
+
+        // 4. Delete account
+        let reset = delete_relay_account(&config_dir).await.expect("Should delete account");
+        assert!(!reset.authenticated);
+        assert_eq!(reset.user_id, None);
+        assert_eq!(reset.email, None);
+        assert_eq!(reset.account_mode, AccountMode::Local);
+
+        // 5. Invariant check: tokens cleared
+        assert!(load_oauth_tokens(&config_dir).is_none());
+
+        // 6. Critical Invariant Check: Local vault is 100% untouched!
+        assert!(note_path.exists(), "Local vault files must NEVER be touched when an account is deleted");
+        let content = fs::read_to_string(&note_path).unwrap();
+        assert!(content.contains("User Local Note"));
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+}

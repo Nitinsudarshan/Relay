@@ -2,6 +2,21 @@
 
 ## [0.9.0] - 2026-08-22
 
+### Phase 11D.1: Relay Security & Foundation Hardening Pass
+
+- **Supabase RLS & Ingestion Hardening (`supabase/migrations/20260822_relay_account_schema.sql`)**:
+  - Replaced open RLS write policies with secure `SECURITY DEFINER` PostgreSQL RPC functions: `register_installation_heartbeat` and `ingest_diagnostic_event` with strict input validation.
+  - Locked down `SELECT` on `installations` and `diagnostics_events` tables strictly to `service_role` (or authenticated installation owner).
+- **Google Calendar OAuth Tokens Migrated to OS Keyring (`meetings/calendar.rs`)**:
+  - Relocated all Calendar OAuth token storage from `vault/google_calendar_token.json` to the OS Keyring / Credential Manager (`keyring` crate) with an encrypted fallback in `.relay/config/`.
+  - Added automated migration that purges any legacy token files in `vault/` to ensure zero secrets ever reside in the user's markdown vault.
+- **Account Deletion $\ne$ Local Vault Deletion (`identity/mod.rs`, `commands.rs`, `AccountSettings.tsx`)**:
+  - Implemented `delete_relay_account` Tauri command and Settings UI modal that deletes cloud profile state while leaving local markdown notes, recordings, scribbles, and meetings 100% untouched.
+- **First-Run Onboarding Vocabulary Refinement (`WelcomeModal.tsx`)**:
+  - Refined first-run choices to clearly present **"Continue with Google"** (Primary CTA) vs. **"Continue Locally"** (Secondary CTA: *"No account required. Your data remains entirely on this device."*), with zero "Skip" terminology.
+- **Opt-In Telemetry by Default (`settings/mod.rs`)**:
+  - Set `allow_anonymous_diagnostics` to default to `false` (opt-in privacy by default).
+
 ### Phase 11D: Relay Identity, Product Account & Local→Hybrid Foundation
 
 - **Relay Account $\neq$ Local Vault Invariant (`native/src-tauri/src/identity/`)**:

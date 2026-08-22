@@ -124,42 +124,38 @@ impl SupabaseClient {
         Ok(())
     }
 
-    /// Upserts installation record to Supabase `installations` table.
+    /// Upserts installation record via secure RPC function `register_installation_heartbeat`.
     pub async fn record_installation(
         &self,
         installation: &InstallationInfo,
-        user_id: Option<&str>,
+        _user_id: Option<&str>,
         jwt: Option<&str>,
     ) -> Result<(), String> {
-        let endpoint = format!("{}/rest/v1/installations", self.config.url.trim_end_matches('/'));
+        let endpoint = format!(
+            "{}/rest/v1/rpc/register_installation_heartbeat",
+            self.config.url.trim_end_matches('/')
+        );
 
         #[derive(Serialize)]
-        struct InstallationRow<'a> {
-            installation_id: &'a str,
-            user_id: Option<&'a str>,
-            app_version: &'a str,
-            platform: &'a str,
-            os_version: &'a str,
-            first_installed_at: &'a str,
-            last_seen_at: String,
+        struct HeartbeatParams<'a> {
+            p_installation_id: &'a str,
+            p_app_version: &'a str,
+            p_platform: &'a str,
+            p_os_version: &'a str,
         }
 
-        let row = InstallationRow {
-            installation_id: &installation.installation_id,
-            user_id,
-            app_version: &installation.app_version,
-            platform: &installation.platform,
-            os_version: &installation.os_version,
-            first_installed_at: &installation.first_installed_at,
-            last_seen_at: Utc::now().to_rfc3339(),
+        let params = HeartbeatParams {
+            p_installation_id: &installation.installation_id,
+            p_app_version: &installation.app_version,
+            p_platform: &installation.platform,
+            p_os_version: &installation.os_version,
         };
 
         let mut req = self
             .client
             .post(&endpoint)
             .header("apikey", &self.config.anon_key)
-            .header("Prefer", "resolution=merge-duplicates")
-            .json(&row);
+            .json(&params);
 
         if let Some(token) = jwt {
             req = req.bearer_auth(token);
@@ -170,29 +166,51 @@ impl SupabaseClient {
         let resp = req
             .send()
             .await
-            .map_err(|e| format!("Supabase installation sync error: {}", e))?;
+            .map_err(|e| format!("Supabase installation heartbeat error: {}", e))?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(format!("Supabase installation sync failed (HTTP {}): {}", status, body));
+            return Err(format!("Supabase installation heartbeat failed (HTTP {}): {}", status, body));
         }
 
         Ok(())
     }
 
-    /// Dispatches privacy-safe diagnostic event to Supabase `diagnostics_events` table.
+    /// Dispatches privacy-safe diagnostic event via secure RPC function `ingest_diagnostic_event`.
     pub async fn send_diagnostic_event(
         &self,
         payload: &DiagnosticPayload,
         jwt: Option<&str>,
     ) -> Result<(), String> {
-        let endpoint = format!("{}/rest/v1/diagnostics_events", self.config.url.trim_end_matches('/'));
+        let endpoint = format!(
+            "{}/rest/v1/rpc/ingest_diagnostic_event",
+            self.config.url.trim_end_matches('/')
+        );
+
+        #[derive(Serialize)]
+        struct IngestParams<'a> {
+            p_installation_id: &'a str,
+            p_relay_version: &'a str,
+            p_platform: &'a str,
+            p_os_version: &'a str,
+            p_event_type: &'a str,
+            p_metadata: &'a std::collections::HashMap<String, String>,
+        }
+
+        let params = IngestParams {
+            p_installation_id: &payload.installation_id,
+            p_relay_version: &payload.relay_version,
+            p_platform: &payload.platform,
+            p_os_version: &payload.os_version,
+            p_event_type: &payload.event_type,
+            p_metadata: &payload.metadata,
+        };
 
         let mut req = self
             .client
             .post(&endpoint)
             .header("apikey", &self.config.anon_key)
-            .json(payload);
+            .json(&params);
 
         if let Some(token) = jwt {
             req = req.bearer_auth(token);
@@ -205,6 +223,32 @@ impl SupabaseClient {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             return Err(format!("Supabase telemetry post failed (HTTP {}): {}", status, body));
+        }
+
+        Ok(())
+    }
+
+    /// Deletes the cloud account record from `relay_accounts`.
+    pub async fn delete_account_profile(&self, user_id: &str, jwt: &str) -> Result<(), String> {
+        let endpoint = format!(
+            "{}/rest/v1/relay_accounts?id=eq.{}",
+            self.config.url.trim_end_matches('/'),
+            user_id
+        );
+
+        let resp = self
+            .client
+            .delete(&endpoint)
+            .header("apikey", &self.config.anon_key)
+            .bearer_auth(jwt)
+            .send()
+            .await
+            .map_err(|e| format!("Supabase delete account request error: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("Supabase delete account failed (HTTP {}): {}", status, body));
         }
 
         Ok(())

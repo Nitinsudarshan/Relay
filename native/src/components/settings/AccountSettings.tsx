@@ -44,6 +44,8 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
   const [signingIn, setSigningIn] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+  const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
   const [showHybridModal, setShowHybridModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -96,6 +98,22 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       console.error('Sign-out failed:', err);
       const msg = typeof err === 'string' ? err : (err as { message?: string })?.message || 'Sign-out failed.';
       setErrorMsg(msg);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    try {
+      setDeletingAccount(true);
+      setErrorMsg(null);
+      const acc = await invoke<RelayAccount>('delete_relay_account');
+      setAccount(acc);
+      setShowDeleteAccountConfirm(false);
+    } catch (err: unknown) {
+      console.error('Delete account failed:', err);
+      const msg = typeof err === 'string' ? err : (err as { message?: string })?.message || 'Failed to delete account.';
+      setErrorMsg(msg);
+    } finally {
+      setDeletingAccount(false);
     }
   };
 
@@ -198,15 +216,25 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
 
           <div>
             {account?.authenticated ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30 gap-1.5"
-                onClick={() => setShowSignOutConfirm(true)}
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Sign Out</span>
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs text-muted-foreground hover:text-foreground border-border/80 gap-1.5"
+                  onClick={() => setShowSignOutConfirm(true)}
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Sign Out</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-destructive/70 hover:text-destructive hover:bg-destructive/10"
+                  onClick={() => setShowDeleteAccountConfirm(true)}
+                >
+                  <span>Delete Account</span>
+                </Button>
+              </div>
             ) : (
               <Button
                 size="sm"
@@ -258,6 +286,45 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
                 Confirm Sign Out
               </Button>
               <Button size="sm" variant="ghost" className="text-xs h-8" onClick={() => setShowSignOutConfirm(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Relay Account Confirmation Modal */}
+        {showDeleteAccountConfirm && (
+          <div className="p-4 rounded-lg border border-destructive/60 bg-destructive/10 space-y-3 animate-in fade-in-50">
+            <div className="space-y-1">
+              <h4 className="text-xs font-bold text-destructive flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4" />
+                <span>Permanently delete your Relay Cloud Account?</span>
+              </h4>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                This removes your cloud profile and disassociates your installation from Relay servers.
+                <strong className="text-foreground block mt-1">
+                  Account ≠ Vault: All your local notes, scribbles, audio recordings, and meetings remain 100% untouched on this computer.
+                </strong>
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                className="text-xs h-8 gap-1.5"
+                onClick={handleDeleteAccount}
+                disabled={deletingAccount}
+              >
+                {deletingAccount ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                <span>{deletingAccount ? 'Deleting...' : 'Confirm Delete Account'}</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-xs h-8"
+                onClick={() => setShowDeleteAccountConfirm(false)}
+                disabled={deletingAccount}
+              >
                 Cancel
               </Button>
             </div>

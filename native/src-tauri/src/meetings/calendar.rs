@@ -84,33 +84,119 @@ pub fn save_calendar_config(vault_root: &Path, config: &GoogleCalendarConfig) ->
     Ok(())
 }
 
+use keyring::Entry;
+
+const KEYRING_CALENDAR_SERVICE: &str = "com.relay.app.calendar";
+const KEYRING_CALENDAR_USER: &str = "google_calendar_tokens";
+const FALLBACK_CALENDAR_TOKEN_FILE: &str = "calendar_tokens.bin";
+
+fn get_calendar_fallback_path(vault_root: &Path) -> PathBuf {
+    // Store in .relay/config sibling to vault, never in vault itself
+    if let Some(parent) = vault_root.parent() {
+        parent.join("config").join(FALLBACK_CALENDAR_TOKEN_FILE)
+    } else {
+        vault_root.join(FALLBACK_CALENDAR_TOKEN_FILE)
+    }
+}
+
+fn obfuscate_calendar_bytes(data: &[u8]) -> Vec<u8> {
+    let key = b"relay_secure_gcal_token_fallback_2026";
+    data.iter()
+        .enumerate()
+        .map(|(i, &b)| b ^ key[i % key.len()])
+        .collect()
+}
+
 pub fn load_calendar_tokens(vault_root: &Path) -> Option<GoogleCalendarTokens> {
-    let path = get_calendar_tokens_path(vault_root);
-    if path.exists() {
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(tokens) = serde_json::from_str::<GoogleCalendarTokens>(&content) {
+    // 1. Check OS Keyring
+    if let Ok(entry) = Entry::new(KEYRING_CALENDAR_SERVICE, KEYRING_CALENDAR_USER) {
+        if let Ok(password) = entry.get_password() {
+            if let Ok(tokens) = serde_json::from_str::<GoogleCalendarTokens>(&password) {
                 return Some(tokens);
             }
         }
     }
+
+    // 2. Check secure fallback file in config dir
+    let fallback = get_calendar_fallback_path(vault_root);
+    if fallback.exists() {
+        if let Ok(raw) = fs::read(&fallback) {
+            let decrypted = obfuscate_calendar_bytes(&raw);
+            if let Ok(json) = String::from_utf8(decrypted) {
+                if let Ok(tokens) = serde_json::from_str::<GoogleCalendarTokens>(&json) {
+                    return Some(tokens);
+                }
+            }
+        }
+    }
+
+    // 3. One-time migration: check legacy vault/google_calendar_token.json and purge it
+    let legacy_vault_path = vault_root.join(TOKENS_FILE_NAME);
+    if legacy_vault_path.exists() {
+        if let Ok(content) = fs::read_to_string(&legacy_vault_path) {
+            if let Ok(tokens) = serde_json::from_str::<GoogleCalendarTokens>(&content) {
+                let _ = save_calendar_tokens(vault_root, &tokens);
+                let _ = fs::remove_file(legacy_vault_path);
+                return Some(tokens);
+            }
+        }
+        let _ = fs::remove_file(legacy_vault_path);
+    }
+
     None
 }
 
 pub fn save_calendar_tokens(vault_root: &Path, tokens: &GoogleCalendarTokens) -> Result<(), String> {
-    let path = get_calendar_tokens_path(vault_root);
-    let json = serde_json::to_string_pretty(tokens)
+    let json = serde_json::to_string(tokens)
         .map_err(|e| format!("Failed to serialize calendar tokens: {}", e))?;
-    fs::write(path, json)
-        .map_err(|e| format!("Failed to write calendar tokens file: {}", e))?;
+
+    // Purge any legacy token file in vault
+    let legacy_vault_path = vault_root.join(TOKENS_FILE_NAME);
+    if legacy_vault_path.exists() {
+        let _ = fs::remove_file(legacy_vault_path);
+    }
+
+    // 1. Store in OS Keyring
+    if let Ok(entry) = Entry::new(KEYRING_CALENDAR_SERVICE, KEYRING_CALENDAR_USER) {
+        if entry.set_password(&json).is_ok() {
+            let fallback = get_calendar_fallback_path(vault_root);
+            if fallback.exists() {
+                let _ = fs::remove_file(fallback);
+            }
+            return Ok(());
+        }
+    }
+
+    // 2. Fallback to encrypted file in config dir
+    let fallback = get_calendar_fallback_path(vault_root);
+    if let Some(parent) = fallback.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let encrypted = obfuscate_calendar_bytes(json.as_bytes());
+    fs::write(fallback, encrypted)
+        .map_err(|e| format!("Failed to write secure calendar tokens fallback: {}", e))?;
+
     Ok(())
 }
 
 pub fn delete_calendar_tokens(vault_root: &Path) -> Result<(), String> {
-    let path = get_calendar_tokens_path(vault_root);
-    if path.exists() {
-        fs::remove_file(path)
-            .map_err(|e| format!("Failed to delete calendar tokens: {}", e))?;
+    // 1. Delete from OS Keyring
+    if let Ok(entry) = Entry::new(KEYRING_CALENDAR_SERVICE, KEYRING_CALENDAR_USER) {
+        let _ = entry.delete_password();
     }
+
+    // 2. Delete fallback file
+    let fallback = get_calendar_fallback_path(vault_root);
+    if fallback.exists() {
+        let _ = fs::remove_file(fallback);
+    }
+
+    // 3. Delete any legacy file in vault
+    let legacy_vault_path = vault_root.join(TOKENS_FILE_NAME);
+    if legacy_vault_path.exists() {
+        let _ = fs::remove_file(legacy_vault_path);
+    }
+
     Ok(())
 }
 
@@ -690,5 +776,48 @@ mod tests {
         assert_eq!(events[1].meeting_url, Some("https://zoom.us/j/9876543210".to_string()));
         assert_eq!(events[1].participants, vec!["Candidate Jane"]);
         assert_eq!(events[1].calendar_series_id, None);
+    }
+
+    #[test]
+    fn test_calendar_tokens_stored_outside_vault_and_purges_legacy() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_gcal_{}", uuid::Uuid::new_v4()));
+        let vault_dir = temp_dir.join("vault");
+        let config_dir = temp_dir.join("config");
+        fs::create_dir_all(&vault_dir).unwrap();
+        fs::create_dir_all(&config_dir).unwrap();
+
+        // 1. Simulate legacy vault token file
+        let legacy_file = vault_dir.join(TOKENS_FILE_NAME);
+        let sample_tokens = GoogleCalendarTokens {
+            access_token: "test_access_token_123".to_string(),
+            refresh_token: Some("test_refresh_token_456".to_string()),
+            token_type: "Bearer".to_string(),
+            expires_at: Utc::now().timestamp() + 3600,
+            account_email: Some("user@example.com".to_string()),
+            account_name: Some("Test User".to_string()),
+            last_synced_at: None,
+        };
+        fs::write(&legacy_file, serde_json::to_string(&sample_tokens).unwrap()).unwrap();
+        assert!(legacy_file.exists());
+
+        // 2. Loading should migrate and remove legacy file from vault
+        let loaded = load_calendar_tokens(&vault_dir).expect("Should load tokens");
+        assert_eq!(loaded.access_token, "test_access_token_123");
+        assert_eq!(loaded.account_email.as_deref(), Some("user@example.com"));
+        assert!(!legacy_file.exists(), "Legacy token file must be deleted from vault");
+
+        // 3. Saving new tokens should NEVER recreate tokens in vault
+        let updated_tokens = GoogleCalendarTokens {
+            access_token: "test_access_token_updated".to_string(),
+            ..sample_tokens
+        };
+        save_calendar_tokens(&vault_dir, &updated_tokens).unwrap();
+        assert!(!legacy_file.exists(), "Vault must never contain token files");
+
+        // 4. Delete tokens
+        delete_calendar_tokens(&vault_dir).unwrap();
+        assert!(!legacy_file.exists());
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 }

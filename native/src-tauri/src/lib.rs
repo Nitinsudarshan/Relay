@@ -146,6 +146,7 @@ pub fn run() {
             commands::get_account_state,
             commands::start_google_sign_in,
             commands::sign_out_account,
+            commands::delete_relay_account,
             commands::get_installation_info,
             commands::check_for_app_updates,
             commands::set_diagnostics_consent,
