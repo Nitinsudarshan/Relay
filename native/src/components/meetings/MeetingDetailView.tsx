@@ -850,8 +850,8 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
           await onDeleteMeeting(meeting.id);
           setDeleteModalOpen(false);
         }}
-        title="Delete Meeting"
-        description={`Are you sure you want to move "${meeting.title}" to the 30-day Trash? Scribbles created from this meeting will remain intact.`}
+        title={meeting.series_id ? "Delete Meeting Occurrence" : "Delete Meeting"}
+        description={`Are you sure you want to move this occurrence ("${meeting.title}") to the 30-day Trash? Any Scribbles derived from this meeting will remain intact and will not be deleted.`}
         confirmLabel="Move to Trash"
         variant="destructive"
       />

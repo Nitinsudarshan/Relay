@@ -392,4 +392,29 @@ mod tests {
         assert_eq!(scribble.source_metadata["provider"], PROVIDER_ZOOM);
         assert_eq!(scribble.source_metadata["segment"], "decision-1");
     }
+
+    #[test]
+    fn test_candidate_scribbles_metadata_only() {
+        let mut meeting = Meeting::new("AI Roadmap", PROVIDER_TEAMS, None);
+        meeting.candidate_scribbles = vec![
+            "Local Whisper latency optimization technique".to_string(),
+            "Vector hybrid retrieval strategy".to_string(),
+        ];
+        
+        let md = meeting.format_markdown();
+        let parsed = Meeting::parse_markdown(&md).expect("Should parse meeting markdown back");
+        
+        assert_eq!(parsed.candidate_scribbles.len(), 2);
+        assert_eq!(parsed.candidate_scribbles[0], "Local Whisper latency optimization technique");
+    }
+
+    #[test]
+    fn test_meeting_series_metadata() {
+        let series = MeetingSeries::new("Weekly Architecture Forum", Some(PROVIDER_GOOGLE_MEET), Some("Weekly on Thursdays"));
+        assert!(series.id.starts_with("series_"));
+        assert_eq!(series.title, "Weekly Architecture Forum");
+        assert_eq!(series.provider.as_deref(), Some(PROVIDER_GOOGLE_MEET));
+        assert_eq!(series.recurrence_rule.as_deref(), Some("Weekly on Thursdays"));
+    }
 }
+

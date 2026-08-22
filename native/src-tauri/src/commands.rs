@@ -1692,20 +1692,57 @@ pub async fn get_upcoming_calendar_events(
 #[tauri::command]
 pub async fn check_meeting_detection(
     app: AppHandle,
+    state: State<'_, AppState>,
 ) -> Result<Vec<crate::meetings::DetectedMeetingPayload>, CommandError> {
     let raw_found = crate::meetings::detect_active_conferencing_windows();
     let mut detected = Vec::new();
 
+    // Optionally check upcoming calendar events to match scheduled meetings
+    let upcoming_events = if crate::meetings::calendar::load_calendar_tokens(&state.vault.vault_dir()).is_some() {
+        crate::meetings::calendar::sync_real_google_calendar_events(&state.vault.vault_dir()).await.unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
     for (provider, title, source) in raw_found {
+        // Try to match with an upcoming calendar event (provider match, or title similarity)
+        let now = chrono::Utc::now();
+        let matched_event = upcoming_events.iter().find(|ev| {
+            if let Ok(start_dt) = chrono::DateTime::parse_from_rfc3339(&ev.scheduled_start) {
+                let start_utc = start_dt.with_timezone(&chrono::Utc);
+                let diff_mins = (start_utc - now).num_minutes().abs();
+                if diff_mins <= 30 && (ev.provider == provider || ev.title.to_lowercase().contains(&title.to_lowercase()) || title.to_lowercase().contains(&ev.title.to_lowercase())) {
+                    return true;
+                }
+            }
+            false
+        });
+
+        let (event_id, final_title, meeting_url, participants) = if let Some(cal_ev) = matched_event {
+            (
+                format!("cal_match_{}", cal_ev.id),
+                cal_ev.title.clone(),
+                cal_ev.meeting_url.clone(),
+                cal_ev.participants.clone(),
+            )
+        } else {
+            (
+                format!("detected_{}_{}", provider, title.replace(' ', "_")),
+                title.clone(),
+                None,
+                Vec::new(),
+            )
+        };
+
         let payload = crate::meetings::DetectedMeetingPayload {
-            event_id: format!("detected_{}_{}", provider, title.replace(' ', "_")),
-            title: title.clone(),
+            event_id,
+            title: final_title,
             provider: provider.clone(),
-            meeting_url: None,
+            meeting_url,
             scheduled_start: Some(chrono::Utc::now().to_rfc3339()),
-            participants: Vec::new(),
-            confidence: 0.95,
-            detection_source: source,
+            participants,
+            confidence: if matched_event.is_some() { 0.99 } else { 0.90 },
+            detection_source: if matched_event.is_some() { "calendar".to_string() } else { source },
         };
 
         let _ = app.emit(MEETING_DETECTED_EVENT, &payload);

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { AppSettings, LanguageSettings, VaultLocationInfo, RelayAccount } from '../../types';
+import { AppSettings, LanguageSettings, VaultLocationInfo, RelayAccount, CalendarConnectionStatus, GoogleCalendarConfig } from '../../types';
 import {
   Cpu,
   Cloud,
@@ -27,6 +27,10 @@ import {
   Check,
   Lock,
   Terminal,
+  Calendar,
+  Unlink,
+  ExternalLink,
+  Video,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -234,6 +238,98 @@ export const ProviderSettings: React.FC = () => {
     }
   };
 
+  // Calendar status & controls
+  const [calendarStatus, setCalendarStatus] = useState<CalendarConnectionStatus>({
+    connected: false,
+    has_custom_credentials: false,
+  });
+  const [calendarBusy, setCalendarBusy] = useState(false);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [showCalendarCreds, setShowCalendarCreds] = useState(false);
+  const [calClientId, setCalClientId] = useState('');
+  const [calClientSecret, setCalClientSecret] = useState('');
+
+  const loadCalendarState = async () => {
+    try {
+      const [status, cfg] = await Promise.all([
+        invoke<CalendarConnectionStatus>('get_calendar_connection_status'),
+        invoke<GoogleCalendarConfig>('get_google_oauth_config'),
+      ]);
+      setCalendarStatus(status);
+      if (cfg?.client_id) setCalClientId(cfg.client_id);
+      if (cfg?.client_secret) setCalClientSecret(cfg.client_secret);
+    } catch (err) {
+      console.error('Failed to load calendar status in settings:', err);
+    }
+  };
+
+  const handleConnectGoogleCalendar = async () => {
+    setCalendarBusy(true);
+    setCalendarError(null);
+    try {
+      const cId = calClientId.trim() || undefined;
+      const cSec = calClientSecret.trim() || undefined;
+      if (cId) {
+        await invoke('save_google_oauth_config', {
+          config: { client_id: cId || null, client_secret: cSec || null },
+        });
+      }
+      const updated = await invoke<CalendarConnectionStatus>('start_google_calendar_oauth', {
+        customClientId: cId || null,
+        customClientSecret: cSec || null,
+      });
+      setCalendarStatus(updated);
+    } catch (err: any) {
+      console.error('Failed to connect Google Calendar:', err);
+      setCalendarError(typeof err === 'string' ? err : err?.message || 'Google OAuth connection failed.');
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
+
+  const handleDisconnectGoogleCalendar = async () => {
+    setCalendarBusy(true);
+    setCalendarError(null);
+    try {
+      const updated = await invoke<CalendarConnectionStatus>('disconnect_google_calendar');
+      setCalendarStatus(updated);
+    } catch (err: any) {
+      console.error('Failed to disconnect Google Calendar:', err);
+      setCalendarError(typeof err === 'string' ? err : err?.message || 'Failed to disconnect.');
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
+
+  const handleSyncGoogleCalendar = async () => {
+    setCalendarBusy(true);
+    setCalendarError(null);
+    try {
+      await invoke('sync_google_calendar');
+      const updated = await invoke<CalendarConnectionStatus>('get_calendar_connection_status');
+      setCalendarStatus(updated);
+    } catch (err: any) {
+      console.error('Failed to sync Google Calendar:', err);
+      setCalendarError(typeof err === 'string' ? err : err?.message || 'Sync failed.');
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
+
+  const handleSaveCalendarConfig = async () => {
+    try {
+      await invoke('save_google_oauth_config', {
+        config: {
+          client_id: calClientId.trim() || null,
+          client_secret: calClientSecret.trim() || null,
+        },
+      });
+      setCalendarError(null);
+    } catch (err: any) {
+      setCalendarError(typeof err === 'string' ? err : err?.message || 'Failed to save OAuth credentials.');
+    }
+  };
+
   const handleChooseVaultFolder = async () => {
     setVaultBusy(true);
     setVaultError('');
@@ -325,6 +421,13 @@ export const ProviderSettings: React.FC = () => {
   useEffect(() => {
     if (!loading && activeSection === 'privacy') {
       loadAccountState();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, activeSection]);
+
+  useEffect(() => {
+    if (!loading && activeSection === 'meetings') {
+      loadCalendarState();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, activeSection]);
@@ -1105,17 +1208,173 @@ export const ProviderSettings: React.FC = () => {
           </form>
         )}
 
-        {/* 5. MEETINGS SECTION */}
+        {/* 5. MEETINGS & CALENDAR SECTION */}
         {activeSection === 'meetings' && (
-          <form onSubmit={handleSave} className="space-y-6">
+          <div className="space-y-6 animate-in fade-in-50">
             <div>
               <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
-                MEETING RECORDER & INTELLIGENCE
+                CALENDAR & MEETINGS
               </p>
-              <h2 className="text-lg font-bold text-foreground">Long-Form Capture & Diarization Preferences</h2>
+              <h2 className="text-lg font-bold text-foreground">Google Calendar Integration & Meeting Capture</h2>
             </div>
 
-            <div className="space-y-4">
+            {/* Google Calendar Integration Card */}
+            <div className="p-5 rounded-xl border border-border bg-gradient-to-br from-card via-card/95 to-blue-500/5 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-500">
+                    <Calendar className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-foreground">Google Calendar Sync</h3>
+                      <Badge
+                        variant={calendarStatus.connected ? 'outline' : 'secondary'}
+                        className={`text-[10px] font-mono uppercase py-0 px-1.5 ${
+                          calendarStatus.connected
+                            ? 'border-emerald-500/40 text-emerald-500 bg-emerald-500/5'
+                            : ''
+                        }`}
+                      >
+                        {calendarStatus.connected ? 'Connected' : 'Not Connected'}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {calendarStatus.connected
+                        ? `Connected as ${calendarStatus.account_email || 'Google User'}`
+                        : 'Connect your Google Calendar to automatically recognize scheduled meetings and invite metadata.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {calendarStatus.connected ? (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleSyncGoogleCalendar}
+                        disabled={calendarBusy}
+                        className="text-xs gap-1.5 h-8"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${calendarBusy ? 'animate-spin' : ''}`} />
+                        <span>Sync Now</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={handleDisconnectGoogleCalendar}
+                        disabled={calendarBusy}
+                        className="text-xs text-destructive hover:bg-destructive/10 gap-1.5 h-8"
+                      >
+                        <Unlink className="w-3.5 h-3.5" />
+                        <span>Disconnect</span>
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      size="sm"
+                      onClick={handleConnectGoogleCalendar}
+                      disabled={calendarBusy}
+                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 h-8"
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span>{calendarBusy ? 'Connecting…' : 'Connect Google Calendar'}</span>
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {calendarError && (
+                <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{calendarError}</span>
+                </div>
+              )}
+
+              {calendarStatus.last_synced_at && (
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-2 border-t border-border/60">
+                  <span>Last synced: {new Date(calendarStatus.last_synced_at).toLocaleString()}</span>
+                  <span className="font-mono text-[10px]">Incremental & Idempotent Sync</span>
+                </div>
+              )}
+
+              {/* Custom Google OAuth Credentials Drawer */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCalendarCreds(!showCalendarCreds)}
+                  className="text-[11px] text-primary hover:underline flex items-center gap-1 font-medium cursor-pointer"
+                >
+                  <span>{showCalendarCreds ? 'Hide custom OAuth client credentials' : 'Configure custom OAuth client ID (Optional)'}</span>
+                </button>
+
+                {showCalendarCreds && (
+                  <div className="mt-3 p-3.5 rounded-lg bg-background/80 border border-border space-y-3">
+                    <p className="text-[10px] text-muted-foreground">
+                      By default, Relay uses loopback OAuth 2.0 PKCE authentication. You may optionally supply your own Google Cloud OAuth 2.0 Client ID and Secret:
+                    </p>
+                    <div className="space-y-2">
+                      <div>
+                        <label className="text-[10px] font-mono text-muted-foreground block mb-0.5">GOOGLE CLIENT ID</label>
+                        <Input
+                          value={calClientId}
+                          onChange={(e) => setCalClientId(e.target.value)}
+                          placeholder="xxxxxxxxxxxx.apps.googleusercontent.com"
+                          className="h-8 text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-mono text-muted-foreground block mb-0.5">GOOGLE CLIENT SECRET</label>
+                        <Input
+                          type="password"
+                          value={calClientSecret}
+                          onChange={(e) => setCalClientSecret(e.target.value)}
+                          placeholder="Optional client secret"
+                          className="h-8 text-xs font-mono"
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleSaveCalendarConfig}
+                        className="text-xs h-7 mt-1"
+                      >
+                        Save Credentials
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <form onSubmit={handleSave} className="space-y-4">
+              {/* Meeting Window & Activity Detection */}
+              <div className="py-3 border-b border-border flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Conferencing App Detection</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Detect active Google Meet, Zoom, Microsoft Teams, and Webex sessions via window activity.
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-[10px] font-mono text-emerald-500 border-emerald-500/30 bg-emerald-500/5">
+                  Always Active
+                </Badge>
+              </div>
+
+              {/* Explicit User Confirmation */}
+              <div className="py-3 border-b border-border flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Explicit Capture Consent (Privacy Guard)</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Relay will never record audio silently. Capture only begins when you explicitly press "Start Recording".
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-[10px] font-mono text-primary border-primary/30 bg-primary/5">
+                  Enforced
+                </Badge>
+              </div>
+
               {/* Speaker Diarization Switch */}
               <div className="py-3 border-b border-border flex items-center justify-between">
                 <div>
@@ -1130,35 +1389,19 @@ export const ProviderSettings: React.FC = () => {
               {/* Auto Meeting Minutes & Actions */}
               <div className="py-3 border-b border-border flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-semibold text-foreground">Generate Meeting Minutes & Next Steps</p>
+                  <p className="text-xs font-semibold text-foreground">Executive AI Minutes & Insights (≥100 words rule)</p>
                   <p className="text-[11px] text-muted-foreground">
-                    Automatically extract key decisions, unresolved questions, and assignees from recorded meetings.
+                    Extract key decisions, unresolved questions, and assignees with strict word-count threshold validation.
                   </p>
                 </div>
                 <Switch checked={meetingSummaryPrompt} onCheckedChange={setMeetingSummaryPrompt} />
               </div>
 
-              {/* Meetings V1 Feature Card */}
-              <div className="p-4 rounded-lg bg-muted/40 border border-border space-y-3">
-                <div className="flex items-center gap-2">
-                  <Users className="w-4 h-4 text-primary" />
-                  <p className="text-xs font-semibold text-foreground">Meetings V1 Preparation</p>
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Long-form meeting recording captures system audio and microphone streams with continuous chunked Whisper transcription.
-                  Full UI and recording controls will arrive in Phase 11B/11C.
-                </p>
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground font-mono">
-                  <Badge variant="outline" className="px-2 py-0.5">Continuous Buffer: 16kHz</Badge>
-                  <Badge variant="outline" className="px-2 py-0.5">Target Folder: /Meetings</Badge>
-                </div>
-              </div>
-
               <Button type="submit" size="sm" variant="default" className="mt-2">
-                Save Meeting Settings
+                Save Meeting Preferences
               </Button>
-            </div>
-          </form>
+            </form>
+          </div>
         )}
 
         {/* 6. PRIVACY SECTION */}
