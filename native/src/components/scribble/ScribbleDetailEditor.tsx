@@ -116,6 +116,13 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
     ];
   }, [questions, scribble.ai_metadata?.suggested_questions, scribble.topics, scribble.title]);
 
+  // Only display valid relationships pointing to currently active, non-trashed scribbles
+  const activeRelationships = useMemo(() => {
+    return (scribble.relationships || []).filter((rel) =>
+      allScribbles.some((s) => s.id === rel.target_id)
+    );
+  }, [scribble.relationships, allScribbles]);
+
   const handleCopyContent = () => {
     navigator.clipboard.writeText(scribble.content);
     setCopiedContent(true);
@@ -684,7 +691,7 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
         <div className="space-y-3 pt-2">
           <div className="flex items-center justify-between">
             <span className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-              <LinkIcon className="w-3.5 h-3.5 text-primary" /> Knowledge Connections ({scribble.relationships?.length || 0})
+              <LinkIcon className="w-3.5 h-3.5 text-primary" /> Knowledge Connections ({activeRelationships.length})
             </span>
 
             <div className="flex items-center gap-2">
@@ -713,12 +720,12 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
 
           {/* List of Relationships */}
           <div className="space-y-1.5">
-            {(!scribble.relationships || scribble.relationships.length === 0) ? (
+            {activeRelationships.length === 0 ? (
               <div className="p-4 rounded-lg border border-dashed border-border text-center text-xs text-muted-foreground">
                 No connected thoughts yet. Click <strong>Connect Scribble</strong> to link related ideas.
               </div>
             ) : (
-              scribble.relationships.map((rel) => {
+              activeRelationships.map((rel) => {
                 const target = allScribbles.find((s) => s.id === rel.target_id);
                 return (
                   <div

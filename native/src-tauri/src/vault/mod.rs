@@ -496,8 +496,14 @@ impl VaultManager {
             return Err(VaultError::NotFound(id.to_string()));
         }
         let content = fs::read_to_string(&file_path)?;
-        Scribble::parse_markdown(&content)
-            .ok_or_else(|| VaultError::FrontmatterError(format!("Failed to parse scribble {}", id)))
+        let mut scribble = Scribble::parse_markdown(&content)
+            .ok_or_else(|| VaultError::FrontmatterError(format!("Failed to parse scribble {}", id)))?;
+
+        let scribbles_dir = self.vault_dir().join("scribbles");
+        scribble.relationships.retain(|r| {
+            scribbles_dir.join(format!("{}.md", r.target_id)).exists()
+        });
+        Ok(scribble)
     }
 
     pub fn list_scribbles(&self) -> Result<Vec<Scribble>, VaultError> {
@@ -509,7 +515,7 @@ impl VaultManager {
             return Ok(scribbles);
         }
 
-        for entry in fs::read_dir(scribbles_dir)? {
+        for entry in fs::read_dir(&scribbles_dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "md") {
@@ -519,6 +525,12 @@ impl VaultManager {
                     }
                 }
             }
+        }
+
+        // Clean any dangling relationships pointing to merged, deleted, or trashed scribbles
+        let valid_ids: std::collections::HashSet<String> = scribbles.iter().map(|s| s.id.clone()).collect();
+        for s in &mut scribbles {
+            s.relationships.retain(|r| valid_ids.contains(&r.target_id));
         }
 
         // Sort newest updated / created first
@@ -699,6 +711,18 @@ impl VaultManager {
                 if src_md.exists() {
                     fs::rename(&src_md, &dest_md)?;
                 }
+
+                // Clean up any relationships in remaining active scribbles pointing to this trashed scribble
+                if let Ok(active_scribbles) = self.list_scribbles() {
+                    for mut other in active_scribbles {
+                        let original_len = other.relationships.len();
+                        other.relationships.retain(|r| r.target_id != id);
+                        if other.relationships.len() != original_len {
+                            let _ = self.save_scribble(&other);
+                        }
+                    }
+                }
+
                 Ok(trash_item)
             }
             "voice_note" | "note" => {
