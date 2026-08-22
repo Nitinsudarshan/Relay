@@ -1724,6 +1724,7 @@ pub async fn get_account_state(
 
 #[tauri::command]
 pub async fn start_google_sign_in(
+    app: tauri::AppHandle,
     custom_client_id: Option<String>,
     custom_client_secret: Option<String>,
     state: State<'_, AppState>,
@@ -1741,6 +1742,8 @@ pub async fn start_google_sign_in(
     )
     .await
     .map_err(|e| CommandError::new("AUTH_FAILED", &e))?;
+
+    let _ = app.emit("account-changed", &account);
 
     // Report diagnostics event if enabled
     let settings = state.settings.lock().unwrap().clone();
@@ -1762,10 +1765,13 @@ pub async fn start_google_sign_in(
 
 #[tauri::command]
 pub async fn sign_out_account(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::identity::RelayAccount, CommandError> {
     let account = crate::identity::sign_out_account(&state.config_dir)
         .map_err(|e| CommandError::new("SIGNOUT_FAILED", &e))?;
+
+    let _ = app.emit("account-changed", &account);
 
     let settings = state.settings.lock().unwrap().clone();
     let inst = crate::identity::get_or_create_installation_info(
@@ -1786,11 +1792,14 @@ pub async fn sign_out_account(
 
 #[tauri::command]
 pub async fn delete_relay_account(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::identity::RelayAccount, CommandError> {
     let account = crate::identity::delete_relay_account(&state.config_dir)
         .await
         .map_err(|e| CommandError::new("DELETE_ACCOUNT_FAILED", &e))?;
+
+    let _ = app.emit("account-changed", &account);
 
     let settings = state.settings.lock().unwrap().clone();
     let inst = crate::identity::get_or_create_installation_info(

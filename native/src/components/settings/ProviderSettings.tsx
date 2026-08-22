@@ -197,6 +197,7 @@ export const ProviderSettings: React.FC = () => {
       setDeleteAccountError(null);
       const updated = await invoke<RelayAccount>('delete_relay_account');
       setAccount(updated);
+      window.dispatchEvent(new CustomEvent('relay-account-changed', { detail: updated }));
       setDeleteAccountSuccess('Relay Cloud Account was deleted. All local markdown notes, scribbles, audio, and vectors remain 100% untouched.');
       setDeleteAccountModalOpen(false);
       setDeleteAccountAck(false);
@@ -215,6 +216,7 @@ export const ProviderSettings: React.FC = () => {
     try {
       const updated = await invoke<RelayAccount>('sign_out_account');
       setAccount(updated);
+      window.dispatchEvent(new CustomEvent('relay-account-changed', { detail: updated }));
     } catch (err) {
       console.error('Failed to disconnect sync:', err);
     }

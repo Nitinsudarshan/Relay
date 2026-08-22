@@ -74,6 +74,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       setErrorMsg(null);
       const acc = await invoke<RelayAccount>('start_google_sign_in');
       setAccount(acc);
+      window.dispatchEvent(new CustomEvent('relay-account-changed', { detail: acc }));
       if (onOpenExplanation) {
         onOpenExplanation();
       }
@@ -91,6 +92,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       setErrorMsg(null);
       const acc = await invoke<RelayAccount>('sign_out_account');
       setAccount(acc);
+      window.dispatchEvent(new CustomEvent('relay-account-changed', { detail: acc }));
       setShowSignOutConfirm(false);
     } catch (err: unknown) {
       console.error('Sign-out failed:', err);

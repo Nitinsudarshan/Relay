@@ -11,6 +11,7 @@ import { WelcomeModal } from './components/common/WelcomeModal';
 import { AccountExplanationModal } from './components/common/AccountExplanationModal';
 import { ProcessedPipelineResult, DetectedMeetingPayload, Meeting, RelayAccount, AppSettings } from './types';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import {
   Mic,
   Calendar,
@@ -63,6 +64,27 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     refreshAccountAndSettings();
+
+    // 1. Listen for backend Tauri account-changed events (sign-in, sign-out, delete-account)
+    const unlistenPromise = listen<RelayAccount>('account-changed', (event) => {
+      if (event.payload) {
+        setAccount(event.payload);
+      }
+    });
+
+    // 2. Listen for DOM custom events
+    const handleDomAccountChange = (e: Event) => {
+      const customEvent = e as CustomEvent<RelayAccount>;
+      if (customEvent.detail) {
+        setAccount(customEvent.detail);
+      }
+    };
+    window.addEventListener('relay-account-changed', handleDomAccountChange);
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+      window.removeEventListener('relay-account-changed', handleDomAccountChange);
+    };
   }, []);
 
   const handleWelcomeGoogle = async () => {
