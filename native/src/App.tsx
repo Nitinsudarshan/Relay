@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { VoiceNotePage } from './components/voicenotes/VoiceNotePage';
 import { MeetingPage } from './components/meetings/MeetingPage';
-import { MeetingDetectionPopup } from './components/meetings/MeetingDetectionPopup';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -12,16 +11,14 @@ import { AccountExplanationModal } from './components/common/AccountExplanationM
 import { ProcessedPipelineResult, DetectedMeetingPayload, Meeting, RelayAccount, RelayProfile, DeveloperSettings, AppSettings } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { NativeSidebar } from './components/common/NativeSidebar';
 import {
   Mic,
   Calendar,
   Sparkles,
   Settings,
-  ShieldCheck,
-  Activity,
   Sidebar as SidebarIcon,
   ChevronRight,
-  User,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -101,9 +98,14 @@ export const App: React.FC = () => {
     window.addEventListener('relay-account-changed', handleDomAccountChange);
     window.addEventListener('relay-profile-changed', handleDomProfileChange);
 
+    const unlistenTabSwitch = listen<string>('switch-to-meetings-tab', (event) => {
+      setActiveTab('meetings');
+    });
+
     return () => {
       unlistenAccount.then((unlisten) => unlisten());
       unlistenProfile.then((unlisten) => unlisten());
+      unlistenTabSwitch.then((unlisten) => unlisten());
       window.removeEventListener('relay-account-changed', handleDomAccountChange);
       window.removeEventListener('relay-profile-changed', handleDomProfileChange);
     };
@@ -141,26 +143,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleCreateAndStartDetectedMeeting = async (detected: DetectedMeetingPayload) => {
-    try {
-      const newMeeting = await invoke<Meeting>('create_meeting', {
-        title: detected.title,
-        provider: detected.provider,
-        seriesId: null,
-      });
 
-      if (detected.meeting_url || detected.scheduled_start) {
-        newMeeting.provider_metadata = { meeting_url: detected.meeting_url };
-        newMeeting.scheduled_start = detected.scheduled_start || newMeeting.scheduled_start;
-        await invoke('save_meeting', { meeting: newMeeting });
-      }
-
-      setActiveTab('meetings');
-      await invoke('start_meeting_recording', { meetingId: newMeeting.id });
-    } catch (err) {
-      console.error('Failed to create and start detected meeting:', err);
-    }
-  };
 
   const renderHeroHeader = () => {
     switch (activeTab) {
@@ -249,154 +232,19 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex h-screen w-screen bg-background text-foreground overflow-hidden font-sans">
-      {/* Non-blocking Meeting Detection Popup Notification */}
-      <MeetingDetectionPopup
-        onStartMeetingRecording={async (mId) => {
-          setActiveTab('meetings');
-          await invoke('start_meeting_recording', { meetingId: mId });
-        }}
-        onCreateAndStartMeeting={handleCreateAndStartDetectedMeeting}
+      {/* Navigation Sidebar (sidebar-07 icon-collapsible pattern) */}
+      <NativeSidebar
+        isOpen={sidebarOpen}
+        onToggle={() => setSidebarOpen(!sidebarOpen)}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        account={account}
+        profile={profile}
+        appVersion={appVersion}
+        onOpenChangelog={() => setChangelogOpen(true)}
+        onOpenWelcome={() => setWelcomeOpen(true)}
+        onOpenExplanation={() => setExplanationOpen(true)}
       />
-
-      {/* Navigation Sidebar (Relay 4-item Structure: Voice Note, Meetings, Scribbles, Settings) */}
-      <aside
-        className={`${
-          sidebarOpen ? 'w-64 p-4 border-r border-sidebar-border opacity-100' : 'w-0 p-0 border-none opacity-0 pointer-events-none'
-        } transition-all duration-300 bg-sidebar flex flex-col shrink-0 select-none overflow-hidden z-20`}
-      >
-        {/* Logo Header */}
-        <div className="flex items-center gap-3 px-2 py-3 mb-4 border-b border-sidebar-border">
-          <div className="flex aspect-square size-9 items-center justify-center rounded-lg bg-card border border-border text-foreground shadow-xs">
-            <RelayLogo className="w-5 h-5" />
-          </div>
-          <div className="grid flex-1 text-left text-sm leading-tight">
-            <span className="truncate font-bold tracking-wider text-sidebar-foreground">RELAY</span>
-            <span className="truncate text-[10px] text-muted-foreground font-mono uppercase tracking-widest">
-              Desktop Native
-            </span>
-          </div>
-        </div>
-
-        {/* Navigation Items (Voice Note, Meetings, Scribbles, Settings) */}
-        <nav className="flex-1 space-y-1">
-          {/* 1. Voice Note */}
-          <button
-            onClick={() => setActiveTab('capture')}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'capture'
-                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold shadow-xs'
-                : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Mic className="w-4 h-4 text-emerald-500" />
-              <span>Voice Note</span>
-            </div>
-            {activeTab === 'capture' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
-          </button>
-
-          {/* 2. Meetings */}
-          <button
-            onClick={() => setActiveTab('meetings')}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'meetings'
-                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold shadow-xs'
-                : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Calendar className="w-4 h-4 text-blue-500" />
-              <span>Meetings</span>
-            </div>
-            {activeTab === 'meetings' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
-          </button>
-
-          {/* 3. Scribbles */}
-          <button
-            onClick={() => setActiveTab('scribble')}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'scribble'
-                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold shadow-xs'
-                : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Sparkles className="w-4 h-4 text-amber-500" />
-              <span>Scribbles</span>
-            </div>
-            {activeTab === 'scribble' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
-          </button>
-
-          {/* 4. Settings */}
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'settings'
-                ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold shadow-xs'
-                : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Settings className="w-4 h-4" />
-              <span>Settings</span>
-            </div>
-            {activeTab === 'settings' && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
-          </button>
-        </nav>
-
-        {/* Pinned Account & Hybrid Sync Card Block */}
-        <div className="mt-auto pt-4 border-t border-sidebar-border space-y-3">
-          <button
-            type="button"
-            onClick={() => setActiveTab('settings')}
-            className="w-full p-2.5 rounded-lg bg-card hover:bg-card/80 border border-border flex items-center gap-2.5 shadow-xs text-left transition-colors cursor-pointer group"
-            title="Open Account & Settings"
-          >
-            {account?.authenticated && account.profile_image ? (
-              <img
-                src={account.profile_image}
-                alt="Profile"
-                className="w-7 h-7 rounded-full border border-primary/30 object-cover shrink-0"
-              />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-primary/20 text-primary font-bold flex items-center justify-center text-xs shrink-0">
-                {profile?.display_name && profile.display_name !== 'Local User'
-                  ? profile.display_name.charAt(0).toUpperCase()
-                  : account?.display_name
-                  ? account.display_name.charAt(0).toUpperCase()
-                  : <User className="w-3.5 h-3.5" />}
-              </div>
-            )}
-            <div className="grid flex-1 leading-tight min-w-0">
-              <span className="text-xs font-bold text-foreground truncate group-hover:text-primary transition-colors">
-                {profile?.display_name || account?.display_name || 'Local User'}
-              </span>
-              <span className="text-[10px] text-muted-foreground truncate font-mono">
-                {account?.authenticated ? account.email : '100% On-Device'}
-              </span>
-            </div>
-            <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 border-primary/30 text-primary">
-              {account?.authenticated ? 'Google' : 'Local'}
-            </Badge>
-          </button>
-
-          <div className="flex items-center justify-between text-[10px] text-muted-foreground px-1">
-            <div className="flex items-center gap-1.5 font-medium text-emerald-500">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Local Vault</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setChangelogOpen(true)}
-              className="flex items-center gap-1 font-mono hover:text-primary transition-colors cursor-pointer group"
-              title="View Release Notes & Changelog"
-            >
-              <Activity className="w-3 h-3 text-primary group-hover:animate-pulse" />
-              <span className="underline decoration-dotted underline-offset-2">v{appVersion}</span>
-            </button>
-          </div>
-        </div>
-      </aside>
 
       {/* Welcome First-Launch Onboarding Modal */}
       <WelcomeModal

@@ -171,3 +171,42 @@ fn active_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
         .ok()
         .flatten()
 }
+
+pub const REMINDER_WINDOW_LABEL: &str = "meeting-reminder";
+
+pub fn ensure_reminder_window(app: &AppHandle) {
+    if app.get_webview_window(REMINDER_WINDOW_LABEL).is_some() {
+        return;
+    }
+
+    let mut builder = WebviewWindowBuilder::new(
+        app,
+        REMINDER_WINDOW_LABEL,
+        WebviewUrl::App("index.html#/meeting-reminder".into()),
+    )
+    .title("Relay — Meeting Reminder")
+    .inner_size(320.0, 140.0)
+    .resizable(false)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .transparent(true)
+    .shadow(true)
+    .visible(false)
+    .focused(false);
+
+    if let Some(monitor) = active_monitor(app) {
+        let scale = monitor.scale_factor();
+        let work_area = monitor.work_area();
+        let wa_x = work_area.position.x as f64 / scale;
+        let wa_y = work_area.position.y as f64 / scale;
+        let wa_w = work_area.size.width as f64 / scale;
+        let x = wa_x + wa_w - 320.0 - 16.0;
+        let y = wa_y + 16.0;
+        builder = builder.position(x, y);
+    }
+
+    if let Err(e) = builder.build() {
+        tracing::error!("Failed to create meeting reminder window: {}", e);
+    }
+}

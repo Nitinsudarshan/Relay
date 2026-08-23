@@ -1659,7 +1659,7 @@ pub async fn disconnect_google_calendar(
 pub async fn sync_google_calendar(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::meetings::CalendarMeetingEvent>, CommandError> {
-    crate::meetings::calendar::sync_real_google_calendar_events(&state.vault.vault_dir())
+    crate::meetings::calendar::sync_real_google_calendar_events(&state.vault.vault_dir(), true)
         .await
         .map_err(|e| CommandError::new("SYNC_FAILED", &e))
 }
@@ -1684,7 +1684,7 @@ pub async fn save_google_oauth_config(
 pub async fn get_upcoming_calendar_events(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::meetings::CalendarMeetingEvent>, CommandError> {
-    crate::meetings::calendar::sync_real_google_calendar_events(&state.vault.vault_dir())
+    crate::meetings::calendar::sync_real_google_calendar_events(&state.vault.vault_dir(), false)
         .await
         .map_err(|e| CommandError::new("CALENDAR_SYNC_FAILED", &e))
 }
@@ -1699,7 +1699,7 @@ pub async fn check_meeting_detection(
 
     // Optionally check upcoming calendar events to match scheduled meetings
     let upcoming_events = if crate::meetings::calendar::load_calendar_tokens(&state.vault.vault_dir()).is_some() {
-        crate::meetings::calendar::sync_real_google_calendar_events(&state.vault.vault_dir()).await.unwrap_or_default()
+        crate::meetings::calendar::sync_real_google_calendar_events(&state.vault.vault_dir(), false).await.unwrap_or_default()
     } else {
         Vec::new()
     };

@@ -21,6 +21,7 @@ use commands::AppState;
 use settings::AppSettings;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use tauri::{Emitter, Manager};
 use vault::VaultManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -79,17 +80,54 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(state)
         .setup(move |app| {
+            let handle = app.handle();
+            let quit_i = tauri::menu::MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let show_i = tauri::menu::MenuItem::with_id(app, "show", "Show Relay", true, None::<&str>)?;
+            let record_i = tauri::menu::MenuItem::with_id(app, "record", "Start Recording", true, None::<&str>)?;
+            
+            let menu = tauri::menu::Menu::with_items(app, &[&show_i, &record_i, &quit_i])?;
+            
+            let _tray = tauri::tray::TrayIconBuilder::new()
+                .menu(&menu)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "record" => {
+                        let _ = app.emit("switch-to-meetings-tab", "");
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                        // Send an event to trigger a generic recording start
+                        let _ = app.emit("start-generic-recording", ());
+                    }
+                    _ => {}
+                })
+                .build(app)?;
+
             hotkeys::register_hotkeys(
-                app.handle(),
+                handle,
                 &hotkeys_config.show_hide_hotkey,
                 &hotkeys_config.dictation_hotkey,
             );
             // The dictation pill is now the one, permanent PTT surface — no
             // more docked/floating product-mode choice to hide it behind
             // (see docs/decisions.md Decision 36) — so it's always shown.
-            overlay::ensure_pill_window(app.handle(), true, pill_position);
+            overlay::ensure_pill_window(handle, true, pill_position);
+
+            crate::meetings::scheduler::start_scheduler(handle.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -153,7 +191,10 @@ pub fn run() {
             commands::trigger_enrich_meeting,
             commands::create_scribble_from_meeting,
             commands::get_upcoming_calendar_events,
-            commands::check_meeting_detection,
+            crate::meetings::scheduler::dismiss_meeting_reminder,
+            crate::meetings::scheduler::start_recording_from_reminder,
+            crate::meetings::scheduler::get_active_meeting_reminder,
+            crate::meetings::scheduler::trigger_mock_meeting_reminder,
             commands::get_calendar_connection_status,
             commands::start_google_calendar_oauth,
             commands::disconnect_google_calendar,

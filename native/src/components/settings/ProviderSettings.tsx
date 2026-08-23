@@ -110,6 +110,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     allow_anonymous_diagnostics: true,
     first_run_completed: false,
   },
+  meetings: {
+    remind_on_detection: true,
+    remind_if_unrecorded: true,
+  },
 };
 
 export const ProviderSettings: React.FC = () => {
@@ -1313,9 +1317,24 @@ export const ProviderSettings: React.FC = () => {
                     Detect active Google Meet, Zoom, Microsoft Teams, and Webex sessions via window activity.
                   </p>
                 </div>
-                <Badge variant="outline" className="text-[10px] font-mono text-emerald-500 border-emerald-500/30 bg-emerald-500/5">
-                  Always Active
-                </Badge>
+                <Switch 
+                  checked={settings.meetings?.remind_on_detection ?? true} 
+                  onCheckedChange={(checked) => setSettings({ ...settings, meetings: { ...settings.meetings, remind_on_detection: checked } })} 
+                />
+              </div>
+
+              {/* Explicit User Confirmation */}
+              <div className="py-3 border-b border-border flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Remind me if a scheduled meeting starts unrecorded</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Relay will remind you 2-5 minutes into a scheduled meeting if you haven't started recording yet.
+                  </p>
+                </div>
+                <Switch 
+                  checked={settings.meetings?.remind_if_unrecorded ?? true} 
+                  onCheckedChange={(checked) => setSettings({ ...settings, meetings: { ...settings.meetings, remind_if_unrecorded: checked } })} 
+                />
               </div>
 
               {/* Explicit User Confirmation */}

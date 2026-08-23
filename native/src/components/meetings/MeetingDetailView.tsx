@@ -45,7 +45,8 @@ interface MeetingDetailViewProps {
   ) => Promise<void>;
   onUpdateMeeting: (updated: Meeting) => Promise<void>;
   onDeleteMeeting: (meetingId: string) => Promise<void>;
-  onNavigateToScribble?: (scribbleId: string) => void;
+  onNavigateToScribble?: (scribbleId?: string) => void;
+  disableRecording?: boolean;
 }
 
 type DetailTab = 'notes' | 'decisions_actions' | 'questions' | 'transcript' | 'scribbles';
@@ -61,6 +62,7 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
   onUpdateMeeting,
   onDeleteMeeting,
   onNavigateToScribble,
+  disableRecording,
 }) => {
   const [activeTab, setActiveTab] = useState<DetailTab>('notes');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -290,6 +292,7 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                 variant="default"
                 size="sm"
                 onClick={() => onStartRecording(meeting.id)}
+                disabled={disableRecording}
                 className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
               >
                 <Mic className="w-3.5 h-3.5" />

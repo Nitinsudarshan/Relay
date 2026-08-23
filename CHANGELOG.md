@@ -13,6 +13,15 @@
 - **Streamlined Capture Actions**:
   - Simplified the calendar import button text from `+ Add & start in Relay` to a cleaner `Start Capturing`.
   - Refined the "Calendar Sync" modal trigger button to dynamically display a green `Calendar Connected` state.
+### Navigation & Layout Modernization (shadcn sidebar-07)
+
+- **shadcn `sidebar-07` Sidenav Pattern (`web/`, `native/`)**:
+  - Implemented collapsible icon sidebar (`w-64` expanded, `w-12` collapsed) with custom cubic bezier smooth transitions.
+  - Added workspace / team switcher header with local vault vs hybrid cloud sync options.
+  - Implemented core navigation with tooltips, active tab indicators, and quick vault shortcuts.
+  - Added user profile footer popover menu with avatar, plan status, changelog, and settings triggers.
+  - Created Radix UI primitives (`dropdown-menu`, `tooltip`) for native frontend.
+
 ## [0.9.0] - 2026-08-22
 
 ### Phase 11D.1: Relay Security & Foundation Hardening Pass

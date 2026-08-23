@@ -7,6 +7,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{OnceLock, RwLock};
 
 const GOOGLE_CALENDAR_EVENTS_ENDPOINT: &str =
     "https://www.googleapis.com/calendar/v3/calendars/primary/events";
@@ -19,6 +20,12 @@ pub struct GoogleCalendarConfig {
 }
 
 pub type GoogleCalendarTokens = OAuthTokens;
+
+static CALENDAR_CACHE: OnceLock<RwLock<Option<(chrono::DateTime<Utc>, Vec<CalendarMeetingEvent>)>>> = OnceLock::new();
+
+fn get_calendar_cache() -> &'static RwLock<Option<(chrono::DateTime<Utc>, Vec<CalendarMeetingEvent>)>> {
+    CALENDAR_CACHE.get_or_init(|| RwLock::new(None))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -204,7 +211,16 @@ pub async fn ensure_valid_access_token(
 /// Queries primary calendar from now to +7 days, expanding recurring series instances.
 pub async fn sync_real_google_calendar_events(
     vault_root: &Path,
+    force: bool,
 ) -> Result<Vec<CalendarMeetingEvent>, String> {
+    if !force {
+        if let Some((last_fetched, events)) = get_calendar_cache().read().unwrap().as_ref() {
+            if Utc::now().signed_duration_since(*last_fetched).num_minutes() < 5 {
+                return Ok(events.clone());
+            }
+        }
+    }
+
     if load_calendar_tokens(vault_root).is_none() {
         return Ok(Vec::new());
     }
@@ -280,6 +296,8 @@ pub async fn sync_real_google_calendar_events(
         .map_err(|e| format!("Failed to read Calendar response: {}", e))?;
 
     let events = parse_google_calendar_events_json(&body_text)?;
+
+    *get_calendar_cache().write().unwrap() = Some((Utc::now(), events.clone()));
 
     if let Some(mut tokens) = load_calendar_tokens(vault_root) {
         tokens.last_synced_at = Some(Utc::now().to_rfc3339());

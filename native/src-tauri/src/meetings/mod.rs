@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
 pub mod calendar;
+pub mod scheduler;
 
 pub const PROVIDER_GOOGLE_MEET: &str = "google_meet";
 pub const PROVIDER_ZOOM: &str = "zoom";

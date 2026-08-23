@@ -234,6 +234,11 @@ export interface CloudSettings {
   supabaseAnonKey?: string | null;
 }
 
+export interface MeetingSettings {
+  remind_on_detection: boolean;
+  remind_if_unrecorded: boolean;
+}
+
 /** Mirrors the Rust `AppSettings` struct persisted at `.relay/config/settings.json`. */
 export interface AppSettings {
   provider: ProviderSettings;
@@ -244,6 +249,7 @@ export interface AppSettings {
   vault: VaultSettings;
   language: LanguageSettings;
   diagnostics: DiagnosticsSettings;
+  meetings: MeetingSettings;
   cloud?: CloudSettings;
 }
 
@@ -523,6 +529,19 @@ export interface DetectedMeetingPayload {
   participants: string[];
   confidence: number;
   detection_source: string;
+}
+
+export interface MeetingListItem {
+  id: string;
+  sourceKind: 'meeting' | 'calendar';
+  title: string;
+  startsAt: string | null;
+  endsAt: string | null;
+  provider: string;
+  participantCount: number;
+  status: MeetingStatus;
+  durationMinutes: number | null;
+  calendarEventId: string | null;
 }
 
 export type GoogleCalendarStatus =

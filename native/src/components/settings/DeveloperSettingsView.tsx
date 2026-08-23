@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { DeveloperSettings } from '../../types';
-import { Terminal, RefreshCw, Check } from 'lucide-react';
+import { Terminal, RefreshCw, Check, Bell, CalendarClock, Play, SearchCode } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 
@@ -40,6 +41,25 @@ export const DeveloperSettingsView: React.FC = () => {
       console.error('Failed to update developer onboarding setting:', err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTriggerMockReminder = async (kind: string) => {
+    try {
+      await invoke('trigger_mock_meeting_reminder', { kind });
+    } catch (err) {
+      console.error(`Failed to trigger mock reminder (${kind}):`, err);
+    }
+  };
+
+  const handleCheckDetection = async () => {
+    try {
+      const res = await invoke('check_meeting_detection');
+      console.log('Detected meetings:', res);
+      alert(JSON.stringify(res, null, 2));
+    } catch (err) {
+      console.error('Failed to check detection:', err);
+      alert('Error: ' + err);
     }
   };
 
@@ -90,6 +110,58 @@ export const DeveloperSettingsView: React.FC = () => {
               disabled={loading || saving}
             />
           </div>
+        </div>
+      </div>
+
+      {/* Mock Meeting Reminders Section */}
+      <div className="p-5 rounded-xl border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <Bell className="w-4 h-4 text-primary" />
+            Test Meeting Reminders
+          </h3>
+          <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
+            Simulate meeting reminder payloads to test the popup and OS notification system without actually scheduling or joining a meeting.
+          </p>
+        </div>
+        
+        <div className="flex flex-wrap items-center gap-3 pt-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCheckDetection}
+            className="text-xs h-8 gap-1.5 border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-500"
+          >
+            <SearchCode className="w-3.5 h-3.5" />
+            Check Window Detection
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleTriggerMockReminder('upcoming')}
+            className="text-xs h-8 gap-1.5 border-blue-500/30 hover:bg-blue-500/10 hover:text-blue-500"
+          >
+            <CalendarClock className="w-3.5 h-3.5" />
+            T-1 Min (Upcoming)
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleTriggerMockReminder('unrecorded')}
+            className="text-xs h-8 gap-1.5 border-orange-500/30 hover:bg-orange-500/10 hover:text-orange-500"
+          >
+            <Play className="w-3.5 h-3.5" />
+            T+2 Min (Unrecorded)
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleTriggerMockReminder('detected')}
+            className="text-xs h-8 gap-1.5 border-emerald-500/30 hover:bg-emerald-500/10 hover:text-emerald-500"
+          >
+            <Bell className="w-3.5 h-3.5" />
+            Ad-hoc (Detected)
+          </Button>
         </div>
       </div>
     </div>

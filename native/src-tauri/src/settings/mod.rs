@@ -189,6 +189,32 @@ impl Default for DiagnosticsSettings {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeetingSettings {
+    #[serde(default = "default_true")]
+    pub remind_before_meeting: bool,
+    #[serde(default = "default_true")]
+    pub remind_if_unrecorded: bool,
+    #[serde(default = "default_true")]
+    pub remind_on_detection: bool,
+    #[serde(default = "default_false")]
+    pub auto_record: bool,
+}
+
+fn default_true() -> bool { true }
+fn default_false() -> bool { false }
+
+impl Default for MeetingSettings {
+    fn default() -> Self {
+        Self {
+            remind_before_meeting: true,
+            remind_if_unrecorded: true,
+            remind_on_detection: true,
+            auto_record: false,
+        }
+    }
+}
+
 /// Supabase Cloud configuration for Relay Hybrid authentication and sync.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CloudSettings {
@@ -218,6 +244,8 @@ pub struct AppSettings {
     pub diagnostics: DiagnosticsSettings,
     #[serde(default)]
     pub cloud: CloudSettings,
+    #[serde(default)]
+    pub meetings: MeetingSettings,
 }
 
 impl AppSettings {
