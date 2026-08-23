@@ -19,9 +19,10 @@
     8. *Corner Action Tray*: 2-row action tray (`rounded-lg`) with participant count badge and "Capture Audio" button.
     9. *Edge-Anchored Mini HUD*: High-contrast HUD card (`rounded-lg`) with live mic input status indicator and "Start STT" CTA.
     10. *Micro Pre-Flight Command Card*: Compact pre-meeting prep card (`rounded-lg`) with mic signal check meter and "Launch Recording" CTA.
-  - **8 Variant Custom Meeting Notification Prototyping Gallery (`native/src/components/meetings/notifications/`)**:
-    - Created modular interactive design exploration surface under `Components > Meeting > Notifications` with 8 distinct notification variants: `01 — Classic Compact`, `02 — Executive`, `03 — Floating Card`, `04 — Status First`, `05 — Action First`, `06 — Minimal`, `07 — Rich Context`, and `08 — Native Inspired`.
-    - Added interactive compare controls for testing meeting states (`Upcoming`, `Detected`, `In Progress`), meeting providers (`Google Meet`, `Zoom`, `Teams`, `Webex`, `In Person`), simulated interactive actions (Record, 5m/10m/15m/30m Snooze, Dismiss), and a direction selection picker.
+  - **Selected Variant 08 (Native Inspired) Meeting Notification (`native/src/components/meetings/notifications/`)**:
+    - Promoted Variant 08 (Native Inspired) as Relay's confirmed visual language spec for meeting notifications under `Components > Meeting > Notifications`.
+    - Scrapped and removed experimental exploratory variants (01 through 07).
+    - Retained full interactive state controls (Upcoming, Detected, In Progress), provider switcher, Record/Snooze/Dismiss actions, and live top-right desktop toast simulation overlay.
     - Zero production meeting logic or Tauri window side effects (100% safe isolated preview surface).
 
 ## [0.9.2] - 2026-08-23
