@@ -17,9 +17,19 @@ import { useMeetingList } from './useMeetingList';
 
 interface MeetingPageProps {
   onNavigateToScribbles?: (scribbleId?: string) => void;
+  /** A meeting to select immediately, e.g. arriving from the reminder
+   * popup's "Start Recording" or the tray (see App.tsx's
+   * `switch-to-meetings-tab` listener) — this is what actually opens the
+   * right meeting instead of just switching to this tab. */
+  focusMeetingId?: string | null;
+  onFocusMeetingIdConsumed?: () => void;
 }
 
-export const MeetingPage: React.FC<MeetingPageProps> = ({ onNavigateToScribbles }) => {
+export const MeetingPage: React.FC<MeetingPageProps> = ({
+  onNavigateToScribbles,
+  focusMeetingId,
+  onFocusMeetingIdConsumed,
+}) => {
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -54,6 +64,13 @@ export const MeetingPage: React.FC<MeetingPageProps> = ({ onNavigateToScribbles 
   useEffect(() => {
     loadExtraData();
   }, [loadExtraData]);
+
+  useEffect(() => {
+    if (focusMeetingId) {
+      setSelectedMeetingId(focusMeetingId);
+      onFocusMeetingIdConsumed?.();
+    }
+  }, [focusMeetingId, onFocusMeetingIdConsumed]);
 
   // If no meeting selected, auto-select first one from filtered list
   const filteredGroups = useMemo(() => {
@@ -209,20 +226,11 @@ export const MeetingPage: React.FC<MeetingPageProps> = ({ onNavigateToScribbles 
 
   const handleImportCalendarEvent = async (event: CalendarMeetingEvent) => {
     try {
-      const newMeeting = await invoke<Meeting>('create_meeting', {
-        title: event.title,
-        provider: event.provider,
-        seriesId: event.calendar_series_id || null,
-      });
-
-      newMeeting.calendar_event_id = event.id;
-      newMeeting.scheduled_start = event.scheduled_start;
-      newMeeting.scheduled_end = event.scheduled_end;
-      newMeeting.participants = event.participants;
-      newMeeting.provider_metadata = { meeting_url: event.meeting_url };
-
-      await invoke('save_meeting', { meeting: newMeeting });
-      setSelectedMeetingId(newMeeting.id);
+      // Goes through the same resolver the background engine uses, so
+      // clicking this can't race the engine's own ~15s sync into creating
+      // a duplicate meeting for the same calendar event.
+      const meeting = await invoke<Meeting>('import_calendar_event', { event });
+      setSelectedMeetingId(meeting.id);
       refresh();
     } catch (err) {
       console.error('Failed to import', err);

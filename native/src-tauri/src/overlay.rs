@@ -173,9 +173,19 @@ fn active_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
 }
 
 pub const REMINDER_WINDOW_LABEL: &str = "meeting-reminder";
+const REMINDER_SIZE: (f64, f64) = (320.0, 140.0);
+const REMINDER_MARGIN: f64 = 16.0;
 
+/// Creates the meeting reminder window if it doesn't exist yet, or — if it
+/// already does — recomputes its position before the caller shows it. The
+/// previous version early-returned on an existing window and never
+/// repositioned it, so it would freeze at whatever monitor it first opened
+/// on (Decision 45, Refactor #2); this mirrors the pill's own
+/// `ensure_pill_window`/`reposition` pattern of recomputing from scratch on
+/// every call instead of caching a position.
 pub fn ensure_reminder_window(app: &AppHandle) {
-    if app.get_webview_window(REMINDER_WINDOW_LABEL).is_some() {
+    if let Some(window) = app.get_webview_window(REMINDER_WINDOW_LABEL) {
+        reposition_reminder_window(app, &window);
         return;
     }
 
@@ -185,7 +195,7 @@ pub fn ensure_reminder_window(app: &AppHandle) {
         WebviewUrl::App("index.html#/meeting-reminder".into()),
     )
     .title("Relay — Meeting Reminder")
-    .inner_size(320.0, 140.0)
+    .inner_size(REMINDER_SIZE.0, REMINDER_SIZE.1)
     .resizable(false)
     .decorations(false)
     .always_on_top(true)
@@ -193,20 +203,41 @@ pub fn ensure_reminder_window(app: &AppHandle) {
     .transparent(true)
     .shadow(true)
     .visible(false)
+    // Same zero-focus-theft principle as the pill (Decision 24/PTT-007):
+    // never grabs focus merely by appearing. A user who clicks "Start
+    // Recording" focuses it at that point, which is a deliberate action —
+    // this is what closes Decision 45's Improve #4 (the window used to
+    // call `.setFocus()` on every new reminder) at the root, rather than
+    // adding a fullscreen/presentation-mode check to work around it.
     .focused(false);
 
-    if let Some(monitor) = active_monitor(app) {
-        let scale = monitor.scale_factor();
-        let work_area = monitor.work_area();
-        let wa_x = work_area.position.x as f64 / scale;
-        let wa_y = work_area.position.y as f64 / scale;
-        let wa_w = work_area.size.width as f64 / scale;
-        let x = wa_x + wa_w - 320.0 - 16.0;
-        let y = wa_y + 16.0;
+    if let Some((x, y)) = compute_reminder_anchor(app) {
         builder = builder.position(x, y);
     }
 
     if let Err(e) = builder.build() {
         tracing::error!("Failed to create meeting reminder window: {}", e);
     }
+}
+
+fn reposition_reminder_window(app: &AppHandle, window: &tauri::WebviewWindow) {
+    if let Some((x, y)) = compute_reminder_anchor(app) {
+        if let Err(e) = window.set_position(LogicalPosition::new(x, y)) {
+            tracing::warn!("Failed to reposition meeting reminder window: {}", e);
+        }
+    }
+}
+
+/// Top-right corner of whichever monitor is currently under the cursor —
+/// recomputed every time (see `reposition_reminder_window`), never cached,
+/// which is what keeps it from staying anchored to a monitor the user has
+/// since disconnected or moved away from.
+fn compute_reminder_anchor(app: &AppHandle) -> Option<(f64, f64)> {
+    let monitor = active_monitor(app)?;
+    let scale = monitor.scale_factor();
+    let work_area = monitor.work_area();
+    let wa_x = work_area.position.x as f64 / scale;
+    let wa_y = work_area.position.y as f64 / scale;
+    let wa_w = work_area.size.width as f64 / scale;
+    Some((wa_x + wa_w - REMINDER_SIZE.0 - REMINDER_MARGIN, wa_y + REMINDER_MARGIN))
 }

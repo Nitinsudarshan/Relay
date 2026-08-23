@@ -11,7 +11,7 @@ use std::sync::Mutex;
 /// that clearly contains a real meeting name, because the former is much
 /// more likely to be a stray browser tab or idle app window rather than an
 /// active call.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct WindowMatch {
     pub provider: String,
     pub title: String,

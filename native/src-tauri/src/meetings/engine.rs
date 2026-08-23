@@ -69,15 +69,12 @@ async fn tick(app: &AppHandle) {
 
     let settings = state.settings.lock().unwrap().clone();
     let meeting_settings = &settings.meetings;
-    if !meeting_settings.remind_before_meeting
-        && !meeting_settings.remind_if_unrecorded
-        && !meeting_settings.remind_on_detection
-    {
-        return;
-    }
-
     let vault_root = state.vault.vault_dir();
 
+    // Signal resolution — keeping the meetings list current — always runs.
+    // It's a separate concern from whether reminders are wanted: a user
+    // who disables every reminder toggle still wants calendar/detected
+    // meetings to show up in their list, just without the interruption.
     if calendar::load_calendar_tokens(&vault_root).is_some() {
         if let Ok(events) = calendar::sync_real_google_calendar_events(&vault_root, false).await {
             for event in &events {
@@ -88,6 +85,13 @@ async fn tick(app: &AppHandle) {
 
     for window_match in detect_active_conferencing_windows() {
         let _ = resolver::resolve_window_signal(&state.vault, &candidates, &window_match);
+    }
+
+    if !meeting_settings.remind_before_meeting
+        && !meeting_settings.remind_if_unrecorded
+        && !meeting_settings.remind_on_detection
+    {
+        return;
     }
 
     let recording_id = active_recording.0.lock().unwrap().clone();

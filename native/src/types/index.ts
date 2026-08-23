@@ -235,6 +235,7 @@ export interface CloudSettings {
 }
 
 export interface MeetingSettings {
+  remind_before_meeting: boolean;
   remind_on_detection: boolean;
   remind_if_unrecorded: boolean;
 }
@@ -489,6 +490,11 @@ export interface Meeting {
   provider: MeetingProvider;
   provider_metadata: Record<string, any>;
   calendar_event_id?: string | null;
+  calendar_series_id?: string | null;
+  detection_source?: string | null;
+  detection_key?: string | null;
+  detection_confidence?: number | null;
+  detected_at?: string | null;
   scheduled_start?: string | null;
   scheduled_end?: string | null;
   actual_start?: string | null;
@@ -519,16 +525,27 @@ export interface CalendarMeetingEvent {
   calendar_series_id?: string | null;
 }
 
-export interface DetectedMeetingPayload {
-  event_id: string;
+export type ReminderKind = 'upcoming' | 'unrecorded' | 'detected';
+
+export type ReminderState =
+  | { state: 'pending' }
+  | { state: 'fired' }
+  | { state: 'snoozed'; until: string }
+  | { state: 'dismissed' }
+  | { state: 'actioned' }
+  | { state: 'expired' };
+
+/** Mirrors the Rust `ReminderEvent` — one logical reminder, driving both
+ * the OS notification and this popup from the same backend state, so
+ * neither can drift from the other (see meetings_implementation.md §4.2). */
+export interface MeetingReminderEvent {
+  meeting_id: string;
+  kind: ReminderKind;
   title: string;
   provider: string;
-  meeting_url?: string | null;
-  scheduled_start?: string | null;
-  scheduled_end?: string | null;
   participants: string[];
-  confidence: number;
-  detection_source: string;
+  fire_at: string;
+  status: ReminderState;
 }
 
 export interface MeetingListItem {

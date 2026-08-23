@@ -1498,6 +1498,19 @@ pub async fn start_meeting_recording(
         // list, the popup, and the tray from disagreeing about whether a
         // meeting has been "seen" (Decision 45, Refactor #1 / Improve #5).
         crate::meetings::reminders::mark_meeting_actioned(&reminders, &meeting_id);
+
+        // Bringing the main window to this meeting is enforced here, once,
+        // rather than duplicated in every caller (the list, the popup, the
+        // tray) — calling this when already on the meetings tab/already
+        // focused is a harmless no-op, so it's always safe to do
+        // unconditionally (Decision 45, Broken #3c: this event used to be
+        // emitted with an empty payload the handler ignored anyway).
+        let _ = app.emit("switch-to-meetings-tab", &meeting_id);
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
     }
 
     result
@@ -1718,6 +1731,47 @@ pub async fn snooze_meeting_reminder(
 ) -> Result<(), CommandError> {
     crate::meetings::reminders::snooze(&reminders, &meeting_id, kind, minutes);
     Ok(())
+}
+
+/// Settings → Developer's "Check Window Detection" button: a pure,
+/// side-effect-free read of the raw window-detection signal (including the
+/// confidence each match scored), for verifying detection itself without
+/// waiting for the background engine's next tick to resolve it into a
+/// meeting. Replaces the removed `check_meeting_detection`, which had real
+/// side effects (emitting an event, inventing synthetic meeting payloads)
+/// this one deliberately doesn't have.
+#[tauri::command]
+pub async fn debug_detect_conferencing_windows() -> Result<Vec<crate::meetings::WindowMatch>, CommandError> {
+    Ok(crate::meetings::detect_active_conferencing_windows())
+}
+
+/// Manually imports one calendar event as a meeting (the meetings list's
+/// "Import and Prepare Meeting" button) through the same resolver every
+/// automatic signal goes through, rather than an unconditional
+/// `create_meeting` — the background engine already resolves every synced
+/// calendar event into a `Meeting` within ~15 seconds regardless of this
+/// button, so a raw create here would risk a duplicate for the same
+/// `calendar_event_id` the moment both happen close together.
+#[tauri::command]
+pub async fn import_calendar_event(
+    event: crate::meetings::CalendarMeetingEvent,
+    state: State<'_, AppState>,
+) -> Result<Meeting, CommandError> {
+    crate::meetings::resolver::resolve_calendar_signal(&state.vault, &event)
+        .map_err(|e| CommandError::new("IMPORT_FAILED", &e))
+}
+
+/// The real answer to "which meeting, if any, is currently being
+/// recorded" — resolves the cross-meeting status confusion an earlier
+/// audit found in `MeetingDetailPane.tsx`: it previously had to guess this
+/// from `meeting.status === 'recording'` (a vault field that can go stale)
+/// combined with a capture-ownership hook that only knows the active
+/// *mode* ("meeting"), not which specific meeting.
+#[tauri::command]
+pub async fn get_active_recording_meeting_id(
+    active_recording: State<'_, crate::meetings::reminders::ActiveMeetingRecording>,
+) -> Result<Option<String>, CommandError> {
+    Ok(active_recording.0.lock().unwrap().clone())
 }
 
 /// The single reminder the popup should currently show, if any — derived

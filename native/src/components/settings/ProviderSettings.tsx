@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { AppSettings, LanguageSettings, VaultLocationInfo, RelayAccount, CalendarConnectionStatus, GoogleCalendarConfig } from '../../types';
+import { AppSettings, LanguageSettings, VaultLocationInfo, RelayAccount, CalendarConnectionStatus } from '../../types';
 import {
   Cpu,
   Cloud,
@@ -111,6 +111,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     first_run_completed: false,
   },
   meetings: {
+    remind_before_meeting: true,
     remind_on_detection: true,
     remind_if_unrecorded: true,
   },
@@ -127,8 +128,6 @@ export const ProviderSettings: React.FC = () => {
   const [autoSaveVault, setAutoSaveVault] = useState(true);
   const [rawAudioKept, setRawAudioKept] = useState(true);
   const [autoExtractTasks, setAutoExtractTasks] = useState(true);
-  const [speakerDiarization, setSpeakerDiarization] = useState(false);
-  const [meetingSummaryPrompt, setMeetingSummaryPrompt] = useState(true);
   const [scribbleTemplate, setScribbleTemplate] = useState<'structured' | 'minimal' | 'executive'>('structured');
 
   type OllamaStatus =
@@ -1309,6 +1308,20 @@ export const ProviderSettings: React.FC = () => {
             </div>
 
             <form onSubmit={handleSave} className="space-y-4">
+              {/* Upcoming-meeting reminder */}
+              <div className="py-3 border-b border-border flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Remind me before a meeting starts</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Relay will remind you shortly before a scheduled meeting begins.
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.meetings?.remind_before_meeting ?? true}
+                  onCheckedChange={(checked) => setSettings({ ...settings, meetings: { ...settings.meetings, remind_before_meeting: checked } })}
+                />
+              </div>
+
               {/* Meeting Window & Activity Detection */}
               <div className="py-3 border-b border-border flex items-center justify-between">
                 <div>
@@ -1350,27 +1363,6 @@ export const ProviderSettings: React.FC = () => {
                 </Badge>
               </div>
 
-              {/* Speaker Diarization Switch */}
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Speaker Diarization & Labeling</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Distinguish multiple speakers in meeting transcripts (Speaker 1, Speaker 2).
-                  </p>
-                </div>
-                <Switch checked={speakerDiarization} onCheckedChange={setSpeakerDiarization} />
-              </div>
-
-              {/* Auto Meeting Minutes & Actions */}
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Executive AI Minutes & Insights (≥100 words rule)</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Extract key decisions, unresolved questions, and assignees with strict word-count threshold validation.
-                  </p>
-                </div>
-                <Switch checked={meetingSummaryPrompt} onCheckedChange={setMeetingSummaryPrompt} />
-              </div>
 
               <Button type="submit" size="sm" variant="default" className="mt-2">
                 Save Meeting Preferences

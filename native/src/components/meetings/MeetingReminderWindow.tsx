@@ -1,76 +1,78 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { X } from 'lucide-react';
 import { Button } from '../ui/button';
+import { MeetingReminderEvent, ReminderKind } from '../../types';
 
-interface MeetingReminderPayload {
-  meeting_id: string;
-  title: string;
-  provider: string;
-  kind: string; // "upcoming" | "unrecorded" | "detected"
-  participants: string[];
-}
-
+/// One logical reminder, one interactive surface. This window shows
+/// whichever reminder the backend queue says is earliest-and-currently-due
+/// (`get_current_meeting_reminder`) — never a locally-cached "last event
+/// received," since a second reminder firing while this one is still up
+/// must not make the first one silently disappear (Decision 45, Broken #2).
+/// An OS notification fires alongside this from the same backend event;
+/// this window is the only place with actual controls (§4.2).
 export const MeetingReminderWindow: React.FC = () => {
-  const [reminder, setReminder] = useState<MeetingReminderPayload | null>(null);
-  
-  // Hide the window if no reminder is active
+  const [reminder, setReminder] = useState<MeetingReminderEvent | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(() => {
+    invoke<MeetingReminderEvent | null>('get_current_meeting_reminder')
+      .then(setReminder)
+      .catch(console.error);
+  }, []);
+
   useEffect(() => {
     const currentWindow = getCurrentWindow();
     if (!reminder) {
       currentWindow.hide().catch(console.error);
     } else {
       currentWindow.show().catch(console.error);
-      currentWindow.setFocus().catch(console.error);
     }
   }, [reminder]);
 
   useEffect(() => {
-    // 1. Fetch current active reminder immediately
-    invoke<MeetingReminderPayload | null>('get_active_meeting_reminder')
-      .then(payload => {
-        if (payload) setReminder(payload);
-      })
-      .catch(console.error);
-
-    // 2. Listen for future reminders
-    const unlisten = listen<MeetingReminderPayload>('meeting-reminder', (e) => {
-      setReminder(e.payload);
-    });
-
+    refresh();
+    const unlisten = listen('meeting-reminder', refresh);
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  }, [refresh]);
 
-  const handleStartRecording = async () => {
-    if (!reminder) return;
+  const withBusyGuard = async (action: () => Promise<void>) => {
+    if (!reminder || busy) return;
+    setBusy(true);
     try {
-      await invoke('start_recording_from_reminder', { meetingId: reminder.meeting_id });
-      setReminder(null);
+      await action();
     } catch (e) {
-      console.error('Failed to start recording from reminder', e);
+      console.error('Meeting reminder action failed', e);
+    } finally {
+      setBusy(false);
+      refresh();
     }
   };
 
-  const handleDismiss = async (permanent: boolean) => {
-    if (!reminder) return;
-    try {
-      await invoke('dismiss_meeting_reminder', { meetingId: reminder.meeting_id, permanent });
-      setReminder(null);
-    } catch (e) {
-      console.error('Failed to dismiss reminder', e);
-    }
-  };
+  const handleStartRecording = () =>
+    withBusyGuard(() => invoke('start_meeting_recording', { meetingId: reminder!.meeting_id }));
+
+  const handleSnooze = () =>
+    withBusyGuard(() =>
+      invoke('snooze_meeting_reminder', {
+        meetingId: reminder!.meeting_id,
+        kind: reminder!.kind,
+        minutes: 5,
+      })
+    );
+
+  const handleDismiss = () =>
+    withBusyGuard(() =>
+      invoke('dismiss_meeting_reminder', { meetingId: reminder!.meeting_id, kind: reminder!.kind })
+    );
 
   if (!reminder) return null;
 
-  const headerText = 
-    reminder.kind === 'upcoming' ? 'Upcoming Meeting' : 
-    reminder.kind === 'unrecorded' ? 'Meeting in Progress' : 
-    'Meeting Detected';
+  const headerText = headerTextForKind(reminder.kind);
 
   return (
     <div className="flex flex-col bg-background/95 backdrop-blur-md border border-border shadow-xl rounded-xl h-full w-full select-none overflow-hidden" data-tauri-drag-region>
@@ -78,44 +80,72 @@ export const MeetingReminderWindow: React.FC = () => {
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground" data-tauri-drag-region>
           {headerText}
         </span>
-        <button 
-          onClick={() => handleDismiss(false)}
-          className="text-muted-foreground hover:text-foreground p-1 -mr-1 rounded-full transition-colors"
+        <button
+          onClick={handleDismiss}
+          disabled={busy}
+          className="text-muted-foreground hover:text-foreground p-1 -mr-1 rounded-full transition-colors disabled:opacity-50"
+          title="Dismiss"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
-      
+
       <div className="flex flex-col flex-1 px-4 py-3 justify-between">
         <div>
           <h3 className="text-sm font-medium line-clamp-1 text-foreground" title={reminder.title}>
             {reminder.title || 'Untitled Meeting'}
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {reminder.provider.charAt(0).toUpperCase() + reminder.provider.slice(1).replace('_', ' ')}
+            {formatProvider(reminder.provider)}
             {reminder.participants.length > 0 && ` • ${reminder.participants.length} participants`}
           </p>
         </div>
-        
+
         <div className="flex items-center justify-end space-x-2 mt-auto">
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             className="h-7 text-xs"
-            onClick={() => handleDismiss(true)}
+            onClick={handleSnooze}
+            disabled={busy}
           >
-            Don't remind me
+            Remind me in 5 min
           </Button>
-          <Button 
-            variant="default" 
-            size="sm" 
+          <Button
+            variant="default"
+            size="sm"
             className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white"
             onClick={handleStartRecording}
+            disabled={busy}
           >
-            Record
+            Start Recording
           </Button>
         </div>
       </div>
     </div>
   );
 };
+
+function headerTextForKind(kind: ReminderKind): string {
+  switch (kind) {
+    case 'upcoming':
+      return 'Upcoming Meeting';
+    case 'unrecorded':
+      return 'Meeting in Progress';
+    case 'detected':
+      return 'Meeting Detected';
+    default:
+      return 'Meeting Reminder';
+  }
+}
+
+function formatProvider(provider: string): string {
+  const known: Record<string, string> = {
+    google_meet: 'Google Meet',
+    zoom: 'Zoom',
+    teams: 'Teams',
+    webex: 'Webex',
+    in_person: 'In Person',
+  };
+  return known[provider] ?? 'Meeting';
+}
