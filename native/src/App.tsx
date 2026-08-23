@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { VoiceNotePage } from './components/voicenotes/VoiceNotePage';
 import { MeetingPage } from './components/meetings/MeetingPage';
 import { MeetingNotificationGallery } from './components/meetings/notifications/MeetingNotificationGallery';
-import { MeetingReminderToastListener } from './components/meetings/notifications/MeetingReminderToastListener';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -346,9 +345,6 @@ export const App: React.FC = () => {
           )}
         </main>
       </div>
-
-      {/* Global Meeting Reminder Toast Alert (Variant 08 - Native Inspired) */}
-      <MeetingReminderToastListener />
     </div>
   );
 };
