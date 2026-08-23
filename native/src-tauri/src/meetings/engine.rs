@@ -108,7 +108,6 @@ async fn tick(app: &AppHandle) {
         if let Err(e) = app.notification().builder().title(title).body(body).show() {
             tracing::error!("[notifications] ERROR failed to emit native notification: {}", e);
         }
-        crate::overlay::ensure_reminder_window(app);
         let _ = app.emit(MEETING_REMINDER_EVENT, &entry);
     }
 }

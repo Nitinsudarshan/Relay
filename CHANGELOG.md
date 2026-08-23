@@ -19,12 +19,11 @@
     8. *Corner Action Tray*: 2-row action tray (`rounded-lg`) with participant count badge and "Capture Audio" button.
     9. *Edge-Anchored Mini HUD*: High-contrast HUD card (`rounded-lg`) with live mic input status indicator and "Start STT" CTA.
     10. *Micro Pre-Flight Command Card*: Compact pre-meeting prep card (`rounded-lg`) with mic signal check meter and "Launch Recording" CTA.
-  - **OS Desktop Standalone Floating Meeting Reminder Window (`overlay.rs`, `MeetingReminderWindow.tsx`, `main.tsx`)**:
-    - Re-enabled the standalone floating Tauri window (`meeting-reminder`) to display the selected **Variant 08 (Native Inspired)** card directly on the **Windows OS Desktop** outside the Relay app window (floating over Google Meet, Zoom, Chrome).
-    - Window features 100% transparent webview background, top-right screen anchoring (`420x130`), always-on-top, skip-taskbar, and non-focus stealing behavior (`focused: false`).
-    - Integrated a 5-second OS auto-dismiss progress bar (pauses on hover) and instant window hiding (`getCurrentWindow().hide()`) on Record, Snooze, Dismiss, or Close (`X`) actions.
-    - Wired CTAs directly to Rust commands (`start_meeting_recording`, `snooze_meeting_reminder`, `dismiss_meeting_reminder`).
-    - Zero production meeting logic or Tauri window side effects (100% safe isolated preview surface).
+  - **Clean Native OS Notification Architecture (`overlay.rs`, `engine.rs`, `commands.rs`, `main.tsx`)**:
+    - Completely removed the Tauri WebView `"meeting-reminder"` window to eliminate duplicate notifications and white container rectangle artifacts (Decision 46).
+    - Windows native OS Toast Notifications (`tauri_plugin_notification`) handle OS-level desktop meeting alerts cleanly.
+    - Floating in-app toast listener (`MeetingReminderToastListener.tsx`) handles clean in-app alerts inside Relay with live Record, Snooze, and Dismiss CTAs.
+    - Zero webview container artifacts, zero ghost windows, and zero duplicate notifications.
 
 ## [0.9.2] - 2026-08-23
 
