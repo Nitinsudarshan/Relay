@@ -1358,7 +1358,6 @@ pub async fn get_stt_corpus() -> Result<Vec<crate::capture::CorpusItem>, Command
 }
 
 pub const MEETING_UPDATED_EVENT: &str = "meeting-updated";
-pub const MEETING_DETECTED_EVENT: &str = "meeting-detected";
 
 #[tauri::command]
 pub async fn get_meetings(state: State<'_, AppState>) -> Result<Vec<Meeting>, CommandError> {
@@ -1450,11 +1449,21 @@ pub async fn delete_meeting_series(
         .map_err(|e| CommandError::new("DELETE_FAILED", &e.to_string()))
 }
 
+/// The single entry point for starting a meeting recording, called
+/// identically whether triggered from the meetings list, the reminder
+/// popup, or the tray (`meetings_implementation.md` §4.2, Refactor #1). The
+/// `meeting_id` it receives is always real by this point — `resolver.rs`
+/// guarantees a `Meeting` is persisted at detection time, never invented
+/// downstream — so the `NOT_FOUND` case below reflects an actually-missing
+/// meeting, not the ID-shape mismatch that used to make this fail for
+/// every reminder kind (Decision 45, Broken #1).
 #[tauri::command]
 pub async fn start_meeting_recording(
     app: AppHandle,
     meeting_id: String,
     state: State<'_, AppState>,
+    active_recording: State<'_, crate::meetings::reminders::ActiveMeetingRecording>,
+    reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
 ) -> Result<String, CommandError> {
     if state.recorder.is_active() {
         return Err(CommandError::new(
@@ -1482,6 +1491,13 @@ pub async fn start_meeting_recording(
         meeting.updated_at = chrono::Utc::now().to_rfc3339();
         let _ = state.vault.save_meeting(&meeting);
         let _ = app.emit(MEETING_UPDATED_EVENT, &meeting);
+
+        *active_recording.0.lock().unwrap() = Some(meeting_id.clone());
+        // Resolves any pending/fired reminder for this meeting regardless
+        // of where recording was started from — this is what keeps the
+        // list, the popup, and the tray from disagreeing about whether a
+        // meeting has been "seen" (Decision 45, Refactor #1 / Improve #5).
+        crate::meetings::reminders::mark_meeting_actioned(&reminders, &meeting_id);
     }
 
     result
@@ -1492,6 +1508,7 @@ pub async fn stop_meeting_recording(
     app: AppHandle,
     meeting_id: String,
     state: State<'_, AppState>,
+    active_recording: State<'_, crate::meetings::reminders::ActiveMeetingRecording>,
 ) -> Result<Option<Meeting>, CommandError> {
     let captured = state
         .recorder
@@ -1499,6 +1516,7 @@ pub async fn stop_meeting_recording(
         .await
         .map_err(|e| CommandError::new("CAPTURE_STOP_FAILED", &e.to_string()));
     emit_capture_state(&app, &state.recorder);
+    *active_recording.0.lock().unwrap() = None;
     let captured = captured?;
 
     let mut meeting = state
@@ -1665,22 +1683,6 @@ pub async fn sync_google_calendar(
 }
 
 #[tauri::command]
-pub async fn get_google_oauth_config(
-    state: State<'_, AppState>,
-) -> Result<crate::meetings::calendar::GoogleCalendarConfig, CommandError> {
-    Ok(crate::meetings::calendar::load_calendar_config(&state.vault.vault_dir()))
-}
-
-#[tauri::command]
-pub async fn save_google_oauth_config(
-    config: crate::meetings::calendar::GoogleCalendarConfig,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    crate::meetings::calendar::save_calendar_config(&state.vault.vault_dir(), &config)
-        .map_err(|e| CommandError::new("SAVE_FAILED", &e))
-}
-
-#[tauri::command]
 pub async fn get_upcoming_calendar_events(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::meetings::CalendarMeetingEvent>, CommandError> {
@@ -1689,67 +1691,72 @@ pub async fn get_upcoming_calendar_events(
         .map_err(|e| CommandError::new("CALENDAR_SYNC_FAILED", &e))
 }
 
+/// Dismisses one reminder kind for one meeting — leaves any other kind for
+/// the same meeting, and every other meeting's reminders, untouched
+/// (Decision 45, Broken #2: reminders are a queue, not a single slot).
 #[tauri::command]
-pub async fn check_meeting_detection(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<Vec<crate::meetings::DetectedMeetingPayload>, CommandError> {
-    let raw_found = crate::meetings::detect_active_conferencing_windows();
-    let mut detected = Vec::new();
+pub async fn dismiss_meeting_reminder(
+    meeting_id: String,
+    kind: crate::meetings::reminders::ReminderKind,
+    reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
+) -> Result<(), CommandError> {
+    crate::meetings::reminders::dismiss(&reminders, &meeting_id, kind);
+    Ok(())
+}
 
-    // Optionally check upcoming calendar events to match scheduled meetings
-    let upcoming_events = if crate::meetings::calendar::load_calendar_tokens(&state.vault.vault_dir()).is_some() {
-        crate::meetings::calendar::sync_real_google_calendar_events(&state.vault.vault_dir(), false).await.unwrap_or_default()
-    } else {
-        Vec::new()
+/// "Remind me in 5 minutes" — the one snooze action the popup offers
+/// (Decision 45, Improve #1). `minutes` is accepted rather than hardcoded
+/// so the frontend owns the exact copy/duration without a backend change,
+/// but the popup itself only ever offers one duration, per
+/// `meetings_implementation.md`'s "stay simple" constraint.
+#[tauri::command]
+pub async fn snooze_meeting_reminder(
+    meeting_id: String,
+    kind: crate::meetings::reminders::ReminderKind,
+    minutes: i64,
+    reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
+) -> Result<(), CommandError> {
+    crate::meetings::reminders::snooze(&reminders, &meeting_id, kind, minutes);
+    Ok(())
+}
+
+/// The single reminder the popup should currently show, if any — derived
+/// from the queue itself rather than a separate "active" cell, which is
+/// what prevents a second reminder from having anywhere to silently
+/// overwrite the first (Decision 45, Broken #2).
+#[tauri::command]
+pub async fn get_current_meeting_reminder(
+    reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
+) -> Result<Option<crate::meetings::reminders::ReminderEvent>, CommandError> {
+    Ok(crate::meetings::reminders::current_popup_reminder(&reminders))
+}
+
+/// Settings → Developer's "Mock Meeting Reminders" section: creates a real
+/// vault meeting and fires an already-`Fired` reminder for it, so the
+/// popup's "Start Recording" action can be exercised end to end without
+/// waiting for a real calendar/window signal.
+#[tauri::command]
+pub async fn trigger_mock_meeting_reminder(
+    kind: crate::meetings::reminders::ReminderKind,
+    state: State<'_, AppState>,
+    reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
+) -> Result<(), CommandError> {
+    use crate::meetings::reminders::ReminderKind;
+    let (title, provider) = match kind {
+        ReminderKind::Upcoming => ("Weekly Engineering Sync", "google_meet"),
+        ReminderKind::Unrecorded => ("Candidate Tech Interview", "zoom"),
+        ReminderKind::Detected => ("Ad-hoc Architecture Review", "teams"),
     };
 
-    for (provider, title, source) in raw_found {
-        // Try to match with an upcoming calendar event (provider match, or title similarity)
-        let now = chrono::Utc::now();
-        let matched_event = upcoming_events.iter().find(|ev| {
-            if let Ok(start_dt) = chrono::DateTime::parse_from_rfc3339(&ev.scheduled_start) {
-                let start_utc = start_dt.with_timezone(&chrono::Utc);
-                let diff_mins = (start_utc - now).num_minutes().abs();
-                if diff_mins <= 30 && (ev.provider == provider || ev.title.to_lowercase().contains(&title.to_lowercase()) || title.to_lowercase().contains(&ev.title.to_lowercase())) {
-                    return true;
-                }
-            }
-            false
-        });
+    let mut meeting = Meeting::new(title, provider, None);
+    meeting.participants = vec!["Alice".to_string(), "Bob".to_string(), "Charlie".to_string()];
+    state
+        .vault
+        .save_meeting(&meeting)
+        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
 
-        let (event_id, final_title, meeting_url, participants) = if let Some(cal_ev) = matched_event {
-            (
-                format!("cal_match_{}", cal_ev.id),
-                cal_ev.title.clone(),
-                cal_ev.meeting_url.clone(),
-                cal_ev.participants.clone(),
-            )
-        } else {
-            (
-                format!("detected_{}_{}", provider, title.replace(' ', "_")),
-                title.clone(),
-                None,
-                Vec::new(),
-            )
-        };
-
-        let payload = crate::meetings::DetectedMeetingPayload {
-            event_id,
-            title: final_title,
-            provider: provider.clone(),
-            meeting_url,
-            scheduled_start: Some(chrono::Utc::now().to_rfc3339()),
-            participants,
-            confidence: if matched_event.is_some() { 0.99 } else { 0.90 },
-            detection_source: if matched_event.is_some() { "calendar".to_string() } else { source },
-        };
-
-        let _ = app.emit(MEETING_DETECTED_EVENT, &payload);
-        detected.push(payload);
-    }
-
-    Ok(detected)
+    crate::meetings::reminders::inject_mock_reminder(&reminders, &meeting, kind);
+    Ok(())
 }
 
 #[tauri::command]
