@@ -104,14 +104,23 @@ pub fn run() {
                         }
                     }
                     "record" => {
-                        let _ = app.emit("switch-to-meetings-tab", "");
+                        // Wired to the same meeting the reminder popup is
+                        // currently showing (soonest/active), if any — the
+                        // frontend's shared `startMeetingRecording` handles
+                        // it identically to the popup's own button
+                        // (meetings_implementation.md §4.2). Previously
+                        // this emitted an event nothing listened for
+                        // (Decision 45, Broken #3b).
+                        if let Some(reminders) = app.try_state::<crate::meetings::reminders::ReminderQueue>() {
+                            if let Some(current) = crate::meetings::reminders::current_popup_reminder(&reminders) {
+                                let _ = app.emit("start-meeting-recording-for", &current.meeting_id);
+                            }
+                        }
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.unminimize();
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
-                        // Send an event to trigger a generic recording start
-                        let _ = app.emit("start-generic-recording", ());
                     }
                     _ => {}
                 })
@@ -127,7 +136,7 @@ pub fn run() {
             // (see docs/decisions.md Decision 36) — so it's always shown.
             overlay::ensure_pill_window(handle, true, pill_position);
 
-            crate::meetings::scheduler::start_scheduler(handle.clone());
+            crate::meetings::engine::start(handle.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -191,16 +200,17 @@ pub fn run() {
             commands::trigger_enrich_meeting,
             commands::create_scribble_from_meeting,
             commands::get_upcoming_calendar_events,
-            crate::meetings::scheduler::dismiss_meeting_reminder,
-            crate::meetings::scheduler::start_recording_from_reminder,
-            crate::meetings::scheduler::get_active_meeting_reminder,
-            crate::meetings::scheduler::trigger_mock_meeting_reminder,
+            commands::import_calendar_event,
+            commands::dismiss_meeting_reminder,
+            commands::snooze_meeting_reminder,
+            commands::get_current_meeting_reminder,
+            commands::trigger_mock_meeting_reminder,
+            commands::get_active_recording_meeting_id,
+            commands::debug_detect_conferencing_windows,
             commands::get_calendar_connection_status,
             commands::start_google_calendar_oauth,
             commands::disconnect_google_calendar,
             commands::sync_google_calendar,
-            commands::get_google_oauth_config,
-            commands::save_google_oauth_config,
             commands::get_relay_profile,
             commands::update_profile_display_name,
             commands::complete_profile_onboarding,

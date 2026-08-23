@@ -8,7 +8,7 @@ import { RelayLogo } from './components/common/RelayLogo';
 import { ChangelogModal } from './components/common/ChangelogModal';
 import { WelcomeModal } from './components/common/WelcomeModal';
 import { AccountExplanationModal } from './components/common/AccountExplanationModal';
-import { ProcessedPipelineResult, DetectedMeetingPayload, Meeting, RelayAccount, RelayProfile, DeveloperSettings, AppSettings } from './types';
+import { ProcessedPipelineResult, Meeting, RelayAccount, RelayProfile, DeveloperSettings, AppSettings } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { NativeSidebar } from './components/common/NativeSidebar';
@@ -42,6 +42,7 @@ export const App: React.FC = () => {
   const [profile, setProfile] = useState<RelayProfile | null>(null);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [explanationOpen, setExplanationOpen] = useState(false);
+  const [focusedMeetingId, setFocusedMeetingId] = useState<string | null>(null);
 
   const refreshAccountAndSettings = async () => {
     try {
@@ -98,14 +99,32 @@ export const App: React.FC = () => {
     window.addEventListener('relay-account-changed', handleDomAccountChange);
     window.addEventListener('relay-profile-changed', handleDomProfileChange);
 
+    // Carries the meeting ID now (Decision 45, Broken #3c) — previously
+    // emitted with an empty payload this handler ignored, so a reminder's
+    // "Start Recording" only ever switched tabs without opening the
+    // meeting it was actually about.
     const unlistenTabSwitch = listen<string>('switch-to-meetings-tab', (event) => {
       setActiveTab('meetings');
+      if (event.payload) {
+        setFocusedMeetingId(event.payload);
+      }
+    });
+
+    // The tray's "Start Recording" item (see lib.rs) resolves to whichever
+    // meeting the reminder popup is currently showing and asks this window
+    // to start it — going through the same command every other entry
+    // point uses, rather than a second, parallel recording path.
+    const unlistenTrayRecord = listen<string>('start-meeting-recording-for', (event) => {
+      if (event.payload) {
+        invoke('start_meeting_recording', { meetingId: event.payload }).catch(console.error);
+      }
     });
 
     return () => {
       unlistenAccount.then((unlisten) => unlisten());
       unlistenProfile.then((unlisten) => unlisten());
       unlistenTabSwitch.then((unlisten) => unlisten());
+      unlistenTrayRecord.then((unlisten) => unlisten());
       window.removeEventListener('relay-account-changed', handleDomAccountChange);
       window.removeEventListener('relay-profile-changed', handleDomProfileChange);
     };
@@ -303,7 +322,11 @@ export const App: React.FC = () => {
           {activeTab === 'capture' && <VoiceNotePage />}
 
           {activeTab === 'meetings' && (
-            <MeetingPage onNavigateToScribbles={() => setActiveTab('scribble')} />
+            <MeetingPage
+              onNavigateToScribbles={() => setActiveTab('scribble')}
+              focusMeetingId={focusedMeetingId}
+              onFocusMeetingIdConsumed={() => setFocusedMeetingId(null)}
+            />
           )}
 
           {activeTab === 'scribble' && <ScribbleViewer />}

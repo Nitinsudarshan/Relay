@@ -189,6 +189,13 @@ impl Default for DiagnosticsSettings {
     }
 }
 
+/// `auto_record` was deliberately removed rather than implemented — Relay's
+/// own settings UI already ships a hardcoded "Explicit Capture Consent
+/// (Privacy Guard)" badge stating recording only ever starts on an
+/// explicit press, and `CalendarSyncModal.tsx`'s footer promises calendar
+/// sync happens "without automatic recording." Auto-record-on-detect would
+/// contradict both already-shipped commitments. See
+/// `meetings_implementation.md` §4.5 and `docs/decisions.md` Decision 45.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeetingSettings {
     #[serde(default = "default_true")]
@@ -197,12 +204,9 @@ pub struct MeetingSettings {
     pub remind_if_unrecorded: bool,
     #[serde(default = "default_true")]
     pub remind_on_detection: bool,
-    #[serde(default = "default_false")]
-    pub auto_record: bool,
 }
 
 fn default_true() -> bool { true }
-fn default_false() -> bool { false }
 
 impl Default for MeetingSettings {
     fn default() -> Self {
@@ -210,7 +214,6 @@ impl Default for MeetingSettings {
             remind_before_meeting: true,
             remind_if_unrecorded: true,
             remind_on_detection: true,
-            auto_record: false,
         }
     }
 }

@@ -78,6 +78,34 @@ pub struct Meeting {
     pub provider_metadata: serde_json::Value,
     #[serde(default)]
     pub calendar_event_id: Option<String>,
+    /// Google's recurrence/series identifier for this calendar event (when
+    /// calendar-sourced), distinct from `series_id` above — Relay's own
+    /// `MeetingSeries` grouping. Used by the resolver's tier-2 matching to
+    /// recognize a recurring event's next occurrence even when its
+    /// per-instance `calendar_event_id` differs.
+    #[serde(default)]
+    pub calendar_series_id: Option<String>,
+    /// How this record came to exist: "calendar_sync" | "window_detector".
+    /// Kept even after confirmation so "why did Relay create this meeting?"
+    /// never requires reverse-engineering it from the title.
+    #[serde(default)]
+    pub detection_source: Option<String>,
+    /// Short-lived dedup fingerprint used only to recognize a repeated
+    /// window-detection signal as "the same candidate seen moments ago" —
+    /// never meeting identity. See `meetings::resolver`.
+    #[serde(default)]
+    pub detection_key: Option<String>,
+    /// How confident the detection signal was at the moment this record was
+    /// created (see `meetings::detection::WindowMatch::confidence`). `None`
+    /// for calendar-sourced meetings, which don't need a confidence gate.
+    #[serde(default)]
+    pub detection_confidence: Option<f32>,
+    /// When this record was first created (as opposed to `created_at`,
+    /// which already serves that purpose generically — `detected_at` is
+    /// specifically "when the detection signal fired", kept distinct in
+    /// case a future signal type back-dates detection relative to creation).
+    #[serde(default)]
+    pub detected_at: Option<String>,
     #[serde(default)]
     pub scheduled_start: Option<String>,
     #[serde(default)]
@@ -131,6 +159,16 @@ struct MeetingFrontmatter {
     #[serde(default)]
     pub calendar_event_id: Option<String>,
     #[serde(default)]
+    pub calendar_series_id: Option<String>,
+    #[serde(default)]
+    pub detection_source: Option<String>,
+    #[serde(default)]
+    pub detection_key: Option<String>,
+    #[serde(default)]
+    pub detection_confidence: Option<f32>,
+    #[serde(default)]
+    pub detected_at: Option<String>,
+    #[serde(default)]
     pub scheduled_start: Option<String>,
     #[serde(default)]
     pub scheduled_end: Option<String>,
@@ -168,6 +206,11 @@ impl Meeting {
             provider: provider.to_string(),
             provider_metadata: serde_json::json!({}),
             calendar_event_id: None,
+            calendar_series_id: None,
+            detection_source: None,
+            detection_key: None,
+            detection_confidence: None,
+            detected_at: None,
             scheduled_start: Some(now.clone()),
             scheduled_end: None,
             actual_start: None,
@@ -185,6 +228,45 @@ impl Meeting {
             created_at: now.clone(),
             updated_at: now,
         }
+    }
+
+    /// Constructs a `Meeting` from a calendar signal — always persisted
+    /// immediately (see `meetings::resolver`), since a scheduled calendar
+    /// event is already real, explicit evidence regardless of confidence.
+    pub fn from_calendar_event(event: &crate::meetings::CalendarMeetingEvent) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut meeting = Self::new(&event.title, &event.provider, None);
+        meeting.calendar_event_id = Some(event.id.clone());
+        meeting.calendar_series_id = event.calendar_series_id.clone();
+        meeting.scheduled_start = Some(event.scheduled_start.clone());
+        meeting.scheduled_end = Some(event.scheduled_end.clone());
+        meeting.participants = event.participants.clone();
+        meeting.detection_source = Some("calendar_sync".to_string());
+        meeting.detected_at = Some(now);
+        if let Some(url) = &event.meeting_url {
+            meeting.provider_metadata = serde_json::json!({ "meeting_url": url });
+        }
+        meeting
+    }
+
+    /// Constructs a `Meeting` from a window-detection signal that has
+    /// graduated from candidate to confirmed (see `meetings::resolver`).
+    /// Only ever called past the confidence/sustained-detection bar — never
+    /// for every raw window match.
+    pub fn from_window_detection(
+        provider: &str,
+        title: &str,
+        detection_key: &str,
+        confidence: f32,
+    ) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut meeting = Self::new(title, provider, None);
+        meeting.status = MEETING_STATUS_DETECTED.to_string();
+        meeting.detection_source = Some("window_detector".to_string());
+        meeting.detection_key = Some(detection_key.to_string());
+        meeting.detection_confidence = Some(confidence);
+        meeting.detected_at = Some(now);
+        meeting
     }
 
     /// Creates an atomic Scribble knowledge object from meeting content (notes, decision, action, or selection)
@@ -255,6 +337,11 @@ impl Meeting {
             provider: self.provider.clone(),
             provider_metadata: self.provider_metadata.clone(),
             calendar_event_id: self.calendar_event_id.clone(),
+            calendar_series_id: self.calendar_series_id.clone(),
+            detection_source: self.detection_source.clone(),
+            detection_key: self.detection_key.clone(),
+            detection_confidence: self.detection_confidence,
+            detected_at: self.detected_at.clone(),
             scheduled_start: self.scheduled_start.clone(),
             scheduled_end: self.scheduled_end.clone(),
             actual_start: self.actual_start.clone(),
@@ -319,6 +406,11 @@ impl Meeting {
             provider: meta.provider,
             provider_metadata: meta.provider_metadata,
             calendar_event_id: meta.calendar_event_id,
+            calendar_series_id: meta.calendar_series_id,
+            detection_source: meta.detection_source,
+            detection_key: meta.detection_key,
+            detection_confidence: meta.detection_confidence,
+            detected_at: meta.detected_at,
             scheduled_start: meta.scheduled_start,
             scheduled_end: meta.scheduled_end,
             actual_start: meta.actual_start,
@@ -406,6 +498,55 @@ mod tests {
         
         assert_eq!(parsed.candidate_scribbles.len(), 2);
         assert_eq!(parsed.candidate_scribbles[0], "Local Whisper latency optimization technique");
+    }
+
+    #[test]
+    fn test_detection_provenance_roundtrip() {
+        let mut meeting = Meeting::from_window_detection(
+            PROVIDER_ZOOM,
+            "Sprint Architecture Planning",
+            "zoom:sprint architecture planning:2026-08-23",
+            0.85,
+        );
+        meeting.calendar_series_id = Some("series_gcal_123".to_string());
+
+        let md = meeting.format_markdown();
+        let parsed = Meeting::parse_markdown(&md).expect("Should parse meeting markdown back");
+
+        assert_eq!(parsed.detection_source, Some("window_detector".to_string()));
+        assert_eq!(
+            parsed.detection_key,
+            Some("zoom:sprint architecture planning:2026-08-23".to_string())
+        );
+        assert_eq!(parsed.detection_confidence, Some(0.85));
+        assert!(parsed.detected_at.is_some());
+        assert_eq!(parsed.calendar_series_id, Some("series_gcal_123".to_string()));
+        assert_eq!(parsed.status, MEETING_STATUS_DETECTED);
+    }
+
+    #[test]
+    fn test_from_calendar_event_carries_identity_and_meeting_url() {
+        let event = crate::meetings::CalendarMeetingEvent {
+            id: "gcal_event_101".to_string(),
+            title: "Sprint Planning Sync".to_string(),
+            provider: PROVIDER_GOOGLE_MEET.to_string(),
+            meeting_url: Some("https://meet.google.com/abc-defg-hij".to_string()),
+            scheduled_start: "2026-08-25T10:00:00Z".to_string(),
+            scheduled_end: "2026-08-25T11:00:00Z".to_string(),
+            participants: vec!["Alex Rivera".to_string()],
+            recurrence_rule: Some("Recurring Series".to_string()),
+            calendar_series_id: Some("series_sprint_plan".to_string()),
+        };
+
+        let meeting = Meeting::from_calendar_event(&event);
+        assert_eq!(meeting.calendar_event_id, Some("gcal_event_101".to_string()));
+        assert_eq!(meeting.calendar_series_id, Some("series_sprint_plan".to_string()));
+        assert_eq!(meeting.detection_source, Some("calendar_sync".to_string()));
+        assert_eq!(
+            meeting.provider_metadata["meeting_url"],
+            "https://meet.google.com/abc-defg-hij"
+        );
+        assert_eq!(meeting.status, MEETING_STATUS_SCHEDULED);
     }
 
     #[test]

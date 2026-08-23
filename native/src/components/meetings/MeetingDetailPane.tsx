@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { MeetingListItem, Meeting, CalendarMeetingEvent } from '../../types';
 import { MeetingDetailView } from './MeetingDetailView';
 import { Button } from '../ui/button';
@@ -38,6 +39,17 @@ export const MeetingDetailPane: React.FC<MeetingDetailPaneProps> = ({
 }) => {
   const ownership = useCaptureOwnership();
 
+  // The real answer to "which meeting is being recorded" — not a guess
+  // from `meeting.status` (a vault field that can go stale) combined with
+  // ownership's mode-only signal. Re-checked whenever capture ownership
+  // changes, since that's the only thing that can make the answer change.
+  const [activeRecordingMeetingId, setActiveRecordingMeetingId] = useState<string | null>(null);
+  useEffect(() => {
+    invoke<string | null>('get_active_recording_meeting_id')
+      .then(setActiveRecordingMeetingId)
+      .catch(console.error);
+  }, [ownership.active, ownership.mode]);
+
   if (!item) {
     return (
       <div className="flex-1 flex items-center justify-center bg-card rounded-xl border border-border shadow-xs h-full text-muted-foreground text-sm">
@@ -53,14 +65,7 @@ export const MeetingDetailPane: React.FC<MeetingDetailPaneProps> = ({
     const meeting = rawMeetings.find(m => m.id === item.id);
     if (!meeting) return null;
     
-    // We override isRecordingThisMeeting by checking our global ownership hook
-    const isRecordingThisMeeting = ownership.active && ownership.mode === 'meeting';
-    // Wait, we need to know if THIS meeting is the one being recorded.
-    // The previous implementation used recordingMeetingId, but the plan was:
-    // "Remove recordingMeetingId from MeetingPage.tsx, relying on the new hook to deduce if the current meeting is being recorded or if the mic is used by another mode".
-    // Actually the ownership hook only knows it's a meeting, but not WHICH meeting. 
-    // Usually only the ACTIVE meeting has status="recording". Let's check status.
-    const isThisMeetingRecording = meeting.status === 'recording' && ownership.ownedByMeeting;
+    const isThisMeetingRecording = ownership.ownedByMeeting && activeRecordingMeetingId === meeting.id;
 
     return (
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">

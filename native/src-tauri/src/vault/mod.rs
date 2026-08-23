@@ -619,6 +619,51 @@ impl VaultManager {
         Ok(meetings)
     }
 
+    /// Exact-match lookup by calendar event ID — the resolver's tier-1
+    /// identity check for a calendar signal. Never falls back to title
+    /// matching; that's a distinct, weaker tier the resolver applies itself.
+    pub fn find_meeting_by_calendar_event_id(
+        &self,
+        calendar_event_id: &str,
+    ) -> Result<Option<Meeting>, VaultError> {
+        Ok(self
+            .list_meetings()?
+            .into_iter()
+            .find(|m| m.calendar_event_id.as_deref() == Some(calendar_event_id)))
+    }
+
+    /// Exact-match lookup by Google's recurrence/series identifier — the
+    /// resolver's tier-2 check for a recurring calendar event's next
+    /// occurrence, when its per-instance event ID differs but the series
+    /// doesn't. Returns the most recently updated match if more than one
+    /// (there shouldn't be, but a stale duplicate is safer to prefer the
+    /// freshest one than to error).
+    pub fn find_meeting_by_calendar_series_id(
+        &self,
+        calendar_series_id: &str,
+    ) -> Result<Option<Meeting>, VaultError> {
+        let mut matches: Vec<Meeting> = self
+            .list_meetings()?
+            .into_iter()
+            .filter(|m| m.calendar_series_id.as_deref() == Some(calendar_series_id))
+            .collect();
+        matches.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(matches.into_iter().next())
+    }
+
+    /// Exact-match lookup by short-lived detection fingerprint — used only
+    /// to recognize a graduated candidate that was already persisted a
+    /// moment ago, never as meeting identity. See `meetings::resolver`.
+    pub fn find_meeting_by_detection_key(
+        &self,
+        detection_key: &str,
+    ) -> Result<Option<Meeting>, VaultError> {
+        Ok(self
+            .list_meetings()?
+            .into_iter()
+            .find(|m| m.detection_key.as_deref() == Some(detection_key)))
+    }
+
     pub fn update_meeting(&self, meeting: &Meeting) -> Result<Meeting, VaultError> {
         let mut updated = meeting.clone();
         updated.updated_at = chrono::Utc::now().to_rfc3339();

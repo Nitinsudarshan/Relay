@@ -54,8 +54,8 @@ export const DeveloperSettingsView: React.FC = () => {
 
   const handleCheckDetection = async () => {
     try {
-      const res = await invoke('check_meeting_detection');
-      console.log('Detected meetings:', res);
+      const res = await invoke('debug_detect_conferencing_windows');
+      console.log('Window-detection signal (raw, unresolved):', res);
       alert(JSON.stringify(res, null, 2));
     } catch (err) {
       console.error('Failed to check detection:', err);
