@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   Mic,
   Bell,
@@ -542,11 +541,9 @@ const NotificationCardWrapper: React.FC<{
 
       if (remaining <= 0) {
         clearInterval(interval);
-        try {
-          getCurrentWindow().hide().catch(() => {});
-        } catch (e) {
-          // ignore in browser mode
-        }
+        // Let the parent's onDismiss handle window hiding — calling
+        // getCurrentWindow().hide() here would hide the *main* window
+        // when rendered inside the gallery preview.
         onDismiss();
       }
     }, 50);

@@ -2,8 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { X } from 'lucide-react';
-import { Button } from '../ui/button';
 import { MeetingReminderEvent, ReminderKind } from '../../types';
 
 import {
@@ -20,7 +18,6 @@ import {
 /// this window is the only place with actual controls (§4.2).
 export const MeetingReminderWindow: React.FC = () => {
   const [reminder, setReminder] = useState<MeetingReminderEvent | null>(null);
-  const [busy, setBusy] = useState(false);
   const [activeThemeId, setActiveThemeId] = useState<number>(() => {
     const saved = localStorage.getItem('relay_meeting_reminder_theme');
     return saved ? parseInt(saved, 10) : 1;
@@ -49,7 +46,12 @@ export const MeetingReminderWindow: React.FC = () => {
   useEffect(() => {
     refresh();
     const unlisten = listen('meeting-reminder', refresh);
-    const handleStorage = () => refresh();
+    const handleStorage = () => {
+      // Only reload the theme, never re-fetch the reminder (that re-shows
+      // the window). Theme changes don't affect visibility.
+      const saved = localStorage.getItem('relay_meeting_reminder_theme');
+      if (saved) setActiveThemeId(parseInt(saved, 10));
+    };
     window.addEventListener('storage', handleStorage);
     window.addEventListener('relay-reminder-theme-changed', handleStorage);
     return () => {
@@ -59,41 +61,40 @@ export const MeetingReminderWindow: React.FC = () => {
     };
   }, [refresh]);
 
-  const withBusyGuard = async (action: () => Promise<void>) => {
-    if (!reminder || busy) return;
-    setBusy(true);
-    // Hide window immediately when user triggers an action
+  /// Hides the Tauri window immediately, nulls React state, then fires the
+  /// backend command using the *captured* reminder data. Does NOT call
+  /// refresh() afterwards — the window should stay hidden until a brand-new
+  /// `meeting-reminder` event arrives from the Rust backend.
+  const hideAndRun = (action: (r: MeetingReminderEvent) => Promise<void>) => {
+    const captured = reminder;
+    if (!captured) return;
+
+    // 1. Hide window + clear React state synchronously
     getCurrentWindow().hide().catch(console.error);
     setReminder(null);
-    try {
-      await action();
-    } catch (e) {
-      console.error('Meeting reminder action failed', e);
-    } finally {
-      setBusy(false);
-      refresh();
-    }
+
+    // 2. Fire backend command with the captured (non-null) data
+    action(captured).catch((e) =>
+      console.error('Meeting reminder action failed', e)
+    );
   };
 
   const handleStartRecording = () =>
-    withBusyGuard(() => invoke('start_meeting_recording', { meetingId: reminder!.meeting_id }));
+    hideAndRun((r) => invoke('start_meeting_recording', { meetingId: r.meeting_id }));
 
   const handleSnooze = () =>
-    withBusyGuard(() =>
+    hideAndRun((r) =>
       invoke('snooze_meeting_reminder', {
-        meetingId: reminder!.meeting_id,
-        kind: reminder!.kind,
+        meetingId: r.meeting_id,
+        kind: r.kind,
         minutes: 5,
       })
     );
 
-  const handleDismiss = () => {
-    getCurrentWindow().hide().catch(console.error);
-    setReminder(null);
-    withBusyGuard(() =>
-      invoke('dismiss_meeting_reminder', { meetingId: reminder!.meeting_id, kind: reminder!.kind })
+  const handleDismiss = () =>
+    hideAndRun((r) =>
+      invoke('dismiss_meeting_reminder', { meetingId: r.meeting_id, kind: r.kind })
     );
-  };
 
   if (!reminder) return null;
 
