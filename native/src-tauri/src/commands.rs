@@ -1814,6 +1814,7 @@ pub async fn trigger_mock_meeting_reminder(
         .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
 
     crate::meetings::reminders::inject_mock_reminder(&reminders, &meeting, kind);
+    crate::overlay::ensure_reminder_window(&app);
 
     let notif_title = format!("{} Meeting Alert", title);
     let notif_body = format!("Meeting ({}) - Click to open Relay", provider);
