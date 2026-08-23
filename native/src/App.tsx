@@ -35,7 +35,7 @@ const TAB_LABELS: Record<MainTabType, string> = {
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<MainTabType>('capture');
   const [lastResult, setLastResult] = useState<ProcessedPipelineResult | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('0.9.0');
   const [account, setAccount] = useState<RelayAccount | null>(null);

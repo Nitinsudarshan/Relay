@@ -108,12 +108,12 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
   return (
     <TooltipProvider delayDuration={150}>
       <aside
-        className={`relative transition-[width,padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] bg-sidebar border-r border-sidebar-border flex flex-col shrink-0 select-none z-20 h-full overflow-hidden ${
-          isOpen ? 'w-64 p-3' : 'w-12 p-2 items-center'
+        className={`relative transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] bg-sidebar border-r border-sidebar-border flex flex-col shrink-0 select-none z-20 h-full overflow-hidden ${
+          isOpen ? 'w-64' : 'w-12 items-center'
         }`}
       >
         {/* Workspace / Brand Header (sidebar-07 Team Switcher Pattern) */}
-        <div className="w-full mb-3 shrink-0 flex justify-center">
+        <div className={`h-14 w-full shrink-0 flex items-center justify-center ${isOpen ? 'px-3' : 'px-2'}`}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -200,104 +200,107 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
           </DropdownMenu>
         </div>
 
-        {/* Section Label (Expanded Only) */}
-        {isOpen && (
-          <div className="w-full px-2 py-1 text-[10px] font-semibold text-muted-foreground/80 tracking-wider uppercase shrink-0">
-            Platform
-          </div>
-        )}
+        {/* Navigation & Quick Links Body */}
+        <div className={`flex-1 w-full overflow-y-auto overflow-x-hidden flex flex-col ${isOpen ? 'px-3 py-1' : 'px-2 py-1 items-center'}`}>
+          {/* Section Label (Expanded Only) */}
+          {isOpen && (
+            <div className="w-full px-2 py-1 text-[10px] font-semibold text-muted-foreground/80 tracking-wider uppercase shrink-0">
+              Platform
+            </div>
+          )}
 
-        {/* Core Navigation */}
-        <nav className="w-full space-y-1 shrink-0 flex flex-col items-center">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
+          {/* Core Navigation */}
+          <nav className="w-full space-y-1 shrink-0 flex flex-col items-center">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
 
-            const button = (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setActiveTab(item.id)}
-                className={`flex items-center rounded-lg text-xs font-medium transition-colors cursor-pointer overflow-hidden ${
-                  isOpen
-                    ? 'w-full h-9 px-2.5 py-1.5'
-                    : 'size-8 justify-center p-0 shrink-0'
-                } ${
-                  isActive
-                    ? `${item.activeBg} font-semibold shadow-xs`
-                    : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-                }`}
-                aria-label={item.label}
-              >
-                <Icon className={`w-4 h-4 shrink-0 ${item.color}`} />
-                {isOpen && (
-                  <div className="flex items-center justify-between flex-1 min-w-0 ml-2.5 transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden whitespace-nowrap">
-                    <span className="truncate">{item.label}</span>
-                    {isActive && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 ml-2" />
-                    )}
-                  </div>
-                )}
-              </button>
-            );
-
-            if (!isOpen) {
-              return (
-                <Tooltip key={item.id}>
-                  <TooltipTrigger asChild>{button}</TooltipTrigger>
-                  <TooltipContent side="right" sideOffset={10}>
-                    <span>{item.label}</span>
-                  </TooltipContent>
-                </Tooltip>
+              const button = (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveTab(item.id)}
+                  className={`flex items-center rounded-lg text-xs font-medium transition-colors cursor-pointer overflow-hidden ${
+                    isOpen
+                      ? 'w-full h-9 px-2.5 py-1.5'
+                      : 'size-8 justify-center p-0 shrink-0'
+                  } ${
+                    isActive
+                      ? `${item.activeBg} font-semibold shadow-xs`
+                      : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+                  }`}
+                  aria-label={item.label}
+                >
+                  <Icon className={`w-4 h-4 shrink-0 ${item.color}`} />
+                  {isOpen && (
+                    <div className="flex items-center justify-between flex-1 min-w-0 ml-2.5 transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden whitespace-nowrap">
+                      <span className="truncate">{item.label}</span>
+                      {isActive && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 ml-2" />
+                      )}
+                    </div>
+                  )}
+                </button>
               );
-            }
 
-            return button;
-          })}
-        </nav>
+              if (!isOpen) {
+                return (
+                  <Tooltip key={item.id}>
+                    <TooltipTrigger asChild>{button}</TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={10}>
+                      <span>{item.label}</span>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              }
 
-        {/* Quick Access Section (Expanded Only) */}
-        {isOpen && (
-          <div className="w-full mt-4 pt-3 border-t border-sidebar-border shrink-0">
-            <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground/80 tracking-wider uppercase">
-              Quick Vault
+              return button;
+            })}
+          </nav>
+
+          {/* Quick Access Section (Expanded Only) */}
+          {isOpen && (
+            <div className="w-full mt-4 pt-3 border-t border-sidebar-border shrink-0">
+              <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground/80 tracking-wider uppercase">
+                Quick Vault
+              </div>
+              <div className="mt-1 space-y-0.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('capture')}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/40 transition-colors text-left cursor-pointer overflow-hidden whitespace-nowrap"
+                >
+                  <Radio className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <span className="truncate">Instant Voice Capture</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('meetings')}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/40 transition-colors text-left cursor-pointer overflow-hidden whitespace-nowrap"
+                >
+                  <Calendar className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                  <span className="truncate">Meeting Summaries</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('scribble')}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/40 transition-colors text-left cursor-pointer overflow-hidden whitespace-nowrap"
+                >
+                  <FileText className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="truncate">Active Knowledge Graph</span>
+                </button>
+              </div>
             </div>
-            <div className="mt-1 space-y-0.5">
-              <button
-                type="button"
-                onClick={() => setActiveTab('capture')}
-                className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/40 transition-colors text-left cursor-pointer overflow-hidden whitespace-nowrap"
-              >
-                <Radio className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span className="truncate">Instant Voice Capture</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('meetings')}
-                className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/40 transition-colors text-left cursor-pointer overflow-hidden whitespace-nowrap"
-              >
-                <Calendar className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                <span className="truncate">Meeting Summaries</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('scribble')}
-                className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/40 transition-colors text-left cursor-pointer overflow-hidden whitespace-nowrap"
-              >
-                <FileText className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                <span className="truncate">Active Knowledge Graph</span>
-              </button>
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* Collapsed Divider */}
-        {!isOpen && (
-          <div className="w-5 h-px bg-sidebar-border mx-auto my-2.5 shrink-0" />
-        )}
+          {/* Collapsed Divider */}
+          {!isOpen && (
+            <div className="w-5 h-px bg-sidebar-border mx-auto my-2.5 shrink-0" />
+          )}
+        </div>
 
         {/* User Footer Card & Popover Menu (sidebar-07 NavUser Pattern) */}
-        <div className="mt-auto pt-3 border-t border-sidebar-border w-full flex flex-col items-center shrink-0">
+        <div className={`mt-auto w-full border-t border-sidebar-border flex flex-col items-center shrink-0 ${isOpen ? 'p-3 pt-2.5' : 'p-2 pt-2.5'}`}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
