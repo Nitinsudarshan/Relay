@@ -35,6 +35,7 @@ coding-convention layer underneath it.
 - [performance.md](Rules/performance.md): Async/non-blocking rules, bundle size, memoization.
 - [rbac-settings.md](Rules/rbac-settings.md): Why RBAC is intentionally not built yet.
 - [version-and-changelog.md](Rules/version-and-changelog.md): Versioning and changelog maintenance requirement.
+- [maybe-later.md](Rules/maybe-later.md): Policy and format for logging deferred/postponed features to `maybe_later.md`.
 
 Not carried over from NGConnect: `data-import.md` (Excel/CSV import safety —
 no Relay feature to attach to) and `greetings.md` (documented a specific

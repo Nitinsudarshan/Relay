@@ -43,6 +43,7 @@ Relay is **three surfaces sharing one repo**, per `Relay - Decision Log.md`
 | `performance.md` | Bundle size, async/non-blocking rules, memoization | All three surfaces |
 | `rbac-settings.md` | Why this is intentionally not built yet | Reference only — not active |
 | `version-and-changelog.md` | Versioning and changelog maintenance requirement | Whole repo |
+| `maybe-later.md` | Requirements for logging deferred features to `maybe_later.md` | Whole repo |
 
 Two NGConnect rule files were **not** carried over — `data-import.md`
 (Excel/CSV import safety) has no Relay feature to attach to, and

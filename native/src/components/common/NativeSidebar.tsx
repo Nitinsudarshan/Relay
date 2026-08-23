@@ -77,7 +77,6 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       icon: Mic,
       color: 'text-emerald-500',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-      shortcut: '⌥1',
     },
     {
       id: 'meetings' as TabType,
@@ -85,7 +84,6 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       icon: Calendar,
       color: 'text-blue-500',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-      shortcut: '⌥2',
     },
     {
       id: 'scribble' as TabType,
@@ -93,7 +91,6 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       icon: Sparkles,
       color: 'text-amber-500',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-      shortcut: '⌥3',
     },
     {
       id: 'settings' as TabType,
@@ -101,7 +98,6 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       icon: Settings,
       color: 'text-muted-foreground',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-      shortcut: '⌥4',
     },
   ];
 
@@ -237,15 +233,9 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
                 {isOpen && (
                   <div className="flex items-center justify-between flex-1 min-w-0 ml-2.5 transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden whitespace-nowrap">
                     <span className="truncate">{item.label}</span>
-                    <div className="flex items-center gap-1.5 ml-2">
-                      {isActive ? (
-                        <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                      ) : (
-                        <span className="text-[10px] font-mono text-muted-foreground/60">
-                          {item.shortcut}
-                        </span>
-                      )}
-                    </div>
+                    {isActive && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 ml-2" />
+                    )}
                   </div>
                 )}
               </button>
@@ -256,10 +246,7 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
                 <Tooltip key={item.id}>
                   <TooltipTrigger asChild>{button}</TooltipTrigger>
                   <TooltipContent side="right" sideOffset={10}>
-                    <div className="flex items-center gap-1.5">
-                      <span>{item.label}</span>
-                      <span className="text-[10px] font-mono opacity-60">({item.shortcut})</span>
-                    </div>
+                    <span>{item.label}</span>
                   </TooltipContent>
                 </Tooltip>
               );
