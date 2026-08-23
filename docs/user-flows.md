@@ -53,3 +53,10 @@
 5. The configured LLM provider answers the question using only that grounding context, instructed to say so honestly if the notes don't contain the answer.
 6. The answer is shown in the chat thread along with the source note titles used.
 7. If a local Piper TTS binary and voice model are configured, the answer is also synthesized as audio and played back automatically; otherwise the response is text-only.
+
+## Flow 8: Native OS Meeting Notification Alerts
+1. Meeting engine detects an upcoming, unrecorded, or active meeting.
+2. Rust reminder engine transitions reminder state to `Fired`.
+3. System emits a native Windows OS Toast Notification (`app.notification()`).
+4. Windows displays the native toast notification without opening any Tauri WebView window.
+5. User clicks notification or action -> Relay main window opens and focuses relevant meeting context.

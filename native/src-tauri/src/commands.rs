@@ -1797,6 +1797,8 @@ pub async fn trigger_mock_meeting_reminder(
     reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
 ) -> Result<(), CommandError> {
     use crate::meetings::reminders::ReminderKind;
+    use tauri_plugin_notification::NotificationExt;
+
     let (title, provider) = match kind {
         ReminderKind::Upcoming => ("Weekly Engineering Sync", "google_meet"),
         ReminderKind::Unrecorded => ("Candidate Tech Interview", "zoom"),
@@ -1812,11 +1814,15 @@ pub async fn trigger_mock_meeting_reminder(
         .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
 
     crate::meetings::reminders::inject_mock_reminder(&reminders, &meeting, kind);
-    crate::overlay::ensure_reminder_window(&app);
-    if let Some(win) = app.get_webview_window(crate::overlay::REMINDER_WINDOW_LABEL) {
-        let _ = win.show();
-        let _ = win.set_focus();
+
+    let notif_title = format!("{} Meeting Alert", title);
+    let notif_body = format!("Meeting ({}) - Click to open Relay", provider);
+
+    tracing::info!("[notifications] Triggering mock native OS notification for '{}'", title);
+    if let Err(e) = app.notification().builder().title(notif_title).body(notif_body).show() {
+        tracing::error!("[notifications] ERROR failed to emit mock native notification: {}", e);
     }
+
     let _ = app.emit(crate::meetings::engine::MEETING_REMINDER_EVENT, ());
     Ok(())
 }

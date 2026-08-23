@@ -19,9 +19,12 @@
     8. *Corner Action Tray*: 2-row action tray (`rounded-lg`) with participant count badge and "Capture Audio" button.
     9. *Edge-Anchored Mini HUD*: High-contrast HUD card (`rounded-lg`) with live mic input status indicator and "Start STT" CTA.
     10. *Micro Pre-Flight Command Card*: Compact pre-meeting prep card (`rounded-lg`) with mic signal check meter and "Launch Recording" CTA.
-  - **Tauri Native Window Label Routing (`main.tsx`, `index.css`)**: Updated entry point routing to query `getCurrentWindow().label`. Fixed bug where hash mismatch caused the 400x84px floating window to mistakenly render `<App />` and its white page background instead of `<MeetingReminderWindow />`. Enforced `background: transparent !important` on `body.overlay-window #root`.
-  - **Mock Meeting Vault & Queue Deduplication (`commands.rs`, `reminders.rs`)**: Reused fixed ID `relay_mock_preview_meeting` and cleared previous mock queue entries in `trigger_mock_meeting_reminder`, eliminating duplicate test meeting database inflation.
-  - Added interactive controls for testing AI output presets, audio input modes, and setting active system popup themes.
+  - **Native OS Toast Notifications Architectural Migration (`overlay.rs`, `engine.rs`, `commands.rs`, `main.tsx`)**:
+    - Permanently eliminated the Tauri WebView `"meeting-reminder"` window, overlay positioning math, and container artifacts (Decision 46).
+    - Migrated meeting reminders (Upcoming, Unrecorded, Detected) to native Windows OS Toast Notifications using `tauri_plugin_notification`.
+    - Deleted `MeetingReminderWindow.tsx` and removed `meeting-reminder` routing from `main.tsx`. Tauri WebView windows remain strictly reserved for persistent custom UI surfaces (`"main"` application window and `"dictation-pill"` overlay).
+    - Preserved all meeting engine state machine logic (`Pending` -> `Fired` -> `Snoozed`/`Dismissed`/`Actioned`/`Expired`), calendar matching, and active window detection.
+    - Updated developer test path (`trigger_mock_meeting_reminder`) to fire native OS toast notifications directly.
 
 ## [0.9.2] - 2026-08-23
 

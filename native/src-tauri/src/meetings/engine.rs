@@ -100,8 +100,14 @@ async fn tick(app: &AppHandle) {
 
     for entry in newly_fired {
         let (title, body) = notification_copy(entry.kind, &entry.title, &entry.provider);
-        app.notification().builder().title(title).body(body).show().unwrap_or_default();
-        crate::overlay::ensure_reminder_window(app);
+        tracing::info!(
+            "[notifications] Emitting native OS notification for meeting '{}' ({:?})",
+            entry.title,
+            entry.kind
+        );
+        if let Err(e) = app.notification().builder().title(title).body(body).show() {
+            tracing::error!("[notifications] ERROR failed to emit native notification: {}", e);
+        }
         let _ = app.emit(MEETING_REMINDER_EVENT, &entry);
     }
 }

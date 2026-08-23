@@ -485,3 +485,13 @@ This log records material architectural, technical, and product decisions for Re
 - **Explicitly Not Changed by this decision**: No source file. This entry is the triage and the repair decision; implementation lands as a separate, subsequent commit against this plan.
 
 - **Deferred / open question carried forward**: whether `auto_record` — a settings field that exists end-to-end except it's never read — should become real auto-record-on-detect, or be removed. That's a product call (does Relay ever start recording a meeting without an explicit user action?), not an engineering one, and is left open rather than decided by default here.
+
+---
+
+### Decision 46: Native OS Notifications for Meeting Reminders
+
+- **Context**: The dedicated Tauri WebView window (`"meeting-reminder"`, 400x84 size) used for transient meeting reminders caused recurring webview lifecycle bugs (white container artifacts, re-show loops, and hash mismatch issues rendering main `<App />`).
+- **Decision made**: Replace the Tauri WebView meeting-reminder window entirely with native OS Toast Notifications (`tauri_plugin_notification`). Reserve Tauri WebView windows strictly for persistent/custom UI surfaces that genuinely require a custom window (`"main"` application window and `"dictation-pill"` overlay).
+- **Reason**: Operating system notifications belong in native OS notification centers. Native OS toasts automatically manage visibility, focus, positioning, display scaling, and dismissal lifecycle without webview overhead or container artifacts.
+- **Alternatives considered**: Continuing to patch the Tauri WebView `meeting-reminder` window lifecycle.
+- **Impact**: Removed `ensure_reminder_window()` and `REMINDER_WINDOW_LABEL` from `overlay.rs`. Deleted `MeetingReminderWindow.tsx`. Removed `meeting-reminder` routing from `main.tsx`. Meeting reminders fire clean native OS Toast notifications while preserving all meeting detection, calendar integration, and queue state machine logic in Rust.

@@ -26,6 +26,9 @@
 - **FR-5.1 (Native Desktop)**: The Windows app MUST render a responsive floating PTT widget, Kanban board viewer, voice chat panel, trigger phrase config UI, and provider/STT/TTS/hotkey settings. *(The Kanban board viewer, voice chat panel, and trigger phrase config UI are deferred for the current phase — see Decisions 33–35; implementations preserved, nav entries removed.)*
 - **FR-5.2 (Web Dashboard)**: The Next.js web application MUST allow authentication and viewing/managing synced vault notes and Kanban cards in hybrid mode. *(Deferred for the current desktop-first MVP phase — see `docs/decisions.md` Decision 32. Requirement preserved for when hybrid mode resumes; not part of the active build target.)*
 
+### 6. Notifications & Windows Integration
+- **FR-6.1 (Native OS Notifications for Meetings)**: The system MUST present transient meeting notifications (upcoming, unrecorded, detected) using native Windows OS Toast Notifications (`tauri_plugin_notification`). The system MUST NOT create custom Tauri WebView windows or floating webview containers for transient meeting reminders.
+
 ## Non-Functional Requirements
 
 - **NFR-1 (Cost)**: Baseline operation MUST require $0 recurring cloud cost (local-first).

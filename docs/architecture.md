@@ -58,6 +58,11 @@ Relay is architected into three distinct surfaces in a single repository. **Curr
 - `settings`: Loads/saves `AppSettings` (provider, STT, TTS, hotkey config) at `.relay/config/settings.json`.
 - `commands.rs`: Exposes thin `#[tauri::command]` functions returning `Result<T, CommandError>`.
 
+## Window Architecture vs Native OS Notifications
+
+- **Persistent Custom Tauri Windows**: Reserved strictly for UI surfaces that genuinely require custom interactive windows (`"main"` application window and `"dictation-pill"` overlay).
+- **Transient Meeting Reminders**: Native OS Toast Notifications (`tauri_plugin_notification`). Transient notifications are presented directly via native Windows OS toasts without any React WebView or Tauri meeting-reminder window.
+
 ## Data Access & Security Model
 - **Local-Only Mode**: No authentication required. Notes saved in `.relay/vault`. Vector indices stored in `.relay/lancedb`. Zero network activity required.
 - **Hybrid Cloud Mode**: Not yet implemented. This describes the intended design (Supabase client in `web/src/lib/supabase` for web dashboard authentication; desktop app syncing vault notes to Supabase PostgreSQL via RLS policies), but a repository audit (2026-08-20) found no Supabase code anywhere in `native/src-tauri`, and `web/`'s own Supabase client is a mocked stand-in returning hardcoded data. Hybrid mode is deferred along with the Web surface — see `docs/decisions.md` Decision 32.

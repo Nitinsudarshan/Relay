@@ -162,9 +162,9 @@ export const MeetingNotificationsDesignGallery: React.FC = () => {
 
     try {
       await invoke('trigger_mock_meeting_reminder', { kind: 'detected' });
-      triggerActionFeedback(`Fired Design Option #${id} (400x84px) to OS System Desktop Window!`);
+      triggerActionFeedback(`Fired Native OS Toast Notification for Option #${id} to Desktop!`);
     } catch (err) {
-      console.warn('Could not launch system popup via Tauri:', err);
+      console.warn('Could not launch native OS notification:', err);
       triggerActionFeedback(`Set Design Option #${id} as active theme`);
     }
   };
