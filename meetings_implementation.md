@@ -29,6 +29,48 @@ tracked as the phases in §9, done as a separate, subsequent pass.
 
 ---
 
+## 0.1 Revision — architecture review incorporated
+
+The first draft of this plan treated meeting identity, detection, and
+notifications more simply than the domain actually allows. A review before
+implementation started caught six real issues; all six are adopted in §4.1
+and §4.2 below:
+
+1. `detection_key` is a **deduplication fingerprint, never identity** —
+   `provider:title:date` can collide two unrelated real meetings (a generic
+   window title like "Zoom Meeting", or two distinct meetings that happen
+   to share a name on the same day).
+2. `meetings/lifecycle.rs` (renamed `resolver.rs`) is a **reconciliation
+   layer**, not a CRUD factory — a calendar signal and a later window
+   signal for the same real-world meeting must converge on one `Meeting`,
+   not silently create two that turn out to be duplicates.
+3. **Detection confidence gates persistence** — a window-title heuristic
+   match is weaker evidence than a calendar event and shouldn't immediately
+   become a vault record; it graduates from candidate to confirmed first.
+4. **The OS notification and the interactive popup are one logical
+   reminder**, not a redundant surface to delete outright — the actual bug
+   was that they weren't coordinated, not that both existed.
+5. **"Missed" is mostly a passive data state**, not something to actively
+   resurface on wake — surfacing a stale reminder late can be more
+   annoying than not reminding at all.
+6. **The reminder engine reacts to meeting-record changes**; the polling
+   loops that feed it (calendar sync, window detection) are the clock, not
+   where the reminder decision logic lives.
+
+The data flow this plan now targets:
+
+```
+Calendar signal ──┐
+                   ├──►  Resolver  ──► persisted Meeting ──┬──► Reminders (reactive)
+Window signal   ──┘   (reconciles,                          ├──► Meetings page
+                        confidence-gates)                    └──► Recorder (shared AudioRecorder)
+                                                                       │
+                                                                       ▼
+                                                                   Scribble
+```
+
+---
+
 ## 1. Why remove instead of patch
 
 Decision 45 found the reminder popup's primary action fails for every
@@ -37,8 +79,9 @@ reminder silently erases the first, the popup freezes at its first on-screen
 position, and several smaller integrity gaps. Patching each in place would
 leave the same fragile foundation — a meeting ID that only sometimes refers
 to something real — for the next feature to trip over again. This plan
-instead fixes the foundation once (a meeting is created the moment it's
-detected, never later — see §4.1) and rebuilds the layer above it clean,
+instead fixes the foundation once — a meeting becomes a persisted,
+first-class record as soon as Relay has sufficient evidence one exists,
+never deferred to record-time (see §4.1) — and rebuilds the layer above it clean,
 reusing everything that already works (calendar auth, the list-rail/
 detail-pane split, the shared recorder).
 
@@ -88,58 +131,128 @@ detail-pane split, the shared recorder).
 
 ## 4. New architecture
 
-### 4.1 One meeting-creation path, triggered at detection — not at record time
+### 4.1 Meeting identity — a reconciliation layer, not independent CRUD
 
 This is the fix for Decision 45's Broken #1 (the reminder popup's "Start
-Recording" action failing for every kind). The root cause was that a
-meeting's real vault ID was only ever minted when a recording actually
-started, while calendar sync and window detection each independently
-invented their own ID shapes (a raw calendar-event ID; a synthetic
-`detected_<provider>_<title>` string) that never matched. The fix is to
-never let that gap exist:
+Recording" action failing for every kind). The root cause was that two
+signals — calendar sync and window detection — each independently minted
+their own incompatible ID shape for what might be the same real meeting.
+The fix isn't "both call the same lookup function" — it's a resolver that
+converges signals onto one persisted `Meeting`, with an identity hierarchy
+strict enough that generic titles can't merge unrelated meetings, and a
+confidence gate so a window-title heuristic doesn't spam the vault with
+candidates that were never really meetings.
 
-- **`meetings/detection.rs`** (new — the rebuilt window-detection signal from
-  the removed `meetings/mod.rs` code, unchanged Win32 approach): exposes
-  `detect_active_conferencing_windows() -> Vec<WindowMatch>`, pure, no side
-  effects, same provider-identification/title-cleaning helpers as before.
-- **`meetings/lifecycle.rs`** (new): a single
-  `find_or_create_meeting(source: MeetingSource) -> Meeting` entry point,
-  where `MeetingSource` is either `Calendar(CalendarMeetingEvent)` or
-  `WindowDetected { provider, title }`. It's idempotent:
-  - Calendar-sourced: looks up an existing `Meeting` by `calendar_event_id`
-    first; creates one with a real `meeting_<uuid>` ID only if none exists.
-    Recurring daily sync of the same event never creates a duplicate.
-  - Window-detected: looks up an existing `Meeting` with a matching
-    `detection_key` (a new `Option<String>` field on `Meeting`, e.g.
-    `"{provider}:{title}:{date}"`) within the current day before creating
-    one — repeated detection polls of the same open Zoom window don't spawn
-    duplicates.
-  - **Either path returns a real, already-persisted `Meeting` with a real
-    ID.** Nothing downstream — the reminder engine, the popup, the list —
-    ever sees a synthetic or not-yet-real ID again.
-- Both the calendar sync tick and the window-detection poll call
-  `find_or_create_meeting` immediately on a new match, not lazily on
-  reminder or record. The meeting shows up in the list (as "Upcoming" or
-  "Detected" — see §4.4) the moment it's found, which also means recording
-  can be started from the list itself, not only from a popup.
+- **`meetings/detection.rs`** (new — the rebuilt window-detection signal
+  from the removed `meetings/mod.rs` code, unchanged Win32 `EnumWindows`
+  approach and provider/title helpers): also computes a real `confidence`
+  for each match — `DetectedMeetingPayload.confidence` already exists on
+  the struct today, confirmed via a repo-wide search to be set but never
+  read anywhere, so this gives an existing, currently-decorative field a
+  real purpose. A bare "Zoom Meeting"/"Meet - Google Meet" title scores
+  lower than one with an actual topic/participant in it.
+- **`meetings/resolver.rs`** (new — renamed from an earlier `lifecycle.rs`
+  draft to describe what it actually does): the single entry point every
+  signal goes through,
+  `resolve_meeting_signal(signal: MeetingSignal) -> ResolvedMeeting`, where
+  `ResolvedMeeting` is either `Persisted(Meeting)` or a `Candidate` not yet
+  written to the vault. Matching hierarchy, most authoritative first:
+  - **Calendar signal**: (1) exact `calendar_event_id` match against an
+    existing `Meeting`; (2) same Google recurrence/series identifier, for a
+    recurring series' next occurrence; (3) a time+title fallback only if
+    neither ID is available, and only within a tight scheduled-time window
+    — never title alone. Any match updates the existing `Meeting`; no match
+    creates one. Calendar events are persisted immediately regardless of
+    confidence — a scheduled event is already real, explicit evidence,
+    independent of whether the user actually attends.
+  - **Window-detection signal**: (1) a meeting URL/ID extracted from the
+    signal, if available — in practice this rarely comes from the bare OS
+    window title itself (Zoom/Meet don't put the meeting code in their
+    title bar), so this tier mostly fires when correlating against a
+    **calendar** event's own `meeting_url` (already a field on
+    `CalendarMeetingEvent`), not the window title in isolation; (2)
+    otherwise, match against an existing `Meeting` by provider + temporal
+    proximity (within a few minutes of `scheduled_start`/`scheduled_end`,
+    or of another already-confirmed detection) + normalized title
+    similarity — a match here *corroborates* an existing meeting (e.g. sets
+    `actual_start`) rather than creating a second one; (3) no match → held
+    as an in-memory **candidate**, keyed by a short-lived `detection_key`
+    (provider + cleaned title + rough time bucket) used only to recognize
+    "still the same candidate I saw 10 seconds ago" — never as identity;
+    (4) a candidate **graduates to a persisted `Meeting`** once confidence
+    is high enough (a later iteration: sustained across repeated polls, not
+    one instantaneous hit) or the user acts on it directly from a
+    "Detected" reminder. Below that bar nothing is written to the vault —
+    a stray browser tab with "zoom" in its title never becomes vault
+    clutter.
+- **Known limitation, accepted rather than solved here**: title-similarity
+  matching can misjudge — two distinct meetings with near-identical names
+  could be merged, or a real second occurrence could be treated as
+  unrelated. There is no unlink/re-split UI in this pass; a wrong merge is
+  recoverable by hand-editing the resulting `Meeting` today. A correction
+  UI is a reasonable future addition, not built speculatively here.
+- Both the calendar-sync loop and the window-detection loop call the
+  resolver immediately on a new signal, not lazily at reminder- or
+  record-time. A confirmed meeting shows up in the list (as "Upcoming" or
+  "Detected" — see §4.4) as soon as it's persisted, which also means
+  recording can be started from the list itself, not only from a popup.
+- **`Meeting`'s new fields** split identity/linkage from detection
+  provenance, rather than one flat `detection_key`:
 
-### 4.2 Reminder queue and popup
+  ```rust
+  pub struct Meeting {
+      pub id: String,
+      // Identity / linkage
+      pub series_id: Option<String>,          // existing — Relay's own MeetingSeries grouping
+      pub calendar_event_id: Option<String>,  // existing — exact match, tier 1
+      pub calendar_series_id: Option<String>, // new — Google's recurrence/series id, tier 2
+      // Detection provenance — kept even after confirmation, so "why did
+      // Relay create this meeting?" never requires reverse-engineering it
+      // from the title
+      pub detection_source: Option<String>,   // "calendar_sync" | "window_detector"
+      pub detection_key: Option<String>,      // short-lived dedup fingerprint only — never identity
+      pub detection_confidence: Option<f32>,  // gives the existing, unused confidence field a purpose
+      pub detected_at: Option<String>,
+      // ...unchanged: title, provider, scheduled/actual times, status,
+      // participants, recording_path, transcript, notes, summary,
+      // decisions, action_items, questions, candidate_scribbles, timestamps
+  }
+  ```
 
-Fixes Decision 45's Broken #2, Refactor #2/#3, and Improve #1–5.
+### 4.2 Reminders — event-driven, one logical reminder across two surfaces
 
-- **`meetings/reminders.rs`** (new, replaces `scheduler.rs`): reminders are a
-  `Vec<ReminderEvent>` keyed by `meeting_id`, each with a `kind`
-  (`Upcoming` / `Unrecorded` / `Detected`), a `fire_at`, and a `state`
-  (`Pending` → `Shown` → one of `Snoozed(until)` / `Dismissed` / `Actioned`
-  / `Missed`). A second reminder queues instead of overwriting — closes
-  Broken #2 directly. A kind is marked `Shown`/resolved only once the user
-  has actually seen and acted on it, never at fire time.
-- **Missed-window catch-up** (Improve #2): each poll also checks for any
-  `Pending` reminder whose `fire_at` has passed outside its normal window
-  (app was asleep/closed/backgrounded) and surfaces it once as `Missed`,
-  visually distinct ("You missed a reminder for…") rather than a live one.
+Fixes Decision 45's Broken #2, Refactor #2/#3, and Improve #1–5:
+
+- **States**: `Pending → Fired → {Snoozed(until) | Dismissed | Actioned | Expired}`,
+  one `ReminderEvent` per (meeting, kind) in a `Vec`, never a single
+  overwritable slot — closes Broken #2 directly. `Expired` means the fire
+  window passed with no interaction; it's data, not automatically an
+  interruption (see below).
+- **Reactive, not a monolithic poll**: `meetings/reminders.rs` recomputes
+  due reminders when told a meeting record changed — a callback/event from
+  the calendar-sync loop or the resolver — rather than a fixed tick that
+  re-derives everything from scratch. The two signal loops keep their own,
+  independently appropriate cadences (window detection needs a short
+  interval, since it's the only way to notice a call started, close to
+  today's 15s; calendar sync can stay coarse, matching `calendar.rs`'s
+  existing ~5-minute cache) — they're the clock, not where the reminder
+  decision lives. This doesn't eliminate polling entirely: window
+  enumeration and calendar freshness have no push mechanism available to a
+  desktop app without much larger infrastructure (OS event hooks, calendar
+  webhooks), so a timer still exists at the signal layer — what changes is
+  that the reminder engine no longer redoes that work itself on every tick.
 - **Recording gate is per-meeting** (Refactor #3): `is_recording_this_meeting(id)`
   replaces the old global `is_recording_meeting()` check.
+- **One logical reminder, two coordinated surfaces — not a surface to
+  delete** (Improve #3, revised): the existing OS notification
+  (`tauri-plugin-notification`, confirmed a real dependency already called
+  four times in today's `scheduler.rs` — not aspirational) and the
+  interactive popup both render from the same `ReminderEvent`, so neither
+  can drift from the other. The notification stays informational and, at
+  minimum, focuses/raises the popup when clicked; the popup remains the
+  only place with actual controls. Whether `tauri-plugin-notification`
+  supports richer inline actions directly on Windows is worth checking
+  during implementation, not assumed here.
 - **The popup** (`overlay.rs`'s `ensure_reminder_window`, rebuilt): reuses
   `compute_anchor`/`active_monitor` from the pill's existing code instead of
   hardcoding its own top-right corner, so it's recomputed on every show
@@ -150,13 +263,18 @@ Fixes Decision 45's Broken #2, Refactor #2/#3, and Improve #1–5.
   "Remind me in 5 min", replacing "Don't remind me" vs. a functionally
   identical ✕ (Improve #1). No duration picker, no do-not-disturb
   subsystem.
-- **One notification surface** (Improve #3): the popup only. The parallel OS
-  toast that duplicated it is dropped.
+- **`Expired` is passive, and only actively resurfaced when the underlying
+  meeting might still be actionable** (Improve #2, revised): e.g. an
+  `Unrecorded` reminder whose meeting hasn't reached `scheduled_end` yet is
+  still worth a nudge; one for a meeting that ended an hour ago is not.
+  Otherwise `Expired` just shows as a quiet badge on that meeting's row
+  next time the list is open — never an interruption fired on wake, which
+  can land more annoying than helpful.
 - **One shared recording entry point**, `startMeetingRecording(meetingId)`
   (frontend), called identically from the popup's button, the meetings
-  list, and the tray item. It always clears any queued/shown reminder for
-  that meeting as a side effect — this is what fixes both Refactor #1 (two
-  disconnected start-recording paths) and Improve #5 (acknowledging a
+  list, and the tray item. It always resolves any pending/fired reminder
+  for that meeting as a side effect — this is what fixes both Refactor #1
+  (two disconnected start-recording paths) and Improve #5 (acknowledging a
   meeting in the list not dismissing its popup) with one function, not two
   separate patches. The tray's "Start Recording" item (currently a no-op —
   Decision 45, Broken #3b) is wired to call it with whichever meeting is
@@ -167,19 +285,18 @@ Fixes Decision 45's Broken #2, Refactor #2/#3, and Improve #1–5.
   meeting's detail pane, not just the tab.
 
 *Research pattern applied here*: Hyprnote's own notification design gates a
-detected-meeting popup to only interrupt when the main window is hidden, and
-confirms with a toast when a notification setting is turned on. Since Relay
-already asks the user before ever recording (see §4.5), the popup only ever
-needs to *inform*, not *gate consent* — so this plan borrows the
-hidden-window-only-interrupt idea for the `Detected` kind specifically
-(no calendar backing it, the noisiest kind) but doesn't need Hyprnote's
-consent-confirmation toast, since consent is already the app's standing
-default.
+detected-meeting popup to only interrupt when the main window is hidden.
+Since Relay already asks the user before ever recording (see §4.5), the
+popup only ever needs to *inform*, not *gate consent* — so this plan
+borrows the hidden-window-only-interrupt idea for the `Detected` kind
+specifically (no calendar backing it, the noisiest kind), applied to the
+*popup's* interruptiveness — independent of whether the OS notification
+still fires, which it does, per the revision above.
 
 ### 4.3 Recording — unchanged invariant, restated for this rebuild
 
 `start_meeting_recording` (rebuilt, same name) takes the real meeting ID
-`find_or_create_meeting` already guaranteed exists, and calls
+the resolver already guaranteed is persisted, and calls
 `state.recorder.start("meeting", ...)` exactly as today — no new capture
 path. This is what closes Broken #1 concretely: the command was always
 correct; it just never received a valid ID before.
@@ -245,17 +362,18 @@ list, both meetings-scoped:
 ## 5. File map
 
 **Backend — new**
-`meetings/detection.rs`, `meetings/lifecycle.rs`, `meetings/reminders.rs`
+`meetings/detection.rs`, `meetings/resolver.rs`, `meetings/reminders.rs`
 
 **Backend — kept as-is**
 `meetings/calendar.rs` (calendar auth/sync only), `oauth/*`, `identity/*`,
 `capture/*`, `overlay.rs` lines 1–173
 
 **Backend — rewritten in place**
-`vault/meeting.rs` (adds `detection_key`; drops nothing from the existing
-notes/transcript/decisions/action-items shape — that part isn't broken),
-`settings/mod.rs`'s `MeetingSettings`, the meetings-related sections of
-`commands.rs` and `lib.rs`
+`vault/meeting.rs` (adds `calendar_series_id`, `detection_source`,
+`detection_key`, `detection_confidence`, `detected_at` — drops nothing from
+the existing notes/transcript/decisions/action-items shape, that part isn't
+broken), `settings/mod.rs`'s `MeetingSettings`, the meetings-related
+sections of `commands.rs` and `lib.rs`
 
 **Backend — deleted**
 `meetings/scheduler.rs`, `overlay.rs` lines 175–212 (folded into the rebuilt
@@ -277,22 +395,31 @@ restructured), `ProviderSettings.tsx`'s Meetings section
 
 | # | Decision 45 item | Resolved by |
 | --- | --- | --- |
-| Broken 1 | Record action fails for every reminder kind | §4.1 — meeting IDs are real from the moment of detection, never synthetic |
-| Broken 2 | Second reminder erases the first permanently | §4.2 — queue, not a single slot; resolved-not-fired latching |
+| Broken 1 | Record action fails for every reminder kind | §4.1 — a meeting ID is only ever real: minted by the resolver once persisted, never a synthetic string a downstream command has to guess at |
+| Broken 2 | Second reminder erases the first permanently | §4.2 — queue, not a single slot; resolved only once actually seen/acted on |
 | Broken 3 | Dead event/command, tray no-op, dropped tab-switch payload | §4.2 — dead pair deleted; tray and tab-switch both call the one shared recording entry point |
 | Refactor 1 | Two start-recording paths, one doesn't clear state | §4.2 — one `startMeetingRecording` function, used everywhere |
 | Refactor 2 | Popup position frozen after first show | §4.2 — reuses the pill's recompute-on-every-show anchor logic |
 | Refactor 3 | Global, not per-meeting, recording gate | §4.2 — `is_recording_this_meeting(id)` |
 | Refactor 4 | Settings/type drift, `auto_record` unread | §4.5 — all real settings exposed; `auto_record` removed on evidence |
 | Improve 1 | No real snooze | §4.2 — "remind me in 5 min" as one of two popup actions |
-| Improve 2 | Missed windows drop reminders silently | §4.2 — `Missed` state surfaced once |
-| Improve 3 | Duplicate OS toast + popup | §4.2 — popup is the only surface |
+| Improve 2 | Missed windows drop reminders silently | §4.2 — revised: `Expired` is passive data, actively resurfaced only if the meeting might still be actionable |
+| Improve 3 | Duplicate OS toast + popup | §4.2 — revised: kept as one logical reminder driven by one `ReminderEvent`, not reduced to a single surface |
 | Improve 4 | Popup steals focus during screen-share | §4.2 — fullscreen-aware `.setFocus()` suppression |
 | Improve 5 | Acknowledging in list doesn't dismiss popup | §4.2 — side effect of the shared recording entry point |
 
-Plus two meetings-scoped issues found during this investigation, not in
-Decision 45: the duplicate calendar-connect UI and the two decorative
-settings toggles (§4.5).
+Plus issues found during this investigation and its pre-implementation
+review, not in Decision 45 itself:
+
+| Source | Item | Resolved by |
+| --- | --- | --- |
+| This plan's own audit | Duplicate calendar-connect UI in `ProviderSettings.tsx` | §4.5 — shared `CalendarConnectionCard` |
+| This plan's own audit | Two decorative settings toggles with no backend wiring | §4.5 — removed |
+| Architecture review | `detection_key` used as identity, not just dedup | §4.1 — tiered identity hierarchy; key is fingerprint-only |
+| Architecture review | Calendar and window signals could create duplicate `Meeting`s | §4.1 — resolver reconciles both onto one record |
+| Architecture review | No confidence gate before persisting a detected meeting | §4.1 — candidate → confirmed graduation |
+| Architecture review | Reminder engine repeats full sync/enum/match every tick | §4.2 — reactive recompute off meeting-record-change events |
+| Architecture review | `Meeting`'s new field was one flat, ungrouped `detection_key` | §4.1 — split into identity/linkage vs. detection provenance |
 
 ---
 
@@ -308,13 +435,19 @@ touched. No settings field outside `MeetingSettings` changes shape.
 
 ## 8. Implementation sequence
 
-1. **Backend foundation** — `vault/meeting.rs`'s `detection_key` field;
-   `meetings/detection.rs`; `meetings/lifecycle.rs`'s `find_or_create_meeting`.
-   Unit tests for idempotency (same calendar event synced twice; same window
-   match polled twice) before anything else is built on top.
-2. **Reminder engine** — `meetings/reminders.rs`, the queue, missed-window
-   catch-up, per-meeting recording gate. Unit tests for queue ordering and
-   the never-overwrite guarantee.
+1. **Backend foundation** — `vault/meeting.rs`'s new identity/detection
+   fields; `meetings/detection.rs` (with real `confidence` scoring);
+   `meetings/resolver.rs`'s signal-matching hierarchy and candidate →
+   confirmed graduation. Unit tests for idempotency (same calendar event
+   synced twice; same window match polled twice) *and* for reconciliation
+   (a calendar signal followed by a corroborating window signal updates one
+   record, never creates two) before anything else is built on top.
+2. **Reminder engine** — `meetings/reminders.rs`, the queue, the
+   `Pending/Fired/Snoozed/Dismissed/Actioned/Expired` state machine wired
+   reactively to resolver/calendar-sync change events, per-meeting
+   recording gate. Unit tests for queue ordering, the never-overwrite
+   guarantee, and that `Expired` alone never triggers an interruptive
+   surface.
 3. **Commands & wiring** — rebuild the meetings/calendar-adjacent commands in
    `commands.rs`, delete the dead pair, rewire `lib.rs` (scheduler spawn →
    reminder engine spawn, tray item, `invoke_handler` list).
@@ -338,6 +471,13 @@ touched. No settings field outside `MeetingSettings` changes shape.
   starts a recording (the concrete repro of Broken #1).
 - Manual: two reminders firing within one poll tick both end up visible
   (queue, not overwrite).
+- Manual: a calendar-synced meeting later corroborated by a window-detection
+  signal (join the actual call) stays one `Meeting`, not two.
+- Manual: a browser tab with "Zoom" in its title, never actually joined,
+  does not create a persisted meeting.
+- Manual: waking the laptop long after a meeting ended shows that
+  meeting's reminder as an `Expired` badge in the list, not an interruptive
+  popup/notification.
 - Manual: popup reappears correctly positioned after switching monitors.
 - Manual: recording from the meetings list clears a live popup for that
   meeting; recording from the tray does the same.
