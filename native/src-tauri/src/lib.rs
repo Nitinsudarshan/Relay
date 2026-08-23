@@ -111,9 +111,13 @@ pub fn run() {
                         // (meetings_implementation.md §4.2). Previously
                         // this emitted an event nothing listened for
                         // (Decision 45, Broken #3b).
-                        if let Some(reminders) = app.try_state::<crate::meetings::reminders::ReminderQueue>() {
-                            if let Some(current) = crate::meetings::reminders::current_popup_reminder(&reminders) {
-                                let _ = app.emit("start-meeting-recording-for", &current.meeting_id);
+                        let queue = app.try_state::<crate::meetings::reminders::ReminderQueue>();
+                        let state = app.try_state::<commands::AppState>();
+                        if let (Some(queue), Some(state)) = (queue, state) {
+                            if let Some(meeting_id) =
+                                crate::meetings::reminders::tray_target_meeting_id(&queue, &state.vault)
+                            {
+                                let _ = app.emit("start-meeting-recording-for", &meeting_id);
                             }
                         }
                         if let Some(window) = app.get_webview_window("main") {

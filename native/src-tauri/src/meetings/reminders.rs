@@ -46,6 +46,17 @@ pub struct ReminderEvent {
 #[derive(Default)]
 pub struct ReminderQueue(pub Mutex<Vec<ReminderEvent>>);
 
+/// What one `recompute_reminders` pass concluded. `changed` covers *any*
+/// status transition (including into `Expired`), not just firings, so the
+/// popup gets told to re-check and close itself rather than being left
+/// showing a reminder that is no longer active.
+#[derive(Debug, Clone)]
+pub struct RecomputeOutcome {
+    pub all: Vec<ReminderEvent>,
+    pub newly_fired: Vec<ReminderEvent>,
+    pub changed: bool,
+}
+
 /// Tracks which meeting ID, if any, the shared `AudioRecorder` is currently
 /// recording *for* — the recorder itself only knows a generic mode string
 /// ("meeting"), not a meeting ID, and per constraint 1 in
@@ -61,6 +72,12 @@ const EXPIRE_AFTER_MINUTES: i64 = 10;
 /// How long past a meeting's scheduled end an `Unrecorded` reminder is
 /// still worth actively resurfacing, rather than staying a passive badge.
 const ACTIONABLE_GRACE_MINUTES: i64 = 5;
+/// A `Detected` reminder is only worth firing while the detection is
+/// recent. The queue is in-memory, so it starts empty after a restart —
+/// without this bound, any still-open meeting detected days ago would be
+/// re-queued with its original `fire_at`, fire immediately, and pop the
+/// notification again on every single restart.
+const DETECTED_REMINDER_MAX_AGE_MINUTES: i64 = 15;
 
 fn upcoming_fire_time(meeting: &Meeting, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     let start = meeting.scheduled_start.as_deref().and_then(parse_rfc3339)?;
@@ -75,6 +92,14 @@ fn unrecorded_fire_time(meeting: &Meeting, now: DateTime<Utc>) -> Option<DateTim
     let start = meeting.scheduled_start.as_deref().and_then(parse_rfc3339)?;
     let diff = (now - start).num_seconds();
     (diff >= 120 && diff <= 300).then_some(now)
+}
+
+/// `None` once the detection is older than
+/// `DETECTED_REMINDER_MAX_AGE_MINUTES`, which is what stops a long-open
+/// detected meeting from re-notifying on every app restart.
+fn detected_fire_time(meeting: &Meeting, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    let detected_at = meeting.detected_at.as_deref().and_then(parse_rfc3339)?;
+    ((now - detected_at).num_minutes() <= DETECTED_REMINDER_MAX_AGE_MINUTES).then_some(detected_at)
 }
 
 fn ensure_entry(entries: &mut Vec<ReminderEvent>, meeting: &Meeting, kind: ReminderKind, fire_at: DateTime<Utc>) {
@@ -116,18 +141,25 @@ fn is_still_actionable(entry: &ReminderEvent, meeting: &Meeting, now: DateTime<U
 /// on every tick (a local vault read plus in-memory diffing, no network or
 /// OS calls of its own).
 ///
-/// Returns `(full_queue_snapshot, newly_fired_this_call)` — the second so
-/// the caller can decide exactly when to raise the OS notification/popup,
-/// once per transition into `Fired`, not on every tick while it stays there.
+/// Returns `RecomputeOutcome`: the full queue snapshot, the entries that
+/// transitioned into `Fired` on *this* call (so the OS notification is
+/// raised once per firing, not every tick), and whether anything at all
+/// changed — the last of which is what lets the popup close itself when a
+/// reminder expires or is resolved elsewhere, rather than sitting there
+/// showing a reminder the backend no longer considers active.
 pub fn recompute_reminders(
     queue: &ReminderQueue,
     vault: &VaultManager,
     settings: &MeetingSettings,
     currently_recording_meeting_id: Option<&str>,
-) -> (Vec<ReminderEvent>, Vec<ReminderEvent>) {
+) -> RecomputeOutcome {
     let meetings = vault.list_meetings().unwrap_or_default();
     let now = Utc::now();
     let mut entries = queue.0.lock().unwrap();
+    let before: Vec<(String, ReminderKind, ReminderStatus)> = entries
+        .iter()
+        .map(|e| (e.meeting_id.clone(), e.kind, e.status.clone()))
+        .collect();
 
     for meeting in meetings.iter().filter(|m| is_open(m)) {
         if currently_recording_meeting_id == Some(meeting.id.as_str()) {
@@ -145,8 +177,9 @@ pub fn recompute_reminders(
             }
         }
         if settings.remind_on_detection && meeting.detection_source.as_deref() == Some("window_detector") {
-            let fire_at = meeting.detected_at.as_deref().and_then(parse_rfc3339).unwrap_or(now);
-            ensure_entry(&mut entries, meeting, ReminderKind::Detected, fire_at);
+            if let Some(fire_at) = detected_fire_time(meeting, now) {
+                ensure_entry(&mut entries, meeting, ReminderKind::Detected, fire_at);
+            }
         }
     }
 
@@ -185,7 +218,16 @@ pub fn recompute_reminders(
     let open_ids: HashSet<&str> = meetings.iter().filter(|m| is_open(m)).map(|m| m.id.as_str()).collect();
     entries.retain(|e| open_ids.contains(e.meeting_id.as_str()));
 
-    (entries.clone(), newly_fired)
+    let after: Vec<(String, ReminderKind, ReminderStatus)> = entries
+        .iter()
+        .map(|e| (e.meeting_id.clone(), e.kind, e.status.clone()))
+        .collect();
+
+    RecomputeOutcome {
+        changed: before != after,
+        all: entries.clone(),
+        newly_fired,
+    }
 }
 
 /// The single reminder the popup should currently show, if any — the
@@ -200,6 +242,41 @@ pub fn current_popup_reminder(queue: &ReminderQueue) -> Option<ReminderEvent> {
         .filter(|e| matches!(e.status, ReminderStatus::Fired))
         .min_by_key(|e| e.fire_at)
         .cloned()
+}
+
+/// Which meeting the tray's "Start Recording" item should act on: the
+/// reminder currently on screen if there is one, otherwise the meeting
+/// that's actually happening now (or starting imminently). Without the
+/// fallback the tray item is a silent no-op whenever no reminder happens to
+/// be firing — which is most of the time, and a milder repeat of the very
+/// "tray does nothing" bug it was added to fix.
+pub fn tray_target_meeting_id(queue: &ReminderQueue, vault: &VaultManager) -> Option<String> {
+    if let Some(current) = current_popup_reminder(queue) {
+        return Some(current.meeting_id);
+    }
+
+    let now = Utc::now();
+    let mut candidates: Vec<(i64, String)> = vault
+        .list_meetings()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| is_open(m) && m.status != MEETING_STATUS_RECORDING)
+        .filter_map(|m| {
+            let start = m.scheduled_start.as_deref().and_then(parse_rfc3339)?;
+            let end = m
+                .scheduled_end
+                .as_deref()
+                .and_then(parse_rfc3339)
+                .unwrap_or(start + Duration::hours(1));
+            // In progress, or starting within the next 15 minutes.
+            let in_progress = start <= now && now <= end;
+            let starting_soon = start > now && (start - now).num_minutes() <= 15;
+            (in_progress || starting_soon).then(|| ((start - now).num_seconds().abs(), m.id))
+        })
+        .collect();
+
+    candidates.sort_by_key(|(distance, _)| *distance);
+    candidates.into_iter().next().map(|(_, id)| id)
 }
 
 pub fn dismiss(queue: &ReminderQueue, meeting_id: &str, kind: ReminderKind) {
@@ -284,7 +361,7 @@ mod tests {
         let m2 = meeting_starting_in(&vault, 60);
         let queue = ReminderQueue::default();
 
-        let (all, _) = recompute_reminders(&queue, &vault, &settings_all_on(), None);
+        let all = recompute_reminders(&queue, &vault, &settings_all_on(), None).all;
         let ids: HashSet<&str> = all.iter().map(|e| e.meeting_id.as_str()).collect();
         assert!(ids.contains(m1.id.as_str()));
         assert!(ids.contains(m2.id.as_str()));
@@ -297,14 +374,17 @@ mod tests {
         let m = meeting_starting_in(&vault, 30);
         let queue = ReminderQueue::default();
 
-        let (all, newly_fired) = recompute_reminders(&queue, &vault, &settings_all_on(), None);
-        let entry = all.iter().find(|e| e.meeting_id == m.id).unwrap();
+        let outcome = recompute_reminders(&queue, &vault, &settings_all_on(), None);
+        let entry = outcome.all.iter().find(|e| e.meeting_id == m.id).unwrap();
         assert!(matches!(entry.status, ReminderStatus::Fired));
-        assert_eq!(newly_fired.len(), 1);
+        assert_eq!(outcome.newly_fired.len(), 1);
+        assert!(outcome.changed);
 
-        // A second recompute while still due must not re-fire it again.
-        let (_, newly_fired_again) = recompute_reminders(&queue, &vault, &settings_all_on(), None);
-        assert_eq!(newly_fired_again.len(), 0);
+        // A second recompute while still due must not re-fire it again,
+        // and must report nothing changed so the popup isn't churned.
+        let again = recompute_reminders(&queue, &vault, &settings_all_on(), None);
+        assert_eq!(again.newly_fired.len(), 0);
+        assert!(!again.changed);
     }
 
     #[test]
@@ -314,7 +394,7 @@ mod tests {
         let other = meeting_starting_in(&vault, -150);
         let queue = ReminderQueue::default();
 
-        let (all, _) = recompute_reminders(&queue, &vault, &settings_all_on(), Some(recording.id.as_str()));
+        let all = recompute_reminders(&queue, &vault, &settings_all_on(), Some(recording.id.as_str())).all;
         assert!(all.iter().all(|e| e.meeting_id != recording.id));
         assert!(all.iter().any(|e| e.meeting_id == other.id));
     }
@@ -330,6 +410,88 @@ mod tests {
         let current = queue.0.lock().unwrap();
         let entry = current.iter().find(|e| e.meeting_id == m.id && e.kind == ReminderKind::Upcoming).unwrap();
         assert!(matches!(entry.status, ReminderStatus::Dismissed));
+    }
+
+    /// The queue is in-memory, so it starts empty after a restart. A
+    /// still-open meeting detected days ago must not be re-queued and
+    /// re-fired as if it were new.
+    #[test]
+    fn test_stale_detected_meeting_does_not_refire_after_restart() {
+        let vault = temp_vault();
+        let mut m = Meeting::from_window_detection(PROVIDER_ZOOM, "Zoom Meeting", "zoom:zoom meeting:old", 0.85);
+        m.detected_at = Some((Utc::now() - Duration::days(3)).to_rfc3339());
+        m.scheduled_start = Some((Utc::now() - Duration::days(3)).to_rfc3339());
+        vault.save_meeting(&m).unwrap();
+
+        // A fresh queue, exactly as it would be right after a restart.
+        let queue = ReminderQueue::default();
+        let outcome = recompute_reminders(&queue, &vault, &settings_all_on(), None);
+
+        assert!(
+            outcome.all.iter().all(|e| e.kind != ReminderKind::Detected),
+            "a 3-day-old detection must not queue a Detected reminder"
+        );
+        assert!(outcome.newly_fired.is_empty());
+    }
+
+    #[test]
+    fn test_freshly_detected_meeting_does_fire() {
+        let vault = temp_vault();
+        let m = Meeting::from_window_detection(PROVIDER_ZOOM, "Zoom Meeting", "zoom:zoom meeting:now", 0.85);
+        vault.save_meeting(&m).unwrap();
+
+        let queue = ReminderQueue::default();
+        let outcome = recompute_reminders(&queue, &vault, &settings_all_on(), None);
+
+        assert!(outcome.newly_fired.iter().any(|e| e.kind == ReminderKind::Detected));
+    }
+
+    /// An expiring reminder has to be reported as a change, or the popup
+    /// never learns to close itself.
+    #[test]
+    fn test_expiry_is_reported_as_a_change() {
+        let vault = temp_vault();
+        let m = meeting_starting_in(&vault, 30);
+        let queue = ReminderQueue::default();
+        recompute_reminders(&queue, &vault, &settings_all_on(), None);
+
+        // Backdate the fired entry past the expiry window.
+        {
+            let mut entries = queue.0.lock().unwrap();
+            for e in entries.iter_mut().filter(|e| e.meeting_id == m.id) {
+                e.fire_at = Utc::now() - Duration::minutes(EXPIRE_AFTER_MINUTES + 5);
+            }
+        }
+
+        let outcome = recompute_reminders(&queue, &vault, &settings_all_on(), None);
+        assert!(outcome.changed, "expiry must be reported so the popup can hide");
+        assert!(outcome.newly_fired.is_empty(), "expiry is not a firing");
+        let entry = outcome.all.iter().find(|e| e.meeting_id == m.id).unwrap();
+        assert!(matches!(entry.status, ReminderStatus::Expired));
+    }
+
+    #[test]
+    fn test_tray_falls_back_to_in_progress_meeting_with_no_reminder() {
+        let vault = temp_vault();
+        let queue = ReminderQueue::default();
+
+        // In progress right now, but no reminder queued at all.
+        let mut m = Meeting::new("Standup", PROVIDER_ZOOM, None);
+        m.scheduled_start = Some((Utc::now() - Duration::minutes(10)).to_rfc3339());
+        m.scheduled_end = Some((Utc::now() + Duration::minutes(20)).to_rfc3339());
+        vault.save_meeting(&m).unwrap();
+
+        assert_eq!(tray_target_meeting_id(&queue, &vault), Some(m.id));
+    }
+
+    #[test]
+    fn test_tray_prefers_the_on_screen_reminder() {
+        let vault = temp_vault();
+        let reminded = meeting_starting_in(&vault, 30);
+        let queue = ReminderQueue::default();
+        recompute_reminders(&queue, &vault, &settings_all_on(), None);
+
+        assert_eq!(tray_target_meeting_id(&queue, &vault), Some(reminded.id));
     }
 
     #[test]

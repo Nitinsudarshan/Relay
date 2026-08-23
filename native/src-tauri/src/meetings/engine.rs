@@ -75,16 +75,26 @@ async fn tick(app: &AppHandle) {
     // It's a separate concern from whether reminders are wanted: a user
     // who disables every reminder toggle still wants calendar/detected
     // meetings to show up in their list, just without the interruption.
+    // A newly *created* meeting is emitted so an already-open meetings list
+    // picks it up live (`useMeetingList.ts` listens for this event) instead
+    // of only showing it after the user navigates away and back. Updates to
+    // an existing record aren't emitted here — corroboration happens on
+    // every tick, and re-emitting the same meeting 4x/minute would churn
+    // the list for no visible benefit.
     if calendar::load_calendar_tokens(&vault_root).is_some() {
         if let Ok(events) = calendar::sync_real_google_calendar_events(&vault_root, false).await {
             for event in &events {
-                let _ = resolver::resolve_calendar_signal(&state.vault, event);
+                if let Ok(resolved) = resolver::resolve_calendar_signal(&state.vault, event) {
+                    emit_if_created(app, &resolved);
+                }
             }
         }
     }
 
     for window_match in detect_active_conferencing_windows() {
-        let _ = resolver::resolve_window_signal(&state.vault, &candidates, &window_match);
+        if let Ok(resolved) = resolver::resolve_window_signal(&state.vault, &candidates, &window_match) {
+            emit_if_created(app, &resolved);
+        }
     }
 
     if !meeting_settings.remind_before_meeting
@@ -95,13 +105,29 @@ async fn tick(app: &AppHandle) {
     }
 
     let recording_id = active_recording.0.lock().unwrap().clone();
-    let (_, newly_fired) =
+    let outcome =
         reminders::recompute_reminders(&queue, &state.vault, meeting_settings, recording_id.as_deref());
 
-    for entry in newly_fired {
+    // The OS notification is raised only for a genuine transition into
+    // `Fired` — once per reminder, not every tick it stays up.
+    for entry in &outcome.newly_fired {
         let (title, body) = notification_copy(entry.kind, &entry.title, &entry.provider);
         app.notification().builder().title(title).body(body).show().unwrap_or_default();
         crate::overlay::ensure_reminder_window(app);
-        let _ = app.emit(MEETING_REMINDER_EVENT, &entry);
+    }
+
+    // The popup, by contrast, is told to re-check on *any* status change —
+    // including a reminder expiring or being resolved elsewhere — so it can
+    // close itself instead of sitting there showing a stale reminder.
+    if outcome.changed {
+        let _ = app.emit(MEETING_REMINDER_EVENT, ());
+    }
+}
+
+fn emit_if_created(app: &AppHandle, resolved: &resolver::ResolvedMeeting) {
+    if resolved.was_created() {
+        if let Some(meeting) = resolved.meeting() {
+            let _ = app.emit(crate::commands::MEETING_UPDATED_EVENT, meeting);
+        }
     }
 }

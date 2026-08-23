@@ -1750,15 +1750,21 @@ pub async fn debug_detect_conferencing_windows() -> Result<Vec<crate::meetings::
 /// automatic signal goes through, rather than an unconditional
 /// `create_meeting` — the background engine already resolves every synced
 /// calendar event into a `Meeting` within ~15 seconds regardless of this
-/// button, so a raw create here would risk a duplicate for the same
-/// `calendar_event_id` the moment both happen close together.
+/// button, so a raw create here would produce a duplicate for the same
+/// `calendar_event_id` whenever the two happen close together. The
+/// resolver serializes its own check-then-create, so clicking this at the
+/// exact moment the engine ticks still yields one meeting, not two.
 #[tauri::command]
 pub async fn import_calendar_event(
     event: crate::meetings::CalendarMeetingEvent,
     state: State<'_, AppState>,
 ) -> Result<Meeting, CommandError> {
-    crate::meetings::resolver::resolve_calendar_signal(&state.vault, &event)
-        .map_err(|e| CommandError::new("IMPORT_FAILED", &e))
+    let resolved = crate::meetings::resolver::resolve_calendar_signal(&state.vault, &event)
+        .map_err(|e| CommandError::new("IMPORT_FAILED", &e))?;
+    resolved
+        .meeting()
+        .cloned()
+        .ok_or_else(|| CommandError::new("IMPORT_FAILED", "Calendar event did not resolve to a meeting."))
 }
 
 /// The real answer to "which meeting, if any, is currently being

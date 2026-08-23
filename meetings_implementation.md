@@ -328,10 +328,14 @@ list, both meetings-scoped:
 - **Duplicate calendar-connect UI.** `ProviderSettings.tsx`'s "Meetings"
   section (`handleConnectGoogleCalendar`/`handleDisconnectGoogleCalendar`,
   around line 1196) independently reimplements the exact connect/disconnect/
-  sync/status flow `CalendarSyncModal.tsx` already implements. **Fix**:
-  extract a single presentational `CalendarConnectionCard` (props: status,
-  handlers) used by both `CalendarSyncModal` and the settings section, so
-  there is one calendar-auth UI implementation, not two that can drift apart.
+  sync/status flow `CalendarSyncModal.tsx` already implements. **Planned
+  fix**: extract a single presentational `CalendarConnectionCard` (props:
+  status, handlers) used by both `CalendarSyncModal` and the settings
+  section, so there is one calendar-auth UI implementation, not two that
+  can drift apart. **Status: NOT DONE — deferred.** Both copies work
+  correctly today, so this is a maintainability cleanup rather than a bug
+  fix, and it was left for its own pass rather than rushed alongside the
+  functional work. The duplication is still present.
 - **Two fully decorative settings toggles.** "Speaker Diarization &
   Labeling" (`speakerDiarization`) and "Executive AI Minutes & Insights"
   (`meetingSummaryPrompt`) in `ProviderSettings.tsx` (lines ~1353, 1371) are
@@ -382,12 +386,13 @@ reminder window function elsewhere in the same file)
 **Frontend — rewritten in place**
 `MeetingPage.tsx`, `MeetingListRail.tsx`, `MeetingDetailPane.tsx`,
 `MeetingDetailView.tsx`, `useMeetingList.ts`, `MeetingReminderWindow.tsx`,
-`CalendarSyncModal.tsx` (extracts `CalendarConnectionCard`), relevant
-sections of `App.tsx`, `main.tsx`, `NativeSidebar.tsx` (repointed, not
-restructured), `ProviderSettings.tsx`'s Meetings section
+relevant sections of `App.tsx`, `main.tsx`, `NativeSidebar.tsx`
+(repointed, not restructured), `ProviderSettings.tsx`'s Meetings section
 
-**Frontend — new**
-`CalendarConnectionCard.tsx` (shared by the modal and settings section)
+**Deferred, not built**
+`CalendarConnectionCard.tsx` (would be shared by `CalendarSyncModal.tsx`
+and the settings section — see §4.5; the duplication it would remove is
+still present)
 
 ---
 
@@ -413,7 +418,7 @@ review, not in Decision 45 itself:
 
 | Source | Item | Resolved by |
 | --- | --- | --- |
-| This plan's own audit | Duplicate calendar-connect UI in `ProviderSettings.tsx` | §4.5 — shared `CalendarConnectionCard` |
+| This plan's own audit | Duplicate calendar-connect UI in `ProviderSettings.tsx` | **Deferred, not fixed** — see §4.5 |
 | This plan's own audit | Two decorative settings toggles with no backend wiring | §4.5 — removed |
 | Architecture review | `detection_key` used as identity, not just dedup | §4.1 — tiered identity hierarchy; key is fingerprint-only |
 | Architecture review | Calendar and window signals could create duplicate `Meeting`s | §4.1 — resolver reconciles both onto one record |
@@ -456,9 +461,9 @@ touched. No settings field outside `MeetingSettings` changes shape.
 5. **Meetings page** — rebuilt `MeetingListRail.tsx` (state groups),
    `MeetingDetailPane.tsx` (Summary/Transcript tabs), `useMeetingList.ts`,
    `MeetingPage.tsx`.
-6. **Settings** — `CalendarConnectionCard` extraction, remove the two
-   decorative toggles and `auto_record`, expose all three real reminder
-   settings.
+6. **Settings** — remove the two decorative toggles and `auto_record`,
+   expose all three real reminder settings. (The `CalendarConnectionCard`
+   extraction originally listed here is deferred — see §4.5.)
 7. **Wiring cleanup** — `App.tsx`'s tab/event handling, `main.tsx`'s
    `#/meeting-reminder` route, `NativeSidebar.tsx`'s nav entry repointed.
 

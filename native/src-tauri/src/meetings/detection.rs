@@ -122,6 +122,9 @@ pub fn clean_meeting_window_title(raw_title: &str, provider: &str) -> String {
 
 /// The exact set of bare fallback titles `clean_meeting_window_title`
 /// produces when the real window title carried no distinguishing topic.
+/// Only reachable from the Windows detection path (and the tests), since
+/// window enumeration is Windows-only today.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn is_generic_fallback_title(title: &str) -> bool {
     matches!(
         title,
@@ -133,6 +136,7 @@ fn is_generic_fallback_title(title: &str) -> bool {
 /// distinctive one — see `resolver.rs`'s candidate-graduation rule, which
 /// only needs one hit at high confidence but several sustained hits at low
 /// confidence before writing a vault record.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn score_confidence(cleaned_title: &str) -> f32 {
     if is_generic_fallback_title(cleaned_title) {
         0.55
