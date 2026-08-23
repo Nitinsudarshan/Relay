@@ -1,7 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Check } from 'lucide-react';
+import { Check, MonitorPlay } from 'lucide-react';
 
 interface PreviewProps {
   id: string;
@@ -9,6 +8,7 @@ interface PreviewProps {
   description: string;
   isSelected: boolean;
   onSelect: () => void;
+  onSimulate: () => void;
   children: React.ReactNode;
 }
 
@@ -18,6 +18,7 @@ export const MeetingNotificationPreview: React.FC<PreviewProps> = ({
   description,
   isSelected,
   onSelect,
+  onSimulate,
   children,
 }) => {
   return (
@@ -36,21 +37,33 @@ export const MeetingNotificationPreview: React.FC<PreviewProps> = ({
           </span>
           <h3 className="text-xs font-bold text-foreground">{name}</h3>
         </div>
-        <Button
-          type="button"
-          variant={isSelected ? 'default' : 'outline'}
-          size="sm"
-          onClick={onSelect}
-          className="h-6 text-[11px] px-2 font-medium rounded-md gap-1"
-        >
-          {isSelected ? (
-            <>
-              <Check className="w-3 h-3" /> Selected
-            </>
-          ) : (
-            'Select Direction'
-          )}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={onSimulate}
+            className="h-6 text-[11px] px-2 font-medium rounded-md gap-1 text-primary hover:text-primary/90"
+            title="Simulate floating desktop notification toast overlay"
+          >
+            <MonitorPlay className="w-3 h-3" /> Simulate
+          </Button>
+          <Button
+            type="button"
+            variant={isSelected ? 'default' : 'outline'}
+            size="sm"
+            onClick={onSelect}
+            className="h-6 text-[11px] px-2 font-medium rounded-md gap-1"
+          >
+            {isSelected ? (
+              <>
+                <Check className="w-3 h-3" /> Selected
+              </>
+            ) : (
+              'Select'
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Live Preview Area */}
@@ -59,7 +72,7 @@ export const MeetingNotificationPreview: React.FC<PreviewProps> = ({
       </div>
 
       {/* Footer Description */}
-      <div className="px-4 py-2.5 border-t border-border bg-card">
+      <div className="px-4 py-2.5 border-t border-border bg-card flex items-center justify-between">
         <p className="text-[11px] text-muted-foreground leading-snug">{description}</p>
       </div>
     </div>
