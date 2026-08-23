@@ -1791,6 +1791,7 @@ pub async fn get_current_meeting_reminder(
 /// waiting for a real calendar/window signal.
 #[tauri::command]
 pub async fn trigger_mock_meeting_reminder(
+    app: AppHandle,
     kind: crate::meetings::reminders::ReminderKind,
     state: State<'_, AppState>,
     reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
@@ -1803,6 +1804,7 @@ pub async fn trigger_mock_meeting_reminder(
     };
 
     let mut meeting = Meeting::new(title, provider, None);
+    meeting.id = "relay_mock_preview_meeting".to_string();
     meeting.participants = vec!["Alice".to_string(), "Bob".to_string(), "Charlie".to_string()];
     state
         .vault
@@ -1810,6 +1812,12 @@ pub async fn trigger_mock_meeting_reminder(
         .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
 
     crate::meetings::reminders::inject_mock_reminder(&reminders, &meeting, kind);
+    crate::overlay::ensure_reminder_window(&app);
+    if let Some(win) = app.get_webview_window(crate::overlay::REMINDER_WINDOW_LABEL) {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+    let _ = app.emit(crate::meetings::engine::MEETING_REMINDER_EVENT, ());
     Ok(())
 }
 

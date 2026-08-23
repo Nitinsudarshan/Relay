@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { VoiceNotePage } from './components/voicenotes/VoiceNotePage';
 import { MeetingPage } from './components/meetings/MeetingPage';
+import { MeetingNotificationsDesignGallery } from './components/meetings/MeetingNotificationsDesignGallery';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -23,13 +24,19 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
-export type MainTabType = 'capture' | 'meetings' | 'scribble' | 'settings';
+export type MainTabType =
+  | 'capture'
+  | 'meetings'
+  | 'scribble'
+  | 'settings'
+  | 'components-meeting-notifications';
 
 const TAB_LABELS: Record<MainTabType, string> = {
   capture: 'Voice Note',
   meetings: 'Meetings',
   scribble: 'Scribbles',
   settings: 'Settings',
+  'components-meeting-notifications': 'Components > Meeting > Notifications',
 };
 
 export const App: React.FC = () => {
@@ -332,6 +339,10 @@ export const App: React.FC = () => {
           {activeTab === 'scribble' && <ScribbleViewer />}
 
           {activeTab === 'settings' && <ProviderSettings />}
+
+          {activeTab === 'components-meeting-notifications' && (
+            <MeetingNotificationsDesignGallery />
+          )}
         </main>
       </div>
     </div>

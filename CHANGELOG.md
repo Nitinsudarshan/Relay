@@ -1,5 +1,28 @@
 # Relay — Changelog
 
+## [0.9.3] - 2026-08-23
+
+### Meeting Notification Popups & Components Sidenav Route
+
+- **Components Sidenav Navigation (`native/src/components/common/NativeSidebar.tsx`, `App.tsx`)**:
+  - Added new navigation tab `components-meeting-notifications` and breadcrumb routing (`Components > Meeting > Notifications`).
+  - Added dedicated `Components` navigation section in the collapsible sidebar with direct access to meeting notification design options.
+- **10 Sleek Interactive System Popup Design Options (`rounded-lg`) (`native/src/components/meetings/MeetingNotificationsDesignGallery.tsx`)**:
+  - Expanded the interactive gallery to feature 10 compact, non-intrusive meeting notification popup designs, all formatted with `rounded-lg` (8px border-radius) corners and prominent CTAs:
+    1. *Compact HUD Bar*: Top-anchored HUD bar (`rounded-lg`) with live mic activity pulse and "Record Now" button.
+    2. *Compact Quick Dock Widget*: Streamlined dock card (`rounded-lg`) with input mode toggles and REC CTA.
+    3. *Animated Gradient Border Card*: Shimmering gradient border card (`rounded-lg`) with participant avatar cluster and "Start Recording Now" CTA.
+    4. *Stealth Mini Floating Bar*: Ultra-compact 34px height horizontal bar (`rounded-lg`) for zero screen clutter.
+    5. *Left-Accent Banner*: Left-border accent card (`rounded-lg`) with speaker badge and glowing red "Start Recording" button.
+    6. *Waveform Control Bar*: Dark tech widget (`rounded-lg`) with animated audio frequency visualizer simulation and "Initiate Capture" CTA.
+    7. *AI Copilot Quick Toast*: Smart assist toast (`rounded-lg`) with output preset selector chip and "Record & Transcribe" button.
+    8. *Corner Action Tray*: 2-row action tray (`rounded-lg`) with participant count badge and "Capture Audio" button.
+    9. *Edge-Anchored Mini HUD*: High-contrast HUD card (`rounded-lg`) with live mic input status indicator and "Start STT" CTA.
+    10. *Micro Pre-Flight Command Card*: Compact pre-meeting prep card (`rounded-lg`) with mic signal check meter and "Launch Recording" CTA.
+  - **Tauri Native Window Label Routing (`main.tsx`, `index.css`)**: Updated entry point routing to query `getCurrentWindow().label`. Fixed bug where hash mismatch caused the 400x84px floating window to mistakenly render `<App />` and its white page background instead of `<MeetingReminderWindow />`. Enforced `background: transparent !important` on `body.overlay-window #root`.
+  - **Mock Meeting Vault & Queue Deduplication (`commands.rs`, `reminders.rs`)**: Reused fixed ID `relay_mock_preview_meeting` and cleared previous mock queue entries in `trigger_mock_meeting_reminder`, eliminating duplicate test meeting database inflation.
+  - Added interactive controls for testing AI output presets, audio input modes, and setting active system popup themes.
+
 ## [0.9.2] - 2026-08-23
 
 ### Repository Licensing & Governance Migration (AGPL-3.0-only)

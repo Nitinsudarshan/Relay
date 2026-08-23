@@ -13,6 +13,7 @@ import {
   Cloud,
   Sparkle,
   Sliders,
+  Bell,
 } from 'lucide-react';
 import { RelayLogo } from '@/components/common/RelayLogo';
 import { Badge } from '@/components/ui/badge';
@@ -33,7 +34,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import type { RelayAccount, RelayProfile } from '@/types';
 
-export type TabType = 'capture' | 'meetings' | 'scribble' | 'settings';
+export type TabType =
+  | 'capture'
+  | 'meetings'
+  | 'scribble'
+  | 'settings'
+  | 'components-meeting-notifications';
 
 interface NativeSidebarProps {
   isOpen: boolean;
@@ -83,6 +89,13 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       label: 'Meetings',
       icon: Calendar,
       color: 'text-blue-500',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+    {
+      id: 'components-meeting-notifications' as TabType,
+      label: 'Meeting Notifications',
+      icon: Bell,
+      color: 'text-purple-500',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {
@@ -288,6 +301,28 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
                 >
                   <FileText className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                   <span className="truncate">Active Knowledge Graph</span>
+                </button>
+              </div>
+
+              {/* Components Section */}
+              <div className="mt-4 pt-3 border-t border-sidebar-border">
+                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground/80 tracking-wider uppercase flex items-center justify-between">
+                  <span>Components</span>
+                  <span className="text-[9px] font-mono text-purple-400">10 Designs</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('components-meeting-notifications')}
+                  className={`w-full mt-1 flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs transition-colors text-left cursor-pointer overflow-hidden whitespace-nowrap ${
+                    activeTab === 'components-meeting-notifications'
+                      ? 'bg-purple-500/15 text-purple-300 font-semibold border border-purple-500/30'
+                      : 'text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/40'
+                  }`}
+                >
+                  <Bell className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                  <div className="flex flex-col min-w-0 truncate">
+                    <span className="truncate">Meeting Notifications</span>
+                  </div>
                 </button>
               </div>
             </div>

@@ -173,7 +173,7 @@ fn active_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
 }
 
 pub const REMINDER_WINDOW_LABEL: &str = "meeting-reminder";
-const REMINDER_SIZE: (f64, f64) = (320.0, 140.0);
+const REMINDER_SIZE: (f64, f64) = (400.0, 84.0);
 const REMINDER_MARGIN: f64 = 16.0;
 
 /// Creates the meeting reminder window if it doesn't exist yet, or — if it

@@ -6,6 +6,11 @@ import { X } from 'lucide-react';
 import { Button } from '../ui/button';
 import { MeetingReminderEvent, ReminderKind } from '../../types';
 
+import {
+  DESIGN_OPTIONS,
+  renderNotificationCard,
+} from './MeetingNotificationsDesignGallery';
+
 /// One logical reminder, one interactive surface. This window shows
 /// whichever reminder the backend queue says is earliest-and-currently-due
 /// (`get_current_meeting_reminder`) — never a locally-cached "last event
@@ -16,11 +21,20 @@ import { MeetingReminderEvent, ReminderKind } from '../../types';
 export const MeetingReminderWindow: React.FC = () => {
   const [reminder, setReminder] = useState<MeetingReminderEvent | null>(null);
   const [busy, setBusy] = useState(false);
+  const [activeThemeId, setActiveThemeId] = useState<number>(() => {
+    const saved = localStorage.getItem('relay_meeting_reminder_theme');
+    return saved ? parseInt(saved, 10) : 1;
+  });
 
   const refresh = useCallback(() => {
     invoke<MeetingReminderEvent | null>('get_current_meeting_reminder')
       .then(setReminder)
       .catch(console.error);
+
+    const saved = localStorage.getItem('relay_meeting_reminder_theme');
+    if (saved) {
+      setActiveThemeId(parseInt(saved, 10));
+    }
   }, []);
 
   useEffect(() => {
@@ -35,14 +49,22 @@ export const MeetingReminderWindow: React.FC = () => {
   useEffect(() => {
     refresh();
     const unlisten = listen('meeting-reminder', refresh);
+    const handleStorage = () => refresh();
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('relay-reminder-theme-changed', handleStorage);
     return () => {
       unlisten.then((fn) => fn());
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('relay-reminder-theme-changed', handleStorage);
     };
   }, [refresh]);
 
   const withBusyGuard = async (action: () => Promise<void>) => {
     if (!reminder || busy) return;
     setBusy(true);
+    // Hide window immediately when user triggers an action
+    getCurrentWindow().hide().catch(console.error);
+    setReminder(null);
     try {
       await action();
     } catch (e) {
@@ -65,63 +87,31 @@ export const MeetingReminderWindow: React.FC = () => {
       })
     );
 
-  const handleDismiss = () =>
+  const handleDismiss = () => {
+    getCurrentWindow().hide().catch(console.error);
+    setReminder(null);
     withBusyGuard(() =>
       invoke('dismiss_meeting_reminder', { meetingId: reminder!.meeting_id, kind: reminder!.kind })
     );
+  };
 
   if (!reminder) return null;
 
-  const headerText = headerTextForKind(reminder.kind);
+  const selectedOption =
+    DESIGN_OPTIONS.find((o) => o.id === activeThemeId) || DESIGN_OPTIONS[0];
 
   return (
-    <div className="flex flex-col bg-background/95 backdrop-blur-md border border-border shadow-xl rounded-xl h-full w-full select-none overflow-hidden" data-tauri-drag-region>
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border/50 bg-muted/30" data-tauri-drag-region>
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground" data-tauri-drag-region>
-          {headerText}
-        </span>
-        <button
-          onClick={handleDismiss}
-          disabled={busy}
-          className="text-muted-foreground hover:text-foreground p-1 -mr-1 rounded-full transition-colors disabled:opacity-50"
-          title="Dismiss"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-
-      <div className="flex flex-col flex-1 px-4 py-3 justify-between">
-        <div>
-          <h3 className="text-sm font-medium line-clamp-1 text-foreground" title={reminder.title}>
-            {reminder.title || 'Untitled Meeting'}
-          </h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {formatProvider(reminder.provider)}
-            {reminder.participants.length > 0 && ` • ${reminder.participants.length} participants`}
-          </p>
-        </div>
-
-        <div className="flex items-center justify-end space-x-2 mt-auto">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={handleSnooze}
-            disabled={busy}
-          >
-            Remind me in 5 min
-          </Button>
-          <Button
-            variant="default"
-            size="sm"
-            className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white"
-            onClick={handleStartRecording}
-            disabled={busy}
-          >
-            Start Recording
-          </Button>
-        </div>
-      </div>
+    <div
+      className="size-full bg-transparent p-0 m-0 overflow-hidden select-none flex items-center justify-center"
+      data-tauri-drag-region
+    >
+      {renderNotificationCard(selectedOption, {
+        preset: 'Executive Summary',
+        inputMode: 'both',
+        onStart: handleStartRecording,
+        onSnooze: handleSnooze,
+        onDismiss: handleDismiss,
+      })}
     </div>
   );
 };

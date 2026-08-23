@@ -238,7 +238,7 @@ pub fn mark_meeting_actioned(queue: &ReminderQueue, meeting_id: &str) {
 /// 45's Broken #1 all over again.
 pub fn inject_mock_reminder(queue: &ReminderQueue, meeting: &Meeting, kind: ReminderKind) {
     let mut entries = queue.0.lock().unwrap();
-    entries.retain(|e| !(e.meeting_id == meeting.id && e.kind == kind));
+    entries.retain(|e| e.meeting_id != meeting.id && e.meeting_id != "relay_mock_preview_meeting");
     entries.push(ReminderEvent {
         meeting_id: meeting.id.clone(),
         kind,

@@ -138,7 +138,8 @@
    * pill floating on the desktop. main.tsx tags these routes with this
    * class so their own background gets out of the way. */
   html.overlay-window,
-  body.overlay-window {
+  body.overlay-window,
+  body.overlay-window #root {
     background: transparent !important;
   }
 }
