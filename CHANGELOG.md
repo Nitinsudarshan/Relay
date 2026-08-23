@@ -19,10 +19,10 @@
     8. *Corner Action Tray*: 2-row action tray (`rounded-lg`) with participant count badge and "Capture Audio" button.
     9. *Edge-Anchored Mini HUD*: High-contrast HUD card (`rounded-lg`) with live mic input status indicator and "Start STT" CTA.
     10. *Micro Pre-Flight Command Card*: Compact pre-meeting prep card (`rounded-lg`) with mic signal check meter and "Launch Recording" CTA.
-  - **Selected Variant 08 (Native Inspired) Meeting Notification (`native/src/components/meetings/notifications/`)**:
-    - Promoted Variant 08 (Native Inspired) as Relay's confirmed visual language spec for meeting notifications under `Components > Meeting > Notifications`.
-    - Scrapped and removed experimental exploratory variants (01 through 07).
-    - Retained full interactive state controls (Upcoming, Detected, In Progress), provider switcher, Record/Snooze/Dismiss actions, and live top-right desktop toast simulation overlay.
+  - **Live Global Meeting Notification Wiring (`MeetingReminderToastListener.tsx`, `App.tsx`)**:
+    - Wired Variant 08 (Native Inspired) directly to live Rust backend events (`meeting-reminder` event & `get_current_meeting_reminder` IPC) via `MeetingReminderToastListener`.
+    - Automatically displays a floating top-right notification alert inside Relay whenever an upcoming, unrecorded, or detected meeting reminder fires.
+    - Connected real actions: **Record** triggers `start_meeting_recording`, **Snooze** triggers `snooze_meeting_reminder` (5m/10m/15m/30m options), and **Dismiss** triggers `dismiss_meeting_reminder` in the Rust queue.
     - Zero production meeting logic or Tauri window side effects (100% safe isolated preview surface).
 
 ## [0.9.2] - 2026-08-23
