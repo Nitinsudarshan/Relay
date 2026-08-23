@@ -22,3 +22,13 @@ This document tracks deferred features, rejected/postponed UI patterns, and arch
   - Listen for `Alt + 1` (Voice Note), `Alt + 2` (Meetings), `Alt + 3` (Scribbles), `Alt + 4` (Settings).
   - Ensure shortcuts are bypassed when user focus is inside text fields, textareas, code editors, or modals (`event.target.tagName !== 'INPUT' && event.target.tagName !== 'TEXTAREA'`).
   - Provide platform-accurate visual shortcut badges (`Alt+1` on Windows / Linux, `⌥1` on macOS) or make them configurable in Settings > Hotkeys.
+
+### 2. Post-Migration Legal & Governance Hardening
+- **Status**: Deferred (Post-AGPL Migration)
+- **Area**: Governance & Legal (`TRADEMARKS.md`, `CONTRIBUTING.md`, `NOTICE`)
+- **Concept & Items**:
+  - **Formal Trademark / Branding Policy (`TRADEMARKS.md`)**: Establish explicit branding guidelines distinguishing AGPL software licensing from official Relay trademark rights for forks and derivatives.
+  - **Contributor License / CLA Policy (`CONTRIBUTING.md`)**: Define contributor guidelines and CLA / DCO expectations before accepting external pull requests.
+  - **Dual-Licensing Evaluation**: Evaluate whether to maintain AGPL-only core or establish an AGPL + commercial dual-licensing structure for official cloud/enterprise offerings.
+  - **Third-Party Attribution Notice (`NOTICE`)**: Consolidate upstream open-source attribution notices if the asset/crate footprint expands.
+

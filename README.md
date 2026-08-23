@@ -1,45 +1,84 @@
-# Relay
+# Relay _(relay-workspace)_
 
-Relay is a hybrid (local + cloud) AI voice and memory assistant. It turns
-push-to-talk speech into structured, actionable system state — Kanban task
-cards, calendar events, reminders, and polished Markdown notes — instead of
-a wall of transcript text you have to re-read and re-type.
+> Hybrid (local-first + cloud) AI voice and memory assistant for Windows — turns push-to-talk speech into structured Kanban cards, markdown notes, and direct dictation without cloud lock-in.
 
-It also works as a universal dictation and voice-chat tool: a global hotkey
-transcribes speech and types it directly into whatever app or field
-currently has focus, and an in-app voice chat answers questions grounded in
-your own vault notes.
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL--v3-blue.svg)](LICENSE)
 
-See `docs/product.md` for the full product spec, `docs/decisions.md` for the
-architectural decision log, and `AGENTS.md` for repository conventions.
+> [!NOTE]
+> **Status: Pre-Alpha / Active Development**  
+> Relay is under active development and is not yet recommended for production use.
 
-## Structure
+## Why Relay
 
-- `native/` — Windows desktop app: Rust backend (`native/src-tauri/`) +
-  Tauri/React frontend (`native/src/`). This is the primary surface.
-- `web/` — Next.js + Shadcn + Supabase dashboard for hybrid (cloud-synced)
-  mode.
-- `docs/` — Living product/architecture specification.
+Traditional dictation tools stream raw audio to third-party clouds and leave you with walls of transcript text that require manual re-reading and manual copying.
 
-## Getting Started (native desktop app)
+Relay processes speech locally using Whisper and structured pipelines to instantly convert spoken thoughts into organized Kanban tasks, meeting agendas, and grounded vault notes while keeping all audio and notes strictly on your machine.
+
+## Features
+
+- **Universal Dictation** — Transcribes push-to-talk audio and injects text directly into whatever Windows app or field has active focus.
+- **Meeting & Scribble Pipelines** — Automatically parses live meeting audio and rough voice scribbles into structured Kanban task cards.
+- **Local Vault Storage** — Saves audio recordings, transcripts, and structured entities locally in Markdown files and LanceDB vector store.
+- **Ground-in-Vault Voice Chat** — Answers user questions in real-time, strictly grounded in your local markdown vault notes.
+- **Hybrid Cloud Sync** — Optional Next.js + Supabase web dashboard for cross-device visibility and team synchronization when enabled.
+
+## Requirements
+
+- **Node.js**: `20+`
+- **Rust**: `1.75+` (for native Tauri desktop backend)
+- **OS**: Windows 10/11 (with WebView2 runtime)
+
+## Install
 
 ```bash
-cd native
-npm install
-npm run tauri dev
+npm run install:all
 ```
 
-## Getting Started (web dashboard)
+<details>
+<summary><b>Individual surface installation</b></summary>
 
 ```bash
-cd web
-npm install
-npm run dev
+# Native desktop app
+cd native && npm install
+
+# Web dashboard
+cd web && npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see
-the result.
+</details>
+
+## Quick start
+
+Run the native desktop application in development mode:
+
+```bash
+npm run dev:native
+```
+
+To run the Next.js hybrid web dashboard:
+
+```bash
+npm run dev:web
+```
+
+## How it works
+
+```mermaid
+flowchart TD
+    A[Push-to-Talk / Audio Capture] --> B[Local Whisper STT Engine]
+    B --> C{Pipeline Dispatcher}
+    C -->|Dictation| D[Windows Active Focus Injection]
+    C -->|Scribble / Meeting| E[Kanban & Note Structuring]
+    E --> F[(Local Markdown Vault & LanceDB)]
+    F -.->|Optional Hybrid Sync| G[Supabase Cloud Backend]
+```
+
+## Contributing
+
+Contributions are welcome — please read [`AGENTS.md`](AGENTS.md) for coding conventions and repository rules before opening a pull request.
 
 ## License
 
-MIT
+Relay is licensed under the GNU Affero General Public License v3.0.
+See [LICENSE](LICENSE) for the complete license text.
+

@@ -43,6 +43,7 @@ Relay is **three surfaces sharing one repo**, per `Relay - Decision Log.md`
 | `performance.md` | Bundle size, async/non-blocking rules, memoization | All three surfaces |
 | `rbac-settings.md` | Why this is intentionally not built yet | Reference only — not active |
 | `version-and-changelog.md` | Versioning and changelog maintenance requirement | Whole repo |
+| `readme.md` | Machine-readable rules for generating or rewriting README.md | Whole repo |
 | `maybe-later.md` | Requirements for logging deferred features to `maybe_later.md` | Whole repo |
 
 Two NGConnect rule files were **not** carried over — `data-import.md`
@@ -61,7 +62,7 @@ If two rules conflict, resolve in this order (most specific wins):
 4. `code-standards-frontend.md` / `component-architecture.md` / `project-structure.md`
 5. `forms-and-validation.md` / `testing.md` / `performance.md`
 6. `design-system.md` / `ui-components.md` / `charts.md` / `responsive-design.md` / `accessibility.md`
-7. `documentation.md`
+7. `documentation.md` / `readme.md` / `version-and-changelog.md`
 
 If a conflict can't be resolved this way, stop and ask rather than guessing —
 see `Relay - IDE Build Prompt.md` section 14 for what actually warrants

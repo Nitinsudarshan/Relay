@@ -35,6 +35,7 @@ coding-convention layer underneath it.
 - [performance.md](Rules/performance.md): Async/non-blocking rules, bundle size, memoization.
 - [rbac-settings.md](Rules/rbac-settings.md): Why RBAC is intentionally not built yet.
 - [version-and-changelog.md](Rules/version-and-changelog.md): Versioning and changelog maintenance requirement.
+- [readme.md](Rules/readme.md): Machine-readable rules for generating, auditing, or rewriting README.md.
 - [maybe-later.md](Rules/maybe-later.md): Policy and format for logging deferred/postponed features to `maybe_later.md`.
 
 Not carried over from NGConnect: `data-import.md` (Excel/CSV import safety —
@@ -62,7 +63,7 @@ If two rules conflict, resolve in this order (most specific wins):
 4. `code-standards-frontend.md` / `component-architecture.md` / `project-structure.md`.
 5. `forms-and-validation.md` / `testing.md` / `performance.md`.
 6. `design-system.md` / `ui-components.md` / `charts.md` / `responsive-design.md` / `accessibility.md`.
-7. `documentation.md`.
+7. `documentation.md` / `readme.md` / `version-and-changelog.md`.
 
 ## Starting State
 
@@ -72,7 +73,7 @@ scope decisions referenced throughout `Rules/` are already made; see
 `Relay - Decision Log.md` for the full context/reason/alternatives/impact
 behind each one, and `Relay - IDE Build Prompt.md` for the build order.
 
-## Safety Requirements
+## Safety & Automated Maintenance Requirements
 
 - **Never** hardcode secrets or credentials in source code.
 - **Never** bypass RLS assumptions once hybrid mode's cloud storage is in
@@ -86,3 +87,7 @@ behind each one, and `Relay - IDE Build Prompt.md` for the build order.
   token) against the cloud backend — not LAN-only or tunnel-based access to
   the Windows machine, a framing already considered and rejected (decision
   12).
+- **Mandatory Commit & Push Execution**: After every task, before committing or pushing changes:
+  1. Inspect changes and update `VERSION` and `CHANGELOG.md` per `Rules/version-and-changelog.md`.
+  2. Audit `README.md` per `Rules/readme.md` whenever scripts, commands, dependencies, or features are modified.
+

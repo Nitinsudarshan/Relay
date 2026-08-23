@@ -1,5 +1,18 @@
 # Relay — Changelog
 
+## [0.9.2] - 2026-08-23
+
+### Repository Licensing & Governance Migration (AGPL-3.0-only)
+
+- **Open-Source Licensing Migration (`LICENSE`, `package.json`, `native/src-tauri/Cargo.toml`, `native/package.json`, `web/package.json`)**:
+  - Migrated Relay's top-level open-source license from MIT to GNU Affero General Public License Version 3 (`AGPL-3.0-only`).
+  - Added complete official AGPLv3 legal text with copyright `Copyright (C) 2026 Relay Maintainers`.
+  - Updated package manifest license metadata across all project surfaces (`native/src-tauri/Cargo.toml`, root `package.json`, `native/package.json`, `web/package.json`).
+- **README Authoring Rules & Pre-Commit Verification (`rules/readme.md`, `scripts/verify-commit-rules.js`, `.git/hooks/`)**:
+  - Created `rules/readme.md` detailing machine-readable rules for creating, auditing, and maintaining `README.md`, including AGPLv3 strategy, pre-production status rules, open-source core vs. commercial services boundaries, and trademark guidelines.
+  - Implemented `scripts/verify-commit-rules.js` and installed Git `.git/hooks/pre-commit` and `.git/hooks/pre-push` to automatically enforce versioning, changelog, and README compliance on commits/pushes.
+  - Updated `README.md` to reference `AGPL-3.0-only` and `rules/global.md` & `AGENTS.md` to integrate `rules/readme.md`.
+
 ## [0.9.1] - 2026-08-23
 
 ### Meetings Directory UI Restructure & Calendar View
