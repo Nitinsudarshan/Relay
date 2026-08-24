@@ -180,7 +180,7 @@
   animation: audio-bar-pulse 0.7s ease-in-out 0.2s infinite alternate;
 }
 
-/* Standalone Overlay Floating Windows (meeting-reminder, dictation-pill) */
+/* Standalone Overlay Floating Window (dictation-pill) */
 html.overlay-window,
 body.overlay-window,
 body.overlay-window #root {

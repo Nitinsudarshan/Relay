@@ -1812,11 +1812,18 @@ pub async fn trigger_mock_meeting_reminder(
         .save_meeting(&meeting)
         .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
 
-    crate::meetings::reminders::inject_mock_reminder(&reminders, &meeting, kind);
-    crate::overlay::ensure_reminder_window(&app);
+    let entry = crate::meetings::reminders::ReminderEvent {
+        meeting_id: meeting.id.clone(),
+        kind,
+        title: meeting.title.clone(),
+        provider: meeting.provider.clone(),
+        participants: meeting.participants.clone(),
+        fire_at: chrono::Utc::now(),
+        status: crate::meetings::reminders::ReminderStatus::Fired,
+    };
 
-    tracing::info!("[notifications] Triggered mock custom desktop reminder overlay for '{}'", title);
-    let _ = app.emit(crate::meetings::engine::MEETING_REMINDER_EVENT, ());
+    crate::meetings::reminders::inject_mock_reminder(&reminders, &meeting, kind);
+    crate::meetings::engine::dispatch_native_reminder_notification(&app, &entry);
     Ok(())
 }
 

@@ -1,15 +1,59 @@
 use crate::commands::AppState;
+use crate::meetings::calendar;
 use crate::meetings::detect_active_conferencing_windows;
 use crate::meetings::reminders::{self, ActiveMeetingRecording, ReminderQueue};
 use crate::meetings::resolver::{self, CandidateStore};
-use crate::meetings::calendar;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
+use tauri_plugin_notification::NotificationExt;
 
-/// One logical reminder, two coordinated surfaces (meetings_implementation.md
-/// §4.2): this event is what both the OS notification and the interactive
-/// popup render from, so neither can drift from the other.
 pub const MEETING_REMINDER_EVENT: &str = "meeting-reminder";
+
+fn hash_meeting_id(meeting_id: &str) -> i32 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    meeting_id.hash(&mut hasher);
+    (hasher.finish() & 0x7FFFFFFF) as i32
+}
+
+/// Dispatches a single native Windows OS notification for a fired meeting reminder.
+pub fn dispatch_native_reminder_notification(app: &AppHandle, entry: &reminders::ReminderEvent) {
+    let provider_name = match entry.provider.to_lowercase().as_str() {
+        "google_meet" | "google meet" => "Google Meet",
+        "zoom" => "Zoom",
+        "teams" => "Teams",
+        "webex" => "Webex",
+        _ => "In Person",
+    };
+
+    let kind_label = match entry.kind {
+        reminders::ReminderKind::Upcoming => "Starts in 5 minutes",
+        reminders::ReminderKind::Unrecorded => "Meeting in progress",
+        reminders::ReminderKind::Detected => "Meeting detected",
+    };
+
+    let body = format!("{} · {}", kind_label, provider_name);
+    let notif_id = hash_meeting_id(&entry.meeting_id);
+
+    tracing::info!(
+        "[notifications] Emitting native OS notification for '{}' ({})",
+        entry.title,
+        body
+    );
+
+    if let Err(e) = app
+        .notification()
+        .builder()
+        .id(notif_id)
+        .title(&entry.title)
+        .body(&body)
+        .action_type_id("meeting-reminder")
+        .show()
+    {
+        tracing::error!("Failed to show native Windows meeting notification: {}", e);
+    }
+}
 
 /// Starts the meetings background loop: resolves calendar and window
 /// signals through `resolver`, then reconciles the reminder queue through
@@ -70,12 +114,6 @@ async fn tick(app: &AppHandle) {
         reminders::recompute_reminders(&queue, &state.vault, meeting_settings, recording_id.as_deref());
 
     for entry in newly_fired {
-        tracing::info!(
-            "[notifications] Triggering custom meeting reminder overlay for '{}' ({:?})",
-            entry.title,
-            entry.kind
-        );
-        crate::overlay::ensure_reminder_window(app);
-        let _ = app.emit(MEETING_REMINDER_EVENT, &entry);
+        dispatch_native_reminder_notification(app, &entry);
     }
 }

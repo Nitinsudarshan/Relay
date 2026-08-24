@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Bell, CheckCircle2, MonitorPlay, Sparkles } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -21,6 +22,16 @@ export const MeetingNotificationGallery: React.FC = () => {
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [isDismissed, setIsDismissed] = useState<boolean>(false);
   const [snoozedMinutes, setSnoozedMinutes] = useState<number | null>(null);
+
+  const handleTriggerNativeNotification = async () => {
+    setIsSimulating(true);
+    try {
+      const kind = status === 'in-progress' ? 'unrecorded' : status;
+      await invoke('trigger_mock_meeting_reminder', { kind });
+    } catch (err) {
+      console.warn('Could not trigger backend native notification (browser fallback):', err);
+    }
+  };
 
   const handleToggleRecord = () => {
     setIsRecording((prev) => !prev);
@@ -113,7 +124,7 @@ export const MeetingNotificationGallery: React.FC = () => {
           <Button
             type="button"
             size="sm"
-            onClick={() => setIsSimulating(true)}
+            onClick={handleTriggerNativeNotification}
             className="h-9 px-4 text-xs font-bold gap-2 shadow-xs shrink-0"
           >
             <MonitorPlay className="w-4 h-4" /> Simulate Desktop Toast
@@ -137,7 +148,7 @@ export const MeetingNotificationGallery: React.FC = () => {
         description="Translates cleanly to Windows OS notification toast structures with conservative radius, restrained typography, and standard action row."
         isSelected={true}
         onSelect={() => {}}
-        onSimulate={() => setIsSimulating(true)}
+        onSimulate={handleTriggerNativeNotification}
       >
         {nativeNotificationComponent}
       </MeetingNotificationPreview>
@@ -153,7 +164,7 @@ export const MeetingNotificationGallery: React.FC = () => {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setIsSimulating(true)}
+            onClick={handleTriggerNativeNotification}
             className="h-8 text-xs font-semibold gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
           >
             <MonitorPlay className="w-3.5 h-3.5" /> Test Desktop Simulation

@@ -24,8 +24,29 @@ use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 use vault::VaultManager;
 
+#[cfg(target_os = "windows")]
+fn set_app_user_model_id() {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    let app_id: Vec<u16> = OsStr::new("com.relay.app")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        #[link(name = "shell32")]
+        extern "system" {
+            fn SetCurrentProcessExplicitAppUserModelID(AppID: *const u16) -> i32;
+        }
+        let _ = SetCurrentProcessExplicitAppUserModelID(app_id.as_ptr());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "windows")]
+    set_app_user_model_id();
     // Load environment variables from .env — search CWD and ancestor directories
     // so the repo-root .env is found even when Tauri runs from native/src-tauri/.
     if dotenvy::dotenv().is_err() {

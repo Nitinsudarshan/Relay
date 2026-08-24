@@ -1,5 +1,21 @@
 # Relay — Changelog
 
+## [0.9.4] - 2026-08-24
+
+### Permanent Removal of Tauri Meeting Reminder Container & Single-Surface Native OS Notifications
+
+- **Permanent Removal of `meeting-reminder` Tauri Window (`overlay.rs`, `MeetingReminderWindow.tsx`, `main.tsx`, `capabilities/default.json`)**:
+  - Permanently removed `REMINDER_WINDOW_LABEL`, `REMINDER_SIZE`, `REMINDER_MARGIN`, `ensure_reminder_window()`, `reposition_reminder_window()`, and `compute_reminder_anchor()` from `overlay.rs`.
+  - Deleted `MeetingReminderWindow.tsx` and removed all meeting-reminder window routing from `main.tsx`.
+  - Removed `"meeting-reminder"` from Tauri capability permissions (`capabilities/default.json`).
+  - Preserved the Dictation Pill (`dictation-pill`) window intact.
+- **Single-Surface Native Windows OS Notification Architecture (`engine.rs`, `commands.rs`, `App.tsx`)**:
+  - Configured Rust meeting engine (`engine.rs`) and Developer Settings simulation (`trigger_mock_meeting_reminder`) to dispatch single, native Windows OS notifications via `dispatch_native_reminder_notification()`.
+  - Added native OS notification action category (`meeting-reminder`) with `▶ Record`, `◷ Snooze 5m`, `◷ Snooze 15m`, and `Dismiss` actions.
+  - Wired `@tauri-apps/plugin-notification` `onAction` listener in `App.tsx` to handle actions (`start_meeting_recording`, `snooze_meeting_reminder`, `dismiss_meeting_reminder`) and notification body clicks (focuses Relay main window and switches to Meetings tab).
+- **Design Exploration Gallery Boundary (`MeetingNotificationGallery.tsx`)**:
+  - Retained the design exploration gallery for visual previewing while guaranteeing zero production notification side-effects or overlay windows.
+
 ## [0.9.3] - 2026-08-23
 
 ### Meeting Notification Popups & Components Sidenav Route

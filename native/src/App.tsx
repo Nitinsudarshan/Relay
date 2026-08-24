@@ -12,6 +12,13 @@ import { AccountExplanationModal } from './components/common/AccountExplanationM
 import { ProcessedPipelineResult, Meeting, RelayAccount, RelayProfile, DeveloperSettings, AppSettings } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import {
+  isPermissionGranted,
+  requestPermission,
+  registerActionTypes,
+  onAction,
+} from '@tauri-apps/plugin-notification';
 import { NativeSidebar } from './components/common/NativeSidebar';
 import {
   Mic,
@@ -76,7 +83,61 @@ export const App: React.FC = () => {
   useEffect(() => {
     refreshAccountAndSettings();
 
-    // 1. Listen for backend Tauri account & profile events
+    // 1. Setup Native OS Notification Actions & Listener
+    const setupNotifications = async () => {
+      try {
+        let granted = await isPermissionGranted();
+        if (!granted) {
+          const permission = await requestPermission();
+          granted = permission === 'granted';
+        }
+
+        await registerActionTypes([
+          {
+            id: 'meeting-reminder',
+            actions: [
+              { id: 'record', title: '▶ Record' },
+              { id: 'snooze_5', title: '◷ Snooze 5m' },
+              { id: 'snooze_15', title: '◷ Snooze 15m' },
+              { id: 'dismiss', title: 'Dismiss' },
+            ],
+          },
+        ]);
+      } catch (err) {
+        console.warn('Failed to register notification action types:', err);
+      }
+    };
+
+    setupNotifications();
+
+    const unlistenNotificationAction = onAction((notification: any) => {
+      const rawId = String(notification?.id || notification?.extra?.meeting_id || '');
+      const actionId = notification?.actionId;
+      const idParts = rawId.split('::');
+
+      if (idParts && idParts[0] === 'meeting' && idParts[1]) {
+        const meetingId = idParts[1];
+        const kind = idParts[2] || 'upcoming';
+
+        if (actionId === 'record') {
+          invoke('start_meeting_recording', { meetingId }).catch(console.error);
+        } else if (actionId?.startsWith('snooze_')) {
+          const minutes = parseInt(actionId.replace('snooze_', ''), 10) || 5;
+          invoke('snooze_meeting_reminder', { meetingId, kind, minutes }).catch(console.error);
+        } else if (actionId === 'dismiss') {
+          invoke('dismiss_meeting_reminder', { meetingId, kind }).catch(console.error);
+        } else {
+          // Body click / default action — focus main window and switch to Meetings tab
+          getCurrentWindow().unminimize().catch(() => {});
+          getCurrentWindow().show().catch(() => {});
+          getCurrentWindow().setFocus().catch(() => {});
+          setActiveTab('meetings');
+          setFocusedMeetingId(meetingId);
+        }
+      }
+    });
+
+    // 2. Listen for backend Tauri account & profile events
     const unlistenAccount = listen<RelayAccount>('account-changed', (event) => {
       if (event.payload) {
         setAccount(event.payload);
@@ -89,7 +150,7 @@ export const App: React.FC = () => {
       }
     });
 
-    // 2. Listen for DOM custom events
+    // 3. Listen for DOM custom events
     const handleDomAccountChange = (e: Event) => {
       const customEvent = e as CustomEvent<RelayAccount>;
       if (customEvent.detail) {
@@ -106,10 +167,6 @@ export const App: React.FC = () => {
     window.addEventListener('relay-account-changed', handleDomAccountChange);
     window.addEventListener('relay-profile-changed', handleDomProfileChange);
 
-    // Carries the meeting ID now (Decision 45, Broken #3c) — previously
-    // emitted with an empty payload this handler ignored, so a reminder's
-    // "Start Recording" only ever switched tabs without opening the
-    // meeting it was actually about.
     const unlistenTabSwitch = listen<string>('switch-to-meetings-tab', (event) => {
       setActiveTab('meetings');
       if (event.payload) {
@@ -117,10 +174,6 @@ export const App: React.FC = () => {
       }
     });
 
-    // The tray's "Start Recording" item (see lib.rs) resolves to whichever
-    // meeting the reminder popup is currently showing and asks this window
-    // to start it — going through the same command every other entry
-    // point uses, rather than a second, parallel recording path.
     const unlistenTrayRecord = listen<string>('start-meeting-recording-for', (event) => {
       if (event.payload) {
         invoke('start_meeting_recording', { meetingId: event.payload }).catch(console.error);
@@ -132,6 +185,11 @@ export const App: React.FC = () => {
       unlistenProfile.then((unlisten) => unlisten());
       unlistenTabSwitch.then((unlisten) => unlisten());
       unlistenTrayRecord.then((unlisten) => unlisten());
+      unlistenNotificationAction.then((listener) => {
+        if (typeof listener?.unregister === 'function') {
+          listener.unregister();
+        }
+      });
       window.removeEventListener('relay-account-changed', handleDomAccountChange);
       window.removeEventListener('relay-profile-changed', handleDomProfileChange);
     };
