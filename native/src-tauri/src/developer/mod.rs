@@ -8,6 +8,20 @@ fn get_dev_settings_path(config_dir: &Path) -> PathBuf {
     config_dir.join(DEV_SETTINGS_FILE)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum NotificationSurfaceMode {
+    System,
+    Tauri,
+    Both,
+}
+
+impl Default for NotificationSurfaceMode {
+    fn default() -> Self {
+        Self::Both
+    }
+}
+
 /// Developer-only settings (testing & debugging overrides).
 ///
 /// Removability Invariant:
@@ -20,6 +34,9 @@ pub struct DeveloperSettings {
     /// without deleting or resetting user data, vault notes, or OAuth tokens.
     #[serde(default)]
     pub force_onboarding_on_launch: bool,
+    /// Surface mode for meeting notifications (System OS toast only, Tauri overlay only, or Both).
+    #[serde(default)]
+    pub notification_surface_mode: NotificationSurfaceMode,
 }
 
 pub fn load_developer_settings(config_dir: &Path) -> DeveloperSettings {
@@ -53,6 +70,16 @@ pub fn set_force_onboarding(config_dir: &Path, force: bool) -> Result<DeveloperS
     Ok(settings)
 }
 
+pub fn set_notification_surface_mode(
+    config_dir: &Path,
+    mode: NotificationSurfaceMode,
+) -> Result<DeveloperSettings, String> {
+    let mut settings = load_developer_settings(config_dir);
+    settings.notification_surface_mode = mode;
+    save_developer_settings(config_dir, &settings)?;
+    Ok(settings)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,6 +103,19 @@ mod tests {
         // 3. Set back to false
         let toggled_off = set_force_onboarding(&temp_dir, false).expect("Should toggle off");
         assert!(!toggled_off.force_onboarding_on_launch);
+
+        // 4. Test Notification Surface Mode
+        assert_eq!(initial.notification_surface_mode, NotificationSurfaceMode::Both);
+        let mode_system = set_notification_surface_mode(&temp_dir, NotificationSurfaceMode::System)
+            .expect("Should save system surface mode");
+        assert_eq!(mode_system.notification_surface_mode, NotificationSurfaceMode::System);
+
+        let reloaded_mode = load_developer_settings(&temp_dir);
+        assert_eq!(reloaded_mode.notification_surface_mode, NotificationSurfaceMode::System);
+
+        let mode_tauri = set_notification_surface_mode(&temp_dir, NotificationSurfaceMode::Tauri)
+            .expect("Should save tauri surface mode");
+        assert_eq!(mode_tauri.notification_surface_mode, NotificationSurfaceMode::Tauri);
 
         let _ = fs::remove_dir_all(temp_dir);
     }

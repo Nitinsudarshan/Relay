@@ -509,11 +509,11 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
             <div className="space-y-2">
               <div className="relative">
                 <div
-                  className={`p-4 rounded-lg bg-muted/20 border border-border font-sans text-xs text-foreground whitespace-pre-wrap leading-relaxed transition-all duration-300 ${
+                  className={`p-4 rounded-lg bg-muted/20 border border-border font-sans text-xs text-foreground leading-relaxed transition-all duration-300 ${
                     !isContentExpanded ? 'max-h-52 overflow-hidden' : ''
                   }`}
                 >
-                  {scribble.content}
+                  <MarkdownView content={scribble.content} />
                 </div>
 
                 {!isContentExpanded && (
@@ -546,8 +546,8 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
               )}
             </div>
           ) : (
-            <div className="p-4 rounded-lg bg-muted/20 border border-border font-sans text-xs text-foreground whitespace-pre-wrap leading-relaxed">
-              {scribble.content}
+            <div className="p-4 rounded-lg bg-muted/20 border border-border font-sans text-xs text-foreground leading-relaxed">
+              <MarkdownView content={scribble.content} />
             </div>
           )}
         </div>

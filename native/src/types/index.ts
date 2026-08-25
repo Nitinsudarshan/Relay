@@ -291,8 +291,11 @@ export interface RelayProfile {
   updated_at: string;
 }
 
+export type NotificationSurfaceMode = 'system' | 'tauri' | 'both';
+
 export interface DeveloperSettings {
   force_onboarding_on_launch: boolean;
+  notification_surface_mode: NotificationSurfaceMode;
 }
 
 export interface InstallationInfo {
@@ -546,6 +549,16 @@ export interface MeetingReminderEvent {
   participants: string[];
   fire_at: string;
   status: ReminderState;
+}
+
+export interface MeetingReminderPayload {
+  meeting_id: string;
+  kind: ReminderKind;
+  title: string;
+  provider: string;
+  provider_name: string;
+  time_label: string;
+  participants: string[];
 }
 
 export interface MeetingListItem {

@@ -1498,6 +1498,9 @@ pub async fn start_meeting_recording(
         // list, the popup, and the tray from disagreeing about whether a
         // meeting has been "seen" (Decision 45, Refactor #1 / Improve #5).
         crate::meetings::reminders::mark_meeting_actioned(&reminders, &meeting_id);
+        if let Some(ns) = app.try_state::<std::sync::Arc<crate::meetings::NotificationService>>() {
+            ns.dismiss_overlay(&app);
+        }
 
         // Bringing the main window to this meeting is enforced here, once,
         // rather than duplicated in every caller (the list, the popup, the
@@ -1709,27 +1712,57 @@ pub async fn get_upcoming_calendar_events(
 /// (Decision 45, Broken #2: reminders are a queue, not a single slot).
 #[tauri::command]
 pub async fn dismiss_meeting_reminder(
+    app: AppHandle,
     meeting_id: String,
     kind: crate::meetings::reminders::ReminderKind,
     reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
+    notification_service: State<'_, std::sync::Arc<crate::meetings::NotificationService>>,
 ) -> Result<(), CommandError> {
     crate::meetings::reminders::dismiss(&reminders, &meeting_id, kind);
+    notification_service.dismiss_overlay(&app);
     Ok(())
 }
 
-/// "Remind me in 5 minutes" — the one snooze action the popup offers
-/// (Decision 45, Improve #1). `minutes` is accepted rather than hardcoded
-/// so the frontend owns the exact copy/duration without a backend change,
-/// but the popup itself only ever offers one duration, per
-/// `meetings_implementation.md`'s "stay simple" constraint.
+/// "Remind me in 5 minutes" (or custom minutes) — dismisses overlay and schedules snooze
 #[tauri::command]
 pub async fn snooze_meeting_reminder(
+    app: AppHandle,
     meeting_id: String,
     kind: crate::meetings::reminders::ReminderKind,
     minutes: i64,
     reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
+    notification_service: State<'_, std::sync::Arc<crate::meetings::NotificationService>>,
 ) -> Result<(), CommandError> {
     crate::meetings::reminders::snooze(&reminders, &meeting_id, kind, minutes);
+    notification_service.dismiss_overlay(&app);
+    Ok(())
+}
+
+/// Retrieves the pending meeting reminder payload for the overlay window.
+#[tauri::command]
+pub async fn get_pending_meeting_reminder(
+    notification_service: State<'_, std::sync::Arc<crate::meetings::NotificationService>>,
+) -> Result<Option<crate::meetings::MeetingReminderPayload>, CommandError> {
+    Ok(notification_service.get_pending_reminder())
+}
+
+/// Signals from the meeting reminder overlay window that it is mounted and ready.
+#[tauri::command]
+pub async fn meeting_reminder_ready(
+    app: AppHandle,
+    notification_service: State<'_, std::sync::Arc<crate::meetings::NotificationService>>,
+) -> Result<(), CommandError> {
+    notification_service.on_frontend_ready(&app);
+    Ok(())
+}
+
+/// Notifies the backend notification service of hover enter/leave on the reminder overlay.
+#[tauri::command]
+pub async fn meeting_reminder_hover_changed(
+    hovered: bool,
+    notification_service: State<'_, std::sync::Arc<crate::meetings::NotificationService>>,
+) -> Result<(), CommandError> {
+    notification_service.on_hover_changed(hovered);
     Ok(())
 }
 
@@ -1795,6 +1828,7 @@ pub async fn trigger_mock_meeting_reminder(
     kind: crate::meetings::reminders::ReminderKind,
     state: State<'_, AppState>,
     reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
+    notification_service: State<'_, std::sync::Arc<crate::meetings::NotificationService>>,
 ) -> Result<(), CommandError> {
     use crate::meetings::reminders::ReminderKind;
 
@@ -1823,7 +1857,14 @@ pub async fn trigger_mock_meeting_reminder(
     };
 
     crate::meetings::reminders::inject_mock_reminder(&reminders, &meeting, kind);
-    crate::meetings::engine::dispatch_native_reminder_notification(&app, &entry);
+    let settings = state.settings.lock().unwrap().clone();
+    notification_service.show_reminder(
+        &app,
+        &entry,
+        state.recorder.is_active(),
+        None,
+        &settings.meetings,
+    );
     Ok(())
 }
 
@@ -1884,6 +1925,15 @@ pub async fn set_developer_force_onboarding(
     state: State<'_, AppState>,
 ) -> Result<crate::developer::DeveloperSettings, CommandError> {
     crate::developer::set_force_onboarding(&state.config_dir, enabled)
+        .map_err(|e| CommandError::new("DEV_SETTINGS_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn set_developer_notification_surface_mode(
+    mode: crate::developer::NotificationSurfaceMode,
+    state: State<'_, AppState>,
+) -> Result<crate::developer::DeveloperSettings, CommandError> {
+    crate::developer::set_notification_surface_mode(&state.config_dir, mode)
         .map_err(|e| CommandError::new("DEV_SETTINGS_FAILED", &e))
 }
 

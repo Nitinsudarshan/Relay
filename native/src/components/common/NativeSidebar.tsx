@@ -92,13 +92,6 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {
-      id: 'components-meeting-notifications' as TabType,
-      label: 'Meeting Notifications',
-      icon: Bell,
-      color: 'text-purple-500',
-      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-    },
-    {
       id: 'scribble' as TabType,
       label: 'Scribbles',
       icon: Sparkles,

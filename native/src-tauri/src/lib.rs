@@ -156,6 +156,8 @@ pub fn run() {
             // more docked/floating product-mode choice to hide it behind
             // (see docs/decisions.md Decision 36) — so it's always shown.
             overlay::ensure_pill_window(handle, true, pill_position);
+            // Create the meeting reminder overlay once, hidden, at startup
+            overlay::ensure_reminder_window(handle);
 
             crate::meetings::engine::start(handle.clone());
             Ok(())
@@ -224,6 +226,9 @@ pub fn run() {
             commands::import_calendar_event,
             commands::dismiss_meeting_reminder,
             commands::snooze_meeting_reminder,
+            commands::get_pending_meeting_reminder,
+            commands::meeting_reminder_ready,
+            commands::meeting_reminder_hover_changed,
             commands::get_current_meeting_reminder,
             commands::trigger_mock_meeting_reminder,
             commands::get_active_recording_meeting_id,
@@ -237,6 +242,7 @@ pub fn run() {
             commands::complete_profile_onboarding,
             commands::get_developer_settings,
             commands::set_developer_force_onboarding,
+            commands::set_developer_notification_surface_mode,
             commands::get_account_state,
             commands::start_google_sign_in,
             commands::sign_out_account,

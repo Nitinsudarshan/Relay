@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
 import { AppSettings, LanguageSettings, VaultLocationInfo, RelayAccount, CalendarConnectionStatus } from '../../types';
 import {
   Cpu,
@@ -248,6 +249,26 @@ export const ProviderSettings: React.FC = () => {
   });
   const [calendarBusy, setCalendarBusy] = useState(false);
   const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [notificationPermissionGranted, setNotificationPermissionGranted] = useState<boolean | null>(null);
+
+  const checkNotificationPermission = async () => {
+    try {
+      const granted = await isPermissionGranted();
+      setNotificationPermissionGranted(granted);
+    } catch (e) {
+      console.warn('Could not check notification permission:', e);
+      setNotificationPermissionGranted(false);
+    }
+  };
+
+  const handleRequestNotificationPermission = async () => {
+    try {
+      const permission = await requestPermission();
+      setNotificationPermissionGranted(permission === 'granted');
+    } catch (e) {
+      console.warn('Could not request notification permission:', e);
+    }
+  };
 
   const loadCalendarState = async () => {
     try {
@@ -411,6 +432,7 @@ export const ProviderSettings: React.FC = () => {
   useEffect(() => {
     if (!loading && activeSection === 'meetings') {
       loadCalendarState();
+      checkNotificationPermission();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, activeSection]);
@@ -1198,8 +1220,33 @@ export const ProviderSettings: React.FC = () => {
               <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
                 CALENDAR & MEETINGS
               </p>
+              <p className="text-xs text-muted-foreground">
+                Relay integrates with Google Calendar and monitors active window titles to automatically prepare meeting notes and record transcripts.
+              </p>
               <h2 className="text-lg font-bold text-foreground">Google Calendar Integration & Meeting Capture</h2>
             </div>
+
+            {/* Notification Permission Warning */}
+            {notificationPermissionGranted === false && (
+              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-3 shadow-xs">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                <div className="space-y-1.5 flex-1">
+                  <p className="font-semibold text-foreground">Windows OS Notifications are Disabled</p>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Native Windows OS notifications are required for meeting reminders to reach you. Please ensure notifications are enabled for Relay under <strong>Windows Settings → System → Notifications</strong>.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRequestNotificationPermission}
+                    className="text-[11px] h-7 px-2.5 mt-1 border-amber-500/40 hover:bg-amber-500/10"
+                  >
+                    Request Notification Permission
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* Google Calendar Sync Card */}
             <div className="p-4 rounded-xl border border-border bg-card space-y-4 shadow-xs">

@@ -158,6 +158,88 @@ fn compute_anchor(app: &AppHandle, size: (f64, f64), position: PillPosition) -> 
     Some((x, y))
 }
 
+pub const REMINDER_WINDOW_LABEL: &str = "meeting-reminder";
+pub const REMINDER_SIZE: (f64, f64) = (420.0, 140.0);
+pub const REMINDER_MARGIN: f64 = 16.0;
+
+/// Creates the meeting reminder overlay window at startup in a hidden state.
+/// Idempotent: if already created, does nothing.
+pub fn ensure_reminder_window(app: &AppHandle) {
+    if app.get_webview_window(REMINDER_WINDOW_LABEL).is_some() {
+        return;
+    }
+
+    let mut builder = WebviewWindowBuilder::new(
+        app,
+        REMINDER_WINDOW_LABEL,
+        WebviewUrl::App("index.html#/meeting-reminder".into()),
+    )
+    .title("Relay — Meeting Reminder")
+    .inner_size(REMINDER_SIZE.0, REMINDER_SIZE.1)
+    .resizable(false)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .transparent(true)
+    .shadow(false)
+    .visible(false)
+    .focused(false)
+    .content_protected(true);
+
+    if let Some((x, y)) = compute_reminder_anchor(app) {
+        builder = builder.position(x, y);
+    }
+
+    if let Err(e) = builder.build() {
+        tracing::error!("Failed to create meeting reminder window: {}", e);
+    }
+}
+
+/// Shows the meeting reminder overlay window, repositioning it at top-right of
+/// the active monitor's work area.
+pub fn show_reminder_window(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(REMINDER_WINDOW_LABEL) else {
+        ensure_reminder_window(app);
+        if let Some(window) = app.get_webview_window(REMINDER_WINDOW_LABEL) {
+            reposition_reminder_window(app, &window);
+            let _ = window.show();
+        }
+        return;
+    };
+    reposition_reminder_window(app, &window);
+    let _ = window.show();
+}
+
+/// Hides the meeting reminder overlay window.
+pub fn hide_reminder_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(REMINDER_WINDOW_LABEL) {
+        let _ = window.hide();
+    }
+}
+
+pub fn reposition_reminder_window(app: &AppHandle, window: &tauri::WebviewWindow) {
+    if let Some((x, y)) = compute_reminder_anchor(app) {
+        if let Err(e) = window.set_position(LogicalPosition::new(x, y)) {
+            tracing::warn!("Failed to reposition meeting reminder window: {}", e);
+        }
+    }
+}
+
+pub fn compute_reminder_anchor(app: &AppHandle) -> Option<(f64, f64)> {
+    let monitor = active_monitor(app)?;
+    let scale = monitor.scale_factor();
+    let work_area = monitor.work_area();
+
+    let wa_x = work_area.position.x as f64 / scale;
+    let wa_y = work_area.position.y as f64 / scale;
+    let wa_w = work_area.size.width as f64 / scale;
+
+    Some((
+        wa_x + wa_w - REMINDER_SIZE.0 - REMINDER_MARGIN,
+        wa_y + REMINDER_MARGIN,
+    ))
+}
+
 fn active_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
     if let Ok(cursor) = app.cursor_position() {
         if let Ok(Some(monitor)) = app.monitor_from_point(cursor.x, cursor.y) {

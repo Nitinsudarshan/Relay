@@ -16,8 +16,6 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   isPermissionGranted,
   requestPermission,
-  registerActionTypes,
-  onAction,
 } from '@tauri-apps/plugin-notification';
 import { NativeSidebar } from './components/common/NativeSidebar';
 import {
@@ -83,7 +81,10 @@ export const App: React.FC = () => {
   useEffect(() => {
     refreshAccountAndSettings();
 
-    // 1. Setup Native OS Notification Actions & Listener
+    // 1. Check Native OS Notification Permissions
+    // Note: On desktop (Windows), permission is granted unconditionally, and OS toasts
+    // are used as a display-only fallback signal. Interactive controls live in the
+    // app-owned meeting-reminder overlay window.
     const setupNotifications = async () => {
       try {
         let granted = await isPermissionGranted();
@@ -91,51 +92,13 @@ export const App: React.FC = () => {
           const permission = await requestPermission();
           granted = permission === 'granted';
         }
-
-        await registerActionTypes([
-          {
-            id: 'meeting-reminder',
-            actions: [
-              { id: 'record', title: '▶ Record' },
-              { id: 'snooze_5', title: '◷ Snooze 5m' },
-              { id: 'snooze_15', title: '◷ Snooze 15m' },
-              { id: 'dismiss', title: 'Dismiss' },
-            ],
-          },
-        ]);
+        console.info('[notifications] Native OS notification permission status:', granted ? 'granted' : 'denied');
       } catch (err) {
-        console.warn('Failed to register notification action types:', err);
+        console.error('[notifications] Failed to initialize notification permissions:', err);
       }
     };
 
     setupNotifications();
-
-    const unlistenNotificationAction = onAction((notification: any) => {
-      const rawId = String(notification?.id || notification?.extra?.meeting_id || '');
-      const actionId = notification?.actionId;
-      const idParts = rawId.split('::');
-
-      if (idParts && idParts[0] === 'meeting' && idParts[1]) {
-        const meetingId = idParts[1];
-        const kind = idParts[2] || 'upcoming';
-
-        if (actionId === 'record') {
-          invoke('start_meeting_recording', { meetingId }).catch(console.error);
-        } else if (actionId?.startsWith('snooze_')) {
-          const minutes = parseInt(actionId.replace('snooze_', ''), 10) || 5;
-          invoke('snooze_meeting_reminder', { meetingId, kind, minutes }).catch(console.error);
-        } else if (actionId === 'dismiss') {
-          invoke('dismiss_meeting_reminder', { meetingId, kind }).catch(console.error);
-        } else {
-          // Body click / default action — focus main window and switch to Meetings tab
-          getCurrentWindow().unminimize().catch(() => {});
-          getCurrentWindow().show().catch(() => {});
-          getCurrentWindow().setFocus().catch(() => {});
-          setActiveTab('meetings');
-          setFocusedMeetingId(meetingId);
-        }
-      }
-    });
 
     // 2. Listen for backend Tauri account & profile events
     const unlistenAccount = listen<RelayAccount>('account-changed', (event) => {
@@ -157,6 +120,7 @@ export const App: React.FC = () => {
         setAccount(customEvent.detail);
       }
     };
+
     const handleDomProfileChange = (e: Event) => {
       const customEvent = e as CustomEvent<RelayProfile>;
       if (customEvent.detail) {
@@ -185,11 +149,6 @@ export const App: React.FC = () => {
       unlistenProfile.then((unlisten) => unlisten());
       unlistenTabSwitch.then((unlisten) => unlisten());
       unlistenTrayRecord.then((unlisten) => unlisten());
-      unlistenNotificationAction.then((listener) => {
-        if (typeof listener?.unregister === 'function') {
-          listener.unregister();
-        }
-      });
       window.removeEventListener('relay-account-changed', handleDomAccountChange);
       window.removeEventListener('relay-profile-changed', handleDomProfileChange);
     };

@@ -82,7 +82,7 @@ pub fn clean_meeting_window_title(raw_title: &str, provider: &str) -> String {
         if title.ends_with(" - Google Meet") {
             title = title[..title.len() - " - Google Meet".len()].trim().to_string();
         }
-        if title.is_empty() || title == "Meet" {
+        if title.is_empty() || title == "Meet" || title == "Google Meet" {
             title = "Google Meet Session".to_string();
         }
     } else if provider == PROVIDER_ZOOM {

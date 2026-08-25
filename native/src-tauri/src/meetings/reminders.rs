@@ -58,23 +58,45 @@ pub struct ActiveMeetingRecording(pub Mutex<Option<String>>);
 /// How long a `Fired`/`Snoozed` reminder can go un-actioned before it's
 /// considered `Expired`.
 const EXPIRE_AFTER_MINUTES: i64 = 10;
-/// How long past a meeting's scheduled end an `Unrecorded` reminder is
-/// still worth actively resurfacing, rather than staying a passive badge.
-const ACTIONABLE_GRACE_MINUTES: i64 = 5;
 
 fn upcoming_fire_time(meeting: &Meeting, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     let start = meeting.scheduled_start.as_deref().and_then(parse_rfc3339)?;
     let diff = (start - now).num_seconds();
-    (diff > 0 && diff <= 90).then_some(now)
+    (diff > 0 && diff <= 120).then_some(now)
 }
 
-fn unrecorded_fire_time(meeting: &Meeting, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+fn unrecorded_fire_time(
+    meeting: &Meeting,
+    now: DateTime<Utc>,
+    active_windows: &[crate::meetings::WindowMatch],
+) -> Option<DateTime<Utc>> {
     if meeting.status == MEETING_STATUS_RECORDING {
         return None;
     }
+
+    // For video conferencing meetings (Google Meet, Zoom, Teams, Webex), verify
+    // that the call is actually currently running. If the user dropped off before
+    // the 5-minute trigger, suppress the unrecorded notification.
+    let is_video_meeting = matches!(
+        meeting.provider.to_lowercase().as_str(),
+        "google_meet" | "google meet" | "zoom" | "teams" | "webex"
+    );
+    if is_video_meeting {
+        let is_running = active_windows.iter().any(|w| {
+            w.provider.eq_ignore_ascii_case(&meeting.provider)
+        });
+        if !is_running {
+            tracing::debug!(
+                "[reminders] Unrecorded reminder skipped for '{}': conferencing window is not active",
+                meeting.title
+            );
+            return None;
+        }
+    }
+
     let start = meeting.scheduled_start.as_deref().and_then(parse_rfc3339)?;
     let diff = (now - start).num_seconds();
-    (diff >= 120 && diff <= 300).then_some(now)
+    (diff >= 300 && diff <= 420).then_some(now)
 }
 
 fn ensure_entry(entries: &mut Vec<ReminderEvent>, meeting: &Meeting, kind: ReminderKind, fire_at: DateTime<Utc>) {
@@ -92,20 +114,9 @@ fn ensure_entry(entries: &mut Vec<ReminderEvent>, meeting: &Meeting, kind: Remin
     });
 }
 
-/// Only an `Unrecorded` reminder for a meeting that hasn't reached its
-/// scheduled end (or ended only moments ago) is worth actively resurfacing
-/// once expired. An `Upcoming` or `Detected` reminder describes a moment
-/// that has definitionally passed by the time it would expire, so neither
-/// is ever resurfaced — showing "you missed a reminder" for something long
-/// over can land more annoying than not reminding at all.
-fn is_still_actionable(entry: &ReminderEvent, meeting: &Meeting, now: DateTime<Utc>) -> bool {
-    entry.kind == ReminderKind::Unrecorded
-        && meeting
-            .scheduled_end
-            .as_deref()
-            .and_then(parse_rfc3339)
-            .map(|end| (now - end).num_minutes() <= ACTIONABLE_GRACE_MINUTES)
-            .unwrap_or(false)
+/// User specification: Unrecorded reminders do not resurface once expired.
+fn is_still_actionable(_entry: &ReminderEvent, _meeting: &Meeting, _now: DateTime<Utc>) -> bool {
+    false
 }
 
 /// Reconciles the reminder queue against what should exist right now,
@@ -124,6 +135,7 @@ pub fn recompute_reminders(
     vault: &VaultManager,
     settings: &MeetingSettings,
     currently_recording_meeting_id: Option<&str>,
+    active_windows: &[crate::meetings::WindowMatch],
 ) -> (Vec<ReminderEvent>, Vec<ReminderEvent>) {
     let meetings = vault.list_meetings().unwrap_or_default();
     let now = Utc::now();
@@ -131,6 +143,10 @@ pub fn recompute_reminders(
 
     for meeting in meetings.iter().filter(|m| is_open(m)) {
         if currently_recording_meeting_id == Some(meeting.id.as_str()) {
+            tracing::debug!(
+                "[reminders] Reminder skipped: meeting '{}' is actively recording",
+                meeting.id
+            );
             continue;
         }
 
@@ -140,7 +156,7 @@ pub fn recompute_reminders(
             }
         }
         if settings.remind_if_unrecorded {
-            if let Some(fire_at) = unrecorded_fire_time(meeting, now) {
+            if let Some(fire_at) = unrecorded_fire_time(meeting, now, active_windows) {
                 ensure_entry(&mut entries, meeting, ReminderKind::Unrecorded, fire_at);
             }
         }
@@ -157,7 +173,19 @@ pub fn recompute_reminders(
 
         let due = match &entry.status {
             ReminderStatus::Pending => entry.fire_at <= now,
-            ReminderStatus::Snoozed { until } => *until <= now,
+            ReminderStatus::Snoozed { until } => {
+                if *until <= now {
+                    true
+                } else {
+                    tracing::debug!(
+                        "[reminders] Reminder suppressed (snoozed until {}): meeting '{}' ({:?})",
+                        until,
+                        entry.title,
+                        entry.kind
+                    );
+                    false
+                }
+            }
             _ => false,
         };
         if due {
@@ -171,12 +199,28 @@ pub fn recompute_reminders(
             if stale {
                 let meeting = meetings.iter().find(|m| m.id == entry.meeting_id);
                 let resurface = meeting.map(|m| is_still_actionable(entry, m, now)).unwrap_or(false);
-                entry.status = if resurface { ReminderStatus::Fired } else { ReminderStatus::Expired };
+                entry.status = if resurface {
+                    ReminderStatus::Fired
+                } else {
+                    tracing::info!(
+                        "[reminders] Reminder expired past {} minutes: meeting '{}' ({:?})",
+                        EXPIRE_AFTER_MINUTES,
+                        entry.title,
+                        entry.kind
+                    );
+                    ReminderStatus::Expired
+                };
             }
         }
 
         if !was_fired && matches!(entry.status, ReminderStatus::Fired) {
             newly_fired.push(entry.clone());
+        } else if was_fired && matches!(entry.status, ReminderStatus::Fired) {
+            tracing::debug!(
+                "[reminders] Reminder already fired, notification suppressed: meeting '{}' ({:?})",
+                entry.title,
+                entry.kind
+            );
         }
     }
 
@@ -284,7 +328,7 @@ mod tests {
         let m2 = meeting_starting_in(&vault, 60);
         let queue = ReminderQueue::default();
 
-        let (all, _) = recompute_reminders(&queue, &vault, &settings_all_on(), None);
+        let (all, _) = recompute_reminders(&queue, &vault, &settings_all_on(), None, &[]);
         let ids: HashSet<&str> = all.iter().map(|e| e.meeting_id.as_str()).collect();
         assert!(ids.contains(m1.id.as_str()));
         assert!(ids.contains(m2.id.as_str()));
@@ -294,27 +338,53 @@ mod tests {
     #[test]
     fn test_reminder_fires_within_window_and_stays_fired() {
         let vault = temp_vault();
-        let m = meeting_starting_in(&vault, 30);
+        let m = meeting_starting_in(&vault, 100); // within 120s window
         let queue = ReminderQueue::default();
 
-        let (all, newly_fired) = recompute_reminders(&queue, &vault, &settings_all_on(), None);
+        let (all, newly_fired) = recompute_reminders(&queue, &vault, &settings_all_on(), None, &[]);
         let entry = all.iter().find(|e| e.meeting_id == m.id).unwrap();
         assert!(matches!(entry.status, ReminderStatus::Fired));
         assert_eq!(newly_fired.len(), 1);
 
         // A second recompute while still due must not re-fire it again.
-        let (_, newly_fired_again) = recompute_reminders(&queue, &vault, &settings_all_on(), None);
+        let (_, newly_fired_again) = recompute_reminders(&queue, &vault, &settings_all_on(), None, &[]);
         assert_eq!(newly_fired_again.len(), 0);
+    }
+
+    #[test]
+    fn test_unrecorded_meeting_requires_active_conferencing_window() {
+        let vault = temp_vault();
+        let m = meeting_starting_in(&vault, -320); // 320 seconds ago (in 5m window)
+        let queue = ReminderQueue::default();
+
+        // 1. Without active conferencing window (e.g. user dropped off) -> NO reminder
+        let (all_without_window, newly_fired_without) =
+            recompute_reminders(&queue, &vault, &settings_all_on(), None, &[]);
+        assert!(all_without_window.iter().all(|e| e.kind != ReminderKind::Unrecorded));
+        assert_eq!(newly_fired_without.len(), 0);
+
+        // 2. With active Zoom window running -> Reminder fires
+        let active_windows = vec![crate::meetings::WindowMatch {
+            provider: PROVIDER_ZOOM.to_string(),
+            title: "Standup".to_string(),
+            raw_title: "Standup - Zoom".to_string(),
+            source: "window_detector".to_string(),
+            confidence: 0.85,
+        }];
+        let (all_with_window, newly_fired_with) =
+            recompute_reminders(&queue, &vault, &settings_all_on(), None, &active_windows);
+        assert!(all_with_window.iter().any(|e| e.meeting_id == m.id && e.kind == ReminderKind::Unrecorded));
+        assert_eq!(newly_fired_with.len(), 1);
     }
 
     #[test]
     fn test_per_meeting_recording_gate() {
         let vault = temp_vault();
-        let recording = meeting_starting_in(&vault, -150); // in the unrecorded window
-        let other = meeting_starting_in(&vault, -150);
+        let recording = meeting_starting_in(&vault, 30);
+        let other = meeting_starting_in(&vault, 30);
         let queue = ReminderQueue::default();
 
-        let (all, _) = recompute_reminders(&queue, &vault, &settings_all_on(), Some(recording.id.as_str()));
+        let (all, _) = recompute_reminders(&queue, &vault, &settings_all_on(), Some(recording.id.as_str()), &[]);
         assert!(all.iter().all(|e| e.meeting_id != recording.id));
         assert!(all.iter().any(|e| e.meeting_id == other.id));
     }
@@ -324,7 +394,7 @@ mod tests {
         let vault = temp_vault();
         let m = meeting_starting_in(&vault, 30);
         let queue = ReminderQueue::default();
-        recompute_reminders(&queue, &vault, &settings_all_on(), None);
+        recompute_reminders(&queue, &vault, &settings_all_on(), None, &[]);
 
         dismiss(&queue, &m.id, ReminderKind::Upcoming);
         let current = queue.0.lock().unwrap();
@@ -337,7 +407,7 @@ mod tests {
         let vault = temp_vault();
         let m = meeting_starting_in(&vault, 30);
         let queue = ReminderQueue::default();
-        recompute_reminders(&queue, &vault, &settings_all_on(), None);
+        recompute_reminders(&queue, &vault, &settings_all_on(), None, &[]);
 
         mark_meeting_actioned(&queue, &m.id);
         let current = queue.0.lock().unwrap();

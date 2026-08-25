@@ -31,7 +31,48 @@ function verifyVersionAndChangelog() {
     process.exit(1);
   }
 
-  console.log(`✅ Version & Changelog verified: v${version}`);
+  // Verify tauri.conf.json version consistency
+  const tauriConfPath = path.join(rootDir, 'native', 'src-tauri', 'tauri.conf.json');
+  if (fs.existsSync(tauriConfPath)) {
+    const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf8'));
+    if (tauriConf.version !== version) {
+      console.error(`❌ ERROR: Version mismatch in native/src-tauri/tauri.conf.json (found "${tauriConf.version}", expected "${version}").`);
+      process.exit(1);
+    }
+  }
+
+  // Verify native/package.json version consistency
+  const nativePkgPath = path.join(rootDir, 'native', 'package.json');
+  if (fs.existsSync(nativePkgPath)) {
+    const nativePkg = JSON.parse(fs.readFileSync(nativePkgPath, 'utf8'));
+    if (nativePkg.version !== version) {
+      console.error(`❌ ERROR: Version mismatch in native/package.json (found "${nativePkg.version}", expected "${version}").`);
+      process.exit(1);
+    }
+  }
+
+  // Verify root package.json version consistency
+  const rootPkgPath = path.join(rootDir, 'package.json');
+  if (fs.existsSync(rootPkgPath)) {
+    const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'));
+    if (rootPkg.version !== version) {
+      console.error(`❌ ERROR: Version mismatch in root package.json (found "${rootPkg.version}", expected "${version}").`);
+      process.exit(1);
+    }
+  }
+
+  // Verify native/src-tauri/Cargo.toml version consistency
+  const cargoTomlPath = path.join(rootDir, 'native', 'src-tauri', 'Cargo.toml');
+  if (fs.existsSync(cargoTomlPath)) {
+    const cargoToml = fs.readFileSync(cargoTomlPath, 'utf8');
+    const match = cargoToml.match(/\[package\][\s\S]*?version\s*=\s*"([^"]+)"/);
+    if (!match || match[1] !== version) {
+      console.error(`❌ ERROR: Version mismatch in native/src-tauri/Cargo.toml (found "${match ? match[1] : 'unknown'}", expected "${version}").`);
+      process.exit(1);
+    }
+  }
+
+  console.log(`✅ Version & Changelog verified across all manifests: v${version}`);
 }
 
 function verifyReadme() {

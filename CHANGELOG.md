@@ -1,5 +1,51 @@
 # Relay — Changelog
 
+## [0.10.0] - 2026-08-25
+
+### App-Owned Overlay Meeting Reminder Window & Native Toast Demotion (Reversal of Decision 46)
+
+- **Reversal of Decision 46 & Desktop Toast Limitation Root Cause**:
+  - Reverses Decision 46. On Windows desktop, `tauri-plugin-notification` 2.x desktop implementation maps only `title`, `body`, and `icon`, silently discarding `.action_type_id()` and `.id()`. `register_action_types` and interactive action callbacks are mobile-only in the desktop plugin and cannot execute on Windows.
+  - Demoted the native Windows OS toast notification to a display-only fallback signal and restored the app-owned desktop floating overlay window (`meeting-reminder`) as the primary interactive surface.
+- **Create-Once-and-Hide Overlay Lifecycle (`overlay.rs`, `lib.rs`)**:
+  - Created the `meeting-reminder` window at startup in a hidden state (`visible: false`), reusing it across reminder cycles to eliminate creation-race loops, re-show loops, and initial DWM flash.
+  - Configured window with `decorations(false)`, `transparent(true)`, `shadow(false)`, `always_on_top(true)`, `skip_taskbar(true)`, `resizable(false)`, `focused(false)`, and `content_protected(true)`.
+  - Added screen-share and recording protection (`content_protected(true)`) to prevent reminder cards from appearing in meeting recordings or active screen shares.
+- **Show Protocol & Readiness Handshake (`notification_service.rs`, `MeetingReminderWindow.tsx`)**:
+  - Implemented two-way show protocol: Rust stages pending sanitized reminder data, frontend overlay mounts and subscribes to events while simultaneously pulling pending data via `get_pending_meeting_reminder`, then signals readiness via `meeting_reminder_ready`.
+  - Added a 3000ms safety fallback timer in Rust: if the frontend fails to signal ready within 3 seconds, the overlay is force-shown and logged.
+- **Auto-Dismiss Countdown with Hover Pause (`notification_service.rs`)**:
+  - Auto-dismiss countdown calibrated per source (30s for detected meetings, 60s for calendar meetings).
+  - Hovering pauses countdown; mouse leave resumes with `MIN_RESUME_MS` (5000ms) safety floor to prevent expiration mid-action.
+- **Security, Title Clamping & Permission Isolation (`capabilities/meeting-reminder.json`, `notification_service.rs`)**:
+  - Created isolated capability `meeting-reminder.json` strictly granting `["core:default", "core:event:default"]` to the `meeting-reminder` window with zero filesystem, shell, or HTTP access.
+  - Added text sanitization and clamping (`sanitize_and_clamp_text`) stripping control characters, bidirectional override Unicode codepoints, and capping title/body lengths.
+  - Guaranteed all frontend meeting title rendering uses text nodes (zero `dangerouslySetInnerHTML`).
+- **Cleaned Dead OS Action Code & Fixed Toast Title Normalization (`App.tsx`, `detection.rs`, `engine.rs`)**:
+  - Removed dead `registerActionTypes` and `onAction` action parsing in `App.tsx`.
+  - Normalized generic window titles (e.g. `Google Meet` -> `Google Meet Session`) and fixed toast formatting to eliminate duplicate provider strings.
+
+## [0.9.5] - 2026-08-24
+
+### Native OS Notification Delivery, Payload Symmetry & Manifest Version Alignment
+
+- **Tauri Notification Capability Grant (`capabilities/default.json`)**:
+  - Added `"notification:default"` permission to `capabilities/default.json` for windows `["main", "dictation-pill"]`, granting the frontend window access to `@tauri-apps/plugin-notification` APIs (`isPermissionGranted()`, `requestPermission()`, `registerActionTypes()`, and `onAction()`).
+- **Notification Payload Symmetry & Robust Action Routing (`engine.rs`, `App.tsx`)**:
+  - Maintained `i32` numeric hashing for OS toast deduplication and toast replacement in `engine.rs` (`.id(notif_id)`).
+  - Attached structured `extra` payload fields (`meeting_id` and `kind`) in Rust reminder notifications.
+  - Updated `App.tsx` `onAction` handler to symmetrically inspect `notification.extra` as well as direct properties and delimited strings.
+  - Linked counterpart file documentation across `native/src-tauri/src/meetings/engine.rs` and `native/src/App.tsx`.
+- **Silent Failure Elimination & In-App Notification Permission Guard (`App.tsx`, `ProviderSettings.tsx`)**:
+  - Replaced silent warning suppression in `setupNotifications()` with structured console diagnostics logging permission status and registration outcomes.
+  - Added notification permission status check and persistent warning banner under **Settings → Meetings & Calendar** if OS notifications are denied or disabled.
+- **End-to-End Diagnostic Tracing (`engine.rs`, `reminders.rs`, `App.tsx`)**:
+  - Added `tracing` log events in `reminders.rs` and `engine.rs` when reminders are suppressed (snoozed, already fired, expired past timeout, or actively recording).
+  - Added logging of raw notification payloads upon `onAction` events in `App.tsx`.
+- **Repository Manifest Version Synchronization & Automated Validation (`VERSION`, `tauri.conf.json`, `package.json`, `Cargo.toml`, `verify-commit-rules.js`)**:
+  - Synchronized version string `0.9.5` across `VERSION`, `native/src-tauri/tauri.conf.json`, `native/src-tauri/Cargo.toml`, `native/package.json`, and root `package.json`.
+  - Extended `scripts/verify-commit-rules.js` to strictly enforce version consistency across all project manifests on pre-commit and pre-push.
+
 ## [0.9.4] - 2026-08-24
 
 ### Permanent Removal of Tauri Meeting Reminder Container & Single-Surface Native OS Notifications

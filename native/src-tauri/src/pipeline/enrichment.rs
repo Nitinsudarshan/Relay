@@ -41,7 +41,11 @@ Analyze this thought/scribble (which may be a new note, voice capture, or consol
 
 Return ONLY a valid JSON object with the following fields:
 - "title": a short, sharp, meaningful concept title (3 to 8 words). Never return placeholder prefixes like "Synthesis: Generating title…", brackets, or "Untitled". Derive a clean, insightful title describing the core subject matter (e.g. 'Event Pipeline Architecture' or 'Quarterly Revenue Strategy').
-- "summary": a structured, short summary (under 75 words total) optimized for rapid reading. Use 2-3 concise bullet points with bold lead-ins (e.g. "- **Core Idea:** ...\n- **Next Action:** ..."). If the thought describes a workflow, state transitions, or relationships, include a concise 2-4 node Mermaid flowchart (e.g. "```mermaid\ngraph LR\nA[Capture] --> B[Enrich] --> C[Graph]\n```").
+- "summary": a structured, short summary (under 75 words total) optimized for rapid reading and visual hierarchy.
+  Formatting Rules:
+  1. Use structured numbered sections (e.g. "1. **Core Insight:** ..." or "1. **Architecture:**") with sub-bullets indented with 2-4 spaces (e.g. "   - Detailed action or context...").
+  2. Use bold lead-ins for key terms and actionable takeaways.
+  3. If the thought describes a workflow, state transitions, or system architecture, ALWAYS include a concise 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Capture] --> B[Enrich] --> C[Graph]\n```").
 - "topics": an array of 2-5 high-level domain topics (e.g. ["Knowledge Management", "Architecture", "Audio Processing"])
 - "entities": an array of specific named entities (people, technologies, products, organizations, projects)
 - "concepts": an array of notable concepts or ideas
@@ -254,15 +258,19 @@ pub async fn summarize_scribble(
 
     let system_prompt = r#"
 You are Relay's Knowledge & Thinking Assistant.
-Summarize this thought/scribble concisely and structure it for rapid comprehension and high readability.
+Summarize this thought/scribble concisely and structure it for rapid comprehension, clean hierarchy, and high readability.
 
-Formatting Rules:
+Formatting & Hierarchy Rules:
 - Keep it short and impactful (under 75 words total).
-- Use 2-3 structured bullet points with bold lead-ins (e.g. "- **Core Insight:** ..." or "1. **Context:** ...").
-- If the thought involves workflows, sequential steps, or component relationships, include a compact 2-4 node Mermaid diagram:
+- Clear hierarchy:
+  1. Use bold numbered items for main takeaways (e.g. "1. **Core Insight:** ...").
+  2. Sub-bullets under numbered headers MUST be indented with 2-4 spaces (e.g. "   - Key detail or context...").
+  3. Bold key takeaways and terms for rapid scanning.
+- Flowcharts & Diagrams:
+  If the thought involves workflows, sequential steps, or component relationships, include a compact 2-4 node Mermaid diagram:
 ```mermaid
 graph LR
-A[Input] --> B[Process] --> C[Result]
+  A[Input] --> B[Process] --> C[Result]
 ```
 - Return ONLY the clean markdown summary text without conversational preamble.
 "#;
@@ -329,7 +337,7 @@ You are Relay's Executive Meeting Intelligence Assistant.
 Analyze this meeting record (notes and transcript) and derive structured meeting intelligence.
 
 Return ONLY a valid JSON object with the following fields:
-- "summary": a crisp executive summary (2-3 concise bullet points with bold lead-ins). If the discussion involves a workflow or process, you may include a compact 2-4 node Mermaid diagram.
+- "summary": a crisp executive summary (2-3 structured points with bold lead-ins and indented sub-bullets). If the discussion involves a workflow or process, include a compact 2-4 node Mermaid diagram wrapped in ```mermaid ... ```.
 - "decisions": an array of explicit decisions agreed upon during the meeting (e.g. ["Deploy v0.8.3 to staging on Tuesday", "Keep local-only storage as default"]).
 - "action_items": an array of tasks with structure:
   [

@@ -3,8 +3,11 @@ use serde::{Deserialize, Serialize};
 pub mod calendar;
 pub mod detection;
 pub mod engine;
+pub mod notification_service;
 pub mod reminders;
 pub mod resolver;
+
+pub use notification_service::{MeetingReminderPayload, NotificationService};
 
 pub use detection::{
     clean_meeting_window_title, detect_active_conferencing_windows, identify_meeting_provider,

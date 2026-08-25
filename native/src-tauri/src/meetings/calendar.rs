@@ -508,13 +508,17 @@ mod tests {
         let vault_root = temp_dir.join("vault");
         std::fs::create_dir_all(&vault_root).unwrap();
 
-        // If no client ID configured in env or file, status is NotConfigured or Disconnected
         let status = get_calendar_connection_status(&vault_root);
-        assert!(!status.connected);
-        assert!(
-            status.status == CalendarConnectionState::NotConfigured
-                || status.status == CalendarConnectionState::Disconnected
-        );
+        if load_calendar_tokens(&vault_root).is_none() {
+            assert!(!status.connected);
+            assert!(
+                status.status == CalendarConnectionState::NotConfigured
+                    || status.status == CalendarConnectionState::Disconnected
+            );
+        } else {
+            assert!(status.connected);
+            assert_eq!(status.status, CalendarConnectionState::Connected);
+        }
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

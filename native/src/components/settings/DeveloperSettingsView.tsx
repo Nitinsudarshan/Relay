@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { DeveloperSettings } from '../../types';
-import { Terminal, RefreshCw, Check, Bell, CalendarClock, Play, SearchCode } from 'lucide-react';
+import { DeveloperSettings, NotificationSurfaceMode } from '../../types';
+import { Terminal, RefreshCw, Check, Bell, CalendarClock, Play, SearchCode, Monitor, BellRing, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 
 export const DeveloperSettingsView: React.FC = () => {
-  const [devSettings, setDevSettings] = useState<DeveloperSettings>({ force_onboarding_on_launch: false });
+  const [devSettings, setDevSettings] = useState<DeveloperSettings>({
+    force_onboarding_on_launch: false,
+    notification_surface_mode: 'both',
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedFeedback, setSavedFeedback] = useState(false);
@@ -39,6 +42,22 @@ export const DeveloperSettingsView: React.FC = () => {
       setTimeout(() => setSavedFeedback(false), 2000);
     } catch (err) {
       console.error('Failed to update developer onboarding setting:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSetSurfaceMode = async (mode: NotificationSurfaceMode) => {
+    try {
+      setSaving(true);
+      const res = await invoke<DeveloperSettings>('set_developer_notification_surface_mode', {
+        mode,
+      });
+      setDevSettings(res);
+      setSavedFeedback(true);
+      setTimeout(() => setSavedFeedback(false), 2000);
+    } catch (err) {
+      console.error('Failed to update notification surface mode:', err);
     } finally {
       setSaving(false);
     }
@@ -81,18 +100,110 @@ export const DeveloperSettingsView: React.FC = () => {
         </p>
       </div>
 
+      {/* Notification Surface Mode Selector */}
+      <div className="p-5 rounded-xl border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Layers className="w-4 h-4 text-primary" />
+              Meeting Notification Surface Mode
+            </h3>
+            {savedFeedback && (
+              <Badge variant="secondary" className="text-[10px] gap-1 bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
+                <Check className="w-3 h-3" />
+                <span>Saved</span>
+              </Badge>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
+            Choose which surfaces display meeting reminders when triggered.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+          {/* Both (Default) */}
+          <button
+            type="button"
+            onClick={() => handleSetSurfaceMode('both')}
+            disabled={loading || saving}
+            className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between gap-2 ${
+              devSettings.notification_surface_mode === 'both'
+                ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/40 shadow-xs'
+                : 'border-border/60 bg-background/50 hover:bg-secondary/40 text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-primary" />
+                <span className="text-xs font-semibold">Both (Default)</span>
+              </div>
+              {devSettings.notification_surface_mode === 'both' && (
+                <div className="w-2 h-2 rounded-full bg-primary" />
+              )}
+            </div>
+            <p className="text-[11px] leading-tight text-muted-foreground">
+              Shows the app overlay window plus native Windows OS toast.
+            </p>
+          </button>
+
+          {/* Tauri Overlay Only */}
+          <button
+            type="button"
+            onClick={() => handleSetSurfaceMode('tauri')}
+            disabled={loading || saving}
+            className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between gap-2 ${
+              devSettings.notification_surface_mode === 'tauri'
+                ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/40 shadow-xs'
+                : 'border-border/60 bg-background/50 hover:bg-secondary/40 text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-2">
+                <Monitor className="w-4 h-4 text-blue-500" />
+                <span className="text-xs font-semibold">Tauri Overlay Only</span>
+              </div>
+              {devSettings.notification_surface_mode === 'tauri' && (
+                <div className="w-2 h-2 rounded-full bg-primary" />
+              )}
+            </div>
+            <p className="text-[11px] leading-tight text-muted-foreground">
+              Only shows the floating desktop overlay card window.
+            </p>
+          </button>
+
+          {/* System Notification Only */}
+          <button
+            type="button"
+            onClick={() => handleSetSurfaceMode('system')}
+            disabled={loading || saving}
+            className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between gap-2 ${
+              devSettings.notification_surface_mode === 'system'
+                ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/40 shadow-xs'
+                : 'border-border/60 bg-background/50 hover:bg-secondary/40 text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-2">
+                <BellRing className="w-4 h-4 text-amber-500" />
+                <span className="text-xs font-semibold">System Toast Only</span>
+              </div>
+              {devSettings.notification_surface_mode === 'system' && (
+                <div className="w-2 h-2 rounded-full bg-primary" />
+              )}
+            </div>
+            <p className="text-[11px] leading-tight text-muted-foreground">
+              Only dispatches native Windows OS toast notifications.
+            </p>
+          </button>
+        </div>
+      </div>
+
       {/* Onboarding Replay Override Section */}
       <div className="p-5 rounded-xl border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-foreground">Show onboarding on every launch</h3>
-              {savedFeedback && (
-                <Badge variant="secondary" className="text-[10px] gap-1 bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
-                  <Check className="w-3 h-3" />
-                  <span>Saved</span>
-                </Badge>
-              )}
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
               Development testing only. Replays onboarding every time Relay starts without deleting your saved profile or data.
@@ -142,7 +253,7 @@ export const DeveloperSettingsView: React.FC = () => {
             className="text-xs h-8 gap-1.5 border-blue-500/30 hover:bg-blue-500/10 hover:text-blue-500"
           >
             <CalendarClock className="w-3.5 h-3.5" />
-            T-1 Min (Upcoming)
+            T-2 Min (Upcoming)
           </Button>
           <Button
             variant="outline"
@@ -151,7 +262,7 @@ export const DeveloperSettingsView: React.FC = () => {
             className="text-xs h-8 gap-1.5 border-orange-500/30 hover:bg-orange-500/10 hover:text-orange-500"
           >
             <Play className="w-3.5 h-3.5" />
-            T+2 Min (Unrecorded)
+            T+5 Min (Unrecorded)
           </Button>
           <Button
             variant="outline"
