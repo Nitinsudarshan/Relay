@@ -186,6 +186,10 @@ pub struct WhisperDecodingConfig {
     pub logprob_thold: f32,
     pub print_special: bool,
     pub print_timestamps: bool,
+    /// Worker threads for this decode. `None` uses every available core.
+    /// Meetings pin the durable clock below the core count so the live
+    /// clock is never starved of CPU by a 30-second chunk decode.
+    pub n_threads: Option<i32>,
 }
 
 impl Default for WhisperDecodingConfig {
@@ -212,6 +216,7 @@ impl WhisperDecodingConfig {
             logprob_thold: -1.0,
             print_special: false,
             print_timestamps: false,
+            n_threads: None,
         }
     }
 
@@ -413,7 +418,7 @@ impl SttEngine {
             if let Some(ref prompt) = decoding_config.initial_prompt {
                 params.set_initial_prompt(prompt);
             }
-            params.set_n_threads(num_cpus());
+            params.set_n_threads(decoding_config.n_threads.unwrap_or_else(num_cpus));
 
             let t0 = std::time::Instant::now();
             state
@@ -469,6 +474,126 @@ impl SttEngine {
 
             Ok((trimmed_text, diag))
         }
+    }
+}
+
+/// Encoder context used for live streaming windows.
+///
+/// Whisper pads its mel spectrogram to 30 s regardless of input length, so a
+/// 2-second window costs a full 30-second encoder pass at the default context
+/// of 1500 positions. Clamping the encoder to 768 positions (~15 s of audio)
+/// roughly halves that cost — the same trick whisper.cpp's own `stream`
+/// example uses — and every window a live stream submits is far shorter than
+/// the clamped span.
+pub const LIVE_AUDIO_CTX: i32 = 768;
+
+/// A dedicated Whisper context for one low-latency stream.
+///
+/// Two properties matter and neither is available through [`SttEngine`]:
+///
+/// 1. **Its own context.** `SttEngine` holds one model behind a mutex that is
+///    locked for the whole of `whisper_full`, so a live clock sharing it would
+///    serialize behind every 30-second chunk decode (and behind dictation).
+/// 2. **A reused state.** `create_state` allocates whisper's KV cache and
+///    compute buffers — roughly 330 MB for `ggml-small` — so allocating one
+///    per window is far more expensive than the inference itself. This holds a
+///    single state for the stream's lifetime.
+///
+/// Decoding is configured for short windows: one segment, no cross-window
+/// prompt carry-over, greedy at temperature 0, and a clamped encoder context.
+/// `single_segment` in particular stops whisper from discarding a whole window
+/// when the decode ends on a lone timestamp token ("single timestamp ending -
+/// skip entire chunk"), which is the common outcome for sub-2-second windows.
+pub struct StreamingTranscriber {
+    #[cfg(feature = "whisper-local")]
+    state: whisper_rs::WhisperState,
+    language: Option<String>,
+    translate: bool,
+    n_threads: i32,
+    audio_ctx: i32,
+}
+
+impl StreamingTranscriber {
+    /// Loads `model_path` into a private context and pre-allocates its state.
+    #[cfg(feature = "whisper-local")]
+    pub fn new(
+        model_path: &str,
+        language_config: &SttLanguageConfig,
+        n_threads: i32,
+    ) -> Result<Self, SttError> {
+        if model_path.trim().is_empty() {
+            return Err(SttError::ModelNotConfigured);
+        }
+
+        let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
+            .map_err(|e| SttError::ModelLoadFailed {
+                path: model_path.to_string(),
+                message: e.to_string(),
+            })?;
+        let state = ctx
+            .create_state()
+            .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
+
+        Ok(Self {
+            state,
+            language: language_config.whisper_language.clone(),
+            translate: language_config.translate,
+            n_threads: n_threads.max(1),
+            audio_ctx: LIVE_AUDIO_CTX,
+        })
+    }
+
+    #[cfg(not(feature = "whisper-local"))]
+    pub fn new(
+        _model_path: &str,
+        _language_config: &SttLanguageConfig,
+        _n_threads: i32,
+    ) -> Result<Self, SttError> {
+        Err(SttError::ModelNotConfigured)
+    }
+
+    /// Transcribes one window. The window is independent: no state, prompt, or
+    /// text carries over from the previous call.
+    #[cfg(feature = "whisper-local")]
+    pub fn transcribe(&mut self, samples_16k_mono: &[f32]) -> Result<String, SttError> {
+        if samples_16k_mono.is_empty() {
+            return Ok(String::new());
+        }
+
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        params.set_language(self.language.as_deref());
+        params.set_translate(self.translate);
+        params.set_n_threads(self.n_threads);
+        params.set_audio_ctx(self.audio_ctx);
+        params.set_single_segment(true);
+        params.set_no_context(true);
+        params.set_temperature(0.0);
+        params.set_temperature_inc(0.0);
+        params.set_suppress_blank(true);
+        params.set_token_timestamps(false);
+        params.set_print_special(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+
+        self.state
+            .full(params, samples_16k_mono)
+            .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
+
+        let mut text = String::new();
+        for segment in self.state.as_iter() {
+            let segment_text = segment
+                .to_str_lossy()
+                .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
+            text.push_str(&segment_text);
+        }
+
+        Ok(text.trim().to_string())
+    }
+
+    #[cfg(not(feature = "whisper-local"))]
+    pub fn transcribe(&mut self, _samples_16k_mono: &[f32]) -> Result<String, SttError> {
+        Err(SttError::ModelNotConfigured)
     }
 }
 

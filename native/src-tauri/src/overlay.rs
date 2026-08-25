@@ -177,7 +177,7 @@ fn active_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
 // =========================================================================
 
 pub const MEETING_OVERLAY_LABEL: &str = "meeting-overlay";
-const MEETING_OVERLAY_SIZE: (f64, f64) = (520.0, 56.0);
+const MEETING_OVERLAY_SIZE: (f64, f64) = (640.0, 56.0);
 
 pub fn ensure_meeting_overlay(app: &AppHandle, visible: bool) {
     if let Some(window) = app.get_webview_window(MEETING_OVERLAY_LABEL) {

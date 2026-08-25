@@ -3,14 +3,22 @@ use super::session_store::SessionStore;
 use super::types::{TranscriptSegment, TranscriptSegmentStatus};
 use crate::capture::stt::{SttEngine, SttLanguageConfig, WhisperDecodingConfig};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
+/// Below this RMS a chunk is treated as silence and never sent to Whisper.
+const SILENCE_RMS_THRESHOLD: f32 = 0.005;
+
+/// The durable recording clock (Clock A).
+///
+/// Persists every audio chunk before transcribing it, so the audio on disk is
+/// never contingent on transcription succeeding. The worker runs until the
+/// capture thread drops its sender and the queue is empty — it is deliberately
+/// *not* interruptible, because everything still queued at stop time is audio
+/// the user already recorded.
 pub struct TranscriptionWorker {
     join_handle: Option<std::thread::JoinHandle<()>>,
-    stop_flag: Arc<AtomicBool>,
 }
 
 impl TranscriptionWorker {
@@ -24,11 +32,9 @@ impl TranscriptionWorker {
         decoding_config: WhisperDecodingConfig,
         app: Option<AppHandle>,
     ) -> Self {
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let stop_flag_clone = stop_flag.clone();
-
         // Enforce explicit language (defaulting to "en") so Whisper never
-        // hallucinates random language codes (e.g. "kn", "la") or token repetition loops on background hiss
+        // hallucinates random language codes (e.g. "kn", "la") or token
+        // repetition loops on background hiss.
         let effective_lang_config = if language_config.whisper_language.is_none() {
             SttLanguageConfig {
                 whisper_language: Some("en".to_string()),
@@ -46,10 +52,9 @@ impl TranscriptionWorker {
                 let sample_count = chunk.samples.len();
                 let start_s = chunk.start_time_s;
                 let end_s = chunk.end_time_s;
-                let is_stopped = stop_flag_clone.load(Ordering::SeqCst);
 
                 tracing::info!(
-                    "Worker: Received Chunk #{} for session {} ({} samples, {:.1}s - {:.1}s)",
+                    "Worker: received chunk #{} for session {} ({} samples, {:.1}s - {:.1}s)",
                     chunk_idx,
                     session_id,
                     sample_count,
@@ -57,27 +62,34 @@ impl TranscriptionWorker {
                     end_s
                 );
 
-                // 1. Persist audio chunk to disk immediately (audio is source of truth!)
-                let write_res = store.write_chunk_wav(&session_id, chunk_idx, &chunk.samples, 16_000);
-                if let Err(ref e) = write_res {
-                    tracing::error!("Worker: Failed to write chunk WAV #{}: {}", chunk_idx, e);
+                // 1. Persist audio first — audio is the source of truth.
+                if let Err(e) =
+                    store.write_chunk_wav(&session_id, chunk_idx, &chunk.samples, 16_000)
+                {
+                    tracing::error!("Worker: failed to write chunk WAV #{}: {}", chunk_idx, e);
                 }
 
-                // Update session chunk count in metadata
-                if let Ok(mut session) = store.get_session(&session_id) {
+                let _ = store.update_session(&session_id, |session| {
                     session.chunk_count = chunk_idx + 1;
                     session.duration_seconds = end_s;
                     session.total_audio_bytes += (sample_count * 2) as u64;
-                    session.updated_at = chrono::Utc::now().to_rfc3339();
-                    let _ = store.save_session(&session);
-                }
+                    if chunk.mic_had_audio {
+                        session.mic_heard = true;
+                    }
+                    if chunk.sys_had_audio {
+                        session.sys_audio_heard = true;
+                    }
+                    session.pending_transcription_chunks = session
+                        .chunk_count
+                        .saturating_sub(session.transcript_segment_count);
+                });
 
-                // 2. Incremental Transcription
+                // 2. Transcribe. Silence is rejected on energy alone rather than
+                //    spending a full decode to produce nothing.
                 let sum_sq: f32 = chunk.samples.iter().map(|&s| s * s).sum();
-                let rms = (sum_sq / chunk.samples.len().max(1) as f32).sqrt();
+                let rms = (sum_sq / sample_count.max(1) as f32).sqrt();
 
-                let (text, status) = if sample_count < 16_000 / 2 || rms < 0.005 || (is_stopped && rms < 0.01) {
-                    // Less than 0.5s of audio or silence — treat as empty immediately (< 1ms)
+                let (text, status) = if sample_count < 16_000 / 2 || rms < SILENCE_RMS_THRESHOLD {
                     (String::new(), TranscriptSegmentStatus::Empty)
                 } else {
                     match stt.transcribe_with_config(
@@ -95,13 +107,17 @@ impl TranscriptionWorker {
                             }
                         }
                         Err(e) => {
-                            tracing::warn!("Worker: STT transcription error on chunk #{}: {}", chunk_idx, e);
+                            tracing::warn!(
+                                "Worker: STT transcription error on chunk #{}: {}",
+                                chunk_idx,
+                                e
+                            );
                             (String::new(), TranscriptSegmentStatus::Failed)
                         }
                     }
                 };
 
-                // 3. Persist transcript segment to JSONL
+                // 3. Persist the transcript segment.
                 let segment = TranscriptSegment {
                     chunk_index: chunk_idx,
                     start_time_s: start_s,
@@ -112,37 +128,37 @@ impl TranscriptionWorker {
                 };
 
                 if let Err(e) = store.append_transcript_segment(&session_id, &segment) {
-                    tracing::error!("Worker: Failed to append transcript segment #{}: {}", chunk_idx, e);
+                    tracing::error!(
+                        "Worker: failed to append transcript segment #{}: {}",
+                        chunk_idx,
+                        e
+                    );
                 }
 
-                // Update session transcript segment count
-                if let Ok(mut session) = store.get_session(&session_id) {
+                let _ = store.update_session(&session_id, |session| {
                     session.transcript_segment_count += 1;
-                    session.updated_at = chrono::Utc::now().to_rfc3339();
-                    let _ = store.save_session(&session);
-                }
+                    session.pending_transcription_chunks = session
+                        .chunk_count
+                        .saturating_sub(session.transcript_segment_count);
+                });
 
-                // 4. Broadcast live transcript update to frontend
+                // 4. Broadcast to the UI.
                 if let Some(ref a) = app {
                     let _ = a.emit("meeting-transcript-segment", &segment);
                 }
             }
 
-            tracing::info!("Worker: All chunks processed for session {}.", session_id);
+            tracing::info!("Worker: all chunks processed for session {}.", session_id);
         });
 
         Self {
             join_handle: Some(handle),
-            stop_flag,
         }
     }
 
-    pub fn stop(&self) {
-        self.stop_flag.store(true, Ordering::SeqCst);
-    }
-
+    /// Waits for the queue to drain. Returns once every recorded chunk has been
+    /// written and transcribed.
     pub fn join(&mut self) {
-        self.stop();
         if let Some(handle) = self.join_handle.take() {
             let _ = handle.join();
         }

@@ -1,19 +1,31 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
   Mic,
+  MicOff,
   Volume2,
+  VolumeX,
   Square,
   Play,
+  Pause,
   Clock,
   FileText,
   RefreshCw,
   Layers,
   Sparkles,
   Trash2,
+  AlertTriangle,
 } from 'lucide-react';
+import { ConfirmationModal } from '../common/ConfirmationModal';
 import { MeetingSession, TranscriptSegment, LiveTranscriptUpdate } from '../../types';
+
+/** States in which a session still owns the recorder. */
+const ACTIVE_STATES = ['STARTING', 'RECORDING', 'PAUSED', 'STOPPING', 'FINALIZING'];
+
+/** See the recording pill: events alone cannot keep a long-lived view honest. */
+const RECONCILE_INTERVAL_MS = 1000;
+const TIMER_TICK_MS = 250;
 
 export const MeetingsV2View: React.FC = () => {
   const [sessions, setSessions] = useState<MeetingSession[]>([]);
@@ -24,37 +36,34 @@ export const MeetingsV2View: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isStarting, setIsStarting] = useState<boolean>(false);
   const [isStopping, setIsStopping] = useState<boolean>(false);
+  const [isTogglingPause, setIsTogglingPause] = useState<boolean>(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [meetingTitleInput, setMeetingTitleInput] = useState<string>('');
   const [activeElapsedSec, setActiveElapsedSec] = useState<number>(0);
 
-  useEffect(() => {
-    if (!activeSession) return;
-    const startMs = activeSession.started_at
-      ? new Date(activeSession.started_at).getTime()
-      : Date.now() - (activeSession.duration_seconds || 0) * 1000;
+  const selectedSessionIdRef = useRef<string | null>(null);
+  selectedSessionIdRef.current = selectedSessionId;
 
-    const update = () => {
-      const diffSec = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
-      setActiveElapsedSec(diffSec);
-    };
-    update();
-    const timer = setInterval(update, 500);
-    return () => clearInterval(timer);
-  }, [activeSession?.id, activeSession?.started_at, activeSession?.state]);
+  /** Recorded seconds as last reported by the backend, plus when that arrived. */
+  const durationAnchor = useRef<{ seconds: number; at: number } | null>(null);
 
-  const loadSessions = async () => {
+  const applyActiveSession = useCallback((next: MeetingSession | null) => {
+    if (!next || !ACTIVE_STATES.includes(next.state)) {
+      durationAnchor.current = null;
+      setActiveSession(null);
+      setActiveElapsedSec(0);
+      return;
+    }
+    durationAnchor.current = { seconds: next.duration_seconds || 0, at: performance.now() };
+    setActiveSession(next);
+  }, []);
+
+  const loadSessions = useCallback(async () => {
     try {
-      setIsLoading(true);
-      const [listRes, activeRes] = await Promise.all([
-        invoke<MeetingSession[]>('list_meetings_v2'),
-        invoke<MeetingSession | null>('get_active_meeting_v2'),
-      ]);
+      const listRes = await invoke<MeetingSession[]>('list_meetings_v2');
       setSessions(listRes);
-      setActiveSession(activeRes);
-      if (activeRes) {
-        setSelectedSessionId(activeRes.id);
-      } else if (listRes.length > 0 && !selectedSessionId) {
+      if (!selectedSessionIdRef.current && listRes.length > 0) {
         setSelectedSessionId(listRes[0].id);
       }
     } catch (err) {
@@ -62,23 +71,34 @@ export const MeetingsV2View: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
+  // Reconcile the active session against the backend rather than trusting an
+  // unbroken stream of events: the recorder, not this view, owns the state.
   useEffect(() => {
+    let cancelled = false;
+
+    const reconcile = async () => {
+      try {
+        const active = await invoke<MeetingSession | null>('get_active_meeting_v2');
+        if (!cancelled) {
+          applyActiveSession(active);
+        }
+      } catch (err) {
+        console.error('Failed to reconcile active meeting:', err);
+      }
+    };
+
+    reconcile();
     loadSessions();
+    const poll = setInterval(reconcile, RECONCILE_INTERVAL_MS);
 
     const unlistenState = listen<MeetingSession>('meeting-session-state-changed', (event) => {
       const updated = event.payload;
-      if (
-        updated.state === 'RECORDING' ||
-        updated.state === 'STARTING' ||
-        updated.state === 'STOPPING' ||
-        updated.state === 'FINALIZING'
-      ) {
-        setActiveSession(updated);
+      applyActiveSession(updated);
+      if (ACTIVE_STATES.includes(updated.state)) {
         setSelectedSessionId(updated.id);
       } else {
-        setActiveSession(null);
         setLiveUpdates([]);
       }
       loadSessions();
@@ -86,27 +106,62 @@ export const MeetingsV2View: React.FC = () => {
 
     const unlistenSegment = listen<TranscriptSegment>('meeting-transcript-segment', (event) => {
       setTranscriptSegments((prev) => {
-        if (prev.some((s) => s.chunk_index === event.payload.chunk_index)) {
-          return prev.map((s) =>
-            s.chunk_index === event.payload.chunk_index ? event.payload : s
-          );
+        const idx = prev.findIndex((s) => s.chunk_index === event.payload.chunk_index);
+        if (idx === -1) {
+          return [...prev, event.payload];
         }
-        return [...prev, event.payload];
+        const next = [...prev];
+        next[idx] = event.payload;
+        return next;
       });
     });
 
+    // Live updates are keyed by utterance: a new update for an existing
+    // segment_id replaces it as the utterance grows.
     const unlistenLive = listen<LiveTranscriptUpdate>('meeting-live-transcript', (event) => {
-      setLiveUpdates((prev) => [...prev, event.payload]);
+      setLiveUpdates((prev) => {
+        const idx = prev.findIndex((u) => u.segment_id === event.payload.segment_id);
+        if (idx === -1) {
+          return [...prev, event.payload];
+        }
+        const next = [...prev];
+        next[idx] = event.payload;
+        return next;
+      });
     });
 
     return () => {
+      cancelled = true;
+      clearInterval(poll);
       unlistenState.then((f) => f());
       unlistenSegment.then((f) => f());
       unlistenLive.then((f) => f());
     };
-  }, []);
+  }, [applyActiveSession, loadSessions]);
 
-  // Fetch transcript when selected session changes
+  // Interpolate the timer between reconciliations, and only while recording, so
+  // it neither counts paused time nor keeps running after a meeting ends.
+  const isRecording = activeSession?.state === 'RECORDING';
+  useEffect(() => {
+    const update = () => {
+      const anchor = durationAnchor.current;
+      if (!anchor) {
+        setActiveElapsedSec(0);
+        return;
+      }
+      const drift = isRecording ? (performance.now() - anchor.at) / 1000 : 0;
+      setActiveElapsedSec(Math.max(0, Math.floor(anchor.seconds + drift)));
+    };
+
+    update();
+    if (!isRecording) {
+      return;
+    }
+    const timer = setInterval(update, TIMER_TICK_MS);
+    return () => clearInterval(timer);
+  }, [isRecording, activeSession?.id, activeSession?.duration_seconds]);
+
+  // Fetch the durable transcript when the selection changes.
   useEffect(() => {
     if (!selectedSessionId) {
       setTranscriptSegments([]);
@@ -123,8 +178,9 @@ export const MeetingsV2View: React.FC = () => {
     try {
       const title = meetingTitleInput.trim() ? meetingTitleInput.trim() : undefined;
       const newSession = await invoke<MeetingSession>('start_meeting_v2', { title });
-      setActiveSession(newSession);
+      applyActiveSession(newSession);
       setSelectedSessionId(newSession.id);
+      setLiveUpdates([]);
       setMeetingTitleInput('');
       loadSessions();
     } catch (err) {
@@ -135,11 +191,14 @@ export const MeetingsV2View: React.FC = () => {
   };
 
   const handleStopRecording = async () => {
-    if (isStopping) return;
+    if (isStopping || !activeSession) return;
     setIsStopping(true);
     try {
-      const completed = await invoke<MeetingSession>('stop_meeting_v2');
-      setActiveSession(null);
+      // Name the session so this cannot stop a later recording.
+      const completed = await invoke<MeetingSession>('stop_meeting_v2', {
+        sessionId: activeSession.id,
+      });
+      applyActiveSession(null);
       setSelectedSessionId(completed.id);
       loadSessions();
     } catch (err) {
@@ -149,15 +208,22 @@ export const MeetingsV2View: React.FC = () => {
     }
   };
 
-  const handleDeleteSession = async (sessionId: string, e?: React.MouseEvent) => {
-    if (e) {
-      e.stopPropagation();
+  const handleTogglePause = async () => {
+    if (isTogglingPause || !activeSession) return;
+    setIsTogglingPause(true);
+    try {
+      const command = activeSession.state === 'PAUSED' ? 'resume_meeting_v2' : 'pause_meeting_v2';
+      const updated = await invoke<MeetingSession>(command, { sessionId: activeSession.id });
+      applyActiveSession(updated);
+    } catch (err) {
+      console.error('Failed to toggle meeting pause:', err);
+    } finally {
+      setIsTogglingPause(false);
     }
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
     if (deletingId) return;
-    if (activeSession?.id === sessionId) {
-      alert('Cannot delete an active recording. Please stop recording first.');
-      return;
-    }
     setDeletingId(sessionId);
     try {
       await invoke('delete_meeting_v2', { sessionId });
@@ -170,16 +236,43 @@ export const MeetingsV2View: React.FC = () => {
       console.error('Failed to delete meeting session:', err);
     } finally {
       setDeletingId(null);
+      setPendingDeleteId(null);
     }
   };
 
-  const selectedSession = sessions.find((s) => s.id === selectedSessionId) || activeSession;
+  const selectedSession = useMemo(
+    () =>
+      (activeSession?.id === selectedSessionId ? activeSession : undefined) ||
+      sessions.find((s) => s.id === selectedSessionId) ||
+      activeSession,
+    [sessions, selectedSessionId, activeSession]
+  );
+
+  const isSelectedActive = !!activeSession && activeSession.id === selectedSession?.id;
+  const isPaused = activeSession?.state === 'PAUSED';
+  const isFinalizing =
+    activeSession?.state === 'STOPPING' || activeSession?.state === 'FINALIZING';
 
   const formatDuration = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
     return `${m}m ${s}s`;
   };
+
+  /** Honest source labels: "captured" must not be shown for a source that never was. */
+  const sourceLabel = (active: boolean, heard: boolean, live: boolean) => {
+    if (heard) return live ? 'Live' : 'Captured';
+    if (active) return live ? 'Silent' : 'No audio';
+    return 'Unavailable';
+  };
+
+  const pendingDeleteSession = sessions.find((s) => s.id === pendingDeleteId);
+  const finalisedUpdates = liveUpdates.filter((u) => u.is_final);
+  const pendingUpdate = liveUpdates.find((u) => !u.is_final);
+  const latestLatency = liveUpdates.length
+    ? liveUpdates[liveUpdates.length - 1].latency_ms
+    : undefined;
+  const backlog = activeSession?.pending_transcription_chunks ?? 0;
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#0a0a0c] text-zinc-100 overflow-hidden select-none">
@@ -202,26 +295,52 @@ export const MeetingsV2View: React.FC = () => {
           </div>
         </div>
 
-        {/* Action Button & Diagnostics */}
+        {/* Action Buttons */}
         <div className="flex items-center gap-3">
           {activeSession ? (
-            <button
-              onClick={handleStopRecording}
-              disabled={isStopping}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-500/90 hover:bg-red-500 text-white font-medium text-xs shadow-lg shadow-red-500/20 active:scale-95 transition-all border border-red-400/30"
-            >
-              {isStopping ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Finalizing Audio...</span>
-                </>
-              ) : (
-                <>
-                  <Square className="w-3.5 h-3.5 fill-current" />
-                  <span>Stop Meeting Recording</span>
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs text-zinc-300 tabular-nums px-2">
+                {formatDuration(activeElapsedSec)}
+              </span>
+              <button
+                onClick={handleTogglePause}
+                disabled={isTogglingPause || isFinalizing}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl font-medium text-xs shadow-lg active:scale-95 transition-all border disabled:opacity-50 disabled:cursor-not-allowed ${
+                  isPaused
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400/30'
+                    : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-100 border-white/10'
+                }`}
+              >
+                {isPaused ? (
+                  <>
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Resume</span>
+                  </>
+                ) : (
+                  <>
+                    <Pause className="w-3.5 h-3.5 fill-current" />
+                    <span>Pause</span>
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleStopRecording}
+                disabled={isStopping || isFinalizing}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-500/90 hover:bg-red-500 text-white font-medium text-xs shadow-lg shadow-red-500/20 active:scale-95 transition-all border border-red-400/30 disabled:opacity-70"
+              >
+                {isStopping || isFinalizing ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Finalizing Audio...</span>
+                  </>
+                ) : (
+                  <>
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                    <span>Stop Meeting Recording</span>
+                  </>
+                )}
+              </button>
+            </div>
           ) : (
             <div className="flex items-center gap-2">
               <input
@@ -253,12 +372,21 @@ export const MeetingsV2View: React.FC = () => {
         </div>
       </div>
 
+      {activeSession?.capture_warning && (
+        <div className="px-6 py-2 bg-amber-500/10 border-b border-amber-500/20 text-[11px] text-amber-300 flex items-center gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <span>{activeSession.capture_warning}</span>
+        </div>
+      )}
+
       {/* Main Content Split */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Meeting Sessions List */}
         <div className="w-80 border-r border-white/5 flex flex-col bg-zinc-950/20">
           <div className="p-3 border-b border-white/5 flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-semibold text-zinc-300">Recorded Sessions ({sessions.length})</span>
+            <span className="font-semibold text-zinc-300">
+              Recorded Sessions ({sessions.length})
+            </span>
             <button
               onClick={loadSessions}
               className="p-1 hover:bg-white/5 rounded transition-colors text-zinc-400 hover:text-zinc-200"
@@ -281,6 +409,7 @@ export const MeetingsV2View: React.FC = () => {
               sessions.map((item) => {
                 const isSelected = selectedSessionId === item.id;
                 const isItemActive = activeSession?.id === item.id;
+                const itemState = isItemActive ? activeSession!.state : item.state;
 
                 return (
                   <div
@@ -299,21 +428,26 @@ export const MeetingsV2View: React.FC = () => {
                       <div className="flex items-center gap-1.5">
                         <span
                           className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                            isItemActive
-                              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                              : item.state === 'RECOVERED'
+                            isItemActive && itemState === 'PAUSED'
                               ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                              : item.state === 'INTERRUPTED'
+                              : isItemActive
+                              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                              : itemState === 'RECOVERED'
+                              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                              : itemState === 'INTERRUPTED' || itemState === 'ERROR'
                               ? 'bg-zinc-800 text-zinc-400'
                               : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                           }`}
                         >
-                          {isItemActive ? 'Recording' : item.state}
+                          {isItemActive && itemState === 'RECORDING' ? 'Recording' : itemState}
                         </span>
 
                         {!isItemActive && (
                           <button
-                            onClick={(e) => handleDeleteSession(item.id, e)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPendingDeleteId(item.id);
+                            }}
                             disabled={deletingId === item.id}
                             className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 hover:text-red-400 text-zinc-500 rounded transition-all"
                             title="Delete meeting"
@@ -352,27 +486,50 @@ export const MeetingsV2View: React.FC = () => {
                   <p className="text-xs text-zinc-400 mt-1">
                     Recorded on {new Date(selectedSession.created_at).toLocaleString()} • Duration:{' '}
                     {formatDuration(
-                      activeSession?.id === selectedSession.id
-                        ? activeElapsedSec
-                        : selectedSession.duration_seconds
+                      isSelectedActive ? activeElapsedSec : selectedSession.duration_seconds
                     )}{' '}
                     • Chunks: {selectedSession.chunk_count}
+                    {selectedSession.paused_seconds > 1
+                      ? ` • Paused: ${formatDuration(selectedSession.paused_seconds)}`
+                      : ''}
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 border border-white/5 text-xs text-zinc-300">
-                    <Mic className="w-3 h-3 text-emerald-400" />
-                    <span>Mic: {selectedSession.mic_active ? 'Active' : 'Captured'}</span>
+                    {selectedSession.mic_heard || selectedSession.mic_active ? (
+                      <Mic className="w-3 h-3 text-emerald-400" />
+                    ) : (
+                      <MicOff className="w-3 h-3 text-zinc-500" />
+                    )}
+                    <span>
+                      Mic:{' '}
+                      {sourceLabel(
+                        selectedSession.mic_active,
+                        selectedSession.mic_heard,
+                        isSelectedActive
+                      )}
+                    </span>
                   </div>
                   <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 border border-white/5 text-xs text-zinc-300">
-                    <Volume2 className="w-3 h-3 text-indigo-400" />
-                    <span>Sys: {selectedSession.sys_audio_active ? 'Active' : 'Captured'}</span>
+                    {selectedSession.sys_audio_heard || selectedSession.sys_audio_active ? (
+                      <Volume2 className="w-3 h-3 text-indigo-400" />
+                    ) : (
+                      <VolumeX className="w-3 h-3 text-zinc-500" />
+                    )}
+                    <span>
+                      Sys:{' '}
+                      {sourceLabel(
+                        selectedSession.sys_audio_active,
+                        selectedSession.sys_audio_heard,
+                        isSelectedActive
+                      )}
+                    </span>
                   </div>
 
-                  {activeSession?.id !== selectedSession.id && (
+                  {!isSelectedActive && (
                     <button
-                      onClick={() => handleDeleteSession(selectedSession.id)}
+                      onClick={() => setPendingDeleteId(selectedSession.id)}
                       disabled={deletingId === selectedSession.id}
                       className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/30 text-xs font-medium transition-all"
                       title="Delete this meeting and all audio chunks"
@@ -389,44 +546,68 @@ export const MeetingsV2View: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
                     <FileText className="w-3.5 h-3.5" />
-                    {activeSession?.id === selectedSession.id
-                      ? `Live Stream (${liveUpdates.length} updates) • 30s Chunks (${transcriptSegments.length})`
+                    {isSelectedActive
+                      ? `Live Stream • 30s Chunks (${transcriptSegments.length})`
                       : `Final Transcript (${transcriptSegments.length} Segments)`}
                   </h3>
-                  {activeSession?.id === selectedSession.id && (
-                    <span className="text-[11px] text-emerald-400 font-medium animate-pulse flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20">
-                      <Sparkles className="w-3 h-3 text-emerald-400" /> Live STT Stream (~1.5s latency)
-                    </span>
+                  {isSelectedActive && (
+                    <div className="flex items-center gap-2">
+                      {backlog > 0 && (
+                        <span
+                          className="text-[10px] text-amber-400 font-mono px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20"
+                          title="Recorded chunks still waiting to be transcribed. Audio is already saved."
+                        >
+                          {backlog} chunk{backlog === 1 ? '' : 's'} queued
+                        </span>
+                      )}
+                      <span
+                        className={`text-[11px] font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-md border ${
+                          isPaused
+                            ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+                            : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20 animate-pulse'
+                        }`}
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        {isPaused ? 'Paused' : 'Live STT Stream'}
+                        {latestLatency !== undefined && !isPaused
+                          ? ` • ${latestLatency}ms`
+                          : ''}
+                      </span>
+                    </div>
                   )}
                 </div>
 
-                {/* Real-time Live STT Feed during active recording */}
-                {activeSession?.id === selectedSession.id && liveUpdates.length > 0 && (
+                {/* Live feed: committed utterances plus the one still forming */}
+                {isSelectedActive && (finalisedUpdates.length > 0 || pendingUpdate) && (
                   <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/20 flex flex-col gap-2">
                     <div className="flex items-center justify-between text-[11px] text-emerald-400 font-medium">
                       <span className="flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                         Live Continuous Speech
                       </span>
-                      {liveUpdates.length > 0 && (
-                        <span className="text-[10px] text-zinc-400 font-mono">
-                          Latency: {liveUpdates[liveUpdates.length - 1].latency_ms}ms
-                        </span>
-                      )}
                     </div>
-                    <div className="text-sm text-zinc-100 leading-relaxed font-sans select-text space-y-1.5">
-                      {liveUpdates.map((u) => (
-                        <span key={u.segment_id} className="inline mr-1.5">
-                          {u.text}{' '}
+                    <div className="text-sm text-zinc-100 leading-relaxed font-sans select-text">
+                      {finalisedUpdates.map((u) => (
+                        <span key={u.segment_id} className="mr-1.5">
+                          {u.text}
                         </span>
                       ))}
+                      {pendingUpdate && (
+                        <span
+                          key={pendingUpdate.segment_id}
+                          className="mr-1.5 text-emerald-200/80 italic"
+                          title="Still being transcribed"
+                        >
+                          {pendingUpdate.text}
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
 
-                {transcriptSegments.length === 0 && (!activeSession || liveUpdates.length === 0) ? (
+                {transcriptSegments.length === 0 && liveUpdates.length === 0 ? (
                   <div className="py-12 text-center text-zinc-500 text-xs">
-                    {activeSession?.id === selectedSession.id
+                    {isSelectedActive
                       ? 'Listening for speech on Microphone and System Audio...'
                       : 'No speech was recognized in this meeting.'}
                   </div>
@@ -453,7 +634,9 @@ export const MeetingsV2View: React.FC = () => {
                           </span>
                         </div>
                         <p className="text-sm text-zinc-200 leading-relaxed font-sans select-text">
-                          {seg.text || <span className="italic text-zinc-600">(Silence / No Speech)</span>}
+                          {seg.text || (
+                            <span className="italic text-zinc-600">(Silence / No Speech)</span>
+                          )}
                         </p>
                       </div>
                     ))}
@@ -466,12 +649,26 @@ export const MeetingsV2View: React.FC = () => {
               <FileText className="w-10 h-10 mb-3 opacity-20" />
               <p className="text-sm font-medium text-zinc-400">No Meeting Selected</p>
               <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-                Select a meeting from the list or start a new recording to capture audio &amp; incremental transcripts.
+                Select a meeting from the list or start a new recording to capture audio &amp;
+                incremental transcripts.
               </p>
             </div>
           )}
         </div>
       </div>
+
+      <ConfirmationModal
+        isOpen={!!pendingDeleteId}
+        title="Delete this meeting?"
+        description={`"${
+          pendingDeleteSession?.title ?? 'This meeting'
+        }" and all of its recorded audio and transcripts will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Delete Meeting"
+        variant="destructive"
+        isBusy={!!deletingId}
+        onConfirm={() => pendingDeleteId && handleDeleteSession(pendingDeleteId)}
+        onCancel={() => setPendingDeleteId(null)}
+      />
     </div>
   );
 };

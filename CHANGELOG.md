@@ -1,5 +1,54 @@
 # Relay — Changelog
 
+## [0.12.0] - 2026-08-26
+
+### Meetings V2: Low-Latency Live STT, Recording Pill Timer Correctness & Pause/Resume
+
+**Type**: minor — `native/` only (`native/src-tauri/src/meetings_v2/*`, `native/src-tauri/src/capture/stt.rs`, `native/src/components/meetings_v2/*`).
+
+#### Features
+
+- **Pause and resume a meeting recording (`meetings_v2/engine.rs`, `meetings_v2/capture.rs`, `MeetingRecordingOverlay.tsx`, `MeetingsV2View.tsx`)**:
+  - New `MeetingState::PAUSED` plus `pause_meeting_v2` / `resume_meeting_v2` commands, exposed as a Pause/Resume control on both the recording pill and the Meetings page.
+  - Audio arriving while paused is discarded rather than queued, so the recording resumes contiguously instead of containing the paused interval, and the live transcriber is told about the discontinuity so an utterance is never spliced across the gap.
+  - Paused time is tracked separately (`paused_seconds`) and excluded from the recorded duration.
+- **Live transcription is now partial-then-final per utterance (`meetings_v2/live_stt.rs`, `types.rs`)**:
+  - `LiveTranscriptUpdate` gained `utterance_index`; updates sharing a `segment_id` replace one another as an utterance grows and the last one is `is_final`, so the UI refines text in place instead of appending overlapping fragments.
+
+#### Improvements
+
+- **Live STT latency: a dedicated Whisper context per clock (`capture/stt.rs`, `meetings_v2/engine.rs`)**:
+  - Added `StreamingTranscriber`, which owns its own `WhisperContext` and reuses one `WhisperState` for the session. The live clock previously shared `SttEngine`'s single model behind a mutex held for the whole of `whisper_full`, so every live window queued behind the durable clock's 30-second decodes (and behind dictation), and every window re-allocated whisper's ~330 MB of per-state buffers.
+  - Live decoding now uses `single_segment` with a clamped encoder context (`audio_ctx = 768`), roughly halving encoder cost per window.
+  - `WhisperDecodingConfig` gained `n_threads`; the two clocks now split the available cores instead of each claiming all of them.
+- **Live windows grow instead of overlapping (`meetings_v2/live_stt.rs`, `meetings_v2/capture.rs`)**:
+  - Frames are 1 s and contiguous; the worker keeps a rolling utterance buffer, re-decodes it each tick, and commits on a silence boundary or a 12 s cap. This replaces 1.5 s windows with 250 ms overlap and word-level prefix de-duplication.
+  - Queued frames are drained to the newest before decoding, so latency equals one inference rather than growing with queue depth.
+  - Silence never reaches Whisper, and the backlog of chunks awaiting transcription is now surfaced in the Meetings page.
+- **Whisper's own logging no longer floods the terminal (`lib.rs`)**: installs whisper-rs's logging hooks, so whisper.cpp/GGML stop writing a token-by-token decode trace to stderr for every window.
+- **Honest capture reporting (`meetings_v2/capture.rs`, `types.rs`, `MeetingsV2View.tsx`)**:
+  - Failing to open a device is now an error at start rather than a silent recording, and a session recorded with only one source carries a `capture_warning` shown in the UI.
+  - New `mic_heard` / `sys_audio_heard` distinguish "a device was bound" from "audio was actually audible"; per-chunk audibility is measured from the chunk's own samples. The Meetings page no longer labels a source that was never captured as "Captured".
+  - Level metering and event emission moved off the realtime audio callback onto the mixer thread, and each meter now tracks its own source.
+- **Deleting a meeting asks first (`MeetingsV2View.tsx`)**: deletion is permanent and immediate, so it now goes through `ConfirmationModal` instead of firing on a single click of a hover-revealed icon.
+
+#### Fixes
+
+- **The recording pill's timer no longer counts the time between meetings (`MeetingRecordingOverlay.tsx`, `MeetingsV2View.tsx`, `meetings_v2/engine.rs`, `commands.rs`)**:
+  - Elapsed time is interpolated from the backend's pause-aware recorded duration instead of the wall clock since `started_at`, and both surfaces reconcile against `get_active_meeting_v2` on an interval. A pill that missed a session's start or terminal event previously kept a stale session on screen and its timer running across meetings; every such divergence is now self-healing.
+  - The overlay is raised after recording actually starts and the session is re-announced, so a freshly created overlay webview cannot miss the start event and show a zeroed timer.
+- **Stop no longer discards the tail of the transcript (`meetings_v2/worker.rs`, `meetings_v2/engine.rs`)**: the durable worker's stop flag applied a harsher silence gate to every chunk still queued when Stop was pressed, dropping quiet-but-real speech from the end of a meeting. The worker is no longer interruptible and drains fully; capture is stopped first so the tail chunk is flushed.
+- **Stop no longer zeroes a session's counters (`meetings_v2/session_store.rs`, `meetings_v2/engine.rs`, `meetings_v2/worker.rs`)**: `session.json` mutations go through a new `update_session` under a store-wide lock instead of saving a `MeetingSession` cloned at start, which had been rolling back the chunk, transcript-segment, and byte counts written during the meeting. `pending_transcription_chunks` is now a real value rather than always zero.
+- **`session.json` is written atomically (`meetings_v2/session_store.rs`)**: write-then-rename, so a crash mid-write cannot leave truncated JSON — which silently hid the meeting from the sessions list even with its audio intact on disk.
+- **Concurrent and stale stops are handled (`meetings_v2/engine.rs`, `commands.rs`)**: `stop`, `pause`, and `resume` take a session id and reject a request naming a session that is no longer current, so a surface that outlived its meeting cannot act on a newer recording. A second stop returns the in-flight session instead of a spurious "nothing to stop" error, and the pill stays up showing "Finalizing" until the session is genuinely finished.
+- **Teardown no longer blocks the async runtime (`meetings_v2/engine.rs`)**: stop joins audio threads and drains the transcription queue inside `spawn_blocking` rather than on an executor thread.
+- **The audio mixer no longer drifts out of alignment (`meetings_v2/capture.rs`)**: with both streams live, samples are consumed in exact lockstep instead of consuming the faster stream and zero-padding the slower one, which had mixed real samples against padding and then against future audio, diverging further for the rest of the meeting. A stream that goes quiet at the device level (loopback with nothing playing) still cannot stall the recording: misalignment is capped at 250 ms.
+- **Sessions interrupted while finalizing are recovered (`meetings_v2/session_store.rs`)**: `FINALIZING` is included in the startup interrupted scan, so a crash during the merge/note step no longer leaves a session stuck in that state forever.
+
+#### Tests
+
+- Added 14 tests across `meetings_v2` covering the mixer's lockstep and lag-allowance behaviour, per-source audibility, utterance commit boundaries, session-id fencing, clock thread budgets, concurrent session-metadata updates, atomic writes, and recovery of sessions interrupted while finalizing.
+
 ## [0.11.0] - 2026-08-26
 
 ### Meetings V2: Dual-Source Capture, Synchronized Temporal Mixing & Low-Latency Live STT (~1.5s)

@@ -3,15 +3,23 @@ use hound::{WavReader, WavSpec, WavWriter};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 pub struct SessionStore {
     base_dir: PathBuf,
+    /// Serializes read-modify-write cycles on `session.json`. The capture
+    /// worker and the engine both mutate session metadata concurrently; without
+    /// this, whichever writes last silently discards the other's counters.
+    write_lock: Mutex<()>,
 }
 
 impl SessionStore {
     pub fn new(vault_dir: PathBuf) -> Self {
         let base_dir = vault_dir.join("meetings_v2");
-        Self { base_dir }
+        Self {
+            base_dir,
+            write_lock: Mutex::new(()),
+        }
     }
 
     pub fn meetings_dir(&self) -> &Path {
@@ -36,17 +44,54 @@ impl SessionStore {
     }
 
     pub fn save_session(&self, session: &MeetingSession) -> Result<(), String> {
+        let _guard = self.write_lock.lock().map_err(|e| e.to_string())?;
+        self.write_session_unlocked(session)
+    }
+
+    /// Applies `mutate` to the on-disk session under the store's write lock and
+    /// persists the result, returning the updated session.
+    ///
+    /// Every mutation of live session metadata must go through this rather than
+    /// saving a `MeetingSession` captured earlier: a stale copy would roll back
+    /// whatever another thread has written since it was cloned.
+    pub fn update_session<F>(&self, session_id: &str, mutate: F) -> Result<MeetingSession, String>
+    where
+        F: FnOnce(&mut MeetingSession),
+    {
+        let _guard = self.write_lock.lock().map_err(|e| e.to_string())?;
+        let mut session = self.read_session_raw(session_id)?;
+        mutate(&mut session);
+        session.updated_at = chrono::Utc::now().to_rfc3339();
+        self.write_session_unlocked(&session)?;
+        Ok(session)
+    }
+
+    fn write_session_unlocked(&self, session: &MeetingSession) -> Result<(), String> {
         let dir = self.session_dir(&session.id);
         fs::create_dir_all(&dir)
             .map_err(|e| format!("Failed to create session dir: {}", e))?;
 
-        let meta_path = dir.join("session.json");
         let content = serde_json::to_string_pretty(session)
             .map_err(|e| format!("Failed to serialize session metadata: {}", e))?;
 
-        fs::write(&meta_path, content)
-            .map_err(|e| format!("Failed to write session.json: {}", e))?;
+        // Write-then-rename: a crash mid-write must never leave a truncated
+        // session.json, which would make the meeting unreadable (and so
+        // invisible in the UI) even though its audio is intact on disk.
+        let meta_path = dir.join("session.json");
+        let tmp_path = dir.join("session.json.tmp");
+        fs::write(&tmp_path, content)
+            .map_err(|e| format!("Failed to write session.json.tmp: {}", e))?;
+        fs::rename(&tmp_path, &meta_path)
+            .map_err(|e| format!("Failed to commit session.json: {}", e))?;
         Ok(())
+    }
+
+    fn read_session_raw(&self, session_id: &str) -> Result<MeetingSession, String> {
+        let meta_path = self.session_dir(session_id).join("session.json");
+        let content = fs::read_to_string(&meta_path)
+            .map_err(|e| format!("Failed to read session.json: {}", e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to deserialize session.json: {}", e))
     }
 
     pub fn get_session(&self, session_id: &str) -> Result<MeetingSession, String> {
@@ -301,7 +346,11 @@ impl SessionStore {
         for mut session in sessions {
             if matches!(
                 session.state,
-                MeetingState::Starting | MeetingState::Recording | MeetingState::Stopping
+                MeetingState::Starting
+                    | MeetingState::Recording
+                    | MeetingState::Paused
+                    | MeetingState::Stopping
+                    | MeetingState::Finalizing
             ) {
                 session.state = MeetingState::Interrupted;
                 let _ = self.save_session(&session);
@@ -317,6 +366,7 @@ impl SessionStore {
 mod tests {
     use super::*;
     use crate::meetings_v2::types::TranscriptSegmentStatus;
+    use std::sync::Arc;
 
     #[test]
     fn test_session_store_lifecycle_and_chunking() {
@@ -385,6 +435,96 @@ mod tests {
         let md_content = fs::read_to_string(note_path).unwrap();
         assert!(md_content.contains("Sprint Planning"));
         assert!(md_content.contains("Hello everyone. Let's review the architecture."));
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn concurrent_updates_never_clobber_each_others_counters() {
+        // The capture worker and the engine both mutate session metadata while a
+        // meeting runs. Saving a `MeetingSession` cloned earlier would roll back
+        // whatever the other thread wrote in the meantime, which is how recorded
+        // chunk and transcript counts used to end up back at zero.
+        let temp_dir =
+            std::env::temp_dir().join(format!("relay_test_meet_concurrent_{}", uuid::Uuid::new_v4()));
+        let store = Arc::new(SessionStore::new(temp_dir.clone()));
+
+        let session = MeetingSession::new("concurrent_session".to_string(), None);
+        store.init_session(&session).unwrap();
+
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let store = store.clone();
+            let id = session.id.clone();
+            handles.push(std::thread::spawn(move || {
+                for _ in 0..50 {
+                    store
+                        .update_session(&id, |s| {
+                            s.chunk_count += 1;
+                            s.transcript_segment_count += 1;
+                            s.total_audio_bytes += 10;
+                        })
+                        .unwrap();
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let reloaded = store.get_session(&session.id).unwrap();
+        assert_eq!(reloaded.chunk_count, 200);
+        assert_eq!(reloaded.transcript_segment_count, 200);
+        assert_eq!(reloaded.total_audio_bytes, 2_000);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn saving_leaves_no_partial_file_behind() {
+        // session.json is committed by rename, so a crash mid-write cannot leave
+        // truncated JSON — which would make the meeting unreadable, and so
+        // invisible in the UI, even with its audio intact.
+        let temp_dir =
+            std::env::temp_dir().join(format!("relay_test_meet_atomic_{}", uuid::Uuid::new_v4()));
+        let store = SessionStore::new(temp_dir.clone());
+
+        let session = MeetingSession::new("atomic_session".to_string(), None);
+        store.init_session(&session).unwrap();
+        store
+            .update_session(&session.id, |s| s.state = MeetingState::Recording)
+            .unwrap();
+
+        let dir = store.session_dir(&session.id);
+        assert!(dir.join("session.json").exists());
+        assert!(
+            !dir.join("session.json.tmp").exists(),
+            "the temporary file must not survive a committed write"
+        );
+        assert_eq!(
+            store.get_session(&session.id).unwrap().state,
+            MeetingState::Recording
+        );
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn recovery_reclaims_sessions_interrupted_while_finalizing() {
+        // Finalization (merging chunks, writing the note) is the slowest part of
+        // a stop, so a crash there is likely; such a session used to stay in
+        // FINALIZING forever and never be recovered.
+        let temp_dir =
+            std::env::temp_dir().join(format!("relay_test_meet_finalizing_{}", uuid::Uuid::new_v4()));
+        let store = SessionStore::new(temp_dir.clone());
+
+        let mut session = MeetingSession::new("finalizing_session".to_string(), None);
+        session.state = MeetingState::Finalizing;
+        store.init_session(&session).unwrap();
+
+        let interrupted = store.scan_interrupted_sessions().unwrap();
+        assert_eq!(interrupted.len(), 1);
+        assert_eq!(interrupted[0].state, MeetingState::Interrupted);
 
         let _ = fs::remove_dir_all(temp_dir);
     }
