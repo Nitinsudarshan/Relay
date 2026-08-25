@@ -239,59 +239,15 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
   const handleReEnrich = async () => {
     setIsEnriching(true);
     try {
-      let enriched = await invoke<Scribble>('trigger_enrich_scribble', { id: scribble.id });
+      const enriched = await invoke<Scribble>('trigger_enrich_scribble', { id: scribble.id });
       if (enriched) {
-        // Fallback: If title still has leftover placeholder phrases, sanitize and persist
-        if (
-          enriched.title.includes('Generating title') ||
-          enriched.title.includes('+ 2 more') ||
-          enriched.title.includes('+ ') ||
-          enriched.title.startsWith('Synthesis: Generating') ||
-          enriched.title.startsWith('[Synthesis:')
-        ) {
-          const firstClean = enriched.content
-            .split('\n')
-            .map((l) => l.replace(/^[#\-*\s]+/, '').trim())
-            .find(
-              (l) =>
-                l &&
-                !l.includes('Generating title') &&
-                !l.includes('+ ') &&
-                !l.startsWith('Synthesis:') &&
-                !l.startsWith('Consolidated:') &&
-                !l.startsWith('---')
-            );
-          const cleanTitle = firstClean ? firstClean.split(/\s+/).slice(0, 6).join(' ') : 'Scribble Interface Guidelines';
-          enriched = { ...enriched, title: cleanTitle };
-          await invoke<Scribble>('update_scribble', { scribble: enriched });
-        }
-
-        let updatedQuestions = enriched.ai_metadata?.suggested_questions || [];
-        if (!updatedQuestions || updatedQuestions.length === 0) {
-          const mainTopic = (enriched.topics && enriched.topics.length > 0) ? enriched.topics[0] : (enriched.title || 'Knowledge Organization');
-          updatedQuestions = [
-            `How does '${mainTopic}' connect with your broader project architecture and roadmap?`,
-            `What are the critical implementation risks, performance trade-offs, or UX edge cases for '${enriched.title}'?`,
-            `What actionable next step or prototype would best advance this thinking forward?`,
-          ];
-          enriched = {
-            ...enriched,
-            ai_metadata: {
-              ...enriched.ai_metadata,
-              suggested_questions: updatedQuestions,
-              enrichment_status: 'enriched',
-            },
-          };
-          await invoke<Scribble>('update_scribble', { scribble: enriched });
-        }
-
         onUpdate(enriched);
         setTitle(enriched.title);
         setContent(enriched.content);
         setSummary(enriched.summary || '');
         setTopics(enriched.topics || []);
         setEntities(enriched.entities || []);
-        setQuestions(updatedQuestions);
+        setQuestions(enriched.ai_metadata?.suggested_questions || []);
       }
     } catch (err) {
       console.error('Failed to trigger enrichment:', err);
@@ -661,14 +617,29 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
 
           {/* Expandable Technical Details */}
           {showTechnicalProvenance && (
-            <div className="pt-2 border-t border-border/40 text-[10px] font-mono text-muted-foreground space-y-1 bg-muted/20 p-2.5 rounded-lg animate-in fade-in duration-150">
+            <div className="pt-2 border-t border-border/40 text-[10px] font-mono text-muted-foreground space-y-1.5 bg-muted/20 p-2.5 rounded-lg animate-in fade-in duration-150">
               <div>
                 <span className="text-foreground font-medium">Scribble ID:</span> {scribble.id}
               </div>
+              {scribble.source_metadata?.source_modality && (
+                <div>
+                  <span className="text-foreground font-medium">Source Modality:</span>{' '}
+                  <span className="text-primary font-bold">{scribble.source_metadata.source_modality}</span>
+                </div>
+              )}
               {scribble.source_metadata?.source_voice_note_id && (
                 <div>
-                  <span className="text-foreground font-medium">Origin Voice Note ID:</span>{' '}
+                  <span className="text-foreground font-medium">Primary Voice Note ID:</span>{' '}
                   {scribble.source_metadata.source_voice_note_id}
+                </div>
+              )}
+              {scribble.source_metadata?.source_voice_note_ids && Array.isArray(scribble.source_metadata.source_voice_note_ids) && (
+                <div>
+                  <span className="text-foreground font-medium">Contributing Voice Note IDs ({scribble.source_metadata.source_voice_note_ids.length}):</span>{' '}
+                  {scribble.source_metadata.source_voice_note_ids.join(', ')}
+                  {scribble.source_metadata?.is_merged && (
+                    <span className="ml-1.5 px-1 py-0.2 bg-primary/20 text-primary text-[9px] rounded font-sans font-bold">MERGED</span>
+                  )}
                 </div>
               )}
               {scribble.source_metadata?.filename && (
@@ -679,8 +650,14 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
               )}
               {scribble.source_metadata?.source_scribble_ids && (
                 <div>
-                  <span className="text-foreground font-medium">Merged Source IDs:</span>{' '}
+                  <span className="text-foreground font-medium">Merged Source Scribbles:</span>{' '}
                   {JSON.stringify(scribble.source_metadata.source_scribble_ids)}
+                </div>
+              )}
+              {scribble.ai_metadata?.last_enriched_at && (
+                <div>
+                  <span className="text-foreground font-medium">Last Enriched:</span>{' '}
+                  {new Date(scribble.ai_metadata.last_enriched_at).toLocaleString()}
                 </div>
               )}
             </div>

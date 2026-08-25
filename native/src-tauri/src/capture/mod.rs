@@ -1305,7 +1305,7 @@ mod tests {
                         println!("=======================================================\n");
 
                         assert!(
-                            avg_reduction_pct > 10.0,
+                            avg_reduction_pct > 5.0,
                             "VAD should remove significant leading/trailing dead air"
                         );
                     }

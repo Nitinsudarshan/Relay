@@ -503,14 +503,27 @@ pub async fn delete_voice_note(
 
 #[tauri::command]
 pub async fn merge_voice_notes(
+    app: AppHandle,
     primary_id: String,
     secondary_id: String,
     state: State<'_, AppState>,
 ) -> Result<VaultNote, CommandError> {
-    state
+    let merged = state
         .vault
         .merge_notes(&primary_id, &secondary_id)
-        .map_err(|e| CommandError::new("VAULT_MERGE_FAILED", &e.to_string()))
+        .map_err(|e| CommandError::new("VAULT_MERGE_FAILED", &e.to_string()))?;
+
+    // Synchronize and re-enrich any existing Scribbles derived from the merged Voice Notes
+    if let Ok(affected_scribble_ids) = state.vault.sync_scribbles_for_voice_note_merge(&primary_id, &secondary_id) {
+        for scribble_id in affected_scribble_ids {
+            if let Ok(scribble) = state.vault.get_scribble(&scribble_id) {
+                let _ = app.emit(SCRIBBLE_SAVED_EVENT, &scribble);
+                spawn_scribble_enrichment(app.clone(), &state, scribble_id);
+            }
+        }
+    }
+
+    Ok(merged)
 }
 
 pub const SCRIBBLE_SAVED_EVENT: &str = "scribble-saved";

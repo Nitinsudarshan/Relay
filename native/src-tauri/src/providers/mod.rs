@@ -107,6 +107,18 @@ impl LLMClient {
     pub fn heuristic_fallback(prompt: &str, system_prompt: Option<&str>) -> LLMResponse {
         let is_json = system_prompt.map(|s| s.contains("JSON")).unwrap_or(false);
         if is_json {
+            let sys = system_prompt.unwrap_or("");
+            if sys.contains("Knowledge & Thinking Assistant") || sys.contains("thought/scribble") || sys.contains("topics") || sys.contains("entities") {
+                let structured = crate::pipeline::extract_deterministic_knowledge(prompt);
+                let json_text = serde_json::to_string_pretty(&structured).unwrap_or_else(|_| "{}".to_string());
+                return LLMResponse {
+                    text: json_text,
+                    model: "heuristic-fallback".to_string(),
+                    prompt_tokens: None,
+                    completion_tokens: None,
+                };
+            }
+
             let first_line = prompt.lines().next().unwrap_or(prompt).trim();
             let title = if first_line.is_empty() {
                 "Follow up on meeting action items"

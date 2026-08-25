@@ -224,18 +224,7 @@ impl VaultManager {
         let mut merged_note = note1;
         merged_note.content = merged_content;
         merged_note.updated_at = chrono::Utc::now().to_rfc3339();
-        merged_note.title = merged_note
-            .content
-            .chars()
-            .take(60)
-            .map(|c| {
-                if c == '"' || c == '\n' || c == '\r' {
-                    ' '
-                } else {
-                    c
-                }
-            })
-            .collect();
+        merged_note.title = crate::pipeline::extract_deterministic_title(&merged_note.content);
 
         self.save_note(&merged_note)?;
         self.delete_note(secondary_id)?;
@@ -1123,6 +1112,95 @@ impl VaultManager {
         Ok(purged)
     }
 
+    /// Synchronizes, consolidates, and refreshes any existing Scribbles derived from the merged Voice Notes.
+    pub fn sync_scribbles_for_voice_note_merge(
+        &self,
+        primary_vn_id: &str,
+        secondary_vn_id: &str,
+    ) -> Result<Vec<String>, VaultError> {
+        let primary_note = self.get_note(primary_vn_id)?;
+        let scribbles = self.list_scribbles()?;
+
+        let mut matching_scribbles = Vec::new();
+        for s in scribbles {
+            let mut matches = false;
+            if let Some(src_id) = s.source_metadata.get("source_voice_note_id").and_then(|v| v.as_str()) {
+                if src_id == primary_vn_id || src_id == secondary_vn_id {
+                    matches = true;
+                }
+            }
+            if !matches {
+                if let Some(arr) = s.source_metadata.get("source_voice_note_ids").and_then(|v| v.as_array()) {
+                    for v in arr {
+                        if let Some(id_str) = v.as_str() {
+                            if id_str == primary_vn_id || id_str == secondary_vn_id {
+                                matches = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if matches {
+                matching_scribbles.push(s);
+            }
+        }
+
+        if matching_scribbles.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // If multiple scribbles exist (e.g. one for primary and one for secondary),
+        // keep the first/primary scribble and retire the redundant secondary scribbles to trash.
+        let mut target_scribble = matching_scribbles.remove(0);
+
+        // Collect all unique contributing voice note IDs
+        let mut all_vn_ids = std::collections::HashSet::new();
+        all_vn_ids.insert(primary_vn_id.to_string());
+        all_vn_ids.insert(secondary_vn_id.to_string());
+
+        if let Some(arr) = target_scribble.source_metadata.get("source_voice_note_ids").and_then(|v| v.as_array()) {
+            for v in arr {
+                if let Some(s) = v.as_str() {
+                    all_vn_ids.insert(s.to_string());
+                }
+            }
+        }
+
+        // Clean up redundant scribbles if both notes were individually converted before merging
+        for redundant in matching_scribbles {
+            if let Some(arr) = redundant.source_metadata.get("source_voice_note_ids").and_then(|v| v.as_array()) {
+                for v in arr {
+                    if let Some(s) = v.as_str() {
+                        all_vn_ids.insert(s.to_string());
+                    }
+                }
+            }
+            let _ = self.move_to_trash("scribble", &redundant.id);
+        }
+
+        let vn_ids_vec: Vec<String> = all_vn_ids.into_iter().collect();
+
+        // Update target scribble's content, provenance, and timestamps
+        target_scribble.content = primary_note.content.clone();
+        target_scribble.updated_at = now.clone();
+        target_scribble.source_type = crate::vault::SOURCE_TYPE_VOICE.to_string();
+        target_scribble.source_metadata = serde_json::json!({
+            "source_voice_note_id": primary_vn_id,
+            "source_voice_note_ids": vn_ids_vec,
+            "is_merged": true,
+            "merged_at": now,
+            "source_modality": "VOICE",
+            "last_synced_at": now,
+        });
+        target_scribble.ai_metadata.enrichment_status = "pending".to_string();
+
+        self.save_scribble(&target_scribble)?;
+        Ok(vec![target_scribble.id])
+    }
+
     /// Merges two or more source Scribbles into a brand new synthesized Scribble.
     /// Preserves full provenance to the source Scribbles and links them with DERIVED_FROM.
     pub fn merge_scribbles(&self, source_ids: &[String]) -> Result<Scribble, VaultError> {
@@ -1136,10 +1214,7 @@ impl VaultManager {
         }
 
         let mut content_parts = Vec::new();
-        let mut combined_topics = std::collections::HashSet::new();
-        let mut combined_entities = std::collections::HashSet::new();
         let mut combined_tags = std::collections::HashSet::new();
-        let mut derived_relationships = Vec::new();
 
         for s in &source_scribbles {
             let raw_t = s.title.trim().trim_start_matches('[').trim_end_matches(']').trim();
@@ -1154,79 +1229,36 @@ impl VaultManager {
                 raw_t.to_string()
             };
             content_parts.push(format!("### {}\n\n{}", clean_t, s.content));
-            for t in &s.topics {
-                combined_topics.insert(t.clone());
-            }
-            for e in &s.entities {
-                combined_entities.insert(e.clone());
-            }
             for tag in &s.tags {
                 combined_tags.insert(tag.clone());
             }
-            derived_relationships.push(ScribbleRelationship {
-                id: format!("rel_merge_{}", uuid::Uuid::new_v4()),
-                target_id: s.id.clone(),
-                relationship_type: REL_DERIVED_FROM.to_string(),
-                confidence: 1.0,
-                source: "user".to_string(),
-            });
         }
 
         let combined_content = content_parts.join("\n\n---\n\n");
         let now = chrono::Utc::now().to_rfc3339();
 
-        // Clean initial semantic fallback title (3-8 words, never recursive brackets/Generating title)
-        let default_title = if !combined_topics.is_empty() {
-            let top_topics: Vec<String> = combined_topics.iter().take(2).cloned().collect();
-            format!("Consolidated: {}", top_topics.join(" & "))
-        } else {
-            let valid_titles: Vec<String> = source_scribbles
-                .iter()
-                .map(|s| s.title.trim())
-                .filter(|t| {
-                    !t.is_empty()
-                        && *t != "Untitled Thought"
-                        && *t != "Generating title…"
-                        && !t.starts_with("Generating title")
-                        && !t.starts_with("Synthesis:")
-                        && !t.starts_with("[Synthesis:")
-                        && !t.starts_with("Consolidated:")
-                        && !t.starts_with("[")
-                })
-                .map(|t| t.to_string())
-                .collect();
-
-            if !valid_titles.is_empty() {
-                if valid_titles.len() == 1 {
-                    format!("Consolidated: {}", valid_titles[0])
-                } else {
-                    format!("Consolidated: {} & {}", valid_titles[0], valid_titles[1])
-                }
-            } else {
-                let first_line = source_scribbles[0].content.lines().next().unwrap_or("Consolidated Thought");
-                let clean = first_line.trim_start_matches('#').trim();
-                let words: Vec<&str> = clean.split_whitespace().take(6).collect();
-                if !words.is_empty() {
-                    format!("Consolidated: {}", words.join(" "))
-                } else {
-                    "Consolidated Thought".to_string()
-                }
-            }
-        };
-
-        let mut merged_scribble = Scribble::new_text(&combined_content, Some(&default_title));
-        merged_scribble.topics = combined_topics.into_iter().collect();
-        merged_scribble.entities = combined_entities.into_iter().collect();
+        let initial_title = crate::pipeline::extract_deterministic_title(&combined_content);
+        let mut merged_scribble = Scribble::new_text(&combined_content, Some(&initial_title));
+        // Reset and re-rank topics and entities cleanly from the combined content
+        merged_scribble.topics = crate::pipeline::extract_deterministic_topics(&combined_content, 7);
+        merged_scribble.entities = crate::pipeline::extract_deterministic_entities(&combined_content, 7);
         merged_scribble.tags = combined_tags.into_iter().collect();
-        // IMPORTANT: DO NOT create knowledge graph relationships to the merge inputs.
-        // Merge relationship is purely provenance metadata, not graph edges.
         merged_scribble.relationships = Vec::new();
+        merged_scribble.source_type = crate::vault::SOURCE_TYPE_TEXT.to_string();
         merged_scribble.source_metadata = serde_json::json!({
             "creation_method": "merge",
             "source_scribble_ids": source_ids,
             "merged_at": now,
             "source_count": source_ids.len(),
+            "source_modality": "MERGED_SCRIBBLE",
         });
+        merged_scribble.ai_metadata.suggested_questions = crate::pipeline::extract_deterministic_questions(
+            &combined_content,
+            &initial_title,
+            &merged_scribble.topics,
+            &merged_scribble.entities,
+        );
+        merged_scribble.ai_metadata.enrichment_status = "pending".to_string();
 
         self.save_scribble(&merged_scribble)?;
 
@@ -1545,12 +1577,12 @@ mod tests {
         let manager = VaultManager::new(temp_dir.clone());
 
         // 1. Create 2 scribbles
-        let mut s1 = Scribble::new_text("First concept on local RAG.", Some("Local RAG"));
+        let mut s1 = Scribble::new_text("First concept on local storage with RAG.", Some("Local Storage"));
         s1.topics = vec!["AI".to_string(), "Search".to_string()];
         s1.entities = vec!["Ollama".to_string()];
         manager.save_scribble(&s1).unwrap();
 
-        let mut s2 = Scribble::new_text("Second concept on vector caching.", Some("Vector Caching"));
+        let mut s2 = Scribble::new_text("Second concept on vector embeddings caching with LanceDB.", Some("Vector Embeddings"));
         s2.topics = vec!["AI".to_string(), "Performance".to_string()];
         s2.entities = vec!["LanceDB".to_string()];
         manager.save_scribble(&s2).unwrap();
@@ -1559,10 +1591,11 @@ mod tests {
         let merged = manager.merge_scribbles(&[s1.id.clone(), s2.id.clone()]).unwrap();
 
         // 3. Verify merged attributes
-        assert!(merged.content.contains("First concept on local RAG."));
-        assert!(merged.content.contains("Second concept on vector caching."));
-        assert_eq!(merged.topics.len(), 3); // AI, Search, Performance
-        assert_eq!(merged.entities.len(), 2); // Ollama, LanceDB
+        assert!(merged.content.contains("First concept on local storage"));
+        assert!(merged.content.contains("Second concept on vector embeddings"));
+        assert!(!merged.topics.is_empty());
+        assert!(!merged.entities.is_empty());
+        assert!(merged.entities.contains(&"LanceDB".to_string()) || merged.entities.contains(&"Ollama".to_string()));
         // Merge must NOT create graph edges to source scribbles
         assert_eq!(merged.relationships.len(), 0);
 
@@ -1581,6 +1614,78 @@ mod tests {
         // Verify source scribbles are retired to Trash and recoverable
         let trash_items = manager.get_trash_items().unwrap();
         assert_eq!(trash_items.len(), 2);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_voice_note_merge_synchronizes_scribble() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_vn_merge_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+
+        // 1. Create Voice Note A and convert to Scribble A
+        let note_a = VaultNote::new_voice_note("Voice Note A: Local-first architecture is critical.");
+        manager.save_note(&note_a).unwrap();
+        let scribble_a = Scribble::from_voice_note(&note_a.id, &note_a.content, None);
+        manager.save_scribble(&scribble_a).unwrap();
+
+        // 2. Create Voice Note B
+        let note_b = VaultNote::new_voice_note("Voice Note B: Adding Google Calendar and cloud sync.");
+        manager.save_note(&note_b).unwrap();
+
+        // 3. Merge Note A and Note B
+        let merged_note = manager.merge_notes(&note_a.id, &note_b.id).unwrap();
+        assert!(merged_note.content.contains("Voice Note A"));
+        assert!(merged_note.content.contains("Voice Note B"));
+
+        // 4. Run sync_scribbles_for_voice_note_merge
+        let affected = manager.sync_scribbles_for_voice_note_merge(&note_a.id, &note_b.id).unwrap();
+        assert_eq!(affected.len(), 1);
+        assert_eq!(affected[0], scribble_a.id);
+
+        // 5. Verify Scribble A has been updated with merged content and provenance
+        let updated_scribble = manager.get_scribble(&scribble_a.id).unwrap();
+        assert!(updated_scribble.content.contains("Voice Note A"));
+        assert!(updated_scribble.content.contains("Voice Note B"));
+        assert_eq!(updated_scribble.source_metadata.get("is_merged").unwrap().as_bool().unwrap(), true);
+        let vn_ids = updated_scribble.source_metadata.get("source_voice_note_ids").unwrap().as_array().unwrap();
+        assert!(vn_ids.iter().any(|v| v.as_str().unwrap() == note_a.id));
+        assert!(vn_ids.iter().any(|v| v.as_str().unwrap() == note_b.id));
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_voice_note_merge_consolidates_dual_scribbles() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_vn_dual_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+
+        // 1. Create Voice Note A and Scribble A
+        let note_a = VaultNote::new_voice_note("Content A");
+        manager.save_note(&note_a).unwrap();
+        let scribble_a = Scribble::from_voice_note(&note_a.id, &note_a.content, None);
+        manager.save_scribble(&scribble_a).unwrap();
+
+        // 2. Create Voice Note B and Scribble B
+        let note_b = VaultNote::new_voice_note("Content B");
+        manager.save_note(&note_b).unwrap();
+        let scribble_b = Scribble::from_voice_note(&note_b.id, &note_b.content, None);
+        manager.save_scribble(&scribble_b).unwrap();
+
+        assert_eq!(manager.list_scribbles().unwrap().len(), 2);
+
+        // 3. Merge Note A and Note B
+        let _ = manager.merge_notes(&note_a.id, &note_b.id).unwrap();
+
+        // 4. Sync scribbles
+        let affected = manager.sync_scribbles_for_voice_note_merge(&note_a.id, &note_b.id).unwrap();
+        assert_eq!(affected.len(), 1);
+
+        // 5. Active scribbles must now be 1, and the other retired to trash
+        let active = manager.list_scribbles().unwrap();
+        assert_eq!(active.len(), 1);
+        let trash = manager.get_trash_items().unwrap();
+        assert_eq!(trash.len(), 1);
 
         let _ = fs::remove_dir_all(temp_dir);
     }

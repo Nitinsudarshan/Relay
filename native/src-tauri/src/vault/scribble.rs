@@ -146,10 +146,16 @@ impl Scribble {
         transcript: &str,
         custom_title: Option<&str>,
     ) -> Self {
-        let mut scribble = Self::new_text(transcript, custom_title);
+        let initial_title = custom_title
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| crate::pipeline::extract_deterministic_title(transcript));
+        let mut scribble = Self::new_text(transcript, Some(&initial_title));
         scribble.source_type = SOURCE_TYPE_VOICE.to_string();
         scribble.source_metadata = serde_json::json!({
             "source_voice_note_id": voice_note_id,
+            "source_voice_note_ids": vec![voice_note_id],
+            "is_merged": false,
+            "source_modality": "VOICE",
             "promoted_at": chrono::Utc::now().to_rfc3339()
         });
         scribble
@@ -399,7 +405,23 @@ impl KnowledgeGraphData {
 
             // 4. Process Source Provenance Nodes & Edges
             if scribble.source_type == SOURCE_TYPE_VOICE {
-                if let Some(vn_id) = scribble.source_metadata.get("source_voice_note_id").and_then(|v| v.as_str()) {
+                let mut vn_ids: Vec<String> = Vec::new();
+                if let Some(arr) = scribble.source_metadata.get("source_voice_note_ids").and_then(|v| v.as_array()) {
+                    for v in arr {
+                        if let Some(s) = v.as_str() {
+                            if !vn_ids.contains(&s.to_string()) {
+                                vn_ids.push(s.to_string());
+                            }
+                        }
+                    }
+                }
+                if vn_ids.is_empty() {
+                    if let Some(vn_id) = scribble.source_metadata.get("source_voice_note_id").and_then(|v| v.as_str()) {
+                        vn_ids.push(vn_id.to_string());
+                    }
+                }
+
+                for vn_id in vn_ids {
                     let source_node_id = format!("source_{}", vn_id);
                     nodes_map.entry(source_node_id.clone()).or_insert_with(|| KnowledgeNode {
                         id: source_node_id.clone(),

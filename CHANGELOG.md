@@ -1,5 +1,28 @@
 # Relay — Changelog
 
+## [0.10.1] - 2026-08-25
+
+### Scribble Lifecycle, Voice Note Merge Synchronization & AI Knowledge Enrichment
+
+- **Voice Note Merge Scribble Synchronization & Consolidation (`vault/mod.rs`, `commands.rs`)**:
+  - Implemented `sync_scribbles_for_voice_note_merge`: when Voice Note A is merged with Voice Note B, linked Scribbles are automatically updated with the full merged content, provenance metadata is updated (`source_voice_note_id`, `source_voice_note_ids`, `is_merged: true`, `merged_at`, `source_modality: "VOICE"`), and async re-enrichment is dispatched.
+  - Handled dual conversion consolidation: if both Voice Note A and B were independently promoted to Scribbles prior to merging, the primary Scribble is updated with merged content and provenance, while the redundant secondary Scribble is retired to Trash.
+  - Emits `SCRIBBLE_SAVED_EVENT` and `SCRIBBLE_ENRICHED_EVENT` on merge, invalidating stale client state immediately.
+- **Transcript-Prefix Title Elimination & Conceptual Title Synthesis (`pipeline/enrichment.rs`)**:
+  - Built `extract_deterministic_title`: strips conversational filler prefixes (`"Yes — this makes a lot of sense..."`, `"So basically..."`, `"I think..."`), scans markdown headings and core insight markers, and synthesizes a concise 3–8 word conceptual title (e.g. *Local Knowledge Layer & Cloud Integration Strategy* instead of *Yes — this makes a lot*).
+- **AI Enrichment Derived State Replacement vs. Accumulation (`pipeline/enrichment.rs`)**:
+  - Refactored enrichment pipeline to treat `topics`, `entities`, and `questions` as derived state replacing previous metadata on current content rather than appending indefinitely.
+  - Extracts and ranks top 5–7 most relevant domain topics and 5–7 named entities (technologies, tools, organizations).
+  - Dynamically synthesizes 3–4 thoughtful AI exploration questions tailored to content and extracted concepts.
+- **Robust Deterministic Knowledge Extractor & Heuristic Fallback (`providers/mod.rs`, `pipeline/enrichment.rs`)**:
+  - Fixed `LLMClient::heuristic_fallback`: differentiated between Meeting task extraction and Scribble knowledge metadata requests, eliminating empty topics/entities when LLM is offline or unconfigured.
+  - Added comprehensive multi-format JSON parsing with fallback to deterministic knowledge extraction on LLM timeout or invalid response.
+- **Scribble Merge Knowledge Object Synthesis (`vault/mod.rs`)**:
+  - Refactored `merge_scribbles` to generate a fresh unified knowledge object from combined content without compounding raw metadata bags; sets initial semantic title, clean 5–7 topics/entities, and records `source_scribble_ids` provenance.
+- **Rich Technical Provenance & Event Sync (`ScribbleDetailEditor.tsx`, `VoiceNotePage.tsx`)**:
+  - Enhanced technical provenance inspector in `ScribbleDetailEditor` displaying contributing Voice Note IDs, merged status badge, modality, and last enriched timestamp.
+  - Added live `scribble-saved` and `scribble-enriched` listeners to `VoiceNotePage` to maintain accurate `promotedNoteIds` across merge operations.
+
 ## [0.10.0] - 2026-08-25
 
 ### App-Owned Overlay Meeting Reminder Window & Native Toast Demotion (Reversal of Decision 46)

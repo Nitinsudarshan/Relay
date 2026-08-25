@@ -7,7 +7,12 @@ mod chat;
 pub use chat::process_chat;
 
 mod enrichment;
-pub use enrichment::{enrich_meeting, enrich_scribble, summarize_scribble};
+pub use enrichment::{
+    enrich_meeting, enrich_scribble, extract_deterministic_entities,
+    extract_deterministic_knowledge, extract_deterministic_questions,
+    extract_deterministic_title, extract_deterministic_topics, summarize_scribble,
+    AiEnrichmentResponse,
+};
 
 #[derive(Error, Debug)]
 pub enum PipelineError {

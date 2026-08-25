@@ -347,6 +347,7 @@ impl NotificationService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::meetings::reminders::ReminderStatus;
 
     #[test]
     fn test_sanitize_and_clamp_text() {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { HardDrive, Mic, ShieldCheck, Edit3, Trash2, GitMerge, Copy, Check, X, Save, Sparkles } from 'lucide-react';
@@ -119,33 +119,47 @@ export const VoiceNotePage: React.FC = () => {
     refreshLocation();
   }, []);
 
-  useEffect(() => {
-    if (vaultState.status !== 'ready') return;
-    invoke<VaultNote[]>('get_voice_notes')
-      .then(setNotes)
-      .catch((err) => console.error('Failed to load Voice Notes', err));
-
-    invoke<{ source_metadata?: { source_voice_note_id?: string } }[]>('get_scribbles')
+  const refreshPromotedScribbles = useCallback(() => {
+    invoke<{ source_metadata?: { source_voice_note_id?: string; source_voice_note_ids?: string[] } }[]>('get_scribbles')
       .then((scribbles) => {
         const ids = new Set<string>();
         for (const s of scribbles) {
           if (s.source_metadata?.source_voice_note_id) {
             ids.add(s.source_metadata.source_voice_note_id);
           }
+          if (Array.isArray(s.source_metadata?.source_voice_note_ids)) {
+            for (const id of s.source_metadata.source_voice_note_ids) {
+              ids.add(id);
+            }
+          }
         }
         setPromotedNoteIds(ids);
       })
       .catch((err) => console.error('Failed to load Scribble promotion mapping', err));
-  }, [vaultState.status]);
+  }, []);
 
   useEffect(() => {
-    const unlistenPromise = listen<VaultNote>('voice-note-saved', ({ payload }) => {
+    if (vaultState.status !== 'ready') return;
+    invoke<VaultNote[]>('get_voice_notes')
+      .then(setNotes)
+      .catch((err) => console.error('Failed to load Voice Notes', err));
+
+    refreshPromotedScribbles();
+  }, [vaultState.status, refreshPromotedScribbles]);
+
+  useEffect(() => {
+    const unlistenVoice = listen<VaultNote>('voice-note-saved', ({ payload }) => {
       setNotes((prev) => [payload, ...prev.filter((n) => n.id !== payload.id)]);
+      refreshPromotedScribbles();
+    });
+    const unlistenScribble = listen('scribble-saved', () => {
+      refreshPromotedScribbles();
     });
     return () => {
-      unlistenPromise.then((unlisten) => unlisten());
+      unlistenVoice.then((unlisten) => unlisten());
+      unlistenScribble.then((unlisten) => unlisten());
     };
-  }, []);
+  }, [refreshPromotedScribbles]);
 
   const handleChooseFolder = async () => {
     setBusy(true);
