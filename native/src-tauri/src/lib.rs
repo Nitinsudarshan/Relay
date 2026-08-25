@@ -5,7 +5,7 @@ pub mod diagnostics;
 pub mod hotkeys;
 pub mod identity;
 pub mod mcp;
-pub mod meetings;
+pub mod meetings_v2;
 pub mod oauth;
 pub mod overlay;
 pub mod pipeline;
@@ -20,8 +20,8 @@ use capture::{AudioRecorder, SttEngine};
 use commands::AppState;
 use settings::AppSettings;
 use std::path::PathBuf;
-use std::sync::Mutex;
-use tauri::{Emitter, Manager};
+use std::sync::{Arc, Mutex};
+use tauri::Manager;
 use vault::VaultManager;
 
 #[cfg(target_os = "windows")]
@@ -88,14 +88,31 @@ pub fn run() {
         .map(PathBuf::from)
         .unwrap_or_else(|| default_vault_dir.clone());
 
+    let stt = SttEngine::new();
+    let meetings_v2 = Arc::new(meetings_v2::MeetingsV2Engine::new(
+        vault_dir.clone(),
+        stt.clone(),
+    ));
+
+    // Run startup crash recovery on launch: reconcile any interrupted recordings
+    if let Ok(recovered) = meetings_v2.recover_interrupted_sessions() {
+        if !recovered.is_empty() {
+            tracing::info!(
+                "Startup: Reconciled {} interrupted meeting recording session(s).",
+                recovered.len()
+            );
+        }
+    }
+
     let state = AppState {
         recorder: AudioRecorder::new(),
         vault: VaultManager::new(vault_dir),
         default_vault_dir,
         config_dir,
         settings: Mutex::new(settings),
-        stt: SttEngine::new(),
+        stt,
         last_stt_diagnostics: Mutex::new(None),
+        meetings_v2,
     };
 
     tauri::Builder::default()
@@ -125,18 +142,6 @@ pub fn run() {
                         }
                     }
                     "record" => {
-                        // Wired to the same meeting the reminder popup is
-                        // currently showing (soonest/active), if any — the
-                        // frontend's shared `startMeetingRecording` handles
-                        // it identically to the popup's own button
-                        // (meetings_implementation.md §4.2). Previously
-                        // this emitted an event nothing listened for
-                        // (Decision 45, Broken #3b).
-                        if let Some(reminders) = app.try_state::<crate::meetings::reminders::ReminderQueue>() {
-                            if let Some(current) = crate::meetings::reminders::current_popup_reminder(&reminders) {
-                                let _ = app.emit("start-meeting-recording-for", &current.meeting_id);
-                            }
-                        }
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.unminimize();
                             let _ = window.show();
@@ -156,10 +161,7 @@ pub fn run() {
             // more docked/floating product-mode choice to hide it behind
             // (see docs/decisions.md Decision 36) — so it's always shown.
             overlay::ensure_pill_window(handle, true, pill_position);
-            // Create the meeting reminder overlay once, hidden, at startup
-            overlay::ensure_reminder_window(handle);
 
-            crate::meetings::engine::start(handle.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -209,34 +211,6 @@ pub fn run() {
             commands::get_knowledge_graph,
             commands::trigger_enrich_scribble,
             commands::summarize_scribble,
-            commands::get_meetings,
-            commands::get_meeting,
-            commands::create_meeting,
-            commands::save_meeting,
-            commands::update_meeting,
-            commands::delete_meeting,
-            commands::get_meeting_series,
-            commands::save_meeting_series,
-            commands::delete_meeting_series,
-            commands::start_meeting_recording,
-            commands::stop_meeting_recording,
-            commands::trigger_enrich_meeting,
-            commands::create_scribble_from_meeting,
-            commands::get_upcoming_calendar_events,
-            commands::import_calendar_event,
-            commands::dismiss_meeting_reminder,
-            commands::snooze_meeting_reminder,
-            commands::get_pending_meeting_reminder,
-            commands::meeting_reminder_ready,
-            commands::meeting_reminder_hover_changed,
-            commands::get_current_meeting_reminder,
-            commands::trigger_mock_meeting_reminder,
-            commands::get_active_recording_meeting_id,
-            commands::debug_detect_conferencing_windows,
-            commands::get_calendar_connection_status,
-            commands::start_google_calendar_oauth,
-            commands::disconnect_google_calendar,
-            commands::sync_google_calendar,
             commands::get_relay_profile,
             commands::update_profile_display_name,
             commands::complete_profile_onboarding,
@@ -251,6 +225,14 @@ pub fn run() {
             commands::check_for_app_updates,
             commands::set_diagnostics_consent,
             commands::complete_first_run,
+            commands::start_meeting_v2,
+            commands::stop_meeting_v2,
+            commands::get_active_meeting_v2,
+            commands::list_meetings_v2,
+            commands::get_meeting_v2,
+            commands::get_meeting_v2_transcript,
+            commands::get_meeting_v2_diagnostics,
+            commands::delete_meeting_v2,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { App } from './App';
 import { FloatingPill } from './components/capture/FloatingPill';
-import { MeetingReminderWindow } from './components/meetings/MeetingReminderWindow';
+import { MeetingRecordingOverlay } from './components/meetings_v2/MeetingRecordingOverlay';
 import './index.css';
 
 let windowLabel = '';
@@ -26,8 +26,8 @@ const ROUTE_MAP: Record<string, RouteEntry> = {
     component: <FloatingPill />,
     isOverlay: true,
   },
-  'meeting-reminder': {
-    component: <MeetingReminderWindow />,
+  'meeting-overlay': {
+    component: <MeetingRecordingOverlay />,
     isOverlay: true,
   },
 };

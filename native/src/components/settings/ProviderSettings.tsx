@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
-import { AppSettings, LanguageSettings, VaultLocationInfo, RelayAccount, CalendarConnectionStatus } from '../../types';
+import { AppSettings, LanguageSettings, VaultLocationInfo, RelayAccount } from '../../types';
 import {
   Cpu,
   Cloud,
@@ -22,16 +22,12 @@ import {
   Activity,
   FileText,
   Sparkles,
-  Users,
   Layers,
   FileAudio,
   Check,
   Lock,
   Terminal,
-  Calendar,
-  Unlink,
   ExternalLink,
-  Video,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -50,7 +46,6 @@ export type SettingsSection =
   | 'dictation'
   | 'voicenotes'
   | 'scribbles'
-  | 'meetings'
   | 'privacy'
   | 'trash'
   | 'advanced'
@@ -110,11 +105,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   diagnostics: {
     allow_anonymous_diagnostics: true,
     first_run_completed: false,
-  },
-  meetings: {
-    remind_before_meeting: true,
-    remind_on_detection: true,
-    remind_if_unrecorded: true,
   },
 };
 
@@ -242,98 +232,6 @@ export const ProviderSettings: React.FC = () => {
     }
   };
 
-  // Calendar status & controls
-  const [calendarStatus, setCalendarStatus] = useState<CalendarConnectionStatus>({
-    connected: false,
-    status: 'disconnected',
-  });
-  const [calendarBusy, setCalendarBusy] = useState(false);
-  const [calendarError, setCalendarError] = useState<string | null>(null);
-  const [notificationPermissionGranted, setNotificationPermissionGranted] = useState<boolean | null>(null);
-
-  const checkNotificationPermission = async () => {
-    try {
-      const granted = await isPermissionGranted();
-      setNotificationPermissionGranted(granted);
-    } catch (e) {
-      console.warn('Could not check notification permission:', e);
-      setNotificationPermissionGranted(false);
-    }
-  };
-
-  const handleRequestNotificationPermission = async () => {
-    try {
-      const permission = await requestPermission();
-      setNotificationPermissionGranted(permission === 'granted');
-    } catch (e) {
-      console.warn('Could not request notification permission:', e);
-    }
-  };
-
-  const loadCalendarState = async () => {
-    try {
-      const status = await invoke<CalendarConnectionStatus>('get_calendar_connection_status');
-      setCalendarStatus(status);
-    } catch (err) {
-      console.error('Failed to load calendar status in settings:', err);
-    }
-  };
-
-  const handleConnectGoogleCalendar = async () => {
-    setCalendarBusy(true);
-    setCalendarError(null);
-    try {
-      const updated = await invoke<CalendarConnectionStatus>('start_google_calendar_oauth');
-      setCalendarStatus(updated);
-    } catch (err: unknown) {
-      console.error('Failed to connect Google Calendar:', err);
-      setCalendarError(
-        typeof err === 'string'
-          ? err
-          : (err as { message?: string })?.message || 'Google OAuth connection failed.'
-      );
-    } finally {
-      setCalendarBusy(false);
-    }
-  };
-
-  const handleDisconnectGoogleCalendar = async () => {
-    setCalendarBusy(true);
-    setCalendarError(null);
-    try {
-      const updated = await invoke<CalendarConnectionStatus>('disconnect_google_calendar');
-      setCalendarStatus(updated);
-    } catch (err: unknown) {
-      console.error('Failed to disconnect Google Calendar:', err);
-      setCalendarError(
-        typeof err === 'string'
-          ? err
-          : (err as { message?: string })?.message || 'Failed to disconnect.'
-      );
-    } finally {
-      setCalendarBusy(false);
-    }
-  };
-
-  const handleSyncGoogleCalendar = async () => {
-    setCalendarBusy(true);
-    setCalendarError(null);
-    try {
-      await invoke('sync_google_calendar');
-      const updated = await invoke<CalendarConnectionStatus>('get_calendar_connection_status');
-      setCalendarStatus(updated);
-    } catch (err: unknown) {
-      console.error('Failed to sync Google Calendar:', err);
-      setCalendarError(
-        typeof err === 'string'
-          ? err
-          : (err as { message?: string })?.message || 'Sync failed.'
-      );
-    } finally {
-      setCalendarBusy(false);
-    }
-  };
-
   const handleChooseVaultFolder = async () => {
     setVaultBusy(true);
     setVaultError('');
@@ -425,14 +323,6 @@ export const ProviderSettings: React.FC = () => {
   useEffect(() => {
     if (!loading && activeSection === 'privacy') {
       loadAccountState();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, activeSection]);
-
-  useEffect(() => {
-    if (!loading && activeSection === 'meetings') {
-      loadCalendarState();
-      checkNotificationPermission();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, activeSection]);
@@ -557,21 +447,7 @@ export const ProviderSettings: React.FC = () => {
           <span>Scribbles</span>
         </button>
 
-        {/* 5. Meetings */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('meetings')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'meetings'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <Users className="w-4 h-4 text-primary" />
-          <span>Meetings</span>
-        </button>
-
-        {/* 6. Privacy */}
+        {/* 5. Privacy */}
         <button
           type="button"
           onClick={() => setActiveSection('privacy')}
@@ -1213,212 +1089,7 @@ export const ProviderSettings: React.FC = () => {
           </form>
         )}
 
-        {/* 5. MEETINGS & CALENDAR SECTION */}
-        {activeSection === 'meetings' && (
-          <div className="space-y-6 animate-in fade-in-50">
-            <div>
-              <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
-                CALENDAR & MEETINGS
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Relay integrates with Google Calendar and monitors active window titles to automatically prepare meeting notes and record transcripts.
-              </p>
-              <h2 className="text-lg font-bold text-foreground">Google Calendar Integration & Meeting Capture</h2>
-            </div>
-
-            {/* Notification Permission Warning */}
-            {notificationPermissionGranted === false && (
-              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-3 shadow-xs">
-                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
-                <div className="space-y-1.5 flex-1">
-                  <p className="font-semibold text-foreground">Windows OS Notifications are Disabled</p>
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    Native Windows OS notifications are required for meeting reminders to reach you. Please ensure notifications are enabled for Relay under <strong>Windows Settings → System → Notifications</strong>.
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={handleRequestNotificationPermission}
-                    className="text-[11px] h-7 px-2.5 mt-1 border-amber-500/40 hover:bg-amber-500/10"
-                  >
-                    Request Notification Permission
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Google Calendar Sync Card */}
-            <div className="p-4 rounded-xl border border-border bg-card space-y-4 shadow-xs">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-500">
-                    <Calendar className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold text-foreground">Google Calendar</h3>
-                      <Badge
-                        variant={calendarStatus.connected ? 'outline' : 'secondary'}
-                        className={`text-[10px] font-mono uppercase py-0 px-1.5 ${
-                          calendarStatus.connected
-                            ? 'border-emerald-500/40 text-emerald-500 bg-emerald-500/5'
-                            : calendarStatus.status === 'not_configured'
-                            ? 'border-amber-500/40 text-amber-500 bg-amber-500/5'
-                            : calendarStatus.status === 'auth_error'
-                            ? 'border-destructive/40 text-destructive bg-destructive/5'
-                            : ''
-                        }`}
-                      >
-                        {calendarStatus.connected
-                          ? 'Connected'
-                          : calendarStatus.status === 'not_configured'
-                          ? 'Setup Required'
-                          : calendarStatus.status === 'auth_error'
-                          ? 'Needs Attention'
-                          : 'Not Connected'}
-                      </Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {calendarStatus.connected
-                        ? `Connected to your Google Calendar (${calendarStatus.account_email || 'Active'})`
-                        : calendarStatus.status === 'not_configured'
-                        ? 'Google Calendar has not been configured for this Relay installation.'
-                        : calendarStatus.status === 'auth_error'
-                        ? 'Calendar authorization expired or needs reconnecting.'
-                        : 'Connect your Google Calendar to automatically recognize scheduled meetings and invite metadata.'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {calendarStatus.connected ? (
-                    <>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleSyncGoogleCalendar}
-                        disabled={calendarBusy}
-                        className="text-xs gap-1.5 h-8"
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 ${calendarBusy ? 'animate-spin' : ''}`} />
-                        <span>Sync Now</span>
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={handleDisconnectGoogleCalendar}
-                        disabled={calendarBusy}
-                        className="text-xs text-destructive hover:bg-destructive/10 gap-1.5 h-8"
-                      >
-                        <Unlink className="w-3.5 h-3.5" />
-                        <span>Disconnect</span>
-                      </Button>
-                    </>
-                  ) : calendarStatus.status === 'not_configured' ? (
-                    <Badge variant="outline" className="text-xs text-muted-foreground">
-                      Unavailable
-                    </Badge>
-                  ) : (
-                    <Button
-                      size="sm"
-                      onClick={handleConnectGoogleCalendar}
-                      disabled={calendarBusy}
-                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 h-8"
-                    >
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>
-                        {calendarBusy
-                          ? 'Connecting…'
-                          : calendarStatus.status === 'auth_error'
-                          ? 'Reconnect Google Calendar'
-                          : 'Connect Google Calendar'}
-                      </span>
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {calendarError && (
-                <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{calendarError}</span>
-                </div>
-              )}
-
-              {calendarStatus.last_synced_at && (
-                <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-2 border-t border-border/60">
-                  <span>Last synced: {new Date(calendarStatus.last_synced_at).toLocaleString()}</span>
-                  <span className="font-mono text-[10px]">Incremental & Idempotent Sync</span>
-                </div>
-              )}
-            </div>
-
-            <form onSubmit={handleSave} className="space-y-4">
-              {/* Upcoming-meeting reminder */}
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Remind me before a meeting starts</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Relay will remind you shortly before a scheduled meeting begins.
-                  </p>
-                </div>
-                <Switch
-                  checked={settings.meetings?.remind_before_meeting ?? true}
-                  onCheckedChange={(checked) => setSettings({ ...settings, meetings: { ...settings.meetings, remind_before_meeting: checked } })}
-                />
-              </div>
-
-              {/* Meeting Window & Activity Detection */}
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Conferencing App Detection</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Detect active Google Meet, Zoom, Microsoft Teams, and Webex sessions via window activity.
-                  </p>
-                </div>
-                <Switch 
-                  checked={settings.meetings?.remind_on_detection ?? true} 
-                  onCheckedChange={(checked) => setSettings({ ...settings, meetings: { ...settings.meetings, remind_on_detection: checked } })} 
-                />
-              </div>
-
-              {/* Explicit User Confirmation */}
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Remind me if a scheduled meeting starts unrecorded</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Relay will remind you 2-5 minutes into a scheduled meeting if you haven't started recording yet.
-                  </p>
-                </div>
-                <Switch 
-                  checked={settings.meetings?.remind_if_unrecorded ?? true} 
-                  onCheckedChange={(checked) => setSettings({ ...settings, meetings: { ...settings.meetings, remind_if_unrecorded: checked } })} 
-                />
-              </div>
-
-              {/* Explicit User Confirmation */}
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Explicit Capture Consent (Privacy Guard)</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Relay will never record audio silently. Capture only begins when you explicitly press "Start Recording".
-                  </p>
-                </div>
-                <Badge variant="outline" className="text-[10px] font-mono text-primary border-primary/30 bg-primary/5">
-                  Enforced
-                </Badge>
-              </div>
-
-
-              <Button type="submit" size="sm" variant="default" className="mt-2">
-                Save Meeting Preferences
-              </Button>
-            </form>
-          </div>
-        )}
-
-        {/* 6. PRIVACY SECTION */}
+        {/* 5. PRIVACY SECTION */}
         {activeSection === 'privacy' && (
           <div className="space-y-6 animate-in fade-in-50">
             <div>

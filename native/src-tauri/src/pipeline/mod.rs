@@ -1,5 +1,5 @@
 use crate::providers::{LLMClient, ProviderError};
-use crate::vault::{KanbanCard, VaultManager, VaultNote};
+use crate::vault::{VaultManager, VaultNote};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -8,7 +8,7 @@ pub use chat::process_chat;
 
 mod enrichment;
 pub use enrichment::{
-    enrich_meeting, enrich_scribble, extract_deterministic_entities,
+    enrich_scribble, extract_deterministic_entities,
     extract_deterministic_knowledge, extract_deterministic_questions,
     extract_deterministic_title, extract_deterministic_topics, summarize_scribble,
     AiEnrichmentResponse,
@@ -41,127 +41,9 @@ pub struct ProcessedPipelineResult {
     pub spoken_audio_base64: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ExtractedActionItem {
-    pub title: String,
-    pub assignee: Option<String>,
-    pub priority: Option<String>,
-    pub due_date: Option<String>,
-    pub description: String,
-}
-
 pub struct PipelineEngine;
 
 impl PipelineEngine {
-    pub async fn process_meeting(
-        llm: &LLMClient,
-        vault: &VaultManager,
-        transcript: &str,
-    ) -> Result<ProcessedPipelineResult, PipelineError> {
-        let system_prompt = r#"
-You are Relay's Meeting-to-Kanban Task Extractor.
-Parse the following meeting transcript into actionable system state.
-Extract all concrete action items, task assignments, and follow-ups.
-
-Output MUST be a valid JSON array of objects with the following keys:
-- "title": concise task title
-- "assignee": person assigned (or "Unassigned")
-- "priority": "high" | "medium" | "low"
-- "due_date": "YYYY-MM-DD" or null
-- "description": details or context for the task
-
-Return ONLY the JSON array inside a json codeblock or raw JSON string without markdown explanations.
-"#;
-
-        let response = llm.complete(transcript, Some(system_prompt)).await?;
-        let text = response.text.trim();
-
-        let json_str = if text.contains("```json") {
-            text.split("```json")
-                .nth(1)
-                .unwrap_or("")
-                .split("```")
-                .next()
-                .unwrap_or("")
-                .trim()
-        } else if text.contains("```") {
-            text.split("```")
-                .nth(1)
-                .unwrap_or("")
-                .split("```")
-                .next()
-                .unwrap_or("")
-                .trim()
-        } else {
-            text
-        };
-
-        let items: Vec<ExtractedActionItem> = serde_json::from_str(json_str).unwrap_or_else(|_| {
-            vec![ExtractedActionItem {
-                title: "Review meeting transcript notes".to_string(),
-                assignee: Some("Unassigned".to_string()),
-                priority: Some("medium".to_string()),
-                due_date: None,
-                description: transcript.chars().take(200).collect(),
-            }]
-        });
-
-        let meeting_note_id = format!("note_{}", uuid::Uuid::new_v4());
-        let now_str = chrono::Utc::now().to_rfc3339();
-
-        let note = VaultNote {
-            id: meeting_note_id.clone(),
-            title: "Meeting Action Items Sync".to_string(),
-            note_type: "meeting".to_string(),
-            created_at: now_str.clone(),
-            updated_at: now_str.clone(),
-            tags: vec!["meeting".to_string(), "kanban".to_string()],
-            source_audio: None,
-            content: format!(
-                "# Meeting Transcript\n\n{}\n\n## Action Items Extracted\n{}",
-                transcript, text
-            ),
-        };
-        vault
-            .save_note(&note)
-            .map_err(|e| PipelineError::VaultError(e.to_string()))?;
-
-        let mut card_count = 0;
-        for item in &items {
-            let card_id = format!("card_{}", uuid::Uuid::new_v4());
-            let card = KanbanCard {
-                id: card_id,
-                title: item.title.clone(),
-                assignee: item
-                    .assignee
-                    .clone()
-                    .unwrap_or_else(|| "Unassigned".to_string()),
-                status: "todo".to_string(),
-                priority: item
-                    .priority
-                    .clone()
-                    .unwrap_or_else(|| "medium".to_string()),
-                due_date: item.due_date.clone(),
-                created_at: now_str.clone(),
-                description: item.description.clone(),
-                source_note_id: Some(meeting_note_id.clone()),
-            };
-            vault
-                .save_kanban_card(&card)
-                .map_err(|e| PipelineError::VaultError(e.to_string()))?;
-            card_count += 1;
-        }
-
-        Ok(ProcessedPipelineResult {
-            mode: "meeting".to_string(),
-            transcript: transcript.to_string(),
-            note_id: Some(meeting_note_id),
-            kanban_cards_created: card_count,
-            output_markdown: format!("Extracted {} Kanban card(s) from meeting.", card_count),
-            sources: Vec::new(),
-            spoken_audio_base64: None,
-        })
-    }
 
     pub async fn process_scribble(
         llm: &LLMClient,

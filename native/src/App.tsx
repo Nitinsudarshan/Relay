@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { VoiceNotePage } from './components/voicenotes/VoiceNotePage';
-import { MeetingPage } from './components/meetings/MeetingPage';
-import { MeetingNotificationGallery } from './components/meetings/notifications/MeetingNotificationGallery';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
+import { MeetingsV2View } from './components/meetings_v2/MeetingsV2View';
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RelayLogo } from './components/common/RelayLogo';
 import { ChangelogModal } from './components/common/ChangelogModal';
 import { WelcomeModal } from './components/common/WelcomeModal';
 import { AccountExplanationModal } from './components/common/AccountExplanationModal';
-import { ProcessedPipelineResult, Meeting, RelayAccount, RelayProfile, DeveloperSettings, AppSettings } from './types';
+import { ProcessedPipelineResult, RelayAccount, RelayProfile, DeveloperSettings, AppSettings } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -33,15 +32,13 @@ export type MainTabType =
   | 'capture'
   | 'meetings'
   | 'scribble'
-  | 'settings'
-  | 'components-meeting-notifications';
+  | 'settings';
 
 const TAB_LABELS: Record<MainTabType, string> = {
   capture: 'Voice Note',
   meetings: 'Meetings',
   scribble: 'Scribbles',
   settings: 'Settings',
-  'components-meeting-notifications': 'Components > Meeting > Notifications',
 };
 
 export const App: React.FC = () => {
@@ -54,7 +51,6 @@ export const App: React.FC = () => {
   const [profile, setProfile] = useState<RelayProfile | null>(null);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [explanationOpen, setExplanationOpen] = useState(false);
-  const [focusedMeetingId, setFocusedMeetingId] = useState<string | null>(null);
 
   const refreshAccountAndSettings = async () => {
     try {
@@ -131,24 +127,9 @@ export const App: React.FC = () => {
     window.addEventListener('relay-account-changed', handleDomAccountChange);
     window.addEventListener('relay-profile-changed', handleDomProfileChange);
 
-    const unlistenTabSwitch = listen<string>('switch-to-meetings-tab', (event) => {
-      setActiveTab('meetings');
-      if (event.payload) {
-        setFocusedMeetingId(event.payload);
-      }
-    });
-
-    const unlistenTrayRecord = listen<string>('start-meeting-recording-for', (event) => {
-      if (event.payload) {
-        invoke('start_meeting_recording', { meetingId: event.payload }).catch(console.error);
-      }
-    });
-
     return () => {
       unlistenAccount.then((unlisten) => unlisten());
       unlistenProfile.then((unlisten) => unlisten());
-      unlistenTabSwitch.then((unlisten) => unlisten());
-      unlistenTrayRecord.then((unlisten) => unlisten());
       window.removeEventListener('relay-account-changed', handleDomAccountChange);
       window.removeEventListener('relay-profile-changed', handleDomProfileChange);
     };
@@ -186,8 +167,6 @@ export const App: React.FC = () => {
     }
   };
 
-
-
   const renderHeroHeader = () => {
     switch (activeTab) {
       case 'capture':
@@ -211,25 +190,7 @@ export const App: React.FC = () => {
           </div>
         );
       case 'meetings':
-        return (
-          <div className="relative rounded-lg border border-border/80 bg-gradient-to-br from-card via-card/95 to-blue-500/5 p-5 md:p-6 shadow-xs overflow-hidden mb-5 shrink-0">
-            <div className="absolute -right-10 -top-10 w-40 h-40 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-            <div className="relative z-10 space-y-1.5">
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-[10px] font-mono uppercase tracking-wider text-blue-500 border-blue-500/30 bg-blue-500/5 gap-1.5 py-0.5 px-2">
-                  <Calendar className="w-3 h-3 text-blue-500" />
-                  <span>Source & Capture Surface</span>
-                </Badge>
-              </div>
-              <h1 className="text-xl md:text-2xl font-extrabold tracking-tight text-foreground">
-                Meetings & <span className="italic text-primary">Conferences</span>
-              </h1>
-              <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
-                Capture standalone and recurring meetings, preserve truthful source context, and extract living knowledge.
-              </p>
-            </div>
-          </div>
-        );
+        return null; // MeetingsV2View has its own self-contained top bar
       case 'scribble':
         return (
           <div className="relative rounded-lg border border-border/80 bg-gradient-to-br from-card via-card/95 to-primary/5 p-5 md:p-6 shadow-xs overflow-hidden mb-5 shrink-0">
@@ -345,21 +306,11 @@ export const App: React.FC = () => {
 
           {activeTab === 'capture' && <VoiceNotePage />}
 
-          {activeTab === 'meetings' && (
-            <MeetingPage
-              onNavigateToScribbles={() => setActiveTab('scribble')}
-              focusMeetingId={focusedMeetingId}
-              onFocusMeetingIdConsumed={() => setFocusedMeetingId(null)}
-            />
-          )}
+          {activeTab === 'meetings' && <MeetingsV2View />}
 
           {activeTab === 'scribble' && <ScribbleViewer />}
 
           {activeTab === 'settings' && <ProviderSettings />}
-
-          {activeTab === 'components-meeting-notifications' && (
-            <MeetingNotificationGallery />
-          )}
         </main>
       </div>
     </div>

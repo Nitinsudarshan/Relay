@@ -1,7 +1,0 @@
-{
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "meeting-reminder-capability",
-  "description": "Minimal isolated permissions for the floating meeting reminder overlay window. Strictly limited to core invoke and event listening — no filesystem, shell, notification, or dialog permissions.",
-  "windows": ["meeting-reminder"],
-  "permissions": ["core:default", "core:event:default"]
-}

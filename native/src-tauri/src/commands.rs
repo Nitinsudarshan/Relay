@@ -5,12 +5,12 @@ use crate::providers::{LLMClient, OllamaStatus, ProviderType};
 use crate::settings::{AppSettings, HotkeySettings, PillPosition};
 use crate::triggers::{TriggerConfig, TriggerEngine};
 use crate::vault::{
-    GraphFilter, KanbanCard, KnowledgeGraphData, KnowledgeSearchResult, Meeting,
-    MeetingSeries, Scribble, ScribbleRelationship, TrashItem, VaultManager, VaultNote,
+    GraphFilter, KanbanCard, KnowledgeGraphData, KnowledgeSearchResult,
+    Scribble, ScribbleRelationship, TrashItem, VaultManager, VaultNote,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -84,6 +84,7 @@ pub struct AppState {
     pub settings: Mutex<AppSettings>,
     pub stt: SttEngine,
     pub last_stt_diagnostics: Mutex<Option<crate::capture::SttDiagnosticSnapshot>>,
+    pub meetings_v2: Arc<crate::meetings_v2::MeetingsV2Engine>,
 }
 
 impl AppState {
@@ -445,10 +446,6 @@ async fn process_captured_audio(
     let llm = LLMClient::new(settings.provider.clone());
 
     match captured.mode.as_str() {
-        "meeting" => PipelineEngine::process_meeting(&llm, &state.vault, &transcript)
-            .await
-            .map(Some)
-            .map_err(|e| CommandError::new("PIPELINE_ERROR", &e.to_string())),
         "chat" => crate::pipeline::process_chat(&llm, &state.vault, &settings.tts, &transcript)
             .await
             .map(Some)
@@ -1370,517 +1367,6 @@ pub async fn get_stt_corpus() -> Result<Vec<crate::capture::CorpusItem>, Command
     Ok(crate::capture::get_curated_corpus())
 }
 
-pub const MEETING_UPDATED_EVENT: &str = "meeting-updated";
-
-#[tauri::command]
-pub async fn get_meetings(state: State<'_, AppState>) -> Result<Vec<Meeting>, CommandError> {
-    state
-        .vault
-        .list_meetings()
-        .map_err(|e| CommandError::new("VAULT_ERROR", &e.to_string()))
-}
-
-#[tauri::command]
-pub async fn get_meeting(meeting_id: String, state: State<'_, AppState>) -> Result<Meeting, CommandError> {
-    state
-        .vault
-        .get_meeting(&meeting_id)
-        .map_err(|e| CommandError::new("NOT_FOUND", &e.to_string()))
-}
-
-#[tauri::command]
-pub async fn create_meeting(
-    title: String,
-    provider: String,
-    series_id: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<Meeting, CommandError> {
-    let meeting = Meeting::new(&title, &provider, series_id.as_deref());
-    state
-        .vault
-        .save_meeting(&meeting)
-        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
-    Ok(meeting)
-}
-
-#[tauri::command]
-pub async fn save_meeting(meeting: Meeting, state: State<'_, AppState>) -> Result<Meeting, CommandError> {
-    state
-        .vault
-        .save_meeting(&meeting)
-        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
-    Ok(meeting)
-}
-
-#[tauri::command]
-pub async fn update_meeting(meeting: Meeting, state: State<'_, AppState>) -> Result<Meeting, CommandError> {
-    state
-        .vault
-        .update_meeting(&meeting)
-        .map_err(|e| CommandError::new("UPDATE_FAILED", &e.to_string()))
-}
-
-#[tauri::command]
-pub async fn delete_meeting(
-    meeting_id: String,
-    state: State<'_, AppState>,
-) -> Result<TrashItem, CommandError> {
-    state
-        .vault
-        .move_to_trash("meeting", &meeting_id)
-        .map_err(|e| CommandError::new("DELETE_FAILED", &e.to_string()))
-}
-
-#[tauri::command]
-pub async fn get_meeting_series(state: State<'_, AppState>) -> Result<Vec<MeetingSeries>, CommandError> {
-    state
-        .vault
-        .list_meeting_series()
-        .map_err(|e| CommandError::new("VAULT_ERROR", &e.to_string()))
-}
-
-#[tauri::command]
-pub async fn save_meeting_series(
-    series: MeetingSeries,
-    state: State<'_, AppState>,
-) -> Result<MeetingSeries, CommandError> {
-    state
-        .vault
-        .save_meeting_series(&series)
-        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
-    Ok(series)
-}
-
-#[tauri::command]
-pub async fn delete_meeting_series(
-    series_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    state
-        .vault
-        .delete_meeting_series(&series_id)
-        .map_err(|e| CommandError::new("DELETE_FAILED", &e.to_string()))
-}
-
-/// The single entry point for starting a meeting recording, called
-/// identically whether triggered from the meetings list, the reminder
-/// popup, or the tray (`meetings_implementation.md` §4.2, Refactor #1). The
-/// `meeting_id` it receives is always real by this point — `resolver.rs`
-/// guarantees a `Meeting` is persisted at detection time, never invented
-/// downstream — so the `NOT_FOUND` case below reflects an actually-missing
-/// meeting, not the ID-shape mismatch that used to make this fail for
-/// every reminder kind (Decision 45, Broken #1).
-#[tauri::command]
-pub async fn start_meeting_recording(
-    app: AppHandle,
-    meeting_id: String,
-    state: State<'_, AppState>,
-    active_recording: State<'_, crate::meetings::reminders::ActiveMeetingRecording>,
-    reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
-) -> Result<String, CommandError> {
-    if state.recorder.is_active() {
-        return Err(CommandError::new(
-            "RECORDER_ACTIVE",
-            "Audio recording is already in progress.",
-        ));
-    }
-
-    let mut meeting = state
-        .vault
-        .get_meeting(&meeting_id)
-        .map_err(|e| CommandError::new("NOT_FOUND", &e.to_string()))?;
-
-    let audio_dir = state.config_dir.join("audio");
-    let result = state
-        .recorder
-        .start("meeting", &audio_dir, Some(app.clone()))
-        .map_err(|e| CommandError::new("CAPTURE_FAILED", &e.to_string()));
-
-    emit_capture_state(&app, &state.recorder);
-
-    if result.is_ok() {
-        meeting.status = crate::vault::MEETING_STATUS_RECORDING.to_string();
-        meeting.actual_start = Some(chrono::Utc::now().to_rfc3339());
-        meeting.updated_at = chrono::Utc::now().to_rfc3339();
-        let _ = state.vault.save_meeting(&meeting);
-        let _ = app.emit(MEETING_UPDATED_EVENT, &meeting);
-
-        *active_recording.0.lock().unwrap() = Some(meeting_id.clone());
-        // Resolves any pending/fired reminder for this meeting regardless
-        // of where recording was started from — this is what keeps the
-        // list, the popup, and the tray from disagreeing about whether a
-        // meeting has been "seen" (Decision 45, Refactor #1 / Improve #5).
-        crate::meetings::reminders::mark_meeting_actioned(&reminders, &meeting_id);
-        if let Some(ns) = app.try_state::<std::sync::Arc<crate::meetings::NotificationService>>() {
-            ns.dismiss_overlay(&app);
-        }
-
-        // Bringing the main window to this meeting is enforced here, once,
-        // rather than duplicated in every caller (the list, the popup, the
-        // tray) — calling this when already on the meetings tab/already
-        // focused is a harmless no-op, so it's always safe to do
-        // unconditionally (Decision 45, Broken #3c: this event used to be
-        // emitted with an empty payload the handler ignored anyway).
-        let _ = app.emit("switch-to-meetings-tab", &meeting_id);
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
-    }
-
-    result
-}
-
-#[tauri::command]
-pub async fn stop_meeting_recording(
-    app: AppHandle,
-    meeting_id: String,
-    state: State<'_, AppState>,
-    active_recording: State<'_, crate::meetings::reminders::ActiveMeetingRecording>,
-) -> Result<Option<Meeting>, CommandError> {
-    let captured = state
-        .recorder
-        .stop()
-        .await
-        .map_err(|e| CommandError::new("CAPTURE_STOP_FAILED", &e.to_string()));
-    emit_capture_state(&app, &state.recorder);
-    *active_recording.0.lock().unwrap() = None;
-    let captured = captured?;
-
-    let mut meeting = state
-        .vault
-        .get_meeting(&meeting_id)
-        .map_err(|e| CommandError::new("NOT_FOUND", &e.to_string()))?;
-
-    meeting.actual_end = Some(chrono::Utc::now().to_rfc3339());
-    meeting.recording_path = Some(captured.audio_path.clone());
-
-    if !captured.had_audio {
-        meeting.status = crate::vault::MEETING_STATUS_COMPLETED.to_string();
-        meeting.updated_at = chrono::Utc::now().to_rfc3339();
-        let _ = state.vault.save_meeting(&meeting);
-        let _ = app.emit(MEETING_UPDATED_EVENT, &meeting);
-        return Ok(Some(meeting));
-    }
-
-    meeting.status = crate::vault::MEETING_STATUS_PROCESSING.to_string();
-    meeting.updated_at = chrono::Utc::now().to_rfc3339();
-    let _ = state.vault.save_meeting(&meeting);
-    let _ = app.emit(MEETING_UPDATED_EVENT, &meeting);
-
-    let settings = state.settings.lock().unwrap().clone();
-    let stt = state.stt.clone();
-    let samples = captured.samples.clone();
-    let models_dir = state.config_dir.join("models");
-    let model_path = match settings
-        .stt
-        .whisper_model_path
-        .clone()
-        .filter(|p| !p.trim().is_empty())
-    {
-        Some(p) => Some(p),
-        None => crate::capture::stt::ensure_default_model(&models_dir).await.ok().map(|p| p.to_string_lossy().to_string()),
-    };
-
-    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
-    let decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
-
-    let mp_clone = model_path.clone();
-    let lang_clone = language_config.clone();
-    let dec_clone = decoding_config.clone();
-
-    let (transcript, _, _) = tokio::task::spawn_blocking(move || {
-        match stt.transcribe_with_config(
-            mp_clone.as_deref(),
-            &samples,
-            &lang_clone,
-            &dec_clone,
-        ) {
-            Ok((t, d)) => (t, Some(d), None),
-            Err(e) => (String::new(), None, Some(e.to_string())),
-        }
-    })
-    .await
-    .map_err(|e| CommandError::new("STT_TASK_FAILED", &e.to_string()))?;
-
-    if !transcript.trim().is_empty() {
-        meeting.transcript = transcript.clone();
-        if meeting.notes.trim().is_empty() {
-            meeting.notes = format!("Auto-generated meeting notes from transcript:\n\n{}", transcript);
-        }
-    }
-
-    meeting.status = crate::vault::MEETING_STATUS_COMPLETED.to_string();
-    meeting.updated_at = chrono::Utc::now().to_rfc3339();
-    let _ = state.vault.save_meeting(&meeting);
-    let _ = app.emit(MEETING_UPDATED_EVENT, &meeting);
-
-    // Auto-trigger background AI enrichment if LLM is configured
-    let app_clone = app.clone();
-    let mid_clone = meeting.id.clone();
-    let config_dir = state.config_dir.clone();
-    let default_vault = state.vault.vault_dir();
-    tauri::async_runtime::spawn(async move {
-        let vault = VaultManager::new(default_vault);
-        let settings = AppSettings::load(&config_dir.join("settings.json")).unwrap_or_default();
-        let llm = LLMClient::new(settings.provider);
-        if let Ok(enriched) = crate::pipeline::enrich_meeting(&llm, &vault, &mid_clone).await {
-            let _ = app_clone.emit(MEETING_UPDATED_EVENT, &enriched);
-        }
-    });
-
-    Ok(Some(meeting))
-}
-
-#[tauri::command]
-pub async fn trigger_enrich_meeting(
-    app: AppHandle,
-    meeting_id: String,
-    state: State<'_, AppState>,
-) -> Result<Meeting, CommandError> {
-    let settings = state.settings.lock().unwrap().clone();
-    let llm = LLMClient::new(settings.provider);
-    let enriched = crate::pipeline::enrich_meeting(&llm, &state.vault, &meeting_id)
-        .await
-        .map_err(|e| CommandError::new("ENRICH_FAILED", &e))?;
-
-    let _ = app.emit(MEETING_UPDATED_EVENT, &enriched);
-    Ok(enriched)
-}
-
-#[tauri::command]
-pub async fn create_scribble_from_meeting(
-    meeting_id: String,
-    content: String,
-    title: Option<String>,
-    segment: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<Scribble, CommandError> {
-    let meeting = state
-        .vault
-        .get_meeting(&meeting_id)
-        .map_err(|e| CommandError::new("NOT_FOUND", &e.to_string()))?;
-
-    let scribble = meeting.create_scribble(&content, title.as_deref(), segment.as_deref());
-    state
-        .vault
-        .save_scribble(&scribble)
-        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
-
-    Ok(scribble)
-}
-
-#[tauri::command]
-pub async fn get_calendar_connection_status(
-    state: State<'_, AppState>,
-) -> Result<crate::meetings::calendar::CalendarConnectionStatus, CommandError> {
-    Ok(crate::meetings::calendar::get_calendar_connection_status(&state.vault.vault_dir()))
-}
-
-#[tauri::command]
-pub async fn start_google_calendar_oauth(
-    custom_client_id: Option<String>,
-    custom_client_secret: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<crate::meetings::calendar::CalendarConnectionStatus, CommandError> {
-    crate::meetings::calendar::start_google_oauth_flow(
-        &state.vault.vault_dir(),
-        custom_client_id,
-        custom_client_secret,
-    )
-    .await
-    .map_err(|e| CommandError::new("OAUTH_FAILED", &e))
-}
-
-#[tauri::command]
-pub async fn disconnect_google_calendar(
-    state: State<'_, AppState>,
-) -> Result<crate::meetings::calendar::CalendarConnectionStatus, CommandError> {
-    crate::meetings::calendar::delete_calendar_tokens(&state.vault.vault_dir())
-        .map_err(|e| CommandError::new("DISCONNECT_FAILED", &e))?;
-    Ok(crate::meetings::calendar::get_calendar_connection_status(&state.vault.vault_dir()))
-}
-
-#[tauri::command]
-pub async fn sync_google_calendar(
-    state: State<'_, AppState>,
-) -> Result<Vec<crate::meetings::CalendarMeetingEvent>, CommandError> {
-    crate::meetings::calendar::sync_real_google_calendar_events(&state.vault.vault_dir(), true)
-        .await
-        .map_err(|e| CommandError::new("SYNC_FAILED", &e))
-}
-
-#[tauri::command]
-pub async fn get_upcoming_calendar_events(
-    state: State<'_, AppState>,
-) -> Result<Vec<crate::meetings::CalendarMeetingEvent>, CommandError> {
-    crate::meetings::calendar::sync_real_google_calendar_events(&state.vault.vault_dir(), false)
-        .await
-        .map_err(|e| CommandError::new("CALENDAR_SYNC_FAILED", &e))
-}
-
-/// Dismisses one reminder kind for one meeting — leaves any other kind for
-/// the same meeting, and every other meeting's reminders, untouched
-/// (Decision 45, Broken #2: reminders are a queue, not a single slot).
-#[tauri::command]
-pub async fn dismiss_meeting_reminder(
-    app: AppHandle,
-    meeting_id: String,
-    kind: crate::meetings::reminders::ReminderKind,
-    reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
-    notification_service: State<'_, std::sync::Arc<crate::meetings::NotificationService>>,
-) -> Result<(), CommandError> {
-    crate::meetings::reminders::dismiss(&reminders, &meeting_id, kind);
-    notification_service.dismiss_overlay(&app);
-    Ok(())
-}
-
-/// "Remind me in 5 minutes" (or custom minutes) — dismisses overlay and schedules snooze
-#[tauri::command]
-pub async fn snooze_meeting_reminder(
-    app: AppHandle,
-    meeting_id: String,
-    kind: crate::meetings::reminders::ReminderKind,
-    minutes: i64,
-    reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
-    notification_service: State<'_, std::sync::Arc<crate::meetings::NotificationService>>,
-) -> Result<(), CommandError> {
-    crate::meetings::reminders::snooze(&reminders, &meeting_id, kind, minutes);
-    notification_service.dismiss_overlay(&app);
-    Ok(())
-}
-
-/// Retrieves the pending meeting reminder payload for the overlay window.
-#[tauri::command]
-pub async fn get_pending_meeting_reminder(
-    notification_service: State<'_, std::sync::Arc<crate::meetings::NotificationService>>,
-) -> Result<Option<crate::meetings::MeetingReminderPayload>, CommandError> {
-    Ok(notification_service.get_pending_reminder())
-}
-
-/// Signals from the meeting reminder overlay window that it is mounted and ready.
-#[tauri::command]
-pub async fn meeting_reminder_ready(
-    app: AppHandle,
-    notification_service: State<'_, std::sync::Arc<crate::meetings::NotificationService>>,
-) -> Result<(), CommandError> {
-    notification_service.on_frontend_ready(&app);
-    Ok(())
-}
-
-/// Notifies the backend notification service of hover enter/leave on the reminder overlay.
-#[tauri::command]
-pub async fn meeting_reminder_hover_changed(
-    hovered: bool,
-    notification_service: State<'_, std::sync::Arc<crate::meetings::NotificationService>>,
-) -> Result<(), CommandError> {
-    notification_service.on_hover_changed(hovered);
-    Ok(())
-}
-
-/// Settings → Developer's "Check Window Detection" button: a pure,
-/// side-effect-free read of the raw window-detection signal (including the
-/// confidence each match scored), for verifying detection itself without
-/// waiting for the background engine's next tick to resolve it into a
-/// meeting. Replaces the removed `check_meeting_detection`, which had real
-/// side effects (emitting an event, inventing synthetic meeting payloads)
-/// this one deliberately doesn't have.
-#[tauri::command]
-pub async fn debug_detect_conferencing_windows() -> Result<Vec<crate::meetings::WindowMatch>, CommandError> {
-    Ok(crate::meetings::detect_active_conferencing_windows())
-}
-
-/// Manually imports one calendar event as a meeting (the meetings list's
-/// "Import and Prepare Meeting" button) through the same resolver every
-/// automatic signal goes through, rather than an unconditional
-/// `create_meeting` — the background engine already resolves every synced
-/// calendar event into a `Meeting` within ~15 seconds regardless of this
-/// button, so a raw create here would risk a duplicate for the same
-/// `calendar_event_id` the moment both happen close together.
-#[tauri::command]
-pub async fn import_calendar_event(
-    event: crate::meetings::CalendarMeetingEvent,
-    state: State<'_, AppState>,
-) -> Result<Meeting, CommandError> {
-    crate::meetings::resolver::resolve_calendar_signal(&state.vault, &event)
-        .map_err(|e| CommandError::new("IMPORT_FAILED", &e))
-}
-
-/// The real answer to "which meeting, if any, is currently being
-/// recorded" — resolves the cross-meeting status confusion an earlier
-/// audit found in `MeetingDetailPane.tsx`: it previously had to guess this
-/// from `meeting.status === 'recording'` (a vault field that can go stale)
-/// combined with a capture-ownership hook that only knows the active
-/// *mode* ("meeting"), not which specific meeting.
-#[tauri::command]
-pub async fn get_active_recording_meeting_id(
-    active_recording: State<'_, crate::meetings::reminders::ActiveMeetingRecording>,
-) -> Result<Option<String>, CommandError> {
-    Ok(active_recording.0.lock().unwrap().clone())
-}
-
-/// The single reminder the popup should currently show, if any — derived
-/// from the queue itself rather than a separate "active" cell, which is
-/// what prevents a second reminder from having anywhere to silently
-/// overwrite the first (Decision 45, Broken #2).
-#[tauri::command]
-pub async fn get_current_meeting_reminder(
-    reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
-) -> Result<Option<crate::meetings::reminders::ReminderEvent>, CommandError> {
-    Ok(crate::meetings::reminders::current_popup_reminder(&reminders))
-}
-
-/// Settings → Developer's "Mock Meeting Reminders" section: creates a real
-/// vault meeting and fires an already-`Fired` reminder for it, so the
-/// popup's "Start Recording" action can be exercised end to end without
-/// waiting for a real calendar/window signal.
-#[tauri::command]
-pub async fn trigger_mock_meeting_reminder(
-    app: AppHandle,
-    kind: crate::meetings::reminders::ReminderKind,
-    state: State<'_, AppState>,
-    reminders: State<'_, crate::meetings::reminders::ReminderQueue>,
-    notification_service: State<'_, std::sync::Arc<crate::meetings::NotificationService>>,
-) -> Result<(), CommandError> {
-    use crate::meetings::reminders::ReminderKind;
-
-    let (title, provider) = match kind {
-        ReminderKind::Upcoming => ("Weekly Engineering Sync", "google_meet"),
-        ReminderKind::Unrecorded => ("Candidate Tech Interview", "zoom"),
-        ReminderKind::Detected => ("Ad-hoc Architecture Review", "teams"),
-    };
-
-    let mut meeting = Meeting::new(title, provider, None);
-    meeting.id = "relay_mock_preview_meeting".to_string();
-    meeting.participants = vec!["Alice".to_string(), "Bob".to_string(), "Charlie".to_string()];
-    state
-        .vault
-        .save_meeting(&meeting)
-        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
-
-    let entry = crate::meetings::reminders::ReminderEvent {
-        meeting_id: meeting.id.clone(),
-        kind,
-        title: meeting.title.clone(),
-        provider: meeting.provider.clone(),
-        participants: meeting.participants.clone(),
-        fire_at: chrono::Utc::now(),
-        status: crate::meetings::reminders::ReminderStatus::Fired,
-    };
-
-    crate::meetings::reminders::inject_mock_reminder(&reminders, &meeting, kind);
-    let settings = state.settings.lock().unwrap().clone();
-    notification_service.show_reminder(
-        &app,
-        &entry,
-        state.recorder.is_active(),
-        None,
-        &settings.meetings,
-    );
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn get_relay_profile(
     state: State<'_, AppState>,
@@ -1968,14 +1454,10 @@ pub async fn start_google_sign_in(
     let supabase_url = settings.cloud.supabase_url;
     let supabase_anon = settings.cloud.supabase_anon_key;
 
-    let cal_config = crate::meetings::calendar::load_calendar_config(&state.vault.vault_dir());
-    let effective_client_id = custom_client_id.or(cal_config.client_id).filter(|s| !s.trim().is_empty());
-    let effective_client_secret = custom_client_secret.or(cal_config.client_secret).filter(|s| !s.trim().is_empty());
-
     let account = crate::identity::sign_in_with_google(
         &state.config_dir,
-        effective_client_id,
-        effective_client_secret,
+        custom_client_id,
+        custom_client_secret,
         supabase_url,
         supabase_anon,
     )
@@ -2099,6 +1581,121 @@ pub async fn complete_first_run(
         .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
     Ok(settings.clone())
 }
+
+// =========================================================================
+// MEETINGS V2 TAURI COMMANDS
+// =========================================================================
+
+#[tauri::command]
+pub async fn start_meeting_v2(
+    title: Option<String>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
+    let settings = state.settings.lock().unwrap().clone();
+    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
+    let decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
+    let models_dir = state.config_dir.join("models");
+    let whisper_model_path = settings.stt.whisper_model_path;
+
+    // Bring up the top-center recording overlay
+    crate::overlay::ensure_meeting_overlay(&app, true);
+
+    state
+        .meetings_v2
+        .start_session(
+            title,
+            &models_dir,
+            whisper_model_path,
+            language_config,
+            decoding_config,
+            Some(app),
+        )
+        .map_err(|e: String| CommandError::new("START_MEETING_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn stop_meeting_v2(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
+    // Immediately hide the recording overlay for instant UI responsiveness
+    crate::overlay::hide_meeting_overlay(&app);
+
+    let session = state
+        .meetings_v2
+        .stop_session(Some(app.clone()))
+        .await
+        .map_err(|e: String| CommandError::new("STOP_MEETING_FAILED", &e))?;
+
+    Ok(session)
+}
+
+#[tauri::command]
+pub async fn get_active_meeting_v2(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::meetings_v2::MeetingSession>, CommandError> {
+    Ok(state.meetings_v2.get_active_session())
+}
+
+#[tauri::command]
+pub async fn list_meetings_v2(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::meetings_v2::MeetingSession>, CommandError> {
+    state
+        .meetings_v2
+        .store()
+        .list_sessions()
+        .map_err(|e: String| CommandError::new("LIST_MEETINGS_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn get_meeting_v2(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
+    state
+        .meetings_v2
+        .store()
+        .get_session(&session_id)
+        .map_err(|e: String| CommandError::new("GET_MEETING_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn get_meeting_v2_transcript(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::meetings_v2::TranscriptSegment>, CommandError> {
+    state
+        .meetings_v2
+        .store()
+        .get_transcript_segments(&session_id)
+        .map_err(|e: String| CommandError::new("GET_TRANSCRIPT_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn get_meeting_v2_diagnostics(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::meetings_v2::MeetingDiagnostics>, CommandError> {
+    state
+        .meetings_v2
+        .get_diagnostics()
+        .map_err(|e: String| CommandError::new("DIAGNOSTICS_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn delete_meeting_v2(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    state
+        .meetings_v2
+        .store()
+        .delete_session(&session_id)
+        .map_err(|e: String| CommandError::new("DELETE_MEETING_FAILED", &e))
+}
+
+
 
 
 

@@ -1,5 +1,25 @@
 # Relay — Changelog
 
+## [0.11.0] - 2026-08-26
+
+### Meetings V2: Dual-Source Capture, Synchronized Temporal Mixing & Low-Latency Live STT (~1.5s)
+
+- **Complete Legacy Meetings Deletion & Archaeological Archive (`docs/meetings/MEETINGS_LEGACY_REMOVAL.md`)**:
+  - Fully purged all legacy Meetings V1 debris, unblocking a clean and reliable rebuild from scratch.
+- **Two-Clock Decoupled STT & Recording Architecture (`meetings_v2/engine.rs`, `live_stt.rs`, `capture.rs`)**:
+  - **Clock A (Durable Recording Clock)**: Continuous 30-second chunk slicing (`audio/chunk_NNNN.wav`), full audio reconciliation (`audio_full.wav`), incremental JSONL logging (`transcript.jsonl`), and crash recovery remain 100% authoritative and uninterrupted.
+  - **Clock B (Live STT Clock)**: Broadcasts 1.5s rolling audio frames (with 250ms overlap) to a dedicated `LiveSttWorker` over a bounded sync channel (`sync_channel(8)`), reducing transcript latency from ~30.7s down to ~1.6s.
+  - **Backpressure & Fault Isolation**: Dropping live frames under heavy CPU load never interrupts or pauses recorded audio persistence.
+- **Synchronized Temporal Audio Mixer (`meetings_v2/capture.rs`)**:
+  - Replaced sequential chunk concatenation with independent sample-by-sample lockstep mixing of Microphone and System Loopback streams (`soft_mix(mic[t], sys[t])`) with soft-saturation limiting and zero-padding for silent streams.
+- **DictationPill Waveform Alignment (`MeetingRecordingOverlay.tsx`)**:
+  - Directly adopted DictationPill waveform geometry (12 bars per stream, `w-[2.5px]`, `gap-[2.5px]`, `rounded-sm`, `h-[22px]`, `duration-75` transition).
+  - Left wave (Emerald `MIC`) scrolling left-to-right from speaker's voice; Right wave (Blue `SYS`) scrolling right-to-left from meeting participants.
+- **Repetition Loop & Language Hallucination Elimination (`meetings_v2/worker.rs`, `live_stt.rs`)**:
+  - Enforced default fallback language `"en"` when auto-detect was unconstrained, eliminating Whisper repetition loops on background noise.
+  - Added low-energy silence gating (`rms < 0.005`) to instantly bypass non-speech frames in `< 1ms`.
+  - Implemented prefix overlap deduplication to eliminate repeated words across consecutive live STT windows.
+
 ## [0.10.1] - 2026-08-25
 
 ### Scribble Lifecycle, Voice Note Merge Synchronization & AI Knowledge Enrichment

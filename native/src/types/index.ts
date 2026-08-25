@@ -1,5 +1,5 @@
 export interface ProcessedPipelineResult {
-  mode: 'meeting' | 'scribble' | 'trigger' | 'chat';
+  mode: 'scribble' | 'trigger' | 'chat';
   transcript: string;
   note_id?: string;
   kanban_cards_created: number;
@@ -234,12 +234,6 @@ export interface CloudSettings {
   supabaseAnonKey?: string | null;
 }
 
-export interface MeetingSettings {
-  remind_before_meeting: boolean;
-  remind_on_detection: boolean;
-  remind_if_unrecorded: boolean;
-}
-
 /** Mirrors the Rust `AppSettings` struct persisted at `.relay/config/settings.json`. */
 export interface AppSettings {
   provider: ProviderSettings;
@@ -250,7 +244,6 @@ export interface AppSettings {
   vault: VaultSettings;
   language: LanguageSettings;
   diagnostics: DiagnosticsSettings;
-  meetings: MeetingSettings;
   cloud?: CloudSettings;
 }
 
@@ -449,152 +442,6 @@ export interface TrashItem {
   expires_at: string;
 }
 
-export type MeetingProvider =
-  | 'google_meet'
-  | 'zoom'
-  | 'teams'
-  | 'webex'
-  | 'in_person'
-  | 'other'
-  | string;
-
-export type MeetingStatus =
-  | 'scheduled'
-  | 'detected'
-  | 'recording'
-  | 'processing'
-  | 'completed'
-  | 'cancelled'
-  | string;
-
-export interface MeetingActionItem {
-  id: string;
-  title: string;
-  assignee?: string | null;
-  due_date?: string | null;
-  priority: 'high' | 'medium' | 'low' | string;
-  status: 'todo' | 'done' | string;
-}
-
-export interface MeetingSeries {
-  id: string;
-  title: string;
-  provider?: string | null;
-  calendar_series_id?: string | null;
-  recurrence_rule?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface Meeting {
-  id: string;
-  series_id?: string | null;
-  title: string;
-  provider: MeetingProvider;
-  provider_metadata: Record<string, any>;
-  calendar_event_id?: string | null;
-  calendar_series_id?: string | null;
-  detection_source?: string | null;
-  detection_key?: string | null;
-  detection_confidence?: number | null;
-  detected_at?: string | null;
-  scheduled_start?: string | null;
-  scheduled_end?: string | null;
-  actual_start?: string | null;
-  actual_end?: string | null;
-  status: MeetingStatus;
-  participants: string[];
-  recording_path?: string | null;
-  transcript: string;
-  notes: string;
-  summary?: string | null;
-  decisions: string[];
-  action_items: MeetingActionItem[];
-  questions: string[];
-  candidate_scribbles: string[];
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CalendarMeetingEvent {
-  id: string;
-  title: string;
-  provider: string;
-  meeting_url?: string | null;
-  scheduled_start: string;
-  scheduled_end: string;
-  participants: string[];
-  recurrence_rule?: string | null;
-  calendar_series_id?: string | null;
-}
-
-export type ReminderKind = 'upcoming' | 'unrecorded' | 'detected';
-
-export type ReminderState =
-  | { state: 'pending' }
-  | { state: 'fired' }
-  | { state: 'snoozed'; until: string }
-  | { state: 'dismissed' }
-  | { state: 'actioned' }
-  | { state: 'expired' };
-
-/** Mirrors the Rust `ReminderEvent` — one logical reminder, driving both
- * the OS notification and this popup from the same backend state, so
- * neither can drift from the other (see meetings_implementation.md §4.2). */
-export interface MeetingReminderEvent {
-  meeting_id: string;
-  kind: ReminderKind;
-  title: string;
-  provider: string;
-  participants: string[];
-  fire_at: string;
-  status: ReminderState;
-}
-
-export interface MeetingReminderPayload {
-  meeting_id: string;
-  kind: ReminderKind;
-  title: string;
-  provider: string;
-  provider_name: string;
-  time_label: string;
-  participants: string[];
-}
-
-export interface MeetingListItem {
-  id: string;
-  sourceKind: 'meeting' | 'calendar';
-  title: string;
-  startsAt: string | null;
-  endsAt: string | null;
-  provider: string;
-  participantCount: number;
-  status: MeetingStatus;
-  durationMinutes: number | null;
-  calendarEventId: string | null;
-}
-
-export type GoogleCalendarStatus =
-  | 'not_configured'
-  | 'disconnected'
-  | 'authorizing'
-  | 'connected'
-  | 'auth_error';
-
-export interface CalendarConnectionStatus {
-  connected: boolean;
-  status: GoogleCalendarStatus;
-  account_email?: string | null;
-  account_name?: string | null;
-  last_synced_at?: string | null;
-  error_message?: string | null;
-}
-
-export interface GoogleCalendarConfig {
-  client_id?: string | null;
-  client_secret?: string | null;
-}
-
 export interface GraphFiltersSettings {
   searchQuery: string;
   showScribbles?: boolean;
@@ -634,6 +481,83 @@ export interface LocalGraphSettings {
 }
 
 export type GraphPositionMap = Record<string, { x: number; y: number }>;
+
+// =========================================================================
+// MEETINGS V2 TYPES
+// =========================================================================
+
+export type MeetingState =
+  | 'IDLE'
+  | 'STARTING'
+  | 'RECORDING'
+  | 'STOPPING'
+  | 'FINALIZING'
+  | 'COMPLETED'
+  | 'INTERRUPTED'
+  | 'RECOVERED'
+  | 'ERROR';
+
+export interface MeetingSession {
+  id: string;
+  title: string;
+  state: MeetingState;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_seconds: number;
+  chunk_count: number;
+  mic_active: boolean;
+  sys_audio_active: boolean;
+  total_audio_bytes: number;
+  transcript_segment_count: number;
+  pending_transcription_chunks: number;
+  error_message?: string | null;
+}
+
+export type TranscriptSegmentStatus = 'SUCCESS' | 'EMPTY' | 'FAILED';
+
+export interface TranscriptSegment {
+  chunk_index: number;
+  start_time_s: number;
+  end_time_s: number;
+  text: string;
+  created_at: string;
+  status: TranscriptSegmentStatus;
+}
+
+export interface LiveTranscriptUpdate {
+  segment_id: string;
+  session_id: string;
+  start_time_s: number;
+  end_time_s: number;
+  text: string;
+  is_final: boolean;
+  latency_ms: number;
+}
+
+export interface AudioLevels {
+  mic_level: number;
+  sys_level: number;
+}
+
+export interface MeetingDiagnostics {
+  session_id: string;
+  state: MeetingState;
+  duration_seconds: number;
+  last_audio_saved_at?: string | null;
+  chunk_count: number;
+  total_audio_bytes: number;
+  last_transcription_at?: string | null;
+  transcript_segment_count: number;
+  pending_transcription_chunks: number;
+  mic_active: boolean;
+  sys_audio_active: boolean;
+  mic_rms: number;
+  sys_rms: number;
+  error?: string | null;
+}
+
 
 
 
