@@ -261,7 +261,7 @@ impl Glossary {
                     }
                     let distance = strsim::levenshtein(candidate, target);
                     if distance <= self.config.max_code_distance
-                        && entry_best.map_or(true, |b| distance < b)
+                        && entry_best.is_none_or(|b| distance < b)
                     {
                         entry_best = Some(distance);
                     }

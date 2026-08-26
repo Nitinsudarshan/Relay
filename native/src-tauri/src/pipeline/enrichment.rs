@@ -705,98 +705,182 @@ pub fn extract_deterministic_meeting_title(clean_transcript: &str, meeting_date_
     }
 }
 
-/// Extracts deterministic meeting enrichment following the contracts in:
-/// - Meeting-rules/meeting_title_headings.md
-/// - Meeting-rules/meeting_transcript_summary.md
-/// - Meeting-rules/meeting_action_items_tasks.md
-pub fn extract_deterministic_meeting_enrichment(content: &str, meeting_date_iso: &str) -> MeetingEnrichmentResponse {
-    let clean = strip_asr_artifacts(content);
-    let date_short = chrono::NaiveDate::parse_from_str(meeting_date_iso, "%Y-%m-%d")
-        .map(|d| d.format("%d %b").to_string())
-        .unwrap_or_else(|_| "Meeting".to_string());
+/// Converts stored transcript segments into normalizer input.
+///
+/// Utterance-level timings are used when the transcript has them, because a
+/// real utterance boundary is a better evidence span than a 30-second chunk;
+/// older transcripts fall back to chunk timing.
+pub fn normalize_meeting_transcript(
+    segments: &[crate::meetings_v2::TranscriptSegment],
+    glossary: &crate::meetings_v2::Glossary,
+) -> crate::meetings_v2::NormalizedTranscript {
+    let mut sources: Vec<crate::meetings_v2::SourceSegment> = Vec::new();
 
-    let title = extract_deterministic_meeting_title(&clean, &date_short);
-
-    let word_count = clean.split_whitespace().count();
-    if word_count < 25 {
-        return MeetingEnrichmentResponse {
-            title: Some(title),
-            summary: Some("## Summary\n\nThe recording contains too little intelligible audio to summarize.".to_string()),
-            action_items: Vec::new(),
-        };
+    for segment in segments {
+        if segment.utterances.is_empty() {
+            sources.push(crate::meetings_v2::SourceSegment::from_mixed(
+                segment.chunk_index,
+                segment.start_time_s,
+                segment.end_time_s,
+                &segment.text,
+            ));
+            continue;
+        }
+        for utterance in &segment.utterances {
+            sources.push(crate::meetings_v2::SourceSegment {
+                id: segment.chunk_index,
+                start_ms: utterance.start_ms,
+                end_ms: utterance.end_ms,
+                text: utterance.text.clone(),
+                channel: crate::meetings_v2::Channel::Mixed,
+                speaker: None,
+            });
+        }
     }
 
-    // 1. Extract Action Items (Checklist format: - [ ] <Action> — **<Owner>** · Due: ...)
-    let action_cues = [
-        "i will", "we will", "i'll", "we'll", "let's", "i can take",
-        "action item", "todo", "make sure to", "follow up", "follow-up", "find out",
-    ];
+    crate::meetings_v2::normalize(
+        &sources,
+        &crate::meetings_v2::NormalizerConfig::default(),
+        Some(glossary),
+    )
+}
 
-    let mut action_items = Vec::new();
-    let sentences = clean.split(|c| c == '.' || c == '\n' || c == '?' || c == '!');
-    for sentence in sentences {
-        let s_trimmed = sentence.trim();
-        if s_trimmed.len() > 15 && s_trimmed.len() < 200 {
-            let lower = s_trimmed.to_lowercase();
-            // Filter out hypotheticals, opinions, already done
-            if lower.contains("could") || lower.contains("already") || lower.contains("feels like") {
+/// A title from the fallback ladder in `meeting_title_headings.md` §7, checked
+/// against the same validator the model's output faces.
+///
+/// Rungs 4 and 5 — "Untitled Meeting — 26 Aug", "Short Recording — 26 Aug" —
+/// are the only titles permitted to contain a date, and they are honest about
+/// knowing nothing, which a truncated guess is not.
+fn deterministic_title_from_ladder(clean_transcript: &str, date_short: &str) -> String {
+    let words = clean_transcript.split_whitespace().count();
+    if words < 100 {
+        return format!("Short Recording — {}", date_short);
+    }
+
+    let candidate = extract_deterministic_meeting_title(clean_transcript, date_short);
+    if crate::meetings_v2::validate_title(&candidate, clean_transcript).is_valid() {
+        candidate
+    } else {
+        format!("Untitled Meeting — {}", date_short)
+    }
+}
+
+/// Calls the model, validates the response against the rules files, and retries
+/// once naming the specific violations.
+///
+/// There is deliberately no fallback that assembles a summary out of transcript
+/// sentences. That is the extraction failure this pipeline exists to fix, and
+/// shipping it under the name of a fallback hides the failure from the only
+/// person who could report it. When generation cannot produce valid output, the
+/// meeting keeps its transcript and the caller is told why.
+async fn generate_validated_enrichment(
+    llm: &LLMClient,
+    system_prompt: &str,
+    clean_transcript: &str,
+    session_id: &str,
+) -> Result<MeetingEnrichmentResponse, String> {
+    let mut prompt = clean_transcript.to_string();
+    let mut last_error = String::new();
+
+    for attempt in 1..=2 {
+        let response = llm
+            .complete(&prompt, Some(system_prompt))
+            .await
+            .map_err(|e| format!("Local model unavailable: {}", e))?;
+
+        let parsed = match parse_enrichment_response(&response.text) {
+            Some(parsed) => parsed,
+            None => {
+                last_error = "the model did not return the required JSON fields".to_string();
+                tracing::warn!(
+                    "Meeting {}: attempt {} returned unusable JSON",
+                    session_id,
+                    attempt
+                );
+                prompt = format!(
+                    "{}\n\nYour previous response was not valid JSON with the fields title, summary, and action_items. Return only that JSON object.",
+                    clean_transcript
+                );
                 continue;
             }
+        };
 
-            for cue in &action_cues {
-                if lower.contains(cue) {
-                    let clean_action = s_trimmed
-                        .trim_start_matches(|c: char| !c.is_alphanumeric())
-                        .trim_end_matches(|c: char| !c.is_alphanumeric());
-
-                    if !clean_action.is_empty() {
-                        let owner = if lower.contains("i will") || lower.contains("i'll") || lower.contains("let me") || lower.contains("i can") {
-                            "Participant"
-                        } else {
-                            "Unassigned"
-                        };
-                        let task_str = format!("- [ ] {} — **{}**", clean_action, owner);
-                        if !action_items.contains(&task_str) {
-                            action_items.push(task_str);
-                        }
-                    }
-                    break;
-                }
+        let report = validate_enrichment(&parsed, clean_transcript);
+        if report.is_valid() {
+            if attempt > 1 {
+                tracing::info!("Meeting {}: retry produced valid output", session_id);
             }
-            if action_items.len() >= 10 {
-                break;
-            }
+            return Ok(parsed);
         }
+
+        tracing::warn!(
+            "Meeting {}: attempt {} failed validation — {}",
+            session_id,
+            attempt,
+            report.summary_line()
+        );
+        last_error = report.summary_line();
+        prompt = format!("{}\n\n{}", clean_transcript, report.prompt_feedback());
     }
 
-    // 2. Build structured markdown summary following meeting_transcript_summary.md
-    let sentences_vec: Vec<&str> = clean
-        .split(|c| c == '.' || c == '\n')
-        .map(|s| s.trim())
-        .filter(|s| s.len() > 20)
-        .collect();
+    Err(format!(
+        "The generated meeting notes did not meet the output rules after a retry ({}). The transcript is saved; try again or switch models.",
+        last_error
+    ))
+}
 
-    let mut summary_md = Vec::new();
-    summary_md.push("## Summary\n".to_string());
-    if sentences_vec.is_empty() {
-        summary_md.push(format!("The team held a session regarding {}.", title));
-    } else {
-        let overview = sentences_vec.iter().take(2).cloned().collect::<Vec<_>>().join(". ");
-        summary_md.push(format!("{}.", overview.trim_end_matches('.')));
+/// Parses the model response, rejecting a JSON object that happens to
+/// deserialize but carries none of the expected fields.
+///
+/// Every field on `MeetingEnrichmentResponse` has a serde default, so an
+/// unrelated JSON object used to parse "successfully" into an empty response
+/// and be persisted as a summary-less success.
+fn parse_enrichment_response(raw: &str) -> Option<MeetingEnrichmentResponse> {
+    let text = raw.trim();
+    let json_str = extract_json_object(text)?;
+    let value: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    let object = value.as_object()?;
+    let has_expected = ["title", "summary", "action_items"]
+        .iter()
+        .any(|key| object.contains_key(*key));
+    if !has_expected {
+        return None;
     }
+    let parsed: MeetingEnrichmentResponse = serde_json::from_value(value).ok()?;
+    if parsed.title.is_none() && parsed.summary.is_none() && parsed.action_items.is_empty() {
+        return None;
+    }
+    Some(parsed)
+}
 
-    if sentences_vec.len() > 1 {
-        summary_md.push("\n## Key Points\n".to_string());
-        for s in sentences_vec.iter().skip(1).take(4) {
-            summary_md.push(format!("- {}", s.trim_end_matches('.')));
-        }
-    }
+/// The outermost JSON object in a response, tolerating code fences and prose.
+fn extract_json_object(text: &str) -> Option<&str> {
+    let start = text.find('{')?;
+    let end = text.rfind('}')?;
+    (end > start).then(|| &text[start..=end])
+}
 
-    MeetingEnrichmentResponse {
-        title: Some(title),
-        summary: Some(summary_md.join("\n")),
-        action_items,
+/// Runs every applicable validator over one response.
+fn validate_enrichment(
+    parsed: &MeetingEnrichmentResponse,
+    transcript: &str,
+) -> crate::meetings_v2::ValidationReport {
+    let mut report = crate::meetings_v2::ValidationReport::default();
+
+    if let Some(summary) = parsed.summary.as_deref() {
+        let summary_report = crate::meetings_v2::validate_summary(summary, transcript);
+        report.max_shared_words = report.max_shared_words.max(summary_report.max_shared_words);
+        report.violations.extend(summary_report.violations);
     }
+    if let Some(title) = parsed.title.as_deref() {
+        let title_report = crate::meetings_v2::validate_title(title, transcript);
+        report.violations.extend(title_report.violations);
+    }
+    let todo_report = crate::meetings_v2::validate_action_items(&parsed.action_items, transcript);
+    report.max_shared_words = report.max_shared_words.max(todo_report.max_shared_words);
+    report.violations.extend(todo_report.violations);
+
+    report
 }
 
 /// Summarizes a meeting session using LLM (or deterministic heuristics), strictly enforcing:
@@ -812,13 +896,39 @@ pub async fn summarize_meeting(
         .get_session(session_id)
         .map_err(|e| format!("Meeting session not found: {}", e))?;
 
-    let transcript = session_store
-        .get_full_transcript_text(session_id)
+    // Stage 0: deterministic normalization. Tag stripping, loop collapse,
+    // filler removal, and glossary correction happen here, in code, so the
+    // model receives speech instead of ASR debris and spends its context on
+    // comprehension rather than cleanup.
+    let segments = session_store
+        .get_transcript_segments(session_id)
         .unwrap_or_default();
+    let glossary = crate::meetings_v2::GlossaryStore::new(session_store.vault_dir()).load();
+    let normalized = normalize_meeting_transcript(&segments, &glossary);
+    let clean_transcript = normalized.plain_text();
 
-    let clean_transcript = strip_asr_artifacts(transcript.trim());
+    tracing::info!(
+        "Meeting {}: normalized {} segments into {} turns ({} -> {} chars); removed {} artifacts, {} looped lines, {} fillers, {} glossary corrections",
+        session_id,
+        normalized.diagnostics.segments_in,
+        normalized.diagnostics.turns_out,
+        normalized.diagnostics.chars_in,
+        normalized.diagnostics.chars_out,
+        normalized.diagnostics.artifact_total(),
+        normalized.diagnostics.loop_lines_discarded(),
+        normalized.diagnostics.filler_removals,
+        normalized.diagnostics.glossary_corrections.len(),
+    );
+
     if clean_transcript.trim().is_empty() {
-        return Err("Cannot summarize a meeting with no transcribed speech.".to_string());
+        // Nothing intelligible survived normalization. The rules file specifies
+        // the exact wording for this case, and specifies not to attempt a
+        // partial summary from fragments.
+        let updated = session_store.update_session(session_id, |s| {
+            s.summary = Some(crate::meetings_v2::validate::INSUFFICIENT_SUMMARY.to_string());
+            s.action_items = Vec::new();
+        })?;
+        return Ok(updated);
     }
 
     let meeting_date_iso = session
@@ -885,18 +995,28 @@ Output ONLY valid JSON with fields:
         meeting_date_iso = meeting_date_iso
     );
 
-    let enriched = match llm.complete(&clean_transcript, Some(&system_prompt)).await {
-        Ok(resp) => {
-            let json_str = resp.text.trim().trim_matches('`').trim_start_matches("json").trim();
-            if let Ok(parsed) = serde_json::from_str::<MeetingEnrichmentResponse>(json_str) {
-                parsed
-            } else {
-                extract_deterministic_meeting_enrichment(&clean_transcript, meeting_date_iso)
+    let enriched = match generate_validated_enrichment(
+        llm,
+        &system_prompt,
+        &clean_transcript,
+        session_id,
+    )
+    .await
+    {
+        Ok(enriched) => enriched,
+        Err(e) => {
+            // Notes could not be generated, but a placeholder title is still
+            // worse than nothing to scan a list by, and the title rule's
+            // fallback ladder is deterministic by design.
+            if is_generic_title {
+                let date_short = chrono::NaiveDate::parse_from_str(meeting_date_iso, "%Y-%m-%d")
+                    .map(|d| d.format("%d %b").to_string())
+                    .unwrap_or_else(|_| "Meeting".to_string());
+                let fallback =
+                    deterministic_title_from_ladder(&clean_transcript, &date_short);
+                let _ = session_store.update_session(session_id, |s| s.title = fallback);
             }
-        }
-        Err(err) => {
-            tracing::warn!("LLM meeting summarization failed for session {}: {}", session_id, err);
-            extract_deterministic_meeting_enrichment(&clean_transcript, meeting_date_iso)
+            return Err(e);
         }
     };
 
@@ -1022,57 +1142,142 @@ mod tests {
     }
 
     #[test]
-    fn test_meeting_enrichment_and_title_synthesis() {
-        let temp_dir = std::env::temp_dir().join(format!("relay_test_meeting_enrich_{}", uuid::Uuid::new_v4()));
+    fn meeting_summarization_without_a_model_fails_visibly_and_keeps_the_transcript() {
+        // There is deliberately no fallback that assembles a summary out of
+        // transcript sentences: that is the extraction failure this pipeline
+        // exists to fix, and shipping it as a "fallback" hides it from the only
+        // person who could report it.
+        let temp_dir =
+            std::env::temp_dir().join(format!("relay_test_meeting_enrich_{}", uuid::Uuid::new_v4()));
         let session_store = crate::meetings_v2::SessionStore::new(temp_dir.clone());
+        // No Ollama in the test environment and no cloud key configured.
         let llm = LLMClient::new(crate::providers::ProviderConfig::default());
 
-        let session = crate::meetings_v2::MeetingSession::new("meeting_enrich_01".to_string(), None);
+        let session =
+            crate::meetings_v2::MeetingSession::new("meeting_enrich_01".to_string(), None);
         session_store.save_session(&session).unwrap();
 
-        // Append transcript segments
-        let segment1 = crate::meetings_v2::TranscriptSegment::new(
-            0,
-            0.0,
-            30.0,
-            "Today we are reviewing product marketing and camera reliability for the new flagship phone.",
-            crate::meetings_v2::TranscriptSegmentStatus::Success,
-        );
-        let segment2 = crate::meetings_v2::TranscriptSegment::new(
-            1,
-            30.0,
-            60.0,
-            "We need to fix the Terms and Conditions section on the website. I will follow up with the CEO tomorrow morning to confirm the pricing model.",
-            crate::meetings_v2::TranscriptSegmentStatus::Success,
-        );
-        session_store.append_transcript_segment(&session.id, &segment1).unwrap();
-        session_store.append_transcript_segment(&session.id, &segment2).unwrap();
+        let body = "The placement team shares opportunities but never sends candidate-level outcomes, so nobody can explain why an application stalled. We want checkpoints for application sent, CV shortlisted, interview held, and feedback received. Weekly updates were preferred over monthly because a monthly cadence loses the follow-up entirely. The alumni response sheets mix lakhs and thousands in the salary column and need cleaning before anyone can use them. ";
+        for i in 0..4 {
+            session_store
+                .append_transcript_segment(
+                    &session.id,
+                    &crate::meetings_v2::TranscriptSegment::new(
+                        i,
+                        i as f64 * 30.0,
+                        (i as f64 + 1.0) * 30.0,
+                        body,
+                        crate::meetings_v2::TranscriptSegmentStatus::Success,
+                    ),
+                )
+                .unwrap();
+        }
 
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let summarized = rt.block_on(async {
-            summarize_meeting(&llm, &session_store, &session.id).await.unwrap()
-        });
+        let result = rt.block_on(summarize_meeting(&llm, &session_store, &session.id));
 
-        // 1. Generic title should be replaced by an intelligent title
-        assert!(!summarized.title.starts_with("Meeting —"));
-        assert!(!summarized.title.starts_with('['));
-        assert!(summarized.title.len() > 3);
+        assert!(
+            result.is_err(),
+            "an unusable model response must surface as an error, not as copied transcript"
+        );
 
-        // 2. Summary should be generated with ## Summary markdown structure
-        assert!(summarized.summary.is_some());
-        let summary = summarized.summary.unwrap();
-        assert!(summary.contains("## Summary"));
+        let reloaded = session_store.get_session(&session.id).unwrap();
+        assert!(
+            reloaded.summary.is_none(),
+            "no invalid summary may be persisted"
+        );
+        assert!(reloaded.action_items.is_empty());
+        assert!(
+            !reloaded.title.starts_with("Meeting —"),
+            "a placeholder title is still replaced from the fallback ladder: {}",
+            reloaded.title
+        );
+        assert!(
+            crate::meetings_v2::validate_title(&reloaded.title, body).is_valid(),
+            "the fallback title must satisfy the title rule: {}",
+            reloaded.title
+        );
 
-        // 3. Action items should follow checklist format
-        assert!(!summarized.action_items.is_empty());
-        assert!(summarized.action_items.iter().any(|item| item.starts_with("- [ ] ")));
-
-        // 4. Verify helper functions
-        assert_eq!(strip_asr_artifacts("[no audio] Meeting content (music)"), "Meeting content");
-        assert!(should_regenerate_meeting_title("[no audio] Clean Assistant"));
-        assert!(should_regenerate_meeting_title("Meeting - Aug 26, 2026 02:03PM"));
-        assert!(!should_regenerate_meeting_title("Sprint Planning & Architecture"));
+        // The transcript itself is untouched.
+        let segments = session_store.get_transcript_segments(&session.id).unwrap();
+        assert_eq!(segments.len(), 4);
+        assert!(segments[0].text.contains("placement team"));
 
         let _ = std::fs::remove_dir_all(temp_dir);
     }
-}
+
+    #[test]
+    fn an_all_silence_meeting_gets_the_exact_specified_wording() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("relay_test_meeting_silent_{}", uuid::Uuid::new_v4()));
+        let session_store = crate::meetings_v2::SessionStore::new(temp_dir.clone());
+        let llm = LLMClient::new(crate::providers::ProviderConfig::default());
+
+        let session = crate::meetings_v2::MeetingSession::new("meeting_silent".to_string(), None);
+        session_store.save_session(&session).unwrap();
+        session_store
+            .append_transcript_segment(
+                &session.id,
+                &crate::meetings_v2::TranscriptSegment::new(
+                    0,
+                    0.0,
+                    30.0,
+                    "[BLANK_AUDIO]",
+                    crate::meetings_v2::TranscriptSegmentStatus::Empty,
+                ),
+            )
+            .unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let updated = rt
+            .block_on(summarize_meeting(&llm, &session_store, &session.id))
+            .expect("an empty transcript is a specified case, not an error");
+
+        assert_eq!(
+            updated.summary.as_deref(),
+            Some(crate::meetings_v2::validate::INSUFFICIENT_SUMMARY)
+        );
+        assert!(updated.action_items.is_empty());
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn a_json_object_without_the_expected_fields_is_not_a_valid_response() {
+        // The shipped code accepted these: every field has a serde default, so
+        // an unrelated JSON object parsed into an empty response and was
+        // persisted as a summary-less success.
+        assert!(parse_enrichment_response(r#"{"topics": ["a"], "entities": []}"#).is_none());
+        assert!(parse_enrichment_response("not json at all").is_none());
+        assert!(parse_enrichment_response(r#"{"title": null, "summary": null}"#).is_none());
+
+        let good = parse_enrichment_response(
+            "```json\n{\"title\": \"Alumni Placement Tracking\", \"summary\": \"## Overview\", \"action_items\": []}\n```",
+        );
+        assert_eq!(
+            good.and_then(|p| p.title).as_deref(),
+            Some("Alumni Placement Tracking"),
+            "a fenced response is still a response"
+        );
+    }
+
+    #[test]
+    fn validation_rejects_a_response_that_copies_the_transcript() {
+        let transcript = "Our main problem is that when we asked for data from the report, we shared so many opportunities.";
+        let copied = MeetingEnrichmentResponse {
+            title: Some("Alumni Placement Tracking Gaps".to_string()),
+            summary: Some(format!("## Overview\n\n**Purpose:** {}", transcript)),
+            action_items: Vec::new(),
+        };
+        assert!(!validate_enrichment(&copied, transcript).is_valid());
+    }
+
+    #[test]
+    fn the_fallback_ladder_prefers_honesty_over_a_truncated_guess() {
+        // Under 100 intelligible words is rung 5 of the ladder.
+        assert_eq!(
+            deterministic_title_from_ladder("just a few words here", "26 Aug"),
+            "Short Recording — 26 Aug"
+        );
+    }
+
+    }

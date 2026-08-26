@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 pub struct SessionStore {
+    vault_dir: PathBuf,
     base_dir: PathBuf,
     /// Serializes read-modify-write cycles on `session.json`. The capture
     /// worker and the engine both mutate session metadata concurrently; without
@@ -17,9 +18,15 @@ impl SessionStore {
     pub fn new(vault_dir: PathBuf) -> Self {
         let base_dir = vault_dir.join("meetings_v2");
         Self {
+            vault_dir,
             base_dir,
             write_lock: Mutex::new(()),
         }
+    }
+
+    /// The workspace root, where cross-meeting state such as the glossary lives.
+    pub fn vault_dir(&self) -> &Path {
+        &self.vault_dir
     }
 
     pub fn meetings_dir(&self) -> &Path {

@@ -86,7 +86,7 @@ impl MeetingsV2Engine {
 
     pub fn is_recording(&self) -> bool {
         let guard = self.active_session.lock().unwrap();
-        guard.as_ref().map_or(false, |ctx| {
+        guard.as_ref().is_some_and(|ctx| {
             matches!(
                 ctx.session.state,
                 MeetingState::Recording | MeetingState::Paused

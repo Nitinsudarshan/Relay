@@ -737,7 +737,7 @@ pub fn collapse_whitespace(text: &str) -> String {
     };
     cleaned
         .trim()
-        .trim_start_matches(|c: char| matches!(c, ',' | '.' | ';' | ':' | '-'))
+        .trim_start_matches([',', '.', ';', ':', '-'])
         .trim()
         .to_string()
 }
