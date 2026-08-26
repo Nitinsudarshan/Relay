@@ -45,6 +45,7 @@ export const MeetingsV2View: React.FC = () => {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [activeMeetingTab, setActiveMeetingTab] = useState<'summary' | 'transcript'>('transcript');
   const [meetingTitleInput, setMeetingTitleInput] = useState<string>('');
+  const [meetingLanguage, setMeetingLanguage] = useState<string>('auto');
   const [activeElapsedSec, setActiveElapsedSec] = useState<number>(0);
 
   const selectedSessionIdRef = useRef<string | null>(null);
@@ -182,7 +183,10 @@ export const MeetingsV2View: React.FC = () => {
     setIsStarting(true);
     try {
       const title = meetingTitleInput.trim() ? meetingTitleInput.trim() : undefined;
-      const newSession = await invoke<MeetingSession>('start_meeting_v2', { title });
+      const newSession = await invoke<MeetingSession>('start_meeting_v2', {
+        title,
+        language: meetingLanguage,
+      });
       applyActiveSession(newSession);
       setSelectedSessionId(newSession.id);
       setLiveUpdates([]);
@@ -429,6 +433,19 @@ export const MeetingsV2View: React.FC = () => {
                 placeholder="Meeting Title (optional)..."
                 className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-white/10 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500/50 w-56"
               />
+              <select
+                value={meetingLanguage}
+                onChange={(e) => setMeetingLanguage(e.target.value)}
+                title="Spoken language for this recording. Auto-detect works for most calls; pin it when a meeting is mostly one non-English language."
+                className="px-2 py-1.5 rounded-lg bg-zinc-900 border border-white/10 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500/50"
+              >
+                <option value="auto">Auto-detect</option>
+                <option value="en">English</option>
+                <option value="hi">Hindi</option>
+                <option value="mr">Marathi</option>
+                <option value="ta">Tamil</option>
+                <option value="kn">Kannada</option>
+              </select>
               <button
                 onClick={handleStartRecording}
                 disabled={isStarting}

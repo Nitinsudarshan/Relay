@@ -1031,22 +1031,20 @@ mod tests {
         session_store.save_session(&session).unwrap();
 
         // Append transcript segments
-        let segment1 = crate::meetings_v2::TranscriptSegment {
-            chunk_index: 0,
-            start_time_s: 0.0,
-            end_time_s: 30.0,
-            text: "Today we are reviewing product marketing and camera reliability for the new flagship phone.".to_string(),
-            created_at: chrono::Utc::now().to_rfc3339(),
-            status: crate::meetings_v2::TranscriptSegmentStatus::Success,
-        };
-        let segment2 = crate::meetings_v2::TranscriptSegment {
-            chunk_index: 1,
-            start_time_s: 30.0,
-            end_time_s: 60.0,
-            text: "We need to fix the Terms and Conditions section on the website. I will follow up with the CEO tomorrow morning to confirm the pricing model.".to_string(),
-            created_at: chrono::Utc::now().to_rfc3339(),
-            status: crate::meetings_v2::TranscriptSegmentStatus::Success,
-        };
+        let segment1 = crate::meetings_v2::TranscriptSegment::new(
+            0,
+            0.0,
+            30.0,
+            "Today we are reviewing product marketing and camera reliability for the new flagship phone.",
+            crate::meetings_v2::TranscriptSegmentStatus::Success,
+        );
+        let segment2 = crate::meetings_v2::TranscriptSegment::new(
+            1,
+            30.0,
+            60.0,
+            "We need to fix the Terms and Conditions section on the website. I will follow up with the CEO tomorrow morning to confirm the pricing model.",
+            crate::meetings_v2::TranscriptSegmentStatus::Success,
+        );
         session_store.append_transcript_segment(&session.id, &segment1).unwrap();
         session_store.append_transcript_segment(&session.id, &segment2).unwrap();
 

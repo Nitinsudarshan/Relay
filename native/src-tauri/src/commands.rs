@@ -1589,6 +1589,7 @@ pub async fn complete_first_run(
 #[tauri::command]
 pub async fn start_meeting_v2(
     title: Option<String>,
+    language: Option<String>,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
@@ -1602,6 +1603,7 @@ pub async fn start_meeting_v2(
         .meetings_v2
         .start_session(
             title,
+            language,
             &models_dir,
             whisper_model_path,
             language_config,

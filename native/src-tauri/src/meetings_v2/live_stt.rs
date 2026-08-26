@@ -57,16 +57,11 @@ impl LiveSttWorker {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = stop_flag.clone();
 
-        // Pin the language (defaulting to English) so short windows cannot send
-        // Whisper's language detector somewhere unrelated on background hiss.
-        let effective_lang_config = if language_config.whisper_language.is_none() {
-            SttLanguageConfig {
-                whisper_language: Some("en".to_string()),
-                translate: false,
-            }
-        } else {
-            language_config
-        };
+        // The session's resolved language is used as-is. On auto-detect, short
+        // windows can disagree with each other about the language; the answer
+        // to that is the per-meeting language setting, not silently forcing
+        // English onto Hindi or Hinglish audio.
+        let effective_lang_config = language_config;
 
         let handle = std::thread::spawn(move || {
             run_live_loop(

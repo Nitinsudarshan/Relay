@@ -404,22 +404,20 @@ mod tests {
         assert_eq!(chunk_files.len(), 2);
 
         // 3. Append incremental transcript segments
-        let seg1 = TranscriptSegment {
-            chunk_index: 0,
-            start_time_s: 0.0,
-            end_time_s: 30.0,
-            text: "Hello everyone.".to_string(),
-            created_at: chrono::Utc::now().to_rfc3339(),
-            status: TranscriptSegmentStatus::Success,
-        };
-        let seg2 = TranscriptSegment {
-            chunk_index: 1,
-            start_time_s: 30.0,
-            end_time_s: 60.0,
-            text: "Let's review the architecture.".to_string(),
-            created_at: chrono::Utc::now().to_rfc3339(),
-            status: TranscriptSegmentStatus::Success,
-        };
+        let seg1 = TranscriptSegment::new(
+            0,
+            0.0,
+            30.0,
+            "Hello everyone.",
+            TranscriptSegmentStatus::Success,
+        );
+        let seg2 = TranscriptSegment::new(
+            1,
+            30.0,
+            60.0,
+            "Let's review the architecture.",
+            TranscriptSegmentStatus::Success,
+        );
 
         store.append_transcript_segment(&session.id, &seg1).unwrap();
         store.append_transcript_segment(&session.id, &seg2).unwrap();
@@ -554,14 +552,13 @@ mod tests {
         store.write_chunk_wav(&session.id, 0, &samples, 16000).unwrap();
 
         // Append 1 transcript segment
-        let seg = TranscriptSegment {
-            chunk_index: 0,
-            start_time_s: 0.0,
-            end_time_s: 30.0,
-            text: "This was preserved before crash.".to_string(),
-            created_at: chrono::Utc::now().to_rfc3339(),
-            status: TranscriptSegmentStatus::Success,
-        };
+        let seg = TranscriptSegment::new(
+            0,
+            0.0,
+            30.0,
+            "This was preserved before crash.",
+            TranscriptSegmentStatus::Success,
+        );
         store.append_transcript_segment(&session.id, &seg).unwrap();
 
         // Simulate app restart and scan

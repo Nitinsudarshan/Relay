@@ -103,9 +103,51 @@ impl MeetingsV2Engine {
         self.finalizing_session.lock().unwrap().clone()
     }
 
+    /// Resolves the language for one recording.
+    ///
+    /// A per-meeting choice wins over the global profile, and `"auto"` means
+    /// auto-detect. `translate` is always off: translating Hinglish to English
+    /// and then summarizing loses more than summarizing across languages does.
+    fn resolve_language(
+        requested: Option<&str>,
+        global: &SttLanguageConfig,
+    ) -> (SttLanguageConfig, Option<String>) {
+        match requested.map(str::trim).filter(|r| !r.is_empty()) {
+            Some(code) if code.eq_ignore_ascii_case("auto") => (
+                SttLanguageConfig {
+                    whisper_language: None,
+                    translate: false,
+                },
+                Some("auto".to_string()),
+            ),
+            Some(code) => {
+                let code = code.to_lowercase();
+                (
+                    SttLanguageConfig {
+                        whisper_language: Some(code.clone()),
+                        translate: false,
+                    },
+                    Some(code),
+                )
+            }
+            None => (
+                SttLanguageConfig {
+                    whisper_language: global.whisper_language.clone(),
+                    translate: false,
+                },
+                global
+                    .whisper_language
+                    .clone()
+                    .or_else(|| Some("auto".to_string())),
+            ),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn start_session(
         &self,
         title: Option<String>,
+        language: Option<String>,
         models_dir: &Path,
         whisper_model_path: Option<String>,
         language_config: SttLanguageConfig,
@@ -121,8 +163,12 @@ impl MeetingsV2Engine {
         }
 
         let session_id = format!("meet_{}", uuid::Uuid::new_v4());
+        let (language_config, resolved_language) =
+            Self::resolve_language(language.as_deref(), &language_config);
+
         let mut session = MeetingSession::new(session_id.clone(), title);
         session.state = MeetingState::Starting;
+        session.language = resolved_language;
         self.store.init_session(&session)?;
 
         let resolved_model_path = match whisper_model_path.filter(|p| !p.trim().is_empty()) {
@@ -147,8 +193,13 @@ impl MeetingsV2Engine {
         // split the cores between them rather than letting each claim all of
         // them and fight.
         let mut durable_decoding_config = decoding_config;
-        durable_decoding_config.temperature_inc = 0.0;
         durable_decoding_config.n_threads = Some(durable_thread_count());
+        // Temperature fallback stays enabled here: when a decode trips the
+        // entropy or log-probability threshold, whisper.cpp retries the window
+        // hotter, which is what breaks a loop instead of recording it. The live
+        // clock disables it for latency, and can afford to — the durable
+        // transcript is the one that has to be right.
+        durable_decoding_config.no_context = true;
 
         let worker = TranscriptionWorker::spawn(
             session_id.clone(),
@@ -165,7 +216,7 @@ impl MeetingsV2Engine {
             session_id.clone(),
             live_rx,
             resolved_model_path,
-            language_config,
+            language_config.clone(),
             app.clone(),
         );
 
@@ -528,6 +579,51 @@ mod tests {
     #[test]
     fn an_unnamed_stop_targets_whatever_is_current() {
         assert!(fence("meet_new", None).is_ok());
+    }
+
+    fn global(lang: Option<&str>) -> SttLanguageConfig {
+        SttLanguageConfig {
+            whisper_language: lang.map(str::to_string),
+            translate: false,
+        }
+    }
+
+    #[test]
+    fn a_per_meeting_language_overrides_the_global_profile() {
+        let (config, stored) = MeetingsV2Engine::resolve_language(Some("hi"), &global(Some("en")));
+        assert_eq!(config.whisper_language.as_deref(), Some("hi"));
+        assert_eq!(stored.as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn auto_means_auto_detect_not_english() {
+        let (config, stored) = MeetingsV2Engine::resolve_language(Some("auto"), &global(Some("en")));
+        assert_eq!(
+            config.whisper_language, None,
+            "auto must reach Whisper as auto-detect"
+        );
+        assert_eq!(stored.as_deref(), Some("auto"));
+    }
+
+    #[test]
+    fn without_a_per_meeting_choice_the_global_profile_is_used() {
+        let (config, stored) = MeetingsV2Engine::resolve_language(None, &global(Some("en")));
+        assert_eq!(config.whisper_language.as_deref(), Some("en"));
+        assert_eq!(stored.as_deref(), Some("en"));
+
+        let (config, stored) = MeetingsV2Engine::resolve_language(None, &global(None));
+        assert_eq!(config.whisper_language, None);
+        assert_eq!(stored.as_deref(), Some("auto"));
+    }
+
+    #[test]
+    fn translation_is_never_enabled() {
+        // Translating Hinglish to English and then summarizing loses more than
+        // summarizing across languages does.
+        for requested in [Some("hi"), Some("auto"), None] {
+            let (config, _) = MeetingsV2Engine::resolve_language(requested, &global(Some("en")));
+            assert!(!config.translate);
+        }
     }
 
     #[test]

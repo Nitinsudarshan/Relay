@@ -186,6 +186,15 @@ pub struct WhisperDecodingConfig {
     pub logprob_thold: f32,
     pub print_special: bool,
     pub print_timestamps: bool,
+    /// Whether to withhold the previous window's text from the decoder prompt
+    /// (whisper.cpp's `no_context`, i.e. openai-whisper's
+    /// `condition_on_previous_text = false`).
+    ///
+    /// Conditioning on previous text is what lets a decoder loop feed itself:
+    /// once "I will pay the firm to fill the form." is in the prompt, the most
+    /// likely continuation is the same sentence again, twenty times. Leave this
+    /// on for meeting audio.
+    pub no_context: bool,
     /// Worker threads for this decode. `None` uses every available core.
     /// Meetings pin the durable clock below the core count so the live
     /// clock is never starved of CPU by a 30-second chunk decode.
@@ -216,6 +225,7 @@ impl WhisperDecodingConfig {
             logprob_thold: -1.0,
             print_special: false,
             print_timestamps: false,
+            no_context: true,
             n_threads: None,
         }
     }
@@ -265,6 +275,22 @@ impl WhisperDecodingConfig {
         }
         cfg
     }
+}
+
+/// One decoder segment, with the per-segment confidence signals Whisper
+/// produces and discards.
+///
+/// `no_speech_prob` and `avg_logprob` are the two numbers that identify a
+/// hallucinated or looped segment before any text analysis: a loop decodes with
+/// high confidence per token but sits behind a high no-speech probability,
+/// because there was nothing there to transcribe.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SttSegment {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub text: String,
+    pub no_speech_prob: f32,
+    pub avg_logprob: f32,
 }
 
 /// Diagnostic metadata recorded for an STT transcription session.
@@ -330,6 +356,41 @@ impl SttEngine {
         language_config: &SttLanguageConfig,
         decoding_config: &WhisperDecodingConfig,
     ) -> Result<(String, SttSessionDiagnostics), SttError> {
+        let (text, _segments, diag) = self.transcribe_detailed(
+            model_path,
+            samples_16k_mono,
+            language_config,
+            decoding_config,
+        )?;
+        Ok((text, diag))
+    }
+
+    /// Transcribe and return each decoder segment with its confidence signals,
+    /// so a caller can drop unreliable stretches before they reach the
+    /// normalizer or a model.
+    pub fn transcribe_segments_with_config(
+        &self,
+        model_path: Option<&str>,
+        samples_16k_mono: &[f32],
+        language_config: &SttLanguageConfig,
+        decoding_config: &WhisperDecodingConfig,
+    ) -> Result<(Vec<SttSegment>, SttSessionDiagnostics), SttError> {
+        let (_text, segments, diag) = self.transcribe_detailed(
+            model_path,
+            samples_16k_mono,
+            language_config,
+            decoding_config,
+        )?;
+        Ok((segments, diag))
+    }
+
+    fn transcribe_detailed(
+        &self,
+        model_path: Option<&str>,
+        samples_16k_mono: &[f32],
+        language_config: &SttLanguageConfig,
+        decoding_config: &WhisperDecodingConfig,
+    ) -> Result<(String, Vec<SttSegment>, SttSessionDiagnostics), SttError> {
         #[cfg(not(feature = "whisper-local"))]
         {
             let _ = (model_path, samples_16k_mono, language_config, decoding_config);
@@ -362,7 +423,7 @@ impl SttEngine {
                     is_empty: true,
                     transcript_char_count: 0,
                 };
-                return Ok((String::new(), diag));
+                return Ok((String::new(), Vec::new(), diag));
             }
 
             let mut guard = self.loaded.lock().unwrap();
@@ -409,6 +470,7 @@ impl SttEngine {
             params.set_print_progress(false);
             params.set_print_realtime(false);
             params.set_print_timestamps(decoding_config.print_timestamps);
+            params.set_no_context(decoding_config.no_context);
             params.set_suppress_blank(decoding_config.suppress_blank);
             params.set_temperature(decoding_config.temperature);
             params.set_temperature_inc(decoding_config.temperature_inc);
@@ -428,12 +490,24 @@ impl SttEngine {
 
             let mut text = String::new();
             let mut segment_count = 0;
+            let mut segments: Vec<SttSegment> = Vec::new();
             for segment in state.as_iter() {
                 segment_count += 1;
                 let segment_text = segment
                     .to_str_lossy()
                     .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
                 text.push_str(&segment_text);
+
+                // Whisper timestamps are in centiseconds.
+                let start_ms = (segment.start_timestamp().max(0) as u64) * 10;
+                let end_ms = (segment.end_timestamp().max(0) as u64) * 10;
+                segments.push(SttSegment {
+                    start_ms,
+                    end_ms,
+                    text: segment_text.trim().to_string(),
+                    no_speech_prob: segment.no_speech_probability(),
+                    avg_logprob: average_token_logprob(&segment),
+                });
             }
 
             let trimmed_text = text.trim().to_string();
@@ -472,7 +546,7 @@ impl SttEngine {
                 diag.transcript_char_count
             );
 
-            Ok((trimmed_text, diag))
+            Ok((trimmed_text, segments, diag))
         }
     }
 }
@@ -595,6 +669,34 @@ impl StreamingTranscriber {
     pub fn transcribe(&mut self, _samples_16k_mono: &[f32]) -> Result<String, SttError> {
         Err(SttError::ModelNotConfigured)
     }
+}
+
+/// Mean log-probability of a segment's content tokens.
+///
+/// whisper-rs surfaces per-token probability but not openai-whisper's
+/// `avg_logprob`, so it is reconstructed here. Special tokens are skipped:
+/// their near-certain probabilities would flatter every segment equally.
+#[cfg(feature = "whisper-local")]
+fn average_token_logprob(segment: &whisper_rs::WhisperSegment) -> f32 {
+    let mut sum = 0.0_f64;
+    let mut count = 0_u32;
+    for i in 0..segment.n_tokens() {
+        let Some(token) = segment.get_token(i) else {
+            continue;
+        };
+        if let Ok(text) = token.to_str_lossy() {
+            if text.starts_with("[_") {
+                continue;
+            }
+        }
+        let p = token.token_probability().clamp(1e-10, 1.0);
+        sum += (p as f64).ln();
+        count += 1;
+    }
+    if count == 0 {
+        return 0.0;
+    }
+    (sum / count as f64) as f32
 }
 
 #[cfg(feature = "whisper-local")]

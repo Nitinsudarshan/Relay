@@ -60,6 +60,10 @@ pub struct MeetingSession {
     pub action_items: Vec<String>,
     pub pending_transcription_chunks: usize,
     pub error_message: Option<String>,
+    /// Spoken language for this recording: an ISO code, or `None` for
+    /// auto-detect. Set per meeting; falls back to the global language profile.
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 impl MeetingSession {
@@ -93,6 +97,7 @@ impl MeetingSession {
             action_items: Vec::new(),
             pending_transcription_chunks: 0,
             error_message: None,
+            language: None,
         }
     }
 }
@@ -118,6 +123,21 @@ impl Default for Channel {
     }
 }
 
+/// One decoder utterance inside a chunk, with the timing and confidence Whisper
+/// reported for it.
+///
+/// Retained for two reasons: real utterance boundaries give a generated claim a
+/// precise `start_ms`/`end_ms` evidence span to cite, and the confidence
+/// signals let an unreliable stretch be dropped before it reaches a model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptUtterance {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub text: String,
+    pub no_speech_prob: f32,
+    pub avg_logprob: f32,
+}
+
 /// A single incremental transcript segment derived from an audio chunk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptSegment {
@@ -127,6 +147,43 @@ pub struct TranscriptSegment {
     pub text: String,
     pub created_at: String,
     pub status: TranscriptSegmentStatus,
+    /// Utterances that survived confidence filtering, in order.
+    #[serde(default)]
+    pub utterances: Vec<TranscriptUtterance>,
+    /// Utterances dropped as unreliable. The audio is untouched; only this
+    /// derived text was discarded.
+    #[serde(default)]
+    pub dropped_utterances: usize,
+    /// Mean of the kept utterances' confidence signals.
+    #[serde(default)]
+    pub avg_logprob: Option<f32>,
+    #[serde(default)]
+    pub no_speech_prob: Option<f32>,
+}
+
+impl TranscriptSegment {
+    /// A segment carrying only joined text, for callers that have no
+    /// per-utterance detail: recovered sessions, older transcripts, and tests.
+    pub fn new(
+        chunk_index: usize,
+        start_time_s: f64,
+        end_time_s: f64,
+        text: &str,
+        status: TranscriptSegmentStatus,
+    ) -> Self {
+        Self {
+            chunk_index,
+            start_time_s,
+            end_time_s,
+            text: text.to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            status,
+            utterances: Vec::new(),
+            dropped_utterances: 0,
+            avg_logprob: None,
+            no_speech_prob: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -524,6 +524,8 @@ export interface MeetingSession {
   paused_seconds: number;
   /** Set when capture came up degraded, e.g. no system-audio device. */
   capture_warning?: string | null;
+  /** Spoken language for this recording: an ISO code, or "auto". */
+  language?: string | null;
   total_audio_bytes: number;
   transcript_segment_count: number;
   word_count?: number;
@@ -535,6 +537,15 @@ export interface MeetingSession {
 
 export type TranscriptSegmentStatus = 'SUCCESS' | 'EMPTY' | 'FAILED';
 
+/** One decoder utterance inside a chunk, with its confidence signals. */
+export interface TranscriptUtterance {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  no_speech_prob: number;
+  avg_logprob: number;
+}
+
 export interface TranscriptSegment {
   chunk_index: number;
   start_time_s: number;
@@ -542,6 +553,12 @@ export interface TranscriptSegment {
   text: string;
   created_at: string;
   status: TranscriptSegmentStatus;
+  /** Utterances that survived confidence filtering. */
+  utterances?: TranscriptUtterance[];
+  /** Utterances dropped as unreliable; the audio is untouched. */
+  dropped_utterances?: number;
+  avg_logprob?: number | null;
+  no_speech_prob?: number | null;
 }
 
 /**
