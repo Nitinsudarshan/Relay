@@ -22,6 +22,7 @@ import {
   Bug 
 } from 'lucide-react';
 import { cn, applyThemeWithoutTransition } from '@/lib/utils';
+import { playDictationStartSound, playDictationStopSound } from '@/lib/soundEffects';
 
 export function getPillLanguageFromSettings(lang?: LanguageSettings): SpeechLanguage {
   if (!lang) return 'auto';
@@ -103,6 +104,8 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverEnterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settingsRef = useRef<AppSettings | null>(null);
+  const isRecordingRef = useRef<boolean>(false);
 
   const isExpanded = (phase !== 'collapsed' && phase !== 'hidden_notch' && phase !== 'error' && phase !== 'warning') || hovering || popoverOpen;
 
@@ -155,11 +158,40 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     };
 
     setSettings(updatedSettings);
+    settingsRef.current = updatedSettings;
 
     try {
       await invoke('save_settings', { settings: updatedSettings });
     } catch (err) {
       console.error('Failed to save language settings from pill', err);
+    }
+  };
+
+  const handleToggleDictationSounds = async (enabled: boolean) => {
+    let currentSettings = settings || settingsRef.current;
+    if (!currentSettings) {
+      try {
+        currentSettings = await invoke<AppSettings>('get_settings');
+      } catch {
+        return;
+      }
+    }
+
+    const updatedSettings: AppSettings = {
+      ...currentSettings,
+      sound: {
+        ...currentSettings.sound,
+        dictation_sounds: enabled,
+      },
+    };
+
+    setSettings(updatedSettings);
+    settingsRef.current = updatedSettings;
+
+    try {
+      await invoke('save_settings', { settings: updatedSettings });
+    } catch (err) {
+      console.error('Failed to save sound settings from pill', err);
     }
   };
 
@@ -189,6 +221,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     const unlistenSettingsPromise = listen<AppSettings>('settings-changed', ({ payload }) => {
       if (payload) {
         setSettings(payload);
+        settingsRef.current = payload;
         if (payload.language) {
           setLanguage(getPillLanguageFromSettings(payload.language));
         }
@@ -222,6 +255,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     try {
       const appSettings = await invoke<AppSettings>('get_settings');
       setSettings(appSettings);
+      settingsRef.current = appSettings;
       if (appSettings?.language) {
         setLanguage(getPillLanguageFromSettings(appSettings.language));
       }
@@ -294,6 +328,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     invoke<any>('get_capture_status')
       .then((status) => {
         if (status.active) {
+          isRecordingRef.current = true;
           setPhase('listening');
         }
       })
@@ -301,29 +336,43 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
     const unlistenState = listen<CaptureStatePayload>('capture-state-changed', ({ payload }) => {
       if (payload.active) {
+        if (!isRecordingRef.current) {
+          isRecordingRef.current = true;
+          if (settingsRef.current?.sound?.dictation_sounds ?? true) {
+            playDictationStartSound();
+          }
+        }
         setPhase('listening');
         setErrorMessage(null);
         setWarningMessage(null);
         // Fresh recording, fresh waveform — never carry the previous
         // session's trailing history into a new one.
         setLevelHistory(SILENT_LEVEL_HISTORY);
-      } else if (payload.status === 'TRANSCRIBING' || payload.status === 'PROCESSING') {
-        setPhase('processing');
-      } else if (payload.status === 'SUCCESS') {
-        setPhase('success');
-        setSuccessMessage(promptMode ? 'Prompt inserted into document' : 'Inserted into document');
-        if (successTimerRef.current) clearTimeout(successTimerRef.current);
-        successTimerRef.current = setTimeout(() => setPhase('collapsed'), 2200);
-      } else if (payload.status === 'ERROR' || payload.message) {
-        setPhase('error');
-        setErrorMessage(payload.message || 'Capture processing failed');
-      } else if (payload.status === 'NO_SPEECH') {
-        // Recording stopped but no usable audio was ever received — never a
-        // transcription/processing result to show, just back to idle.
-        console.debug('[Dictation] Recording stopped with no audio input');
-        setPhase('collapsed');
       } else {
-        setPhase('collapsed');
+        if (isRecordingRef.current) {
+          isRecordingRef.current = false;
+          if (settingsRef.current?.sound?.dictation_sounds ?? true) {
+            playDictationStopSound();
+          }
+        }
+        if (payload.status === 'TRANSCRIBING' || payload.status === 'PROCESSING') {
+          setPhase('processing');
+        } else if (payload.status === 'SUCCESS') {
+          setPhase('success');
+          setSuccessMessage(promptMode ? 'Prompt inserted into document' : 'Inserted into document');
+          if (successTimerRef.current) clearTimeout(successTimerRef.current);
+          successTimerRef.current = setTimeout(() => setPhase('collapsed'), 2200);
+        } else if (payload.status === 'ERROR' || payload.message) {
+          setPhase('error');
+          setErrorMessage(payload.message || 'Capture processing failed');
+        } else if (payload.status === 'NO_SPEECH') {
+          // Recording stopped but no usable audio was ever received — never a
+          // transcription/processing result to show, just back to idle.
+          console.debug('[Dictation] Recording stopped with no audio input');
+          setPhase('collapsed');
+        } else {
+          setPhase('collapsed');
+        }
       }
     });
 
@@ -707,6 +756,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
           onToggleAutoPaste={setAutoPaste}
           textTransform={textTransform}
           onToggleTextTransform={setTextTransform}
+          onToggleDictationSounds={handleToggleDictationSounds}
           cleanupStyle={cleanupStyle}
           onChangeCleanupStyle={setCleanupStyle}
           promptMode={promptMode}

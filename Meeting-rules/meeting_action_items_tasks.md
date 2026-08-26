@@ -143,6 +143,8 @@ The last two minutes of a meeting usually restate the real to-dos. Weight them h
 
 Group by owner. Each owner gets an `###` heading; each to-do is one checkbox line, optionally followed by one indented detail line.
 
+**The user's own to-dos come first**, under a `### Mine` heading, regardless of when they were committed. The question a person asks after a meeting is *what do I have to do* — that should not require scanning past four other people's work. Ownership resolution, including how `me` is determined, is governed by `meeting_speaker_identification.md` §7. When speaker attribution is unavailable, omit the `Mine` heading rather than guessing which items are the user's.
+
 ```markdown
 ### <Owner>
 

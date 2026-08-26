@@ -234,6 +234,12 @@ export interface CloudSettings {
   supabaseAnonKey?: string | null;
 }
 
+export interface SoundSettings {
+  /** Whether sound effects (start/stop tones) are played during dictation. */
+  dictation_sounds: boolean;
+  dictationSounds?: boolean;
+}
+
 /** Mirrors the Rust `AppSettings` struct persisted at `.relay/config/settings.json`. */
 export interface AppSettings {
   provider: ProviderSettings;
@@ -245,6 +251,7 @@ export interface AppSettings {
   language: LanguageSettings;
   diagnostics: DiagnosticsSettings;
   cloud?: CloudSettings;
+  sound?: SoundSettings;
 }
 
 export type AccountMode = 'local' | 'hybrid';

@@ -28,6 +28,7 @@ import {
   Lock,
   Terminal,
   ExternalLink,
+  Volume2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -105,6 +106,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   diagnostics: {
     allow_anonymous_diagnostics: true,
     first_run_completed: false,
+  },
+  sound: {
+    dictation_sounds: true,
   },
 };
 
@@ -719,6 +723,40 @@ export const ProviderSettings: React.FC = () => {
                     }
                   }}
                 />
+              </div>
+
+              {/* Sound Effects */}
+              <div className="py-3 border-b border-border space-y-3">
+                <div className="flex items-center gap-2">
+                  <Volume2 className="w-4 h-4 text-primary" />
+                  <p className="text-xs font-semibold text-foreground">Sound Effects</p>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-foreground">Dictation sounds</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Play a tone when recording starts and stops
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.sound?.dictation_sounds ?? true}
+                    onCheckedChange={async (checked) => {
+                      const updated: AppSettings = {
+                        ...settings,
+                        sound: {
+                          ...settings.sound,
+                          dictation_sounds: checked,
+                        },
+                      };
+                      setSettings(updated);
+                      try {
+                        await invoke('save_settings', { settings: updated });
+                      } catch (err) {
+                        console.error('Failed to toggle dictation sounds', err);
+                      }
+                    }}
+                  />
+                </div>
               </div>
 
               {/* Language & Writing Script Preferences */}

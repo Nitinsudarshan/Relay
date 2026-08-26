@@ -11,6 +11,7 @@ interface PillSettingsPopoverProps {
   onToggleAutoPaste: (val: boolean) => void;
   textTransform: boolean;
   onToggleTextTransform: (val: boolean) => void;
+  onToggleDictationSounds?: (val: boolean) => void;
   cleanupStyle: CleanupStyle;
   onChangeCleanupStyle: (style: CleanupStyle) => void;
   promptMode: boolean;
@@ -46,6 +47,7 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
   onToggleAutoPaste,
   textTransform,
   onToggleTextTransform,
+  onToggleDictationSounds,
   cleanupStyle,
   onChangeCleanupStyle,
   promptMode,
@@ -111,9 +113,30 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
             </button>
           </div>
 
+          {/* 3. Dictation sounds */}
+          <div className="flex items-center justify-between px-3 py-2">
+            <span className="font-medium text-slate-800 dark:text-neutral-200">Dictation sounds</span>
+            <button
+              type="button"
+              onClick={() => onToggleDictationSounds?.(!(settings?.sound?.dictation_sounds ?? true))}
+              className={cn(
+                'relative w-8 h-[18px] rounded-full border-none cursor-pointer transition-colors duration-150 p-0',
+                (settings?.sound?.dictation_sounds ?? true) ? 'bg-blue-600 dark:bg-blue-500' : 'bg-slate-300 dark:bg-neutral-700'
+              )}
+              aria-label="Toggle Dictation sounds"
+            >
+              <span
+                className={cn(
+                  'absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white dark:bg-[#171717] shadow-sm transition-all duration-150',
+                  (settings?.sound?.dictation_sounds ?? true) ? 'left-[16px]' : 'left-[2px]'
+                )}
+              />
+            </button>
+          </div>
+
           <div className="h-px bg-slate-100 dark:bg-[#262626] my-1" />
 
-          {/* 3. Cleanup style row (opens sub-page) */}
+          {/* 4. Cleanup style row (opens sub-page) */}
           <div
             onClick={() => setPage('style')}
             className="flex items-center gap-2.5 px-3 py-2 cursor-pointer rounded-lg hover:bg-slate-100 dark:hover:bg-[#262626] transition-colors"

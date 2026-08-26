@@ -1,5 +1,22 @@
 # Relay — Changelog
 
+## [0.12.2] - 2026-08-27
+
+### Dictation: Start & Stop Sound Effects & Settings Toggle
+
+**Type**: patch — `native/` only (`native/src-tauri/src/settings/mod.rs`, `native/src/lib/soundEffects.ts`, `native/src/components/capture/*`, `native/src/components/settings/ProviderSettings.tsx`).
+
+#### Features
+
+- **Dictation Sound Effects Feedback (`soundEffects.ts`, `DictationPill.tsx`)**:
+  - Implemented zero-dependency Web Audio API harmonic sound synthesizers for instant acoustic feedback when dictation starts and stops.
+  - Ascending two-tone chime (`C5` -> `G5`) with exponential envelope plays smoothly when recording starts.
+  - Resolving two-tone chime (`G5` -> `C5`) plays smoothly when recording stops and speech processing begins.
+- **Sound Effects Toggle in Settings & Pill Popover (`settings/mod.rs`, `ProviderSettings.tsx`, `PillSettingsPopover.tsx`)**:
+  - Added `SoundSettings` schema in Rust (`sound.dictation_sounds: bool`, default `true`).
+  - Added **Sound Effects** section to Settings under Universal Dictation with a "Dictation sounds" toggle ("Play a tone when recording starts and stops").
+  - Added quick toggle switch in the Dictation Pill popover for instantaneous toggling directly from the desktop overlay.
+
 ## [0.12.1] - 2026-08-26
 
 ### Meetings: AI Summarization, Action Items (TODOs), Intelligent Titles, Word Count & 30-Day Trash

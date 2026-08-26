@@ -198,6 +198,26 @@ pub struct CloudSettings {
     pub supabase_anon_key: Option<String>,
 }
 
+/// Audio feedback and sound effects preferences.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SoundSettings {
+    /// Whether sound effects (start/stop tones) are played during dictation.
+    #[serde(default = "default_dictation_sounds", alias = "dictationSounds")]
+    pub dictation_sounds: bool,
+}
+
+fn default_dictation_sounds() -> bool {
+    true
+}
+
+impl Default for SoundSettings {
+    fn default() -> Self {
+        Self {
+            dictation_sounds: default_dictation_sounds(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppSettings {
     #[serde(default)]
@@ -218,6 +238,8 @@ pub struct AppSettings {
     pub diagnostics: DiagnosticsSettings,
     #[serde(default)]
     pub cloud: CloudSettings,
+    #[serde(default)]
+    pub sound: SoundSettings,
 }
 
 impl AppSettings {
@@ -363,5 +385,30 @@ mod tests {
         assert_eq!(reloaded.language.output_script, "latin");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_sound_settings_defaults_and_serialization() {
+        let defaults = SoundSettings::default();
+        assert!(defaults.dictation_sounds);
+
+        let app_settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(app_settings.sound.dictation_sounds);
+
+        let custom_json = r#"{
+            "sound": {
+                "dictation_sounds": false
+            }
+        }"#;
+        let loaded: AppSettings = serde_json::from_str(custom_json).unwrap();
+        assert!(!loaded.sound.dictation_sounds);
+
+        let camel_json = r#"{
+            "sound": {
+                "dictationSounds": false
+            }
+        }"#;
+        let camel_loaded: AppSettings = serde_json::from_str(camel_json).unwrap();
+        assert!(!camel_loaded.sound.dictation_sounds);
     }
 }
