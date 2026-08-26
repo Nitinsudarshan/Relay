@@ -836,41 +836,49 @@ You must strictly follow three mandatory meeting rules:
 1. TITLE RULE (meeting_title_headings.md):
    - 3 to 8 words in Title Case, under 60 characters, topic first.
    - No terminal punctuation, no quotes, no dates/times, no filler nouns ("Meeting", "Call", "Sync", "Discussion").
-   - NEVER copy the first line or cold open of the transcript.
+   - NEVER copy the first line or cold open of the transcript. Skip greetings, joining chatter, and audio checks.
    - NEVER include bracketed ASR tags ([no audio], [inaudible], etc.).
    - NEVER end on a preposition, conjunction, or comma.
 
 2. SUMMARY RULE (meeting_transcript_summary.md):
-   - Output exact Markdown structure:
-     ## Summary
-     <2-4 sentences of plain prose in past tense, third person.>
+   - Output structured Markdown:
+     ## Overview
+     **Purpose:** <Concise statement of why the meeting took place and main problems addressed.>
+     **Themes:** <Key topics covered.>
 
-     ## Key Points
-     - <point>
+     ## Discussion
+     ### <Topic 1>
+     - <Key insight, reasoning, or contextual point (rewrite as claims, never quotes)>
 
-     ## Decisions
+     ## Decisions (Omit if none)
      - <decision> — decided by <name or "the group">
 
-     ## Open Questions
-     - <question or unresolved item>
-   - Only include ## Decisions and ## Open Questions if there are actual items. Omit them entirely if none.
-   - Never duplicate action items in the summary.
-   - Preserve exact numbers, dates, version numbers, and names.
+     ## Risks & Open Questions (Omit if none)
+     - <question, risk, or unresolved item>
 
-3. ACTION ITEMS RULE (meeting_action_items_tasks.md):
-   - Flat Markdown checklist format for each task:
+     ## Next Steps (Omit if none)
+     1. <High-level procedural next step>
+
+   - Past tense, third person ("The team reviewed...", not "We will...").
+   - Never quote verbatim. Synthesize claims and reasons.
+   - Preserve exact numbers, dates, version numbers, and proper nouns.
+
+3. ACTION ITEMS & TO-DOS RULE (meeting_action_items_tasks.md):
+   - Only extract work that MUST HAPPEN AFTER THE CALL ENDS (Gate 1: Durability).
+   - EXCLUDE in-meeting mechanics ("I'll share screen", "let me check the ID", live lookups, turn-taking).
+   - EXCLUDE demo narration ("now I'll click here", "I'll upload a ticket").
+   - EXCLUDE hypotheticals, opinions, or work already done.
+   - Format for each task:
      "- [ ] <Action, verb-first> — **<Owner>** · Due: <YYYY-MM-DD>"
    - If no due date was explicitly spoken, omit the " · Due: ..." segment.
    - Resolve relative dates against meeting_date = {meeting_date_iso}.
-   - ONLY include items if a participant explicitly committed to or was assigned a forward-looking task.
-   - Never include opinions, already-completed work, hypothetical ideas, or decisions without an action.
-   - If NO action items exist, return an empty array [].
+   - If NO action items qualify, return an empty array [].
 
 Response Contract:
 Output ONLY valid JSON with fields:
 {{
   "title": "Clean 3-8 Word Title",
-  "summary": "Markdown string containing ## Summary, ## Key Points, ## Decisions, ## Open Questions",
+  "summary": "Structured Markdown summary string",
   "action_items": ["- [ ] Action item 1 — **Owner** · Due: 2026-08-27", "- [ ] Action item 2 — **Owner**"]
 }}
 "#,
