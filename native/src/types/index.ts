@@ -490,6 +490,7 @@ export type MeetingState =
   | 'IDLE'
   | 'STARTING'
   | 'RECORDING'
+  | 'PAUSED'
   | 'STOPPING'
   | 'FINALIZING'
   | 'COMPLETED'
@@ -509,6 +510,13 @@ export interface MeetingSession {
   chunk_count: number;
   mic_active: boolean;
   sys_audio_active: boolean;
+  /** Whether the source was ever audible, as opposed to merely connected. */
+  mic_heard: boolean;
+  sys_audio_heard: boolean;
+  /** Seconds spent paused, already excluded from `duration_seconds`. */
+  paused_seconds: number;
+  /** Set when capture came up degraded, e.g. no system-audio device. */
+  capture_warning?: string | null;
   total_audio_bytes: number;
   transcript_segment_count: number;
   pending_transcription_chunks: number;
@@ -526,9 +534,16 @@ export interface TranscriptSegment {
   status: TranscriptSegmentStatus;
 }
 
+/**
+ * A live transcript update. Updates sharing a `segment_id` belong to the same
+ * utterance and *replace* one another as it grows; the last one has
+ * `is_final: true`. Key on `segment_id` — appending every update would read as
+ * duplicated speech.
+ */
 export interface LiveTranscriptUpdate {
   segment_id: string;
   session_id: string;
+  utterance_index: number;
   start_time_s: number;
   end_time_s: number;
   text: string;
@@ -553,6 +568,8 @@ export interface MeetingDiagnostics {
   pending_transcription_chunks: number;
   mic_active: boolean;
   sys_audio_active: boolean;
+  mic_heard: boolean;
+  sys_audio_heard: boolean;
   mic_rms: number;
   sys_rms: number;
   error?: string | null;

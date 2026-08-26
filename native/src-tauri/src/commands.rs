@@ -1598,10 +1598,7 @@ pub async fn start_meeting_v2(
     let models_dir = state.config_dir.join("models");
     let whisper_model_path = settings.stt.whisper_model_path;
 
-    // Bring up the top-center recording overlay
-    crate::overlay::ensure_meeting_overlay(&app, true);
-
-    state
+    let session = state
         .meetings_v2
         .start_session(
             title,
@@ -1609,26 +1606,63 @@ pub async fn start_meeting_v2(
             whisper_model_path,
             language_config,
             decoding_config,
-            Some(app),
+            Some(app.clone()),
         )
-        .map_err(|e: String| CommandError::new("START_MEETING_FAILED", &e))
+        .map_err(|e: String| CommandError::new("START_MEETING_FAILED", &e))?;
+
+    // Bring the overlay up only once recording is actually under way, then
+    // re-announce the session: the overlay's webview may not have existed when
+    // `start_session` emitted, and a pill that missed the start event would show
+    // a stale or zero timer.
+    crate::overlay::ensure_meeting_overlay(&app, true);
+    let _ = app.emit("meeting-session-state-changed", &session);
+
+    Ok(session)
 }
 
 #[tauri::command]
 pub async fn stop_meeting_v2(
+    session_id: Option<String>,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
-    // Immediately hide the recording overlay for instant UI responsiveness
-    crate::overlay::hide_meeting_overlay(&app);
-
-    let session = state
+    let result = state
         .meetings_v2
-        .stop_session(Some(app.clone()))
-        .await
-        .map_err(|e: String| CommandError::new("STOP_MEETING_FAILED", &e))?;
+        .stop_session(session_id, Some(app.clone()))
+        .await;
 
-    Ok(session)
+    // The overlay comes down once the session is genuinely finished, so the
+    // pill can show "finalizing" while chunks drain instead of vanishing while
+    // work is still in flight.
+    if state.meetings_v2.get_active_session().is_none() {
+        crate::overlay::hide_meeting_overlay(&app);
+    }
+
+    result.map_err(|e: String| CommandError::new("STOP_MEETING_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn pause_meeting_v2(
+    session_id: Option<String>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
+    state
+        .meetings_v2
+        .pause_session(session_id, Some(app))
+        .map_err(|e: String| CommandError::new("PAUSE_MEETING_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn resume_meeting_v2(
+    session_id: Option<String>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
+    state
+        .meetings_v2
+        .resume_session(session_id, Some(app))
+        .map_err(|e: String| CommandError::new("RESUME_MEETING_FAILED", &e))
 }
 
 #[tauri::command]

@@ -88,6 +88,12 @@ pub fn run() {
         .map(PathBuf::from)
         .unwrap_or_else(|| default_vault_dir.clone());
 
+    // Route whisper.cpp/GGML's own logging through whisper-rs's hooks. Without
+    // this, every decode dumps its full token-by-token trace to the terminal,
+    // which at the live clock's cadence buries everything else.
+    #[cfg(feature = "whisper-local")]
+    whisper_rs::install_logging_hooks();
+
     let stt = SttEngine::new();
     let meetings_v2 = Arc::new(meetings_v2::MeetingsV2Engine::new(
         vault_dir.clone(),
@@ -227,6 +233,8 @@ pub fn run() {
             commands::complete_first_run,
             commands::start_meeting_v2,
             commands::stop_meeting_v2,
+            commands::pause_meeting_v2,
+            commands::resume_meeting_v2,
             commands::get_active_meeting_v2,
             commands::list_meetings_v2,
             commands::get_meeting_v2,
