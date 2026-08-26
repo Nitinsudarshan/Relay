@@ -97,6 +97,27 @@ impl MeetingSession {
     }
 }
 
+/// Which capture stream a segment came from.
+///
+/// `Mic` is the local user, `System` is everyone else, and `Mixed` is a session
+/// recorded before the channels were kept apart (or one deliberately marked
+/// "in person", where the split is meaningless). Rung 1 of the attribution
+/// ladder in `Meeting-rules/meeting_speaker_identification.md` §1 is exactly
+/// this field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Channel {
+    Mic,
+    System,
+    Mixed,
+}
+
+impl Default for Channel {
+    fn default() -> Self {
+        Self::Mixed
+    }
+}
+
 /// A single incremental transcript segment derived from an audio chunk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptSegment {

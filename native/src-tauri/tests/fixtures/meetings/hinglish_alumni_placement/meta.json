@@ -1,0 +1,22 @@
+{
+  "name": "hinglish_alumni_placement",
+  "synthetic": true,
+  "note": "Synthetic stand-in built from the documented pathologies in Meeting-rules/meeting_transcript_summary.md \u00a74 and meeting_action_items_tasks.md \u00a73 and \u00a76: bracketed tags, four decoder loops of 9-20 repetitions (two of them split across a 30-second chunk boundary), clause fillers, mangled proper nouns, a silence gap, a legitimate parenthetical, and a social frame at both ends. Replace with the real Hinglish alumni-placement transcript when it is available; the tests read this path and do not care which it is.",
+  "meeting_date": "2026-08-26",
+  "glossary": [
+    "alumni",
+    "Coursera",
+    "Pay Forward",
+    "NavGurukul"
+  ],
+  "expected": {
+    "loops": 4,
+    "artifact_tags": [
+      "blank_audio",
+      "music playing",
+      "speaking in foreign language",
+      "inaudible",
+      "laughing"
+    ]
+  }
+}
