@@ -3,9 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
   Mic,
-  MicOff,
-  Volume2,
-  VolumeX,
   Square,
   Play,
   Pause,
@@ -16,8 +13,12 @@ import {
   Sparkles,
   Trash2,
   AlertTriangle,
+  ListTodo,
+  Check,
+  Copy,
 } from 'lucide-react';
 import { ConfirmationModal } from '../common/ConfirmationModal';
+import { MarkdownView } from '../common/MarkdownView';
 import { MeetingSession, TranscriptSegment, LiveTranscriptUpdate } from '../../types';
 
 /** States in which a session still owns the recorder. */
@@ -37,8 +38,12 @@ export const MeetingsV2View: React.FC = () => {
   const [isStarting, setIsStarting] = useState<boolean>(false);
   const [isStopping, setIsStopping] = useState<boolean>(false);
   const [isTogglingPause, setIsTogglingPause] = useState<boolean>(false);
+  const [isSummarizing, setIsSummarizing] = useState<boolean>(false);
+  const [copiedSummary, setCopiedSummary] = useState<boolean>(false);
+  const [checkedTodos, setCheckedTodos] = useState<Set<string>>(new Set());
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [activeMeetingTab, setActiveMeetingTab] = useState<'summary' | 'transcript'>('transcript');
   const [meetingTitleInput, setMeetingTitleInput] = useState<string>('');
   const [activeElapsedSec, setActiveElapsedSec] = useState<number>(0);
 
@@ -240,6 +245,56 @@ export const MeetingsV2View: React.FC = () => {
     }
   };
 
+  const handleSummarizeMeeting = async (sessionId: string) => {
+    if (isSummarizing) return;
+    setIsSummarizing(true);
+    try {
+      const updated = await invoke<MeetingSession>('summarize_meeting_v2', { sessionId });
+      setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      if (activeSession?.id === updated.id) {
+        setActiveSession(updated);
+      }
+      setActiveMeetingTab('summary');
+    } catch (err) {
+      console.error('Failed to summarize meeting:', err);
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
+
+  const handleSelectSession = (sessionId: string) => {
+    setSelectedSessionId(sessionId);
+    const sess = sessions.find((s) => s.id === sessionId);
+    if (sess?.summary) {
+      setActiveMeetingTab('summary');
+    } else {
+      setActiveMeetingTab('transcript');
+    }
+  };
+
+  const handleCopySummary = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedSummary(true);
+      setTimeout(() => setCopiedSummary(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy summary:', err);
+    }
+  };
+
+  const toggleTodo = (sessionId: string, idx: number) => {
+    const key = `${sessionId}_${idx}`;
+    setCheckedTodos((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
   const selectedSession = useMemo(
     () =>
       (activeSession?.id === selectedSessionId ? activeSession : undefined) ||
@@ -259,12 +314,36 @@ export const MeetingsV2View: React.FC = () => {
     return `${m}m ${s}s`;
   };
 
-  /** Honest source labels: "captured" must not be shown for a source that never was. */
-  const sourceLabel = (active: boolean, heard: boolean, live: boolean) => {
-    if (heard) return live ? 'Live' : 'Captured';
-    if (active) return live ? 'Silent' : 'No audio';
-    return 'Unavailable';
-  };
+  // Helper for computing word count from durable segments
+  const countWords = useCallback((segments: TranscriptSegment[]) => {
+    return segments.reduce((acc, seg) => {
+      if (seg.status === 'SUCCESS' && seg.text) {
+        return acc + seg.text.trim().split(/\s+/).filter(Boolean).length;
+      }
+      return acc;
+    }, 0);
+  }, []);
+
+  // Word count for the active recording session
+  const activeSessionWords = useMemo(() => {
+    const durableWords = countWords(transcriptSegments);
+    const liveWords = liveUpdates.reduce((acc, update) => {
+      if (update.text) {
+        return acc + update.text.trim().split(/\s+/).filter(Boolean).length;
+      }
+      return acc;
+    }, 0);
+    return Math.max(durableWords, liveWords, activeSession?.word_count ?? 0);
+  }, [countWords, transcriptSegments, liveUpdates, activeSession?.word_count]);
+
+  // Word count for the currently selected session in the details view
+  const selectedSessionWords = useMemo(() => {
+    if (isSelectedActive) {
+      return activeSessionWords;
+    }
+    const fromSegments = countWords(transcriptSegments);
+    return Math.max(fromSegments, selectedSession?.word_count ?? 0);
+  }, [isSelectedActive, activeSessionWords, countWords, transcriptSegments, selectedSession?.word_count]);
 
   const pendingDeleteSession = sessions.find((s) => s.id === pendingDeleteId);
   const finalisedUpdates = liveUpdates.filter((u) => u.is_final);
@@ -414,59 +493,72 @@ export const MeetingsV2View: React.FC = () => {
                 return (
                   <div
                     key={item.id}
-                    onClick={() => setSelectedSessionId(item.id)}
+                    onClick={() => handleSelectSession(item.id)}
+                    title={item.title}
                     className={`group relative w-full text-left p-3 rounded-xl border transition-all flex flex-col gap-1.5 cursor-pointer ${
                       isSelected
                         ? 'bg-indigo-600/10 border-indigo-500/30 text-white'
                         : 'bg-zinc-900/40 hover:bg-zinc-900/80 border-white/5 text-zinc-300'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-xs truncate max-w-[150px] text-zinc-100">
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className="font-medium text-xs truncate text-zinc-100 flex-1 min-w-0"
+                        title={item.title}
+                      >
                         {item.title}
                       </span>
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                            isItemActive && itemState === 'PAUSED'
-                              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                              : isItemActive
-                              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                              : itemState === 'RECOVERED'
-                              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                              : itemState === 'INTERRUPTED' || itemState === 'ERROR'
-                              ? 'bg-zinc-800 text-zinc-400'
-                              : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          }`}
-                        >
-                          {isItemActive && itemState === 'RECORDING' ? 'Recording' : itemState}
-                        </span>
-
-                        {!isItemActive && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setPendingDeleteId(item.id);
-                            }}
-                            disabled={deletingId === item.id}
-                            className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 hover:text-red-400 text-zinc-500 rounded transition-all"
-                            title="Delete meeting"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
+                      <span
+                        className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 ${
+                          isItemActive && itemState === 'PAUSED'
+                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                            : isItemActive
+                            ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                            : itemState === 'RECOVERED'
+                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                            : itemState === 'INTERRUPTED' || itemState === 'ERROR'
+                            ? 'bg-zinc-800 text-zinc-400'
+                            : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        }`}
+                      >
+                        {isItemActive && itemState === 'RECORDING' ? 'Recording' : itemState}
+                      </span>
                     </div>
 
-                    <div className="flex items-center gap-3 text-[11px] text-zinc-400">
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3 text-zinc-500" />
-                        {formatDuration(isItemActive ? activeElapsedSec : item.duration_seconds)}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Layers className="w-3 h-3 text-zinc-500" />
-                        {item.chunk_count} chunk{item.chunk_count === 1 ? '' : 's'}
-                      </span>
+                    <div className="flex items-center justify-between text-[11px] text-zinc-400 gap-2">
+                      <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-zinc-500" />
+                          {formatDuration(isItemActive ? activeElapsedSec : item.duration_seconds)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Layers className="w-3 h-3 text-zinc-500" />
+                          {item.chunk_count} chunk{item.chunk_count === 1 ? '' : 's'}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <FileText className="w-3 h-3 text-zinc-500" />
+                          {isItemActive ? activeSessionWords : (item.word_count ?? 0)} word{(isItemActive ? activeSessionWords : (item.word_count ?? 0)) === 1 ? '' : 's'}
+                        </span>
+                        {item.summary && (
+                          <span title="AI Summarized" className="flex items-center text-indigo-400">
+                            <Sparkles className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
+
+                      {!isItemActive && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPendingDeleteId(item.id);
+                          }}
+                          disabled={deletingId === item.id}
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 hover:text-red-400 text-zinc-500 rounded transition-all shrink-0 cursor-pointer"
+                          title="Move to trash"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -484,11 +576,11 @@ export const MeetingsV2View: React.FC = () => {
                 <div>
                   <h2 className="text-lg font-semibold text-white">{selectedSession.title}</h2>
                   <p className="text-xs text-zinc-400 mt-1">
-                    Recorded on {new Date(selectedSession.created_at).toLocaleString()} • Duration:{' '}
+                    Recorded on {new Date(selectedSession.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} • Duration:{' '}
                     {formatDuration(
                       isSelectedActive ? activeElapsedSec : selectedSession.duration_seconds
                     )}{' '}
-                    • Chunks: {selectedSession.chunk_count}
+                    • Chunks: {selectedSession.chunk_count} • Words: {selectedSessionWords}
                     {selectedSession.paused_seconds > 1
                       ? ` • Paused: ${formatDuration(selectedSession.paused_seconds)}`
                       : ''}
@@ -496,153 +588,294 @@ export const MeetingsV2View: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 border border-white/5 text-xs text-zinc-300">
-                    {selectedSession.mic_heard || selectedSession.mic_active ? (
-                      <Mic className="w-3 h-3 text-emerald-400" />
-                    ) : (
-                      <MicOff className="w-3 h-3 text-zinc-500" />
-                    )}
-                    <span>
-                      Mic:{' '}
-                      {sourceLabel(
-                        selectedSession.mic_active,
-                        selectedSession.mic_heard,
-                        isSelectedActive
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 border border-white/5 text-xs text-zinc-300">
-                    {selectedSession.sys_audio_heard || selectedSession.sys_audio_active ? (
-                      <Volume2 className="w-3 h-3 text-indigo-400" />
-                    ) : (
-                      <VolumeX className="w-3 h-3 text-zinc-500" />
-                    )}
-                    <span>
-                      Sys:{' '}
-                      {sourceLabel(
-                        selectedSession.sys_audio_active,
-                        selectedSession.sys_audio_heard,
-                        isSelectedActive
-                      )}
-                    </span>
-                  </div>
-
                   {!isSelectedActive && (
-                    <button
-                      onClick={() => setPendingDeleteId(selectedSession.id)}
-                      disabled={deletingId === selectedSession.id}
-                      className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/30 text-xs font-medium transition-all"
-                      title="Delete this meeting and all audio chunks"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Delete Meeting</span>
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleSummarizeMeeting(selectedSession.id)}
+                        disabled={isSummarizing || (selectedSessionWords === 0 && transcriptSegments.length === 0)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 hover:border-indigo-500/50 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xs cursor-pointer"
+                        title="Generate AI summary, action items, and intelligent title"
+                      >
+                        {isSummarizing ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                            <span>Summarizing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>{selectedSession.summary ? 'Re-summarise' : 'Summarise'}</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => setPendingDeleteId(selectedSession.id)}
+                        disabled={deletingId === selectedSession.id || isSummarizing}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/30 text-xs font-medium transition-all cursor-pointer"
+                        title="Move this meeting to Trash"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Delete Meeting</span>
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
 
-              {/* Transcript Scroll Area */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
-                    <FileText className="w-3.5 h-3.5" />
-                    {isSelectedActive
-                      ? `Live Stream • 30s Chunks (${transcriptSegments.length})`
-                      : `Final Transcript (${transcriptSegments.length} Segments)`}
-                  </h3>
-                  {isSelectedActive && (
-                    <div className="flex items-center gap-2">
-                      {backlog > 0 && (
-                        <span
-                          className="text-[10px] text-amber-400 font-mono px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20"
-                          title="Recorded chunks still waiting to be transcribed. Audio is already saved."
-                        >
-                          {backlog} chunk{backlog === 1 ? '' : 's'} queued
-                        </span>
-                      )}
-                      <span
-                        className={`text-[11px] font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-md border ${
-                          isPaused
-                            ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
-                            : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20 animate-pulse'
-                        }`}
-                      >
-                        <Sparkles className="w-3 h-3" />
-                        {isPaused ? 'Paused' : 'Live STT Stream'}
-                        {latestLatency !== undefined && !isPaused
-                          ? ` • ${latestLatency}ms`
-                          : ''}
-                      </span>
-                    </div>
+              {/* Tab Navigation */}
+              <div className="flex items-center gap-1 px-6 border-b border-white/5 bg-zinc-950/20">
+                <button
+                  onClick={() => setActiveMeetingTab('summary')}
+                  className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer ${
+                    activeMeetingTab === 'summary'
+                      ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5'
+                      : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Summary</span>
+                  {selectedSession.summary && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
                   )}
-                </div>
+                </button>
 
-                {/* Live feed: committed utterances plus the one still forming */}
-                {isSelectedActive && (finalisedUpdates.length > 0 || pendingUpdate) && (
-                  <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/20 flex flex-col gap-2">
-                    <div className="flex items-center justify-between text-[11px] text-emerald-400 font-medium">
-                      <span className="flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                        Live Continuous Speech
-                      </span>
-                    </div>
-                    <div className="text-sm text-zinc-100 leading-relaxed font-sans select-text">
-                      {finalisedUpdates.map((u) => (
-                        <span key={u.segment_id} className="mr-1.5">
-                          {u.text}
-                        </span>
-                      ))}
-                      {pendingUpdate && (
-                        <span
-                          key={pendingUpdate.segment_id}
-                          className="mr-1.5 text-emerald-200/80 italic"
-                          title="Still being transcribed"
-                        >
-                          {pendingUpdate.text}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
+                <button
+                  onClick={() => setActiveMeetingTab('transcript')}
+                  className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer ${
+                    activeMeetingTab === 'transcript'
+                      ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5'
+                      : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Transcript</span>
+                  {transcriptSegments.length > 0 && (
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-white/5 text-zinc-400">
+                      {transcriptSegments.length}
+                    </span>
+                  )}
+                </button>
+              </div>
 
-                {transcriptSegments.length === 0 && liveUpdates.length === 0 ? (
-                  <div className="py-12 text-center text-zinc-500 text-xs">
-                    {isSelectedActive
-                      ? 'Listening for speech on Microphone and System Audio...'
-                      : 'No speech was recognized in this meeting.'}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {transcriptSegments.map((seg) => (
-                      <div
-                        key={seg.chunk_index}
-                        className="p-4 rounded-xl bg-zinc-950/60 border border-white/5 flex flex-col gap-1.5"
-                      >
-                        <div className="flex items-center justify-between text-[11px] text-zinc-500 font-mono">
-                          <span>
-                            Durable Chunk #{seg.chunk_index + 1} ({Math.floor(seg.start_time_s)}s -{' '}
-                            {Math.floor(seg.end_time_s)}s)
+              {/* Tab Content 1: Summary */}
+              {activeMeetingTab === 'summary' && (
+                <div className="flex-1 overflow-y-auto p-6 space-y-5">
+                  {selectedSession.summary ? (
+                    <>
+                      {/* AI Summary Card */}
+                      <div className="p-5 rounded-xl bg-gradient-to-b from-indigo-950/30 to-zinc-950/50 border border-indigo-500/30 flex flex-col gap-3 shadow-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5 tracking-wide">
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                            AI Meeting Summary
                           </span>
-                          <span
-                            className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
-                              seg.status === 'SUCCESS'
-                                ? 'text-emerald-400 bg-emerald-500/10'
-                                : 'text-zinc-500 bg-zinc-800'
-                            }`}
+                          <button
+                            onClick={() => handleCopySummary(selectedSession.summary!)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-zinc-100 bg-white/5 hover:bg-white/10 border border-white/5 transition-colors cursor-pointer"
+                            title="Copy summary to clipboard"
                           >
-                            {seg.status}
-                          </span>
+                            {copiedSummary ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-400" />
+                                <span className="text-emerald-400">Copied</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3" />
+                                <span>Copy</span>
+                              </>
+                            )}
+                          </button>
                         </div>
-                        <p className="text-sm text-zinc-200 leading-relaxed font-sans select-text">
-                          {seg.text || (
-                            <span className="italic text-zinc-600">(Silence / No Speech)</span>
-                          )}
-                        </p>
+                        <div className="text-xs text-zinc-200 leading-relaxed font-sans select-text">
+                          <MarkdownView content={selectedSession.summary} />
+                        </div>
                       </div>
-                    ))}
+
+                      {/* Action Items / TODOs Card (only if present and non-empty) */}
+                      {selectedSession.action_items && selectedSession.action_items.length > 0 && (
+                        <div className="p-5 rounded-xl bg-gradient-to-b from-amber-950/25 to-zinc-950/50 border border-amber-500/30 flex flex-col gap-3 shadow-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5 tracking-wide">
+                              <ListTodo className="w-3.5 h-3.5 text-amber-400" />
+                              Action Items &amp; Tasks
+                            </span>
+                            <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              {selectedSession.action_items.length} task{selectedSession.action_items.length === 1 ? '' : 's'}
+                            </span>
+                          </div>
+                          <div className="space-y-1.5 pt-1">
+                            {selectedSession.action_items.map((item, idx) => {
+                              const isChecked = checkedTodos.has(`${selectedSession.id}_${idx}`);
+                              const cleanItemText = item.replace(/^-\s*\[[ xX]\]\s*/, '');
+
+                              return (
+                                <div
+                                  key={idx}
+                                  onClick={() => toggleTodo(selectedSession.id, idx)}
+                                  className={`flex items-start gap-2.5 p-2.5 rounded-lg cursor-pointer transition-all border ${
+                                    isChecked
+                                      ? 'bg-white/5 border-transparent text-zinc-500 line-through'
+                                      : 'bg-zinc-900/60 hover:bg-zinc-900 border-white/5 hover:border-amber-500/30 text-zinc-200'
+                                  }`}
+                                >
+                                  <div className="mt-1 shrink-0">
+                                    {isChecked ? (
+                                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                    ) : (
+                                      <div className="w-3.5 h-3.5 rounded border border-zinc-600 hover:border-amber-400 transition-colors" />
+                                    )}
+                                  </div>
+                                  <div className="text-xs select-text leading-relaxed font-sans flex-1 min-w-0">
+                                    <MarkdownView content={cleanItemText} />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    /* Empty state when summary not generated yet */
+                    <div className="py-16 px-4 text-center flex flex-col items-center justify-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-1">
+                        <Sparkles className="w-6 h-6" />
+                      </div>
+                      <h4 className="text-sm font-semibold text-zinc-200">No Summary Generated Yet</h4>
+                      <p className="text-xs text-zinc-400 max-w-sm">
+                        Generate a structured AI summary with key takeaways and automatically extracted action items from this meeting's transcript.
+                      </p>
+                      {!isSelectedActive && (
+                        <button
+                          onClick={() => handleSummarizeMeeting(selectedSession.id)}
+                          disabled={isSummarizing || (selectedSessionWords === 0 && transcriptSegments.length === 0)}
+                          className="mt-2 flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          {isSummarizing ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              <span>Summarizing Meeting...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3.5 h-3.5" />
+                              <span>Summarise Meeting</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab Content 2: Transcript */}
+              {activeMeetingTab === 'transcript' && (
+                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                    <h3 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-zinc-400" />
+                      Transcript
+                      <span className="text-xs font-normal text-zinc-400">
+                        ({transcriptSegments.length} Segment{transcriptSegments.length === 1 ? '' : 's'})
+                      </span>
+                    </h3>
+                    {isSelectedActive && (
+                      <div className="flex items-center gap-2">
+                        {backlog > 0 && (
+                          <span
+                            className="text-[10px] text-amber-400 font-mono px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20"
+                            title="Recorded chunks still waiting to be transcribed. Audio is already saved."
+                          >
+                            {backlog} chunk{backlog === 1 ? '' : 's'} queued
+                          </span>
+                        )}
+                        <span
+                          className={`text-[11px] font-medium flex items-center gap-1.5 px-2 py-0.5 rounded-md border ${
+                            isPaused
+                              ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+                              : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20 animate-pulse'
+                          }`}
+                        >
+                          <Sparkles className="w-3 h-3" />
+                          {isPaused ? 'Paused' : 'Live STT Stream'}
+                          {latestLatency !== undefined && !isPaused
+                            ? ` • ${latestLatency}ms`
+                            : ''}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+
+                  {/* Live feed: committed utterances plus the one still forming */}
+                  {isSelectedActive && (finalisedUpdates.length > 0 || pendingUpdate) && (
+                    <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/20 flex flex-col gap-2">
+                      <div className="flex items-center justify-between text-[11px] text-emerald-400 font-medium">
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                          Live Continuous Speech
+                        </span>
+                      </div>
+                      <div className="text-sm text-zinc-100 leading-relaxed font-sans select-text">
+                        {finalisedUpdates.map((u) => (
+                          <span key={u.segment_id} className="mr-1.5">
+                            {u.text}
+                          </span>
+                        ))}
+                        {pendingUpdate && (
+                          <span
+                            key={pendingUpdate.segment_id}
+                            className="mr-1.5 text-emerald-200/80 italic"
+                            title="Still being transcribed"
+                          >
+                            {pendingUpdate.text}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {transcriptSegments.length === 0 && liveUpdates.length === 0 ? (
+                    <div className="py-12 text-center text-zinc-500 text-xs">
+                      {isSelectedActive
+                        ? 'Listening for speech on Microphone and System Audio...'
+                        : 'No speech was recognized in this meeting.'}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {transcriptSegments.map((seg) => (
+                        <div
+                          key={seg.chunk_index}
+                          className="p-4 rounded-xl bg-zinc-950/60 border border-white/5 flex flex-col gap-1.5"
+                        >
+                          <div className="flex items-center justify-between text-[11px] text-zinc-500 font-mono">
+                            <span>
+                              Durable Chunk #{seg.chunk_index + 1} ({Math.floor(seg.start_time_s)}s -{' '}
+                              {Math.floor(seg.end_time_s)}s)
+                            </span>
+                            <span
+                              className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
+                                seg.status === 'SUCCESS'
+                                  ? 'text-emerald-400 bg-emerald-500/10'
+                                  : 'text-zinc-500 bg-zinc-800'
+                              }`}
+                            >
+                              {seg.status}
+                            </span>
+                          </div>
+                          <p className="text-sm text-zinc-200 leading-relaxed font-sans select-text">
+                            {seg.text || (
+                              <span className="italic text-zinc-600">(Silence / No Speech)</span>
+                            )}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-zinc-500">
@@ -659,11 +892,11 @@ export const MeetingsV2View: React.FC = () => {
 
       <ConfirmationModal
         isOpen={!!pendingDeleteId}
-        title="Delete this meeting?"
+        title="Move meeting to Trash?"
         description={`"${
           pendingDeleteSession?.title ?? 'This meeting'
-        }" and all of its recorded audio and transcripts will be permanently deleted. This cannot be undone.`}
-        confirmLabel="Delete Meeting"
+        }" will be moved to Trash. You can restore it from Settings within 30 days.`}
+        confirmLabel="Move to Trash"
         variant="destructive"
         isBusy={!!deletingId}
         onConfirm={() => pendingDeleteId && handleDeleteSession(pendingDeleteId)}

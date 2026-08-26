@@ -598,6 +598,324 @@ graph LR
     Ok(scribble)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeetingEnrichmentResponse {
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub action_items: Vec<String>,
+}
+
+/// Strips common ASR artifacts like [no audio], [inaudible], [BLANK_AUDIO], etc.
+pub fn strip_asr_artifacts(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut in_bracket = false;
+    let mut in_paren = false;
+
+    for c in text.chars() {
+        match c {
+            '[' => in_bracket = true,
+            ']' => in_bracket = false,
+            '(' => in_paren = true,
+            ')' => in_paren = false,
+            _ if !in_bracket && !in_paren => result.push(c),
+            _ => {}
+        }
+    }
+
+    // Collapse multiple whitespaces and trim
+    result.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Determines whether a meeting title is a generic placeholder or corrupted with ASR tags and should be regenerated.
+/// Follows Meeting-rules/meeting_title_headings.md §2.
+pub fn should_regenerate_meeting_title(title: &str) -> bool {
+    let t = title.trim();
+    if t.is_empty() {
+        return true;
+    }
+
+    let lower = t.to_lowercase();
+    if lower.starts_with("[no audio]")
+        || lower.starts_with("[inaudible]")
+        || lower.starts_with("[blank_audio]")
+        || lower.starts_with("(unintelligible)")
+        || lower.starts_with('[')
+    {
+        return true;
+    }
+
+    if lower.starts_with("meeting —")
+        || lower.starts_with("meeting -")
+        || lower.starts_with("meeting-")
+        || lower.starts_with("meeting ")
+        || lower == "untitled"
+        || lower == "untitled meeting"
+        || lower == "new recording"
+        || lower.starts_with("recording ")
+        || lower.starts_with("rec_")
+        || lower.ends_with(".wav")
+    {
+        return true;
+    }
+
+    false
+}
+
+/// Deterministically generates a 3-8 word meeting title following Meeting-rules/meeting_title_headings.md.
+pub fn extract_deterministic_meeting_title(clean_transcript: &str, meeting_date_short: &str) -> String {
+    let words: Vec<&str> = clean_transcript.split_whitespace().collect();
+    if words.len() < 15 {
+        return format!("Short Recording — {}", meeting_date_short);
+    }
+
+    // Step 2: Skip cold open (~first 200 words if long, or first sentence if short)
+    let body_words = if words.len() > 400 {
+        &words[200..]
+    } else if words.len() > 50 {
+        &words[15..]
+    } else {
+        &words[..]
+    };
+
+    let sample_text = body_words.join(" ");
+    let base_title = extract_deterministic_title(&sample_text);
+    let clean_title = base_title
+        .trim_start_matches(|c: char| !c.is_alphanumeric())
+        .trim_end_matches(|c: char| !c.is_alphanumeric() || c == '.')
+        .to_string();
+
+    let title_words: Vec<&str> = clean_title.split_whitespace().collect();
+    let invalid_ends = ["and", "or", "the", "to", "of", "with", "for", "in", "on", "at", "a", "an"];
+    
+    let filtered_words: Vec<&str> = if let Some(last) = title_words.last() {
+        if invalid_ends.contains(&last.to_lowercase().as_str()) {
+            title_words[..title_words.len() - 1].to_vec()
+        } else {
+            title_words
+        }
+    } else {
+        title_words
+    };
+
+    if filtered_words.len() >= 2 && filtered_words.len() <= 8 {
+        filtered_words.join(" ")
+    } else {
+        format!("Untitled Meeting — {}", meeting_date_short)
+    }
+}
+
+/// Extracts deterministic meeting enrichment following the contracts in:
+/// - Meeting-rules/meeting_title_headings.md
+/// - Meeting-rules/meeting_transcript_summary.md
+/// - Meeting-rules/meeting_action_items_tasks.md
+pub fn extract_deterministic_meeting_enrichment(content: &str, meeting_date_iso: &str) -> MeetingEnrichmentResponse {
+    let clean = strip_asr_artifacts(content);
+    let date_short = chrono::NaiveDate::parse_from_str(meeting_date_iso, "%Y-%m-%d")
+        .map(|d| d.format("%d %b").to_string())
+        .unwrap_or_else(|_| "Meeting".to_string());
+
+    let title = extract_deterministic_meeting_title(&clean, &date_short);
+
+    let word_count = clean.split_whitespace().count();
+    if word_count < 25 {
+        return MeetingEnrichmentResponse {
+            title: Some(title),
+            summary: Some("## Summary\n\nThe recording contains too little intelligible audio to summarize.".to_string()),
+            action_items: Vec::new(),
+        };
+    }
+
+    // 1. Extract Action Items (Checklist format: - [ ] <Action> — **<Owner>** · Due: ...)
+    let action_cues = [
+        "i will", "we will", "i'll", "we'll", "let's", "i can take",
+        "action item", "todo", "make sure to", "follow up", "follow-up", "find out",
+    ];
+
+    let mut action_items = Vec::new();
+    let sentences = clean.split(|c| c == '.' || c == '\n' || c == '?' || c == '!');
+    for sentence in sentences {
+        let s_trimmed = sentence.trim();
+        if s_trimmed.len() > 15 && s_trimmed.len() < 200 {
+            let lower = s_trimmed.to_lowercase();
+            // Filter out hypotheticals, opinions, already done
+            if lower.contains("could") || lower.contains("already") || lower.contains("feels like") {
+                continue;
+            }
+
+            for cue in &action_cues {
+                if lower.contains(cue) {
+                    let clean_action = s_trimmed
+                        .trim_start_matches(|c: char| !c.is_alphanumeric())
+                        .trim_end_matches(|c: char| !c.is_alphanumeric());
+
+                    if !clean_action.is_empty() {
+                        let owner = if lower.contains("i will") || lower.contains("i'll") || lower.contains("let me") || lower.contains("i can") {
+                            "Participant"
+                        } else {
+                            "Unassigned"
+                        };
+                        let task_str = format!("- [ ] {} — **{}**", clean_action, owner);
+                        if !action_items.contains(&task_str) {
+                            action_items.push(task_str);
+                        }
+                    }
+                    break;
+                }
+            }
+            if action_items.len() >= 10 {
+                break;
+            }
+        }
+    }
+
+    // 2. Build structured markdown summary following meeting_transcript_summary.md
+    let sentences_vec: Vec<&str> = clean
+        .split(|c| c == '.' || c == '\n')
+        .map(|s| s.trim())
+        .filter(|s| s.len() > 20)
+        .collect();
+
+    let mut summary_md = Vec::new();
+    summary_md.push("## Summary\n".to_string());
+    if sentences_vec.is_empty() {
+        summary_md.push(format!("The team held a session regarding {}.", title));
+    } else {
+        let overview = sentences_vec.iter().take(2).cloned().collect::<Vec<_>>().join(". ");
+        summary_md.push(format!("{}.", overview.trim_end_matches('.')));
+    }
+
+    if sentences_vec.len() > 1 {
+        summary_md.push("\n## Key Points\n".to_string());
+        for s in sentences_vec.iter().skip(1).take(4) {
+            summary_md.push(format!("- {}", s.trim_end_matches('.')));
+        }
+    }
+
+    MeetingEnrichmentResponse {
+        title: Some(title),
+        summary: Some(summary_md.join("\n")),
+        action_items,
+    }
+}
+
+/// Summarizes a meeting session using LLM (or deterministic heuristics), strictly enforcing:
+/// 1. Meeting-rules/meeting_title_headings.md
+/// 2. Meeting-rules/meeting_transcript_summary.md
+/// 3. Meeting-rules/meeting_action_items_tasks.md
+pub async fn summarize_meeting(
+    llm: &LLMClient,
+    session_store: &crate::meetings_v2::SessionStore,
+    session_id: &str,
+) -> Result<crate::meetings_v2::MeetingSession, String> {
+    let session = session_store
+        .get_session(session_id)
+        .map_err(|e| format!("Meeting session not found: {}", e))?;
+
+    let transcript = session_store
+        .get_full_transcript_text(session_id)
+        .unwrap_or_default();
+
+    let clean_transcript = strip_asr_artifacts(transcript.trim());
+    if clean_transcript.trim().is_empty() {
+        return Err("Cannot summarize a meeting with no transcribed speech.".to_string());
+    }
+
+    let meeting_date_iso = session
+        .started_at
+        .as_ref()
+        .or(Some(&session.created_at))
+        .and_then(|d| d.split('T').next())
+        .unwrap_or("2026-08-26");
+
+    let is_generic_title = should_regenerate_meeting_title(&session.title);
+
+    let system_prompt = format!(
+        r#"You are Relay's Meeting Intelligence Engine.
+You must strictly follow three mandatory meeting rules:
+1. TITLE RULE (meeting_title_headings.md):
+   - 3 to 8 words in Title Case, under 60 characters, topic first.
+   - No terminal punctuation, no quotes, no dates/times, no filler nouns ("Meeting", "Call", "Sync", "Discussion").
+   - NEVER copy the first line or cold open of the transcript.
+   - NEVER include bracketed ASR tags ([no audio], [inaudible], etc.).
+   - NEVER end on a preposition, conjunction, or comma.
+
+2. SUMMARY RULE (meeting_transcript_summary.md):
+   - Output exact Markdown structure:
+     ## Summary
+     <2-4 sentences of plain prose in past tense, third person.>
+
+     ## Key Points
+     - <point>
+
+     ## Decisions
+     - <decision> — decided by <name or "the group">
+
+     ## Open Questions
+     - <question or unresolved item>
+   - Only include ## Decisions and ## Open Questions if there are actual items. Omit them entirely if none.
+   - Never duplicate action items in the summary.
+   - Preserve exact numbers, dates, version numbers, and names.
+
+3. ACTION ITEMS RULE (meeting_action_items_tasks.md):
+   - Flat Markdown checklist format for each task:
+     "- [ ] <Action, verb-first> — **<Owner>** · Due: <YYYY-MM-DD>"
+   - If no due date was explicitly spoken, omit the " · Due: ..." segment.
+   - Resolve relative dates against meeting_date = {meeting_date_iso}.
+   - ONLY include items if a participant explicitly committed to or was assigned a forward-looking task.
+   - Never include opinions, already-completed work, hypothetical ideas, or decisions without an action.
+   - If NO action items exist, return an empty array [].
+
+Response Contract:
+Output ONLY valid JSON with fields:
+{{
+  "title": "Clean 3-8 Word Title",
+  "summary": "Markdown string containing ## Summary, ## Key Points, ## Decisions, ## Open Questions",
+  "action_items": ["- [ ] Action item 1 — **Owner** · Due: 2026-08-27", "- [ ] Action item 2 — **Owner**"]
+}}
+"#,
+        meeting_date_iso = meeting_date_iso
+    );
+
+    let enriched = match llm.complete(&clean_transcript, Some(&system_prompt)).await {
+        Ok(resp) => {
+            let json_str = resp.text.trim().trim_matches('`').trim_start_matches("json").trim();
+            if let Ok(parsed) = serde_json::from_str::<MeetingEnrichmentResponse>(json_str) {
+                parsed
+            } else {
+                extract_deterministic_meeting_enrichment(&clean_transcript, meeting_date_iso)
+            }
+        }
+        Err(err) => {
+            tracing::warn!("LLM meeting summarization failed for session {}: {}", session_id, err);
+            extract_deterministic_meeting_enrichment(&clean_transcript, meeting_date_iso)
+        }
+    };
+
+    let updated_session = session_store.update_session(session_id, |s| {
+        if is_generic_title {
+            if let Some(new_title) = enriched.title {
+                let trimmed_title = strip_asr_artifacts(&new_title);
+                let clean = trimmed_title.trim_matches('"').trim();
+                if !clean.is_empty() && !should_regenerate_meeting_title(clean) {
+                    s.title = clean.to_string();
+                } else if !clean.is_empty() {
+                    s.title = clean.to_string();
+                }
+            }
+        }
+        if let Some(summary) = enriched.summary {
+            let trimmed_summary = summary.trim();
+            if !trimmed_summary.is_empty() {
+                s.summary = Some(trimmed_summary.to_string());
+            }
+        }
+        s.action_items = enriched.action_items;
+    })?;
+
+    Ok(updated_session)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -691,6 +1009,63 @@ mod tests {
         assert!(!enriched.ai_metadata.suggested_questions.is_empty());
         assert_eq!(enriched.ai_metadata.enrichment_status, "enriched");
         assert!(enriched.ai_metadata.last_enriched_at.is_some());
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_meeting_enrichment_and_title_synthesis() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_meeting_enrich_{}", uuid::Uuid::new_v4()));
+        let session_store = crate::meetings_v2::SessionStore::new(temp_dir.clone());
+        let llm = LLMClient::new(crate::providers::ProviderConfig::default());
+
+        let session = crate::meetings_v2::MeetingSession::new("meeting_enrich_01".to_string(), None);
+        session_store.save_session(&session).unwrap();
+
+        // Append transcript segments
+        let segment1 = crate::meetings_v2::TranscriptSegment {
+            chunk_index: 0,
+            start_time_s: 0.0,
+            end_time_s: 30.0,
+            text: "Today we are reviewing product marketing and camera reliability for the new flagship phone.".to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            status: crate::meetings_v2::TranscriptSegmentStatus::Success,
+        };
+        let segment2 = crate::meetings_v2::TranscriptSegment {
+            chunk_index: 1,
+            start_time_s: 30.0,
+            end_time_s: 60.0,
+            text: "We need to fix the Terms and Conditions section on the website. I will follow up with the CEO tomorrow morning to confirm the pricing model.".to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            status: crate::meetings_v2::TranscriptSegmentStatus::Success,
+        };
+        session_store.append_transcript_segment(&session.id, &segment1).unwrap();
+        session_store.append_transcript_segment(&session.id, &segment2).unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let summarized = rt.block_on(async {
+            summarize_meeting(&llm, &session_store, &session.id).await.unwrap()
+        });
+
+        // 1. Generic title should be replaced by an intelligent title
+        assert!(!summarized.title.starts_with("Meeting —"));
+        assert!(!summarized.title.starts_with('['));
+        assert!(summarized.title.len() > 3);
+
+        // 2. Summary should be generated with ## Summary markdown structure
+        assert!(summarized.summary.is_some());
+        let summary = summarized.summary.unwrap();
+        assert!(summary.contains("## Summary"));
+
+        // 3. Action items should follow checklist format
+        assert!(!summarized.action_items.is_empty());
+        assert!(summarized.action_items.iter().any(|item| item.starts_with("- [ ] ")));
+
+        // 4. Verify helper functions
+        assert_eq!(strip_asr_artifacts("[no audio] Meeting content (music)"), "Meeting content");
+        assert!(should_regenerate_meeting_title("[no audio] Clean Assistant"));
+        assert!(should_regenerate_meeting_title("Meeting - Aug 26, 2026 02:03PM"));
+        assert!(!should_regenerate_meeting_title("Sprint Planning & Architecture"));
 
         let _ = std::fs::remove_dir_all(temp_dir);
     }

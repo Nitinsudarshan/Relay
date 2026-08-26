@@ -110,6 +110,11 @@ impl SessionStore {
                 session.chunk_count = chunks.len();
             }
         }
+        if session.word_count == 0 {
+            if let Ok(text) = self.get_full_transcript_text(&session.id) {
+                session.word_count = text.split_whitespace().count();
+            }
+        }
         Ok(session)
     }
 
@@ -130,6 +135,11 @@ impl SessionStore {
                             if session.chunk_count == 0 {
                                 if let Ok(chunks) = self.list_chunk_files(&session.id) {
                                     session.chunk_count = chunks.len();
+                                }
+                            }
+                            if session.word_count == 0 {
+                                if let Ok(text) = self.get_full_transcript_text(&session.id) {
+                                    session.word_count = text.split_whitespace().count();
                                 }
                             }
                             sessions.push(session);

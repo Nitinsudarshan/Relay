@@ -683,7 +683,7 @@ impl VaultManager {
         Ok(scribble)
     }
 
-    /// Moves a scribble or voice note to the 30-day Trash.
+    /// Moves a scribble, voice note, or meeting to the 30-day Trash.
     pub fn move_to_trash(&self, item_type: &str, id: &str) -> Result<TrashItem, VaultError> {
         self.init()?;
         let trash_dir = self.vault_dir().join("trash");
@@ -724,6 +724,21 @@ impl VaultManager {
                 fs::write(&meta_path, serde_json::to_string_pretty(&trash_item).map_err(|e| VaultError::FrontmatterError(e.to_string()))?)?;
                 if src_md.exists() {
                     fs::rename(&src_md, &dest_md)?;
+                }
+                Ok(trash_item)
+            }
+            "meeting" | "meetings" | "meeting_v2" => {
+                let session_store = crate::meetings_v2::SessionStore::new(self.vault_dir());
+                let session = session_store.get_session(id).map_err(VaultError::NotFound)?;
+                let snippet = session_store.get_full_transcript_text(id).unwrap_or_default();
+                let trash_item = TrashItem::new(id, "meeting", &session.title, &snippet);
+                let meta_path = trash_dir.join(format!("{}.json", trash_item.id));
+                let src_dir = self.vault_dir().join("meetings_v2").join(id);
+                let dest_dir = trash_dir.join(&trash_item.id);
+
+                fs::write(&meta_path, serde_json::to_string_pretty(&trash_item).map_err(|e| VaultError::FrontmatterError(e.to_string()))?)?;
+                if src_dir.exists() {
+                    fs::rename(&src_dir, &dest_dir)?;
                 }
                 Ok(trash_item)
             }
@@ -771,6 +786,7 @@ impl VaultManager {
         let item: TrashItem = serde_json::from_str(&content).map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
 
         let trash_md = trash_dir.join(format!("{}.md", trash_id));
+        let trash_meeting_dir = trash_dir.join(trash_id);
         match item.item_type.as_str() {
             "scribble" => {
                 let active_md = self.vault_dir().join("scribbles").join(format!("{}.md", item.original_id));
@@ -782,6 +798,12 @@ impl VaultManager {
                 let active_md = self.vault_dir().join("notes").join(format!("{}.md", item.original_id));
                 if trash_md.exists() {
                     fs::rename(&trash_md, &active_md)?;
+                }
+            }
+            "meeting" | "meetings" | "meeting_v2" => {
+                let active_meeting_dir = self.vault_dir().join("meetings_v2").join(&item.original_id);
+                if trash_meeting_dir.exists() {
+                    fs::rename(&trash_meeting_dir, &active_meeting_dir)?;
                 }
             }
             _ => {}
@@ -798,12 +820,16 @@ impl VaultManager {
         let trash_dir = self.vault_dir().join("trash");
         let meta_path = trash_dir.join(format!("{}.json", trash_id));
         let trash_md = trash_dir.join(format!("{}.md", trash_id));
+        let trash_meeting_dir = trash_dir.join(trash_id);
 
         if meta_path.exists() {
             fs::remove_file(&meta_path)?;
         }
         if trash_md.exists() {
             fs::remove_file(&trash_md)?;
+        }
+        if trash_meeting_dir.exists() && trash_meeting_dir.is_dir() {
+            let _ = fs::remove_dir_all(&trash_meeting_dir);
         }
         Ok(())
     }
@@ -821,10 +847,14 @@ impl VaultManager {
         for entry in fs::read_dir(trash_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                count += 1;
+            if path.is_dir() {
+                let _ = fs::remove_dir_all(&path);
+            } else {
+                if path.extension().is_some_and(|ext| ext == "json") {
+                    count += 1;
+                }
+                let _ = fs::remove_file(&path);
             }
-            let _ = fs::remove_file(&path);
         }
 
         Ok(count)
@@ -846,8 +876,12 @@ impl VaultManager {
                     if let Ok(item) = serde_json::from_str::<TrashItem>(&content) {
                         if item.is_expired() {
                             let trash_md = trash_dir.join(format!("{}.md", item.id));
+                            let trash_meeting_dir = trash_dir.join(&item.id);
                             let _ = fs::remove_file(&path);
                             let _ = fs::remove_file(&trash_md);
+                            if trash_meeting_dir.exists() && trash_meeting_dir.is_dir() {
+                                let _ = fs::remove_dir_all(&trash_meeting_dir);
+                            }
                             purged += 1;
                         }
                     }
@@ -1268,21 +1302,25 @@ mod tests {
         let temp_dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
         let manager = VaultManager::new(temp_dir.clone());
 
-        // 1. Create a voice note and a scribble
+        // 1. Create a voice note, scribble, and meeting
         let voice_note = VaultNote::new_voice_note("Thought to be moved to trash.");
         manager.save_note(&voice_note).unwrap();
 
         let scribble = Scribble::new_text("Scribble to be soft deleted.", Some("Trash Test"));
         manager.save_scribble(&scribble).unwrap();
 
+        let session_store = crate::meetings_v2::SessionStore::new(manager.vault_dir());
+        let meeting_session = crate::meetings_v2::MeetingSession::new("meeting_trash_test".to_string(), Some("Sprint Retrospective".to_string()));
+        session_store.save_session(&meeting_session).unwrap();
+
         assert_eq!(manager.list_notes().unwrap().len(), 1);
         assert_eq!(manager.list_scribbles().unwrap().len(), 1);
+        assert_eq!(session_store.list_sessions().unwrap().len(), 1);
 
         // 2. Move scribble to trash
         let trash_scribble = manager.move_to_trash("scribble", &scribble.id).unwrap();
         assert_eq!(trash_scribble.item_type, "scribble");
         assert_eq!(trash_scribble.days_remaining(), 30);
-        // Active list should now be empty
         assert_eq!(manager.list_scribbles().unwrap().len(), 0);
 
         // 3. Move voice note to trash
@@ -1290,21 +1328,31 @@ mod tests {
         assert_eq!(trash_note.item_type, "voice_note");
         assert_eq!(manager.list_notes().unwrap().len(), 0);
 
-        // 4. List trash items
-        let trash_items = manager.get_trash_items().unwrap();
-        assert_eq!(trash_items.len(), 2);
+        // 4. Move meeting to trash
+        let trash_meeting = manager.move_to_trash("meeting", &meeting_session.id).unwrap();
+        assert_eq!(trash_meeting.item_type, "meeting");
+        assert_eq!(session_store.list_sessions().unwrap().len(), 0);
 
-        // 5. Restore voice note
+        // 5. List trash items
+        let trash_items = manager.get_trash_items().unwrap();
+        assert_eq!(trash_items.len(), 3);
+
+        // 6. Restore meeting
+        manager.restore_trash_item(&trash_meeting.id).unwrap();
+        assert_eq!(session_store.list_sessions().unwrap().len(), 1);
+        assert_eq!(manager.get_trash_items().unwrap().len(), 2);
+
+        // 7. Restore voice note
         manager.restore_trash_item(&trash_note.id).unwrap();
         assert_eq!(manager.list_notes().unwrap().len(), 1);
         assert_eq!(manager.get_trash_items().unwrap().len(), 1);
 
-        // 6. Permanently delete scribble
+        // 8. Permanently delete scribble
         manager.delete_trash_item_permanently(&trash_scribble.id).unwrap();
         assert_eq!(manager.get_trash_items().unwrap().len(), 0);
         assert_eq!(manager.list_scribbles().unwrap().len(), 0);
 
-        // 7. Test Empty Trash
+        // 9. Test Empty Trash
         let scribble2 = Scribble::new_text("Another to delete", Some("Empty Trash Test"));
         manager.save_scribble(&scribble2).unwrap();
         manager.move_to_trash("scribble", &scribble2.id).unwrap();

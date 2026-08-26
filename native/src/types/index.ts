@@ -519,6 +519,9 @@ export interface MeetingSession {
   capture_warning?: string | null;
   total_audio_bytes: number;
   transcript_segment_count: number;
+  word_count?: number;
+  summary?: string | null;
+  action_items?: string[];
   pending_transcription_chunks: number;
   error_message?: string | null;
 }

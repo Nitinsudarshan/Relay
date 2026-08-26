@@ -52,6 +52,12 @@ pub struct MeetingSession {
     pub capture_warning: Option<String>,
     pub total_audio_bytes: u64,
     pub transcript_segment_count: usize,
+    #[serde(default)]
+    pub word_count: usize,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub action_items: Vec<String>,
     pub pending_transcription_chunks: usize,
     pub error_message: Option<String>,
 }
@@ -82,6 +88,9 @@ impl MeetingSession {
             capture_warning: None,
             total_audio_bytes: 0,
             transcript_segment_count: 0,
+            word_count: 0,
+            summary: None,
+            action_items: Vec::new(),
             pending_transcription_chunks: 0,
             error_message: None,
         }

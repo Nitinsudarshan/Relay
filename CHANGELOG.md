@@ -1,5 +1,31 @@
 # Relay — Changelog
 
+## [0.12.1] - 2026-08-26
+
+### Meetings: AI Summarization, Action Items (TODOs), Intelligent Titles, Word Count & 30-Day Trash
+
+**Type**: patch — `native/` only (`native/src-tauri/src/meetings_v2/*`, `native/src-tauri/src/pipeline/*`, `native/src-tauri/src/vault/*`, `native/src/components/meetings_v2/*`, `native/src/components/settings/TrashSettings.tsx`).
+
+#### Features
+
+- **AI Meeting Summarization & Action Items (`pipeline/enrichment.rs`, `commands.rs`, `MeetingsV2View.tsx`)**:
+  - Added `summarize_meeting_v2` command that analyzes full meeting transcripts using the active LLM provider (or local deterministic heuristics).
+  - Produces structured markdown meeting summaries with key takeaways and decisions.
+  - Automatically extracts action items / TODOs when concrete tasks or follow-ups were discussed, rendered in a checkable task list.
+  - Automatically renames generic default titles (e.g. `Meeting — Aug 26, 2026...`) to intelligent 3–7 word meeting titles while preserving custom titles and displaying date/time in the sub-heading.
+- **Transcribed Word Count Tracking (`meetings_v2/types.rs`, `meetings_v2/session_store.rs`, `meetings_v2/worker.rs`, `MeetingsV2View.tsx`)**:
+  - Tracked and rendered transcribed word count on sidebar meeting cards (`X words`) and in the meeting details header metadata.
+- **Move to 30-Day Trash on Single Confirmation (`vault/mod.rs`, `TrashSettings.tsx`, `MeetingsV2View.tsx`)**:
+  - Replaced hard-deletion with a single-confirmation "Move to Trash" flow.
+  - Retains all meeting audio chunks and transcripts in `trash/` for 30 days, recoverable or purgeable from Settings.
+
+#### Improvements
+
+- **Clean Meeting Header**: Removed redundant `Mic: Captured` and `Sys: Captured` source pills from the meeting overview header.
+- **Tabbed Meeting Details Layout (`MeetingsV2View.tsx`)**:
+  - Structured the meeting content into two distinct left-aligned tabs: **Summary** (holding the AI meeting summary & action points) and **Transcript** (holding the raw incremental speech segments with live STT stream support).
+  - Automatically activates the Summary tab upon summary generation and provides an integrated CTA in the empty state.
+
 ## [0.12.0] - 2026-08-26
 
 ### Meetings V2: Low-Latency Live STT, Recording Pill Timer Correctness & Pause/Resume

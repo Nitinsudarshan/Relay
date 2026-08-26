@@ -241,6 +241,7 @@ pub fn run() {
             commands::get_meeting_v2_transcript,
             commands::get_meeting_v2_diagnostics,
             commands::delete_meeting_v2,
+            commands::summarize_meeting_v2,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

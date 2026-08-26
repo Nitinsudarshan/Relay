@@ -135,8 +135,10 @@ impl TranscriptionWorker {
                     );
                 }
 
+                let segment_words = text.split_whitespace().count();
                 let _ = store.update_session(&session_id, |session| {
                     session.transcript_segment_count += 1;
+                    session.word_count += segment_words;
                     session.pending_transcription_chunks = session
                         .chunk_count
                         .saturating_sub(session.transcript_segment_count);

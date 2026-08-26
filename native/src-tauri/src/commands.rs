@@ -1721,12 +1721,28 @@ pub async fn get_meeting_v2_diagnostics(
 pub async fn delete_meeting_v2(
     session_id: String,
     state: State<'_, AppState>,
-) -> Result<(), CommandError> {
+) -> Result<TrashItem, CommandError> {
     state
-        .meetings_v2
-        .store()
-        .delete_session(&session_id)
-        .map_err(|e: String| CommandError::new("DELETE_MEETING_FAILED", &e))
+        .vault
+        .move_to_trash("meeting", &session_id)
+        .map_err(|e| CommandError::new("DELETE_MEETING_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn summarize_meeting_v2(
+    app: AppHandle,
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
+    let settings = state.settings.lock().unwrap().clone();
+    let llm = LLMClient::new(settings.provider);
+
+    let updated = crate::pipeline::summarize_meeting(&llm, &state.meetings_v2.store(), &session_id)
+        .await
+        .map_err(|e| CommandError::new("SUMMARIZE_MEETING_FAILED", &e))?;
+
+    let _ = app.emit("meeting-session-state-changed", &updated);
+    Ok(updated)
 }
 
 
