@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
-import { AppSettings, LanguageSettings, VaultLocationInfo, RelayAccount } from '../../types';
+import {
+  AppSettings,
+  LanguageSettings,
+  VaultLocationInfo,
+  RelayAccount,
+  AudioDeviceInfo,
+} from '../../types';
 import {
   Cpu,
   Cloud,
@@ -19,16 +24,14 @@ import {
   Mic,
   Keyboard,
   Globe,
-  Activity,
-  FileText,
   Sparkles,
-  Layers,
-  FileAudio,
-  Check,
-  Lock,
-  Terminal,
-  ExternalLink,
+  BookOpen,
   Volume2,
+  Terminal,
+  Check,
+  Layers,
+  Power,
+  Clipboard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,20 +39,20 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { HotkeyRecorder } from './HotkeyRecorder';
 import { SttDiagnosticsView } from './SttDiagnosticsView';
-import { TriggerSettings } from './TriggerSettings';
 import { TrashSettings } from './TrashSettings';
 import { AccountSettings } from './AccountSettings';
 import { DeveloperSettingsView } from './DeveloperSettingsView';
+import { DictionarySnippetsSettings } from './DictionarySnippetsSettings';
 
 export type SettingsSection =
   | 'account'
   | 'general'
   | 'dictation'
-  | 'voicenotes'
-  | 'scribbles'
+  | 'dictionary'
+  | 'languages'
+  | 'advanced'
   | 'privacy'
   | 'trash'
-  | 'advanced'
   | 'developer';
 
 const DEFAULT_LANGUAGE_SETTINGS: LanguageSettings = {
@@ -110,6 +113,22 @@ const DEFAULT_SETTINGS: AppSettings = {
   sound: {
     dictation_sounds: true,
   },
+  clipboard: {
+    auto_paste: true,
+    copy_to_clipboard: true,
+  },
+  startup: {
+    launch_at_login: false,
+    start_minimized: false,
+  },
+  audio_input: {
+    prefer_builtin_mic: true,
+    selected_device: null,
+    keep_microphone_warm: 'off',
+    auto_learn_words: true,
+  },
+  dictionary: ['Relay', 'Whisper', 'Tauri', 'Rust', 'Supabase', 'LanceDB', 'Ollama'],
+  snippets: [],
 };
 
 export const ProviderSettings: React.FC = () => {
@@ -119,11 +138,9 @@ export const ProviderSettings: React.FC = () => {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
 
-  // Feature Toggles & Preferences (Prepared for upcoming V1 iterations)
-  const [autoSaveVault, setAutoSaveVault] = useState(true);
-  const [rawAudioKept, setRawAudioKept] = useState(true);
-  const [autoExtractTasks, setAutoExtractTasks] = useState(true);
-  const [scribbleTemplate, setScribbleTemplate] = useState<'structured' | 'minimal' | 'executive'>('structured');
+  // Audio input devices
+  const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
+  const [loadingDevices, setLoadingDevices] = useState(false);
 
   type OllamaStatus =
     | { state: 'checking' }
@@ -164,6 +181,18 @@ export const ProviderSettings: React.FC = () => {
     }
   };
 
+  const loadAudioDevices = async () => {
+    setLoadingDevices(true);
+    try {
+      const devs = await invoke<AudioDeviceInfo[]>('get_audio_devices');
+      setAudioDevices(devs || []);
+    } catch (err) {
+      console.error('Failed to query audio devices', err);
+    } finally {
+      setLoadingDevices(false);
+    }
+  };
+
   const [vaultLocation, setVaultLocation] = useState<VaultLocationInfo | null>(null);
   const [vaultBusy, setVaultBusy] = useState(false);
   const [vaultError, setVaultError] = useState('');
@@ -182,7 +211,6 @@ export const ProviderSettings: React.FC = () => {
   const [clearVaultAck, setClearVaultAck] = useState(false);
   const [clearVaultInput, setClearVaultInput] = useState('');
   const [clearingVault, setClearingVault] = useState(false);
-  const [clearVaultSuccess, setClearVaultSuccess] = useState<string | null>(null);
 
   const loadAccountState = async () => {
     try {
@@ -257,6 +285,22 @@ export const ProviderSettings: React.FC = () => {
         setSettings({
           ...DEFAULT_SETTINGS,
           ...loaded,
+          clipboard: {
+            ...DEFAULT_SETTINGS.clipboard!,
+            ...(loaded.clipboard || {}),
+          },
+          startup: {
+            ...DEFAULT_SETTINGS.startup!,
+            ...(loaded.startup || {}),
+          },
+          audio_input: {
+            ...DEFAULT_SETTINGS.audio_input!,
+            ...(loaded.audio_input || {}),
+          },
+          sound: {
+            ...DEFAULT_SETTINGS.sound!,
+            ...(loaded.sound || {}),
+          },
           language: {
             ...DEFAULT_LANGUAGE_SETTINGS,
             ...(loaded.language || {}),
@@ -290,10 +334,6 @@ export const ProviderSettings: React.FC = () => {
         setSettings((prev) => ({
           ...prev,
           ...payload,
-          language: {
-            ...DEFAULT_LANGUAGE_SETTINGS,
-            ...(payload.language || {}),
-          },
         }));
       }
     });
@@ -307,36 +347,22 @@ export const ProviderSettings: React.FC = () => {
     if (!loading && activeSection === 'general') {
       loadVaultLocation();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, activeSection]);
-
-  useEffect(() => {
+    if (!loading && activeSection === 'dictation') {
+      loadAudioDevices();
+    }
     if (!loading && activeSection === 'advanced' && settings.provider.active_provider === 'ollama') {
       checkLocalLlm();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, activeSection, settings.provider.active_provider]);
-
-  useEffect(() => {
-    if (!loading && activeSection === 'advanced') {
       checkSttModel();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, activeSection]);
-
-  useEffect(() => {
     if (!loading && activeSection === 'privacy') {
       loadAccountState();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, activeSection]);
+  }, [loading, activeSection, settings.provider.active_provider]);
 
-  // Hotkeys are applied the moment they're captured — the backend
-  // unregisters the old binding and registers the new one live, so there's
-  // no need to restart Relay (or even press Save) for them to take effect.
   const applyHotkey = async (field: 'show_hide_hotkey' | 'dictation_hotkey', accelerator: string) => {
     const updatedHotkeys = { ...settings.hotkeys, [field]: accelerator };
-    setSettings((prev) => ({ ...prev, hotkeys: updatedHotkeys }));
+    const updatedSettings = { ...settings, hotkeys: updatedHotkeys };
+    setSettings(updatedSettings);
     try {
       await invoke('update_hotkeys', { hotkeys: updatedHotkeys });
       setError('');
@@ -362,6 +388,10 @@ export const ProviderSettings: React.FC = () => {
     e.preventDefault();
     await handleSaveDirect();
   };
+
+  // Find default or active microphone
+  const defaultDevice = audioDevices.find((d) => d.is_default) || audioDevices[0];
+  const activeDeviceName = settings.audio_input?.selected_device || defaultDevice?.name || 'Default Microphone Array';
 
   if (loading) {
     return (
@@ -409,7 +439,7 @@ export const ProviderSettings: React.FC = () => {
           <span>General</span>
         </button>
 
-        {/* 2. Dictation */}
+        {/* 2. Dictation & Audio */}
         <button
           type="button"
           onClick={() => setActiveSection('dictation')}
@@ -420,38 +450,52 @@ export const ProviderSettings: React.FC = () => {
           }`}
         >
           <Mic className="w-4 h-4 text-primary" />
-          <span>Dictation</span>
+          <span>Dictation & Audio</span>
         </button>
 
-        {/* 3. Voice Notes */}
+        {/* 3. Dictionary & Snippets */}
         <button
           type="button"
-          onClick={() => setActiveSection('voicenotes')}
+          onClick={() => setActiveSection('dictionary')}
           className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'voicenotes'
+            activeSection === 'dictionary'
               ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground'
           }`}
         >
-          <FileText className="w-4 h-4 text-primary" />
-          <span>Voice Notes</span>
+          <BookOpen className="w-4 h-4 text-primary" />
+          <span>Dictionary & Snippets</span>
         </button>
 
-        {/* 4. Scribbles */}
+        {/* 4. Languages & Script */}
         <button
           type="button"
-          onClick={() => setActiveSection('scribbles')}
+          onClick={() => setActiveSection('languages')}
           className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'scribbles'
+            activeSection === 'languages'
               ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground'
           }`}
         >
-          <Sparkles className="w-4 h-4 text-primary" />
-          <span>Scribbles</span>
+          <Globe className="w-4 h-4 text-primary" />
+          <span>Languages & Script</span>
         </button>
 
-        {/* 5. Privacy */}
+        {/* 5. AI Models & STT Engine */}
+        <button
+          type="button"
+          onClick={() => setActiveSection('advanced')}
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
+            activeSection === 'advanced'
+              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          }`}
+        >
+          <Cpu className="w-4 h-4 text-primary" />
+          <span>AI Models & STT</span>
+        </button>
+
+        {/* 6. Privacy & Vault */}
         <button
           type="button"
           onClick={() => setActiveSection('privacy')}
@@ -462,7 +506,7 @@ export const ProviderSettings: React.FC = () => {
           }`}
         >
           <ShieldCheck className="w-4 h-4 text-primary" />
-          <span>Privacy</span>
+          <span>Privacy & Vault</span>
         </button>
 
         {/* 7. Trash & Deleted Items */}
@@ -479,21 +523,7 @@ export const ProviderSettings: React.FC = () => {
           <span>Trash & Deleted</span>
         </button>
 
-        {/* 8. Advanced */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('advanced')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'advanced'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <Cpu className="w-4 h-4 text-primary" />
-          <span>Advanced</span>
-        </button>
-
-        {/* 9. Developer */}
+        {/* 8. Developer */}
         <button
           type="button"
           onClick={() => setActiveSection('developer')}
@@ -511,12 +541,12 @@ export const ProviderSettings: React.FC = () => {
       {/* Main Settings Content Area */}
       <main className="flex-1 bg-card rounded-lg border border-border p-6 overflow-y-auto min-h-0">
         {saved && (
-          <div className="mb-4 p-3 rounded-lg bg-success/20 border border-success/40 text-success-foreground text-xs flex items-center justify-between">
+          <div className="mb-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs flex items-center justify-between">
             <span className="flex items-center gap-2">
               <CheckCircle className="w-4 h-4 text-emerald-500" />
               Settings updated successfully
             </span>
-            <Badge variant="outline" className="text-[10px] font-mono">
+            <Badge variant="outline" className="text-[10px] font-mono border-emerald-500/30 text-emerald-500">
               Persisted
             </Badge>
           </div>
@@ -539,7 +569,7 @@ export const ProviderSettings: React.FC = () => {
               <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
                 GENERAL CONFIGURATION
               </p>
-              <h2 className="text-lg font-bold text-foreground">Desktop App & Vault Defaults</h2>
+              <h2 className="text-lg font-bold text-foreground">Desktop App & Startup Defaults</h2>
             </div>
 
             <div className="space-y-4">
@@ -562,6 +592,73 @@ export const ProviderSettings: React.FC = () => {
                 <p className="text-[10px] text-muted-foreground mt-2">
                   Click the box, then press your desired key combination — it takes effect immediately.
                 </p>
+              </div>
+
+              {/* Startup Group (OpenWhispr Style) */}
+              <div className="py-3 border-b border-border space-y-3">
+                <div className="flex items-center gap-2">
+                  <Power className="w-4 h-4 text-primary" />
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">Startup</p>
+                    <p className="text-[11px] text-muted-foreground">Control how Relay behaves when it launches</p>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-lg bg-muted/40 border border-border space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Launch at login</p>
+                      <p className="text-[11px] text-muted-foreground">Start Relay in the background when you log in</p>
+                    </div>
+                    <Switch
+                      checked={settings.startup?.launch_at_login ?? false}
+                      onCheckedChange={async (checked) => {
+                        const updated: AppSettings = {
+                          ...settings,
+                          startup: {
+                            ...settings.startup,
+                            launch_at_login: checked,
+                            start_minimized: settings.startup?.start_minimized ?? false,
+                          },
+                        };
+                        setSettings(updated);
+                        try {
+                          await invoke('save_settings', { settings: updated });
+                        } catch (err) {
+                          console.error('Failed to update launch at login', err);
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div className="h-px bg-border/60" />
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Start minimized</p>
+                      <p className="text-[11px] text-muted-foreground">Launch without showing the main control panel window</p>
+                    </div>
+                    <Switch
+                      checked={settings.startup?.start_minimized ?? false}
+                      onCheckedChange={async (checked) => {
+                        const updated: AppSettings = {
+                          ...settings,
+                          startup: {
+                            ...settings.startup,
+                            launch_at_login: settings.startup?.launch_at_login ?? false,
+                            start_minimized: checked,
+                          },
+                        };
+                        setSettings(updated);
+                        try {
+                          await invoke('save_settings', { settings: updated });
+                        } catch (err) {
+                          console.error('Failed to update start minimized', err);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Floating Pill Position */}
@@ -603,7 +700,7 @@ export const ProviderSettings: React.FC = () => {
               </div>
 
               {/* Vault Directory Location */}
-              <div className="py-3 border-b border-border flex items-center justify-between gap-3">
+              <div className="py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <HardDrive className="w-4 h-4 text-primary" />
@@ -636,31 +733,6 @@ export const ProviderSettings: React.FC = () => {
                 </div>
               </div>
 
-              {/* Account & Sync Card */}
-              <div className="py-3">
-                <div className="flex items-center gap-2 mb-3">
-                  <User className="w-4 h-4 text-primary" />
-                  <p className="text-xs font-semibold text-foreground">Account & Cloud Profile</p>
-                </div>
-                <div className="p-3.5 rounded-lg bg-card border border-border flex items-center gap-3.5">
-                  <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground font-bold text-sm flex items-center justify-center shrink-0">
-                    N
-                  </div>
-                  <div className="space-y-0.5 min-w-0">
-                    <p className="text-xs font-bold text-foreground truncate">Nitin Sudarshan</p>
-                    <p className="text-[11px] text-muted-foreground truncate">nitin@example.com</p>
-                    <div className="flex gap-1.5 pt-0.5 flex-wrap">
-                      <Badge variant="outline" className="text-[9px] font-mono border-primary/30 text-primary px-1.5 py-0">
-                        Pro Hybrid
-                      </Badge>
-                      <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0">
-                        Local Vault Active
-                      </Badge>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
               <Button type="submit" size="sm" variant="default" className="mt-2">
                 Save General Settings
               </Button>
@@ -668,14 +740,14 @@ export const ProviderSettings: React.FC = () => {
           </form>
         )}
 
-        {/* 2. DICTATION SECTION */}
+        {/* 2. DICTATION & AUDIO SECTION */}
         {activeSection === 'dictation' && (
           <form onSubmit={handleSave} className="space-y-6">
             <div>
               <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
-                UNIVERSAL DICTATION & VOICE CAPTURE
+                UNIVERSAL DICTATION & AUDIO HARDWARE
               </p>
-              <h2 className="text-lg font-bold text-foreground">Dictation, Languages & Spoken Shortcuts</h2>
+              <h2 className="text-lg font-bold text-foreground">Microphone, Clipboard & Sound Behavior</h2>
             </div>
 
             <div className="space-y-4">
@@ -725,6 +797,195 @@ export const ProviderSettings: React.FC = () => {
                 />
               </div>
 
+              {/* Clipboard Group (OpenWhispr Style) */}
+              <div className="py-3 border-b border-border space-y-3">
+                <div className="flex items-center gap-2">
+                  <Clipboard className="w-4 h-4 text-primary" />
+                  <p className="text-xs font-semibold text-foreground">Clipboard</p>
+                </div>
+                <div className="p-3.5 rounded-lg bg-muted/40 border border-border space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Automatic pasting</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Automatically paste transcribed text into the active app when dictation finishes
+                      </p>
+                    </div>
+                    <Switch
+                      checked={settings.clipboard?.auto_paste ?? true}
+                      onCheckedChange={async (checked) => {
+                        const updated: AppSettings = {
+                          ...settings,
+                          clipboard: {
+                            ...settings.clipboard,
+                            auto_paste: checked,
+                            copy_to_clipboard: settings.clipboard?.copy_to_clipboard ?? true,
+                          },
+                        };
+                        setSettings(updated);
+                        try {
+                          await invoke('save_settings', { settings: updated });
+                        } catch (err) {
+                          console.error('Failed to update auto paste', err);
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div className="h-px bg-border/60" />
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Keep transcription in clipboard</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Keep dictated text in your clipboard so you can paste it manually if needed
+                      </p>
+                    </div>
+                    <Switch
+                      checked={settings.clipboard?.copy_to_clipboard ?? true}
+                      onCheckedChange={async (checked) => {
+                        const updated: AppSettings = {
+                          ...settings,
+                          clipboard: {
+                            ...settings.clipboard,
+                            auto_paste: settings.clipboard?.auto_paste ?? true,
+                            copy_to_clipboard: checked,
+                          },
+                        };
+                        setSettings(updated);
+                        try {
+                          await invoke('save_settings', { settings: updated });
+                        } catch (err) {
+                          console.error('Failed to update copy to clipboard', err);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Microphone Hardware & Warm-up (OpenWhispr Style) */}
+              <div className="py-3 border-b border-border space-y-3">
+                <div className="flex items-center gap-2">
+                  <Mic className="w-4 h-4 text-primary" />
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">Microphone</p>
+                    <p className="text-[11px] text-muted-foreground">Select which input device to use for dictation</p>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-lg bg-muted/40 border border-border space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Prefer Built-in Microphone</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        External microphones may cause latency or reduced transcription quality
+                      </p>
+                    </div>
+                    <Switch
+                      checked={settings.audio_input?.prefer_builtin_mic ?? true}
+                      onCheckedChange={async (checked) => {
+                        const updated: AppSettings = {
+                          ...settings,
+                          audio_input: {
+                            ...settings.audio_input,
+                            prefer_builtin_mic: checked,
+                            selected_device: settings.audio_input?.selected_device,
+                            keep_microphone_warm: settings.audio_input?.keep_microphone_warm || 'off',
+                            auto_learn_words: settings.audio_input?.auto_learn_words ?? true,
+                          },
+                        };
+                        setSettings(updated);
+                        try {
+                          await invoke('save_settings', { settings: updated });
+                        } catch (err) {
+                          console.error('Failed to update prefer builtin mic', err);
+                        }
+                      }}
+                    />
+                  </div>
+
+                  {/* Active Input Device Badge (Green Banner) */}
+                  <div className="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2 font-medium">
+                    <Mic className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Using: {activeDeviceName}</span>
+                  </div>
+
+                  <div className="h-px bg-border/60" />
+
+                  {/* Keep Microphone Warm */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Keep Microphone Warm</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        After a dictation ends, keep the microphone open briefly so the next one starts instantly with nothing clipped
+                      </p>
+                    </div>
+                    <select
+                      value={settings.audio_input?.keep_microphone_warm || 'off'}
+                      onChange={async (e) => {
+                        const val = e.target.value;
+                        const updated: AppSettings = {
+                          ...settings,
+                          audio_input: {
+                            ...settings.audio_input,
+                            prefer_builtin_mic: settings.audio_input?.prefer_builtin_mic ?? true,
+                            keep_microphone_warm: val,
+                            auto_learn_words: settings.audio_input?.auto_learn_words ?? true,
+                          },
+                        };
+                        setSettings(updated);
+                        try {
+                          await invoke('save_settings', { settings: updated });
+                        } catch (err) {
+                          console.error('Failed to save keep mic warm', err);
+                        }
+                      }}
+                      className="h-8 rounded-md bg-background border border-input px-2.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="off">Off</option>
+                      <option value="15s">15 seconds</option>
+                      <option value="30s">30 seconds</option>
+                      <option value="1m">1 minute</option>
+                      <option value="5m">5 minutes</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Auto-learn from corrections (OpenWhispr Style) */}
+              <div className="py-3 border-b border-border space-y-3">
+                <p className="text-xs font-semibold text-foreground">Auto-learn from corrections</p>
+                <div className="p-3.5 rounded-lg bg-muted/40 border border-border flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-foreground">Auto-learn from corrections</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      When you correct a transcription in the target app, the corrected word is automatically added to your dictionary.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.audio_input?.auto_learn_words ?? true}
+                    onCheckedChange={async (checked) => {
+                      const updated: AppSettings = {
+                        ...settings,
+                        audio_input: {
+                          ...settings.audio_input,
+                          prefer_builtin_mic: settings.audio_input?.prefer_builtin_mic ?? true,
+                          keep_microphone_warm: settings.audio_input?.keep_microphone_warm || 'off',
+                          auto_learn_words: checked,
+                        },
+                      };
+                      setSettings(updated);
+                      try {
+                        await invoke('save_settings', { settings: updated });
+                      } catch (err) {
+                        console.error('Failed to update auto learn words', err);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
               {/* Sound Effects */}
               <div className="py-3 border-b border-border space-y-3">
                 <div className="flex items-center gap-2">
@@ -759,200 +1020,6 @@ export const ProviderSettings: React.FC = () => {
                 </div>
               </div>
 
-              {/* Language & Writing Script Preferences */}
-              <div className="py-4 border-b border-border space-y-4">
-                <div className="flex items-center gap-2">
-                  <Globe className="w-4 h-4 text-primary" />
-                  <p className="text-xs font-semibold text-foreground">Language & Writing Script Preferences</p>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Separately configure the languages you speak, your default dictation language, and output writing script.
-                </p>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Primary Dictation Language */}
-                  <div>
-                    <label htmlFor="primary-dictation-lang" className="block text-xs font-medium text-foreground mb-1">
-                      Primary Dictation Language
-                    </label>
-                    <p className="text-[10px] text-muted-foreground mb-1.5">
-                      Default language for push-to-talk and quick speech-to-text.
-                    </p>
-                    <select
-                      id="primary-dictation-lang"
-                      value={settings.language?.primary_dictation_language || 'en'}
-                      onChange={(e) => {
-                        const newPrimary = e.target.value;
-                        const currentSpoken = settings.language?.spoken_languages || ['en'];
-                        const updatedSpoken = currentSpoken.includes(newPrimary)
-                          ? currentSpoken
-                          : [...currentSpoken, newPrimary];
-                        setSettings({
-                          ...settings,
-                          language: {
-                            ...settings.language,
-                            primary_dictation_language: newPrimary,
-                            spoken_languages: updatedSpoken,
-                          },
-                        });
-                      }}
-                      className="w-full h-9 rounded-lg bg-background border border-input px-3 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                    >
-                      {WHISPER_SUPPORTED_LANGUAGES.map((lang) => (
-                        <option key={lang.code} value={lang.code}>
-                          {lang.name} ({lang.code})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Output Writing Script */}
-                  <div>
-                    <label className="block text-xs font-medium text-foreground mb-1">
-                      Output Writing Script
-                    </label>
-                    <p className="text-[10px] text-muted-foreground mb-1.5">
-                      Controls alphabet used, independent of spoken language.
-                    </p>
-                    <div className="flex bg-muted p-1 rounded-lg border border-border">
-                      {[
-                        { value: 'latin', label: 'Latin / English' },
-                        { value: 'native', label: 'Native Script' },
-                      ].map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() =>
-                            setSettings({
-                              ...settings,
-                              language: {
-                                ...settings.language,
-                                output_script: opt.value,
-                              },
-                            })
-                          }
-                          className={`flex-1 px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                            (settings.language?.output_script || 'latin') === opt.value
-                              ? 'bg-card text-foreground font-semibold shadow-xs'
-                              : 'text-muted-foreground hover:text-foreground'
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Languages I Speak (Multi-select) */}
-                <div className="pt-2">
-                  <label className="block text-xs font-medium text-foreground mb-1">
-                    Languages I Speak (Spoken Profile)
-                  </label>
-                  <p className="text-[10px] text-muted-foreground mb-2">
-                    Select all languages you commonly speak. Relay recognizes and transcribes speech across your spoken languages profile.
-                  </p>
-
-                  {/* Selected language chips */}
-                  <div className="flex flex-wrap gap-1.5 mb-2.5 min-h-[32px] p-2 rounded-lg bg-muted/40 border border-border items-center">
-                    {(settings.language?.spoken_languages || ['en']).map((code) => {
-                      const langObj = WHISPER_SUPPORTED_LANGUAGES.find((l) => l.code === code);
-                      const label = langObj ? `${langObj.name} (${code})` : code;
-                      const isPrimary = settings.language?.primary_dictation_language === code;
-                      return (
-                        <Badge
-                          key={code}
-                          variant="secondary"
-                          className="text-[11px] font-medium py-1 px-2.5 gap-1.5 rounded-lg border border-border/80 flex items-center bg-card text-foreground"
-                        >
-                          <span>{label}</span>
-                          {isPrimary && (
-                            <span className="text-[9px] uppercase tracking-wider text-primary font-bold">(Primary)</span>
-                          )}
-                          {(settings.language?.spoken_languages || []).length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const current = settings.language?.spoken_languages || ['en'];
-                                const updated = current.filter((c) => c !== code);
-                                setSettings({
-                                  ...settings,
-                                  language: {
-                                    ...settings.language,
-                                    spoken_languages: updated.length > 0 ? updated : ['en'],
-                                  },
-                                });
-                              }}
-                              className="text-muted-foreground hover:text-destructive ml-0.5"
-                              title="Remove language"
-                            >
-                              ×
-                            </button>
-                          )}
-                        </Badge>
-                      );
-                    })}
-                  </div>
-
-                  {/* Quick-add toggle badges */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[10px] text-muted-foreground mr-1">Quick add:</span>
-                    {WHISPER_SUPPORTED_LANGUAGES.slice(0, 10).map((lang) => {
-                      const isSelected = (settings.language?.spoken_languages || ['en']).includes(lang.code);
-                      if (isSelected) return null;
-                      return (
-                        <button
-                          key={lang.code}
-                          type="button"
-                          onClick={() => {
-                            const current = settings.language?.spoken_languages || ['en'];
-                            setSettings({
-                              ...settings,
-                              language: {
-                                ...settings.language,
-                                spoken_languages: [...current, lang.code],
-                              },
-                            });
-                          }}
-                          className="px-2 py-0.5 text-[10px] rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
-                        >
-                          + {lang.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Contextual orthography example card */}
-                <div className="p-3 rounded-lg bg-muted/40 border border-border text-[11px] space-y-1.5">
-                  <p className="font-semibold text-foreground text-[11px]">
-                    Writing Script vs. Spoken Language
-                  </p>
-                  <p className="text-muted-foreground text-[10px] leading-relaxed">
-                    Writing script dictates the alphabet used for transcriptions and notes regardless of spoken language.
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 font-mono text-[10px]">
-                    <div className="p-2 rounded bg-background border border-border">
-                      <span className="text-muted-foreground block text-[9px] font-sans font-medium uppercase tracking-wider mb-0.5">
-                        Hindi + Latin Script (Romanized)
-                      </span>
-                      <span className="text-foreground">"Kal meeting hai"</span>
-                    </div>
-                    <div className="p-2 rounded bg-background border border-border">
-                      <span className="text-muted-foreground block text-[9px] font-sans font-medium uppercase tracking-wider mb-0.5">
-                        Hindi + Native Script (Devanagari)
-                      </span>
-                      <span className="text-foreground">"कल मीटिंग है"</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Trigger Phrases & Actions */}
-              <div className="py-2 border-b border-border">
-                <TriggerSettings />
-              </div>
-
               <Button type="submit" size="sm" variant="default" className="mt-2">
                 Save Dictation Settings
               </Button>
@@ -960,19 +1027,182 @@ export const ProviderSettings: React.FC = () => {
           </form>
         )}
 
-        {/* 3. VOICE NOTES SECTION */}
-        {activeSection === 'voicenotes' && (
+        {/* 3. DICTIONARY & SNIPPETS SECTION */}
+        {activeSection === 'dictionary' && (
+          <DictionarySnippetsSettings
+            settings={settings}
+            onUpdateSettings={setSettings}
+            onSaveDirect={handleSaveDirect}
+          />
+        )}
+
+        {/* 4. LANGUAGES & SCRIPT SECTION */}
+        {activeSection === 'languages' && (
           <form onSubmit={handleSave} className="space-y-6">
             <div>
               <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
-                VOICE NOTES ENGINE
+                MULTILINGUAL & ORTHOGRAPHY CONFIGURATION
               </p>
-              <h2 className="text-lg font-bold text-foreground">Audio Capture, Summarization & Vault Generation</h2>
+              <h2 className="text-lg font-bold text-foreground">Language & Writing Script Preferences</h2>
             </div>
 
             <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Primary Dictation Language */}
+                <div>
+                  <label htmlFor="primary-dictation-lang" className="block text-xs font-medium text-foreground mb-1">
+                    Primary Dictation Language
+                  </label>
+                  <p className="text-[10px] text-muted-foreground mb-1.5">
+                    Default language for push-to-talk and quick speech-to-text.
+                  </p>
+                  <select
+                    id="primary-dictation-lang"
+                    value={settings.language?.primary_dictation_language || 'en'}
+                    onChange={(e) => {
+                      const newPrimary = e.target.value;
+                      const currentSpoken = settings.language?.spoken_languages || ['en'];
+                      const updatedSpoken = currentSpoken.includes(newPrimary)
+                        ? currentSpoken
+                        : [...currentSpoken, newPrimary];
+                      setSettings({
+                        ...settings,
+                        language: {
+                          ...settings.language,
+                          primary_dictation_language: newPrimary,
+                          spoken_languages: updatedSpoken,
+                        },
+                      });
+                    }}
+                    className="w-full h-9 rounded-lg bg-background border border-input px-3 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    {WHISPER_SUPPORTED_LANGUAGES.map((lang) => (
+                      <option key={lang.code} value={lang.code}>
+                        {lang.name} ({lang.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Output Writing Script */}
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    Output Writing Script
+                  </label>
+                  <p className="text-[10px] text-muted-foreground mb-1.5">
+                    Controls alphabet used, independent of spoken language.
+                  </p>
+                  <div className="flex bg-muted p-1 rounded-lg border border-border">
+                    {[
+                      { value: 'latin', label: 'Latin / English' },
+                      { value: 'native', label: 'Native Script' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() =>
+                          setSettings({
+                            ...settings,
+                            language: {
+                              ...settings.language,
+                              output_script: opt.value,
+                            },
+                          })
+                        }
+                        className={`flex-1 px-3 py-1 text-xs font-medium rounded-lg transition-all ${
+                          (settings.language?.output_script || 'latin') === opt.value
+                            ? 'bg-card text-foreground font-semibold shadow-xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Languages I Speak (Multi-select) */}
+              <div className="pt-2">
+                <label className="block text-xs font-medium text-foreground mb-1">
+                  Languages I Speak (Spoken Profile)
+                </label>
+                <p className="text-[10px] text-muted-foreground mb-2">
+                  Select all languages you commonly speak. Relay recognizes and transcribes speech across your spoken languages profile.
+                </p>
+
+                {/* Selected language chips */}
+                <div className="flex flex-wrap gap-1.5 mb-2.5 min-h-[32px] p-2 rounded-lg bg-muted/40 border border-border items-center">
+                  {(settings.language?.spoken_languages || ['en']).map((code) => {
+                    const langObj = WHISPER_SUPPORTED_LANGUAGES.find((l) => l.code === code);
+                    const label = langObj ? `${langObj.name} (${code})` : code;
+                    const isPrimary = settings.language?.primary_dictation_language === code;
+                    return (
+                      <Badge
+                        key={code}
+                        variant="secondary"
+                        className="text-[11px] font-medium py-1 px-2.5 gap-1.5 rounded-lg border border-border/80 flex items-center bg-card text-foreground"
+                      >
+                        <span>{label}</span>
+                        {isPrimary && (
+                          <span className="text-[9px] uppercase tracking-wider text-primary font-bold">(Primary)</span>
+                        )}
+                        {(settings.language?.spoken_languages || []).length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const current = settings.language?.spoken_languages || ['en'];
+                              const updated = current.filter((c) => c !== code);
+                              setSettings({
+                                ...settings,
+                                language: {
+                                  ...settings.language,
+                                  spoken_languages: updated.length > 0 ? updated : ['en'],
+                                },
+                              });
+                            }}
+                            className="text-muted-foreground hover:text-destructive ml-0.5"
+                            title="Remove language"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </Badge>
+                    );
+                  })}
+                </div>
+
+                {/* Quick-add toggle badges */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] text-muted-foreground mr-1">Quick add:</span>
+                  {WHISPER_SUPPORTED_LANGUAGES.slice(0, 10).map((lang) => {
+                    const isSelected = (settings.language?.spoken_languages || ['en']).includes(lang.code);
+                    if (isSelected) return null;
+                    return (
+                      <button
+                        key={lang.code}
+                        type="button"
+                        onClick={() => {
+                          const current = settings.language?.spoken_languages || ['en'];
+                          setSettings({
+                            ...settings,
+                            language: {
+                              ...settings.language,
+                              spoken_languages: [...current, lang.code],
+                            },
+                          });
+                        }}
+                        className="px-2 py-0.5 text-[10px] rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
+                      >
+                        + {lang.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Notes & Summarization Language */}
-              <div className="py-3 border-b border-border">
+              <div className="py-3 border-t border-border">
                 <label htmlFor="notes-lang" className="block text-xs font-semibold text-foreground mb-1">
                   Notes & Summarization Language
                 </label>
@@ -1001,133 +1231,215 @@ export const ProviderSettings: React.FC = () => {
                 </select>
               </div>
 
-              {/* Auto-save Markdown Frontmatter */}
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Auto-save YAML Frontmatter</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Persist structured headers (title, date, tags, speakers) directly into Obsidian-compatible markdown notes.
-                  </p>
-                </div>
-                <Switch checked={autoSaveVault} onCheckedChange={setAutoSaveVault} />
-              </div>
-
-              {/* Note Retrieval Index Mode */}
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Note Retrieval Index</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Keyword-ranked local search with hybrid vector embeddings backstop.
-                  </p>
-                </div>
-                <Badge variant="outline" className="text-xs font-mono">
-                  Keyword Search Active
-                </Badge>
-              </div>
-
-              {/* Voice Notes V1 Preview & Defaults */}
-              <div className="p-4 rounded-lg bg-muted/40 border border-border space-y-3">
-                <div className="flex items-center gap-2">
-                  <FileAudio className="w-4 h-4 text-primary" />
-                  <p className="text-xs font-semibold text-foreground">Voice Note Capture Invariants</p>
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Voice Notes record with high-fidelity 16kHz mono audio, auto-detect silence boundaries via calibrated VAD,
-                  and generate structured markdown files written directly to your local Obsidian vault.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                  <div className="p-2.5 rounded-lg bg-card border border-border text-[11px]">
-                    <span className="font-semibold text-foreground block mb-0.5">Dual Surface Access</span>
-                    <span className="text-[10px] text-muted-foreground">History view in app + Instant floating pill recording.</span>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-card border border-border text-[11px]">
-                    <span className="font-semibold text-foreground block mb-0.5">Local Audio Retention</span>
-                    <span className="text-[10px] text-muted-foreground">Raw audio preserved in vault alongside markdown notes.</span>
-                  </div>
-                </div>
-              </div>
-
               <Button type="submit" size="sm" variant="default" className="mt-2">
-                Save Voice Notes Settings
+                Save Language Settings
               </Button>
             </div>
           </form>
         )}
 
-        {/* 4. SCRIBBLES SECTION */}
-        {activeSection === 'scribbles' && (
-          <form onSubmit={handleSave} className="space-y-6">
-            <div>
-              <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
-                SCRIBBLES & EXTRACTION
-              </p>
-              <h2 className="text-lg font-bold text-foreground">Structured Notes & Action Items Engine</h2>
-            </div>
-
-            <div className="space-y-4">
-              {/* Note Formatting Template */}
-              <div className="py-3 border-b border-border">
-                <p className="text-xs font-semibold text-foreground mb-1">Structured Note Template</p>
-                <p className="text-[11px] text-muted-foreground mb-2">
-                  Default markdown template applied when formatting voice thoughts into polished scribbles.
+        {/* 5. AI MODELS & STT SECTION */}
+        {activeSection === 'advanced' && (
+          <div className="space-y-8">
+            <form onSubmit={handleSave} className="space-y-6">
+              <div>
+                <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
+                  AI INTELLIGENCE & SPEECH ENGINE
                 </p>
-                <div className="flex bg-muted p-1 rounded-lg border border-border w-fit">
-                  {[
-                    { id: 'structured', label: 'Full Structure' },
-                    { id: 'minimal', label: 'Minimal Bullets' },
-                    { id: 'executive', label: 'Executive Memo' },
-                  ].map((tpl) => (
+                <h2 className="text-lg font-bold text-foreground">Local Ollama vs Cloud LLM & Whisper STT</h2>
+              </div>
+
+              <div className="space-y-4">
+                {/* Active LLM Backend Toggle */}
+                <div className="py-3 border-b border-border flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">Active LLM Execution Backend</p>
+                    <p className="text-[11px] text-muted-foreground">100% Local Ollama ($0) vs OpenAI / Gemini Cloud API</p>
+                  </div>
+                  <div className="flex bg-muted p-1 rounded-lg border border-border">
                     <button
-                      key={tpl.id}
                       type="button"
-                      onClick={() => setScribbleTemplate(tpl.id as any)}
+                      onClick={() =>
+                        setSettings({ ...settings, provider: { ...settings.provider, active_provider: 'ollama' } })
+                      }
                       className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                        scribbleTemplate === tpl.id
+                        settings.provider.active_provider === 'ollama'
                           ? 'bg-card text-foreground font-semibold shadow-xs'
-                          : 'text-muted-foreground hover:text-foreground'
+                          : 'text-muted-foreground'
                       }`}
                     >
-                      {tpl.label}
+                      Local Ollama
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSettings({ ...settings, provider: { ...settings.provider, active_provider: 'cloud_openai' } })
+                      }
+                      className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
+                        settings.provider.active_provider !== 'ollama'
+                          ? 'bg-card text-foreground font-semibold shadow-xs'
+                          : 'text-muted-foreground'
+                      }`}
+                    >
+                      Cloud API
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              {/* Kanban Task Extraction */}
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Auto-Extract Kanban Tasks</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Detect actionable commitments in voice notes and automatically create Kanban cards.
-                  </p>
-                </div>
-                <Switch checked={autoExtractTasks} onCheckedChange={setAutoExtractTasks} />
-              </div>
+                {/* Local Ollama Params */}
+                {settings.provider.active_provider === 'ollama' ? (
+                  <div className="py-3 border-b border-border space-y-4">
+                    <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      OLLAMA LOCAL CONFIGURATION
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="ollama-host" className="block text-xs font-medium text-foreground mb-1">
+                          Ollama Host Endpoint
+                        </label>
+                        <Input
+                          id="ollama-host"
+                          value={settings.provider.ollama_host}
+                          onChange={(e) =>
+                            setSettings({ ...settings, provider: { ...settings.provider, ollama_host: e.target.value } })
+                          }
+                          placeholder="http://localhost:11434"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="ollama-model" className="block text-xs font-medium text-foreground mb-1">
+                          Target Model Name
+                        </label>
+                        <Input
+                          id="ollama-model"
+                          value={settings.provider.ollama_model}
+                          onChange={(e) =>
+                            setSettings({ ...settings, provider: { ...settings.provider, ollama_model: e.target.value } })
+                          }
+                          placeholder="llama3.2:latest"
+                        />
+                      </div>
+                    </div>
 
-              {/* Scribbles V1 Feature Preview Card */}
-              <div className="p-4 rounded-lg bg-muted/40 border border-border space-y-3">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-primary" />
-                  <p className="text-xs font-semibold text-foreground">Scribbles V1 Readiness</p>
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Scribbles combines instant speech transcription with prompt-driven LLM restructuring.
-                  Upcoming V1 updates will add customized formatting templates, inline editing, and live sync.
-                </p>
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground font-mono">
-                  <Badge variant="outline" className="px-2 py-0.5">Raw Audio Backstop: Active</Badge>
-                  <Badge variant="outline" className="px-2 py-0.5">Kanban Sync: Ready</Badge>
-                </div>
-              </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/40 border border-border">
+                      <div className="flex items-center gap-2 text-xs">
+                        {ollamaStatus.state === 'checking' && (
+                          <Badge variant="outline" className="text-[10px] font-mono">Checking local Ollama…</Badge>
+                        )}
+                        {ollamaStatus.state === 'running' && (
+                          <Badge variant="emerald" className="text-[10px] font-mono">Ollama running ✓</Badge>
+                        )}
+                        {ollamaStatus.state === 'started' && (
+                          <Badge variant="emerald" className="text-[10px] font-mono">Relay started Ollama for you ✓</Badge>
+                        )}
+                        {ollamaStatus.state === 'not_installed' && (
+                          <Badge variant="outline" className="text-[10px] font-mono border-amber-500/50 text-amber-500">
+                            Ollama isn't installed — install it once, Relay handles the rest
+                          </Badge>
+                        )}
+                        {ollamaStatus.state === 'unreachable' && (
+                          <Badge variant="outline" className="text-[10px] font-mono border-destructive/50 text-destructive">
+                            {ollamaStatus.message}
+                          </Badge>
+                        )}
+                      </div>
+                      <Button type="button" size="sm" variant="ghost" onClick={checkLocalLlm} className="text-xs h-7">
+                        Retry
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-3 border-b border-border space-y-4">
+                    <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      CLOUD API CREDENTIALS
+                    </p>
+                    <div className="space-y-3">
+                      <div>
+                        <label htmlFor="cloud-api-key" className="block text-xs font-medium text-foreground mb-1">
+                          API Secret Key
+                        </label>
+                        <Input
+                          id="cloud-api-key"
+                          type="password"
+                          value={settings.provider.cloud_api_key || ''}
+                          onChange={(e) =>
+                            setSettings({ ...settings, provider: { ...settings.provider, cloud_api_key: e.target.value } })
+                          }
+                          placeholder="sk-..."
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="cloud-model-name" className="block text-xs font-medium text-foreground mb-1">
+                          Cloud Model Selection
+                        </label>
+                        <Input
+                          id="cloud-model-name"
+                          value={settings.provider.cloud_model || ''}
+                          onChange={(e) =>
+                            setSettings({ ...settings, provider: { ...settings.provider, cloud_model: e.target.value } })
+                          }
+                          placeholder="gpt-4o-mini"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-              <Button type="submit" size="sm" variant="default" className="mt-2">
-                Save Scribble Settings
-              </Button>
+                {/* Local Whisper Model Path */}
+                <div className="py-3 border-b border-border">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Mic className="w-4 h-4 text-primary" />
+                    <p className="text-xs font-semibold text-foreground">Speech-to-Text Model (Whisper)</p>
+                  </div>
+                  <label htmlFor="whisper-model-path" className="block text-[11px] text-muted-foreground mb-1">
+                    GGML Model Path (optional — leave blank to use the auto-downloaded default)
+                  </label>
+                  <Input
+                    id="whisper-model-path"
+                    placeholder="Leave blank for the auto-downloaded default, or point at your own model"
+                    value={settings.stt.whisper_model_path || ''}
+                    onChange={(e) => setSettings({ ...settings, stt: { ...settings.stt, whisper_model_path: e.target.value } })}
+                  />
+                  <div className="flex items-center justify-between mt-2 p-3 rounded-lg bg-muted/40 border border-border">
+                    <div className="text-xs">
+                      {sttModelStatus.state === 'checking' && (
+                        <Badge variant="outline" className="text-[10px] font-mono">Checking Whisper model…</Badge>
+                      )}
+                      {sttModelStatus.state === 'ready' && (
+                        <Badge variant="emerald" className="text-[10px] font-mono">
+                          Model ready: {sttModelStatus.path.split(/[\\/]/).pop()}
+                        </Badge>
+                      )}
+                      {sttModelStatus.state === 'failed' && (
+                        <Badge variant="outline" className="text-[10px] font-mono border-destructive/50 text-destructive">
+                          {sttModelStatus.message}
+                        </Badge>
+                      )}
+                    </div>
+                    <Button type="button" size="sm" variant="ghost" onClick={checkSttModel} className="text-xs h-7">
+                      Retry Check
+                    </Button>
+                  </div>
+                </div>
+
+                <Button type="submit" size="sm" variant="default" className="mt-2">
+                  Save Engine Settings
+                </Button>
+              </div>
+            </form>
+
+            {/* STT Diagnostics & Quality Inspector */}
+            <div className="pt-4 border-t border-border">
+              <SttDiagnosticsView
+                settings={settings}
+                onUpdateSettings={setSettings}
+                onSaveSettings={handleSaveDirect}
+              />
             </div>
-          </form>
+          </div>
         )}
 
-        {/* 5. PRIVACY SECTION */}
+        {/* 6. PRIVACY & VAULT SECTION */}
         {activeSection === 'privacy' && (
           <div className="space-y-6 animate-in fade-in-50">
             <div>
@@ -1164,24 +1476,29 @@ export const ProviderSettings: React.FC = () => {
                 </p>
               </div>
 
-              {/* Raw Audio Backstop Retain */}
-              <div className="py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Retain Raw Audio Backstop</p>
-                  <p className="text-[11px] text-muted-foreground">Keep uncompressed WAV recordings alongside generated markdown notes</p>
-                </div>
-                <Switch checked={rawAudioKept} onCheckedChange={setRawAudioKept} />
-              </div>
-
               {/* Safe Export Action */}
               <div className="p-4 rounded-lg bg-card border border-border flex items-center justify-between">
                 <div>
                   <p className="text-xs font-bold text-foreground">Export All Vault Data</p>
                   <p className="text-[11px] text-muted-foreground">Download full backup of notes, tasks, and LanceDB embeddings</p>
                 </div>
-                <Button variant="default" size="sm" className="gap-2">
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="gap-2 text-xs"
+                  onClick={async () => {
+                    const dir = vaultLocation?.path;
+                    if (dir) {
+                      try {
+                        await invoke('open_vault_in_explorer');
+                      } catch {
+                        alert(`Your vault is stored at: ${dir}`);
+                      }
+                    }
+                  }}
+                >
                   <Download className="w-4 h-4" />
-                  <span>Export Everything</span>
+                  <span>Explore Vault Folder</span>
                 </Button>
               </div>
 
@@ -1228,7 +1545,7 @@ export const ProviderSettings: React.FC = () => {
                   <div className="space-y-0.5">
                     <p className="text-xs font-semibold text-foreground">Clear Local Vault & Index</p>
                     <p className="text-[11px] text-muted-foreground max-w-md">
-                      Permanently wipes all stored markdown files, voice notes, scribbles, and the LanceDB vector database from local disk.
+                      Permanently wipes stored markdown files, voice notes, scribbles, and the LanceDB vector database from local disk.
                     </p>
                   </div>
                   <Button
@@ -1448,207 +1765,6 @@ export const ProviderSettings: React.FC = () => {
                 </div>
               </div>
             )}
-          </div>
-        )}
-
-        {/* 7. ADVANCED SECTION */}
-        {activeSection === 'advanced' && (
-          <div className="space-y-8">
-            <form onSubmit={handleSave} className="space-y-6">
-              <div>
-                <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
-                  ADVANCED ENGINE & DIAGNOSTICS
-                </p>
-                <h2 className="text-lg font-bold text-foreground">AI Intelligence Source & Local STT Engine</h2>
-              </div>
-
-              <div className="space-y-4">
-                {/* Active LLM Backend Toggle */}
-                <div className="py-3 border-b border-border flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold text-foreground">Active LLM Execution Backend</p>
-                    <p className="text-[11px] text-muted-foreground">100% Local Ollama ($0) vs OpenAI / Gemini Cloud API</p>
-                  </div>
-                  <div className="flex bg-muted p-1 rounded-lg border border-border">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSettings({ ...settings, provider: { ...settings.provider, active_provider: 'ollama' } })
-                      }
-                      className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                        settings.provider.active_provider === 'ollama'
-                          ? 'bg-card text-foreground font-semibold shadow-xs'
-                          : 'text-muted-foreground'
-                      }`}
-                    >
-                      Local Ollama
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSettings({ ...settings, provider: { ...settings.provider, active_provider: 'cloud_openai' } })
-                      }
-                      className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                        settings.provider.active_provider !== 'ollama'
-                          ? 'bg-card text-foreground font-semibold shadow-xs'
-                          : 'text-muted-foreground'
-                      }`}
-                    >
-                      Cloud API
-                    </button>
-                  </div>
-                </div>
-
-                {/* Local Ollama Params */}
-                {settings.provider.active_provider === 'ollama' ? (
-                  <div className="py-3 border-b border-border space-y-4">
-                    <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                      OLLAMA LOCAL CONFIGURATION
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label htmlFor="ollama-host" className="block text-xs font-medium text-foreground mb-1">
-                          Ollama Host Endpoint
-                        </label>
-                        <Input
-                          id="ollama-host"
-                          value={settings.provider.ollama_host}
-                          onChange={(e) =>
-                            setSettings({ ...settings, provider: { ...settings.provider, ollama_host: e.target.value } })
-                          }
-                          placeholder="http://localhost:11434"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="ollama-model" className="block text-xs font-medium text-foreground mb-1">
-                          Target Model Name
-                        </label>
-                        <Input
-                          id="ollama-model"
-                          value={settings.provider.ollama_model}
-                          onChange={(e) =>
-                            setSettings({ ...settings, provider: { ...settings.provider, ollama_model: e.target.value } })
-                          }
-                          placeholder="llama3.2:latest"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/40 border border-border">
-                      <div className="flex items-center gap-2 text-xs">
-                        {ollamaStatus.state === 'checking' && (
-                          <Badge variant="outline" className="text-[10px] font-mono">Checking local Ollama…</Badge>
-                        )}
-                        {ollamaStatus.state === 'running' && (
-                          <Badge variant="emerald" className="text-[10px] font-mono">Ollama running ✓</Badge>
-                        )}
-                        {ollamaStatus.state === 'started' && (
-                          <Badge variant="emerald" className="text-[10px] font-mono">Relay started Ollama for you ✓</Badge>
-                        )}
-                        {ollamaStatus.state === 'not_installed' && (
-                          <Badge variant="outline" className="text-[10px] font-mono border-amber-500/50 text-amber-500">
-                            Ollama isn't installed — install it once, Relay handles the rest
-                          </Badge>
-                        )}
-                        {ollamaStatus.state === 'unreachable' && (
-                          <Badge variant="outline" className="text-[10px] font-mono border-destructive/50 text-destructive">
-                            {ollamaStatus.message}
-                          </Badge>
-                        )}
-                      </div>
-                      <Button type="button" size="sm" variant="ghost" onClick={checkLocalLlm} className="text-xs h-7">
-                        Retry
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="py-3 border-b border-border space-y-4">
-                    <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                      CLOUD API CREDENTIALS
-                    </p>
-                    <div className="space-y-3">
-                      <div>
-                        <label htmlFor="cloud-api-key" className="block text-xs font-medium text-foreground mb-1">
-                          API Secret Key
-                        </label>
-                        <Input
-                          id="cloud-api-key"
-                          type="password"
-                          value={settings.provider.cloud_api_key || ''}
-                          onChange={(e) =>
-                            setSettings({ ...settings, provider: { ...settings.provider, cloud_api_key: e.target.value } })
-                          }
-                          placeholder="sk-..."
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="cloud-model-name" className="block text-xs font-medium text-foreground mb-1">
-                          Cloud Model Selection
-                        </label>
-                        <Input
-                          id="cloud-model-name"
-                          value={settings.provider.cloud_model || ''}
-                          onChange={(e) =>
-                            setSettings({ ...settings, provider: { ...settings.provider, cloud_model: e.target.value } })
-                          }
-                          placeholder="gpt-4o-mini"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Local Whisper Model Path */}
-                <div className="py-3 border-b border-border">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Mic className="w-4 h-4 text-primary" />
-                    <p className="text-xs font-semibold text-foreground">Speech-to-Text Model (Whisper)</p>
-                  </div>
-                  <label htmlFor="whisper-model-path" className="block text-[11px] text-muted-foreground mb-1">
-                    GGML Model Path (optional — leave blank to use the auto-downloaded default)
-                  </label>
-                  <Input
-                    id="whisper-model-path"
-                    placeholder="Leave blank for the auto-downloaded default, or point at your own model"
-                    value={settings.stt.whisper_model_path || ''}
-                    onChange={(e) => setSettings({ ...settings, stt: { ...settings.stt, whisper_model_path: e.target.value } })}
-                  />
-                  <div className="flex items-center justify-between mt-2 p-3 rounded-lg bg-muted/40 border border-border">
-                    <div className="text-xs">
-                      {sttModelStatus.state === 'checking' && (
-                        <Badge variant="outline" className="text-[10px] font-mono">Checking Whisper model…</Badge>
-                      )}
-                      {sttModelStatus.state === 'ready' && (
-                        <Badge variant="emerald" className="text-[10px] font-mono">
-                          Model ready: {sttModelStatus.path.split(/[\\/]/).pop()}
-                        </Badge>
-                      )}
-                      {sttModelStatus.state === 'failed' && (
-                        <Badge variant="outline" className="text-[10px] font-mono border-destructive/50 text-destructive">
-                          {sttModelStatus.message}
-                        </Badge>
-                      )}
-                    </div>
-                    <Button type="button" size="sm" variant="ghost" onClick={checkSttModel} className="text-xs h-7">
-                      Retry Check
-                    </Button>
-                  </div>
-                </div>
-
-                <Button type="submit" size="sm" variant="default" className="mt-2">
-                  Save Engine Settings
-                </Button>
-              </div>
-            </form>
-
-            {/* STT Diagnostics & Quality Inspector */}
-            <div className="pt-4 border-t border-border">
-              <SttDiagnosticsView
-                settings={settings}
-                onUpdateSettings={setSettings}
-                onSaveSettings={handleSaveDirect}
-              />
-            </div>
           </div>
         )}
 

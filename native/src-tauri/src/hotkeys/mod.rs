@@ -368,7 +368,10 @@ fn stop_dictation_session(
         let language_settings = state.settings.lock().unwrap().language.clone();
         let stt_settings = state.settings.lock().unwrap().stt.clone();
         let language_config = crate::capture::SttLanguageConfig::from_settings(&language_settings);
-        let decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&stt_settings);
+        let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&stt_settings);
+        if let Some(prompt) = state.settings.lock().unwrap().build_stt_prompt() {
+            decoding_config.initial_prompt = Some(prompt);
+        }
 
         let stt = state.stt.clone();
         let samples = captured.samples.clone();
@@ -418,24 +421,42 @@ fn stop_dictation_session(
         }
 
         if !text_res.trim().is_empty() {
+            // Apply snippets expansion if trigger words were dictated
+            let expanded_text = state.settings.lock().unwrap().expand_snippets(&text_res);
+            let final_text = if !expanded_text.trim().is_empty() { expanded_text } else { text_res };
+
             // Voice Note persistence happens from the successful
             // transcript itself, not from injection's outcome — it must
             // still be saved below even if injection fails.
-            crate::commands::save_voice_note(&app, &state.vault, &text_res);
-            match injection::inject_text(&text_res) {
-                Ok(()) => {
-                    emit_capture_status_event(&app, false, None, "SUCCESS", None);
+            crate::commands::save_voice_note(&app, &state.vault, &final_text);
+
+            let (auto_paste, copy_to_clipboard) = {
+                let s = state.settings.lock().unwrap();
+                (s.clipboard.auto_paste, s.clipboard.copy_to_clipboard)
+            };
+
+            if copy_to_clipboard {
+                let _ = app.emit("dictation-clipboard-copy", &final_text);
+            }
+
+            if auto_paste {
+                match injection::inject_text(&final_text) {
+                    Ok(()) => {
+                        emit_capture_status_event(&app, false, None, "SUCCESS", None);
+                    }
+                    Err(e) => {
+                        tracing::error!("Dictation text injection failed: {}", e);
+                        emit_capture_status_event(
+                            &app,
+                            false,
+                            None,
+                            "ERROR",
+                            Some("Couldn't insert text".to_string()),
+                        );
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("Dictation text injection failed: {}", e);
-                    emit_capture_status_event(
-                        &app,
-                        false,
-                        None,
-                        "ERROR",
-                        Some("Couldn't insert text".to_string()),
-                    );
-                }
+            } else {
+                emit_capture_status_event(&app, false, None, "SUCCESS", None);
             }
         } else {
             tracing::info!("Dictation produced no speech (silence or too short)");

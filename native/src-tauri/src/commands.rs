@@ -385,7 +385,10 @@ async fn process_captured_audio(
     };
 
     let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
-    let decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
+    let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
+    if let Some(prompt) = settings.build_stt_prompt() {
+        decoding_config.initial_prompt = Some(prompt);
+    }
 
     let mp_clone = model_path.clone();
     let lang_clone = language_config.clone();
@@ -433,6 +436,10 @@ async fn process_captured_audio(
         return Ok(None);
     }
 
+    // Expand snippets if trigger words were dictated
+    let expanded = settings.expand_snippets(&transcript);
+    let transcript = if !expanded.trim().is_empty() { expanded } else { transcript };
+
     // Every successful, non-empty transcript becomes a Voice Note — this
     // must not depend on which mode-specific pipeline runs next, or on
     // whether it succeeds. "chat" is Voice Chat (a deferred, unrelated
@@ -455,6 +462,33 @@ async fn process_captured_audio(
             .map(Some)
             .map_err(|e| CommandError::new("PIPELINE_ERROR", &e.to_string())),
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioDeviceInfo {
+    pub name: String,
+    pub is_default: bool,
+}
+
+#[tauri::command]
+pub async fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, CommandError> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    let default_device_name = host.default_input_device().and_then(|d| d.name().ok());
+
+    let mut devices = Vec::new();
+    if let Ok(input_devices) = host.input_devices() {
+        for device in input_devices {
+            if let Ok(name) = device.name() {
+                let is_default = default_device_name.as_deref() == Some(&name);
+                devices.push(AudioDeviceInfo {
+                    name,
+                    is_default,
+                });
+            }
+        }
+    }
+    Ok(devices)
 }
 
 #[tauri::command]

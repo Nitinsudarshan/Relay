@@ -218,7 +218,147 @@ impl Default for SoundSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Clipboard injection and text retention preferences.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClipboardSettings {
+    /// Automatically paste/type transcribed text into the active app when dictation finishes.
+    #[serde(default = "default_auto_paste", alias = "autoPaste")]
+    pub auto_paste: bool,
+    /// Keep transcribed text in OS clipboard so you can paste it manually if needed.
+    #[serde(default = "default_copy_to_clipboard", alias = "copyToClipboard")]
+    pub copy_to_clipboard: bool,
+}
+
+fn default_auto_paste() -> bool {
+    true
+}
+
+fn default_copy_to_clipboard() -> bool {
+    true
+}
+
+impl Default for ClipboardSettings {
+    fn default() -> Self {
+        Self {
+            auto_paste: default_auto_paste(),
+            copy_to_clipboard: default_copy_to_clipboard(),
+        }
+    }
+}
+
+/// App launch and startup behavior preferences.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct StartupSettings {
+    /// Start Relay in the background when logging into the OS.
+    #[serde(default, alias = "launchAtLogin")]
+    pub launch_at_login: bool,
+    /// Launch Relay minimized without showing the main control panel window.
+    #[serde(default, alias = "startMinimized")]
+    pub start_minimized: bool,
+}
+
+/// Microphone input hardware and audio warm-up preferences.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AudioInputSettings {
+    /// Prefer system built-in microphone for lower latency.
+    #[serde(default = "default_prefer_builtin_mic", alias = "preferBuiltinMic")]
+    pub prefer_builtin_mic: bool,
+    /// Explicitly selected microphone device name (None = OS default).
+    #[serde(default, alias = "selectedDevice")]
+    pub selected_device: Option<String>,
+    /// Keep microphone stream warm ("off", "15s", "30s", "1m", "5m") to avoid warm-up clipping.
+    #[serde(default = "default_keep_microphone_warm", alias = "keepMicrophoneWarm")]
+    pub keep_microphone_warm: String,
+    /// Auto-learn corrections made in the target app into user dictionary.
+    #[serde(default = "default_auto_learn_words", alias = "autoLearnWords")]
+    pub auto_learn_words: bool,
+}
+
+fn default_prefer_builtin_mic() -> bool {
+    true
+}
+
+fn default_keep_microphone_warm() -> String {
+    "off".to_string()
+}
+
+fn default_auto_learn_words() -> bool {
+    true
+}
+
+impl Default for AudioInputSettings {
+    fn default() -> Self {
+        Self {
+            prefer_builtin_mic: default_prefer_builtin_mic(),
+            selected_device: None,
+            keep_microphone_warm: default_keep_microphone_warm(),
+            auto_learn_words: default_auto_learn_words(),
+        }
+    }
+}
+
+/// Spoken trigger phrase -> text expansion snippet.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SnippetItem {
+    pub id: String,
+    pub trigger: String,
+    pub snippet_text: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default = "default_snippet_enabled")]
+    pub enabled: bool,
+}
+
+fn default_snippet_enabled() -> bool {
+    true
+}
+
+pub fn default_snippets() -> Vec<SnippetItem> {
+    vec![
+        SnippetItem {
+            id: "snip_linkedin".to_string(),
+            trigger: "my linkedin".to_string(),
+            snippet_text: "https://linkedin.com/in/you".to_string(),
+            label: Some("My LinkedIn".to_string()),
+            enabled: true,
+        },
+        SnippetItem {
+            id: "snip_rewrite".to_string(),
+            trigger: "rewrite prompt".to_string(),
+            snippet_text: "Rewrite this to be more concise, clear, and professional:".to_string(),
+            label: Some("Rewrite prompt".to_string()),
+            enabled: true,
+        },
+        SnippetItem {
+            id: "snip_intro".to_string(),
+            trigger: "intro email".to_string(),
+            snippet_text: "Hey, would love to find some time to chat later this week. Let me know what works best for you!".to_string(),
+            label: Some("Intro email".to_string()),
+            enabled: true,
+        },
+        SnippetItem {
+            id: "snip_signoff".to_string(),
+            trigger: "sign off".to_string(),
+            snippet_text: "Best regards,\nAlex".to_string(),
+            label: Some("Sign off".to_string()),
+            enabled: true,
+        },
+    ]
+}
+
+pub fn default_dictionary_words() -> Vec<String> {
+    vec![
+        "Relay".to_string(),
+        "Whisper".to_string(),
+        "Tauri".to_string(),
+        "Rust".to_string(),
+        "Supabase".to_string(),
+        "LanceDB".to_string(),
+        "Ollama".to_string(),
+    ]
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
     pub provider: ProviderConfig,
@@ -240,6 +380,38 @@ pub struct AppSettings {
     pub cloud: CloudSettings,
     #[serde(default)]
     pub sound: SoundSettings,
+    #[serde(default)]
+    pub clipboard: ClipboardSettings,
+    #[serde(default)]
+    pub startup: StartupSettings,
+    #[serde(default)]
+    pub audio_input: AudioInputSettings,
+    #[serde(default = "default_dictionary_words")]
+    pub dictionary: Vec<String>,
+    #[serde(default = "default_snippets")]
+    pub snippets: Vec<SnippetItem>,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            provider: ProviderConfig::default(),
+            stt: SttSettings::default(),
+            tts: TtsSettings::default(),
+            hotkeys: HotkeySettings::default(),
+            ui: UiSettings::default(),
+            vault: VaultSettings::default(),
+            language: LanguageSettings::default(),
+            diagnostics: DiagnosticsSettings::default(),
+            cloud: CloudSettings::default(),
+            sound: SoundSettings::default(),
+            clipboard: ClipboardSettings::default(),
+            startup: StartupSettings::default(),
+            audio_input: AudioInputSettings::default(),
+            dictionary: default_dictionary_words(),
+            snippets: default_snippets(),
+        }
+    }
 }
 
 impl AppSettings {
@@ -263,11 +435,77 @@ impl AppSettings {
         fs::write(path, serde_json::to_string_pretty(self)?)?;
         Ok(())
     }
+
+    /// Applies active snippet expansions to the given transcript.
+    /// If an enabled snippet's trigger phrase is found (case-insensitive),
+    /// it replaces the phrase with the snippet expansion text.
+    pub fn expand_snippets(&self, transcript: &str) -> String {
+        let mut result = transcript.to_string();
+        for snippet in &self.snippets {
+            if !snippet.enabled || snippet.trigger.trim().is_empty() {
+                continue;
+            }
+            let trigger = snippet.trigger.trim();
+            let lower_result = result.to_lowercase();
+            let lower_trigger = trigger.to_lowercase();
+            if let Some(pos) = lower_result.find(&lower_trigger) {
+                let prefix = &result[..pos];
+                let suffix = &result[pos + lower_trigger.len()..];
+                result = format!("{}{}{}", prefix, snippet.snippet_text, suffix);
+            }
+        }
+        result
+    }
+
+    /// Builds the combined STT initial prompt incorporating custom dictionary words.
+    pub fn build_stt_prompt(&self) -> Option<String> {
+        let mut terms: Vec<String> = self.dictionary.iter().filter(|w| !w.trim().is_empty()).cloned().collect();
+        if let Some(custom) = &self.stt.custom_initial_prompt {
+            if !custom.trim().is_empty() {
+                terms.push(custom.trim().to_string());
+            }
+        }
+        if terms.is_empty() {
+            None
+        } else {
+            Some(terms.join(", "))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_snippet_expansion() {
+        let settings = AppSettings::default();
+        let transcript = "Here is my linkedin if you want to connect";
+        let expanded = settings.expand_snippets(transcript);
+        assert_eq!(expanded, "Here is https://linkedin.com/in/you if you want to connect");
+    }
+
+    #[test]
+    fn test_disabled_snippet_not_expanded() {
+        let mut settings = AppSettings::default();
+        settings.snippets[0].enabled = false;
+        let transcript = "Here is my linkedin";
+        let expanded = settings.expand_snippets(transcript);
+        assert_eq!(expanded, "Here is my linkedin");
+    }
+
+    #[test]
+    fn test_clipboard_and_startup_defaults() {
+        let defaults = AppSettings::default();
+        assert!(defaults.clipboard.auto_paste);
+        assert!(defaults.clipboard.copy_to_clipboard);
+        assert!(!defaults.startup.launch_at_login);
+        assert!(!defaults.startup.start_minimized);
+        assert!(defaults.audio_input.prefer_builtin_mic);
+        assert_eq!(defaults.audio_input.keep_microphone_warm, "off");
+        assert!(defaults.audio_input.auto_learn_words);
+        assert!(!defaults.dictionary.is_empty());
+    }
 
     #[test]
     fn test_pill_position_defaults() {
@@ -321,6 +559,9 @@ mod tests {
         assert_eq!(app_settings.language.spoken_languages, vec!["en".to_string()]);
         assert_eq!(app_settings.language.notes_language, "en");
         assert_eq!(app_settings.language.output_script, "latin");
+        assert!(app_settings.clipboard.auto_paste);
+        assert!(app_settings.clipboard.copy_to_clipboard);
+        assert!(!app_settings.startup.launch_at_login);
 
         // Partial JSON with legacy settings and no language field
         let legacy_json = r#"{

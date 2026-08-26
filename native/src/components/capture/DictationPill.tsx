@@ -195,6 +195,36 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     }
   };
 
+  const handleToggleAutoPaste = async (val: boolean) => {
+    setAutoPaste(val);
+    let currentSettings = settings || settingsRef.current;
+    if (!currentSettings) {
+      try {
+        currentSettings = await invoke<AppSettings>('get_settings');
+      } catch {
+        return;
+      }
+    }
+
+    const updatedSettings: AppSettings = {
+      ...currentSettings,
+      clipboard: {
+        ...currentSettings.clipboard,
+        auto_paste: val,
+        copy_to_clipboard: currentSettings.clipboard?.copy_to_clipboard ?? true,
+      },
+    };
+
+    setSettings(updatedSettings);
+    settingsRef.current = updatedSettings;
+
+    try {
+      await invoke('save_settings', { settings: updatedSettings });
+    } catch (err) {
+      console.error('Failed to save auto-paste setting from pill', err);
+    }
+  };
+
   // Real-time Theme Syncing (Light / Dark / System)
   useEffect(() => {
     const applyTheme = (mode: string) => {
@@ -225,6 +255,17 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         if (payload.language) {
           setLanguage(getPillLanguageFromSettings(payload.language));
         }
+        if (payload.clipboard) {
+          setAutoPaste(payload.clipboard.auto_paste ?? true);
+        }
+      }
+    });
+
+    const unlistenClipboardCopy = listen<string>('dictation-clipboard-copy', ({ payload }) => {
+      if (payload) {
+        navigator.clipboard.writeText(payload).catch((err) => {
+          console.warn('Could not copy transcript to clipboard', err);
+        });
       }
     });
 
@@ -753,7 +794,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         <PillSettingsPopover
           settings={settings}
           autoPaste={autoPaste}
-          onToggleAutoPaste={setAutoPaste}
+          onToggleAutoPaste={handleToggleAutoPaste}
           textTransform={textTransform}
           onToggleTextTransform={setTextTransform}
           onToggleDictationSounds={handleToggleDictationSounds}

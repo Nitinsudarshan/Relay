@@ -1,5 +1,38 @@
 # Relay — Changelog
 
+## [0.12.3] - 2026-08-27
+
+### Settings: Streamlined Navigation, OpenWhispr Clipboard, Startup, Microphone & Dictionary/Snippets Engine
+
+**Type**: minor — `native/` only (`native/src-tauri/src/settings/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/hotkeys/mod.rs`, `native/src/components/settings/*`, `native/src/components/capture/*`, `native/src/types/index.ts`).
+
+#### Features
+
+- **OpenWhispr-Inspired Dictionary & Snippets Engine (`DictionarySnippetsSettings.tsx`, `settings/mod.rs`, `hotkeys/mod.rs`, `commands.rs`)**:
+  - **Dictionary Tab**: Add custom vocabulary words via comma-separated quick input (`Relay, Supabase, John Snow, ARR`) with default tagging, search filtering, delete chips, and Import/Export capabilities.
+  - **Custom STT Vocabulary Injection**: User dictionary words are directly compiled into Whisper STT's decoding initial prompt, significantly boosting speech recognition accuracy for technical acronyms and names.
+  - **Snippets Tab ("The stuff you shouldn't have to say twice")**: Create spoken trigger phrases that expand into saved text templates, intros, URLs, and complex prompt instructions. Includes full CRUD, active toggles, and pre-populated templates.
+  - **Runtime Snippet Expansion**: Transcriptions containing trigger phrases automatically expand before note persistence and field text injection.
+- **Clipboard & Text Injection Controls (`settings/mod.rs`, `ProviderSettings.tsx`, `PillSettingsPopover.tsx`, `DictationPill.tsx`)**:
+  - Added **Automatic Pasting** setting (`clipboard.auto_paste: bool`, default `true`) to control whether transcribed text is automatically typed into the focused application.
+  - Added **Keep Transcription in Clipboard** setting (`clipboard.copy_to_clipboard: bool`, default `true`) to preserve transcriptions in the OS clipboard for manual pasting.
+  - Bidirectionally synchronized between Desktop Settings and the floating Dictation Pill popover.
+- **Startup Launch Options (`settings/mod.rs`, `ProviderSettings.tsx`)**:
+  - Added **Launch at Login** (`startup.launch_at_login: bool`, default `false`) to start Relay automatically in the background on OS startup.
+  - Added **Start Minimized** (`startup.start_minimized: bool`, default `false`) to launch Relay silently without displaying the main control panel window.
+- **Microphone Hardware & Warm-up Optimization (`settings/mod.rs`, `commands.rs`, `ProviderSettings.tsx`)**:
+  - Added system audio input query command (`get_audio_devices`) and rendered an active green microphone status card (`Using: Default - Microphone Array...`).
+  - Added **Prefer Built-in Microphone** toggle to prioritize onboard inputs for lower latency.
+  - Added **Keep Microphone Warm** selection (`Off`, `15s`, `30s`, `1m`, `5m`) to keep audio streams primed and eliminate warm-up latency.
+  - Added **Auto-learn from Corrections** toggle to automatically capture corrected transcriptions into the custom dictionary.
+
+#### Improvements
+
+- **Streamlined Settings Navigation & Deduplication (`ProviderSettings.tsx`)**:
+  - Reorganized into 9 clear, dedicated sections: *Account & Identity*, *General*, *Dictation & Audio*, *Dictionary & Snippets*, *Languages & Script*, *AI Models & STT*, *Privacy & Vault*, *Trash & Deleted*, and *Developer*.
+  - Removed duplicate, unpersisted mock account card from General settings.
+  - Consolidated language and orthography preferences into their own dedicated sub-page.
+
 ## [0.12.2] - 2026-08-27
 
 ### Dictation: Start & Stop Sound Effects & Settings Toggle

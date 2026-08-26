@@ -240,6 +240,52 @@ export interface SoundSettings {
   dictationSounds?: boolean;
 }
 
+export interface ClipboardSettings {
+  /** Automatically paste/type transcribed text into the active app when dictation finishes. */
+  auto_paste: boolean;
+  /** Keep transcribed text in OS clipboard so you can paste it manually if needed. */
+  copy_to_clipboard: boolean;
+  autoPaste?: boolean;
+  copyToClipboard?: boolean;
+}
+
+export interface StartupSettings {
+  /** Start Relay in the background when logging into the OS. */
+  launch_at_login: boolean;
+  /** Launch Relay minimized without showing the main control panel window. */
+  start_minimized: boolean;
+  launchAtLogin?: boolean;
+  startMinimized?: boolean;
+}
+
+export interface AudioInputSettings {
+  /** Prefer system built-in microphone for lower latency. */
+  prefer_builtin_mic: boolean;
+  /** Explicitly selected microphone device name (null = OS default). */
+  selected_device?: string | null;
+  /** Keep microphone stream warm ("off", "15s", "30s", "1m", "5m") to avoid warm-up clipping. */
+  keep_microphone_warm: string;
+  /** Auto-learn corrections made in the target app into user dictionary. */
+  auto_learn_words: boolean;
+  preferBuiltinMic?: boolean;
+  selectedDevice?: string | null;
+  keepMicrophoneWarm?: string;
+  autoLearnWords?: boolean;
+}
+
+export interface SnippetItem {
+  id: string;
+  trigger: string;
+  snippet_text: string;
+  label?: string | null;
+  enabled: boolean;
+}
+
+export interface AudioDeviceInfo {
+  name: string;
+  is_default: boolean;
+}
+
 /** Mirrors the Rust `AppSettings` struct persisted at `.relay/config/settings.json`. */
 export interface AppSettings {
   provider: ProviderSettings;
@@ -252,6 +298,11 @@ export interface AppSettings {
   diagnostics: DiagnosticsSettings;
   cloud?: CloudSettings;
   sound?: SoundSettings;
+  clipboard?: ClipboardSettings;
+  startup?: StartupSettings;
+  audio_input?: AudioInputSettings;
+  dictionary?: string[];
+  snippets?: SnippetItem[];
 }
 
 export type AccountMode = 'local' | 'hybrid';

@@ -183,6 +183,7 @@ pub fn run() {
             commands::get_kanban_cards,
             commands::get_triggers,
             commands::save_triggers,
+            commands::get_audio_devices,
             commands::get_settings,
             commands::save_settings,
             commands::open_settings_window,
