@@ -1,5 +1,45 @@
 # Relay — Changelog
 
+## [0.13.0] - 2026-08-26
+
+### Meeting Notes Pipeline: Stage 0 Normalizer, Glossary, Decode Configuration & Output Validators
+
+**Type**: minor — `native/` only. Phases 0, 1, 2, 4 and 7 of the meeting-notes pipeline handoff. Every phase moves deterministic work out of the prompt or gives the model information it previously had to guess at.
+
+#### Features
+
+- **Stage 0 transcript normalizer (`meetings_v2/normalize.rs`)**: a pure function — raw ASR segments in, cleaned turns plus a diagnostics report out, no model involved.
+  - Bracketed artifacts are removed and tallied. Square-bracketed spans go unconditionally; parenthesized spans go only when their content reads as a tag, so `(fifty-fifty)` survives. An unclosed bracket no longer swallows the rest of the segment.
+  - Decoder loops (a phrase repeating three or more times) collapse to one instance with the repeat count recorded. Detection runs after turn merging, because a 20-repetition loop arrives split across 30-second chunks and is only visible once they are one turn. Two repeats can be emphasis and survive.
+  - Clause-leading filler is removed from a deliberately short list; `so`, `well`, `like`, and `actually` are excluded because each can be load-bearing.
+  - Consecutive same-speaker segments merge into turns; silence above a threshold becomes a structural break rather than text.
+  - The stored transcript is never edited: output is a derived layer, each turn carries its source segment ids, and turns are keyed to `start_ms`/`end_ms` so downstream claims can cite evidence spans.
+- **Per-workspace glossary (`meetings_v2/glossary.rs`)**: product, project, and person names with Double Metaphone plus Levenshtein on the phonetic codes and a Jaro-Winkler guard on the spellings, applied inside the normalizer and passed to the model.
+  - The four documented mishearings map: *Aluminium → alumni*, *Corsair → Coursera*, *PayFour Art → Pay Forward*, *Nagpur Kul → NavGurukul*. A term with no near match is left exactly as heard, and two terms fitting one sound equally well produce no correction.
+  - JSON store in the vault with atomic writes, alias merging, and attendee seeding ready for calendar metadata.
+- **Per-meeting spoken language**, selectable when starting a recording, defaulting to auto-detect and stored on the session. `translate` is never enabled.
+- **Pause and resume** shipped in 0.12.0 remain; the recording pill is unchanged by this release.
+
+#### Improvements
+
+- **ASR decode configuration (`capture/stt.rs`, `meetings_v2/worker.rs`)**: `no_context` (openai-whisper's `condition_on_previous_text = false`) is now a config field, defaulted on and set on every call — conditioning on previous text is what lets a decoder loop feed itself. Temperature fallback stays enabled on the durable clock so a decode that trips the entropy or log-probability threshold is retried hotter.
+- **Per-utterance confidence is retained and acted on**: `transcribe_segments_with_config` returns each decoder segment with its `no_speech_prob` and a reconstructed `avg_logprob`, and the durable worker drops utterances above the no-speech threshold or below the log-probability threshold before they reach the transcript. Survivors are stored with session-relative timings for evidence spans. Existing transcripts still load; the fields are additive.
+- **Summarization now consumes normalized text**, with the glossary applied, instead of the old bracket-deleting `strip_asr_artifacts`, and logs what normalization removed.
+- **Generation validates and retries once** with the specific violations named, then fails rather than shipping invalid output.
+- `CLAUDE.md` records the pipeline invariants: prompt text lives in `Meeting-rules/` and is loaded from disk, ASR output is immutable, attribution is a layer, every claim carries an evidence span, comprehension precedes structure.
+
+#### Fixes
+
+- **Deleted the deterministic summary fallback (`pipeline/enrichment.rs`)**: it assembled a summary from the first few transcript sentences and a to-do list from any sentence containing "I'll", which is exactly the extraction failure the pipeline exists to prevent — shipped under the name of a fallback, where nobody could see it. Generation failure is now reported.
+- **A model response with none of the expected fields is no longer accepted as success**: every field of the response type has a serde default, so an unrelated JSON object parsed into an empty response and was persisted as a summary-less "success".
+- **Removed the forced-English override in both transcription clocks**: it was the previous guard against decoder loops and hallucinated language codes, but it pushed Hindi and Hinglish audio through an English acoustic filter. Loops are now handled in the decoder config and the confidence filter.
+- **An all-silence recording** gets the exact wording the summary rule specifies rather than an error or a guess.
+
+#### Tests
+
+- 76 new tests across `meetings_v2` and `pipeline`: artifact stripping (every tag the rules files list, plus real parentheticals and unclosed brackets), loop collapse including across chunk boundaries, filler, turn merging and structural breaks, the four glossary mishearings and the unmappable cases, language resolution, utterance filtering, and the validators — every documented bad output from the rules files now fails, and a genuine summary passes.
+- Fixture at `native/src-tauri/tests/fixtures/meetings/hinglish_alumni_placement/`, a synthetic stand-in built from the documented pathologies; the tests read the path and do not care whether the real transcript is behind it.
+
 ## [0.12.2] - 2026-08-27
 
 ### Dictation: Start & Stop Sound Effects & Settings Toggle
