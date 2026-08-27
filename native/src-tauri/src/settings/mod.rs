@@ -821,5 +821,43 @@ mod tests {
         assert_eq!(camel.stt.dictation_threads, Some(12));
     }
 
+    #[test]
+    fn test_pre_0_15_0_prompt_settings_backward_compatibility() {
+        // Pre-0.15.0 settings containing prompt_settings, prompts, and custom options
+        let pre_0_15_0_json = r#"{
+            "prompt_settings": {
+                "enabled": true,
+                "promptHotkey": "Ctrl+Alt+Space"
+            },
+            "prompts": [
+                {
+                    "id": "prompt_custom",
+                    "name": "Custom Action",
+                    "prompt_body": "Do something with {{text}}",
+                    "enabled": true
+                }
+            ],
+            "hotkeys": {
+                "show_hide_hotkey": "Ctrl+Shift+Space",
+                "dictation_hotkey": "Ctrl+Space",
+                "toggle_to_talk": true
+            },
+            "stt": {
+                "dictation_quality": "fast",
+                "dictation_threads": 8
+            },
+            "dictionary": ["Relay", "Tauri"]
+        }"#;
 
+        let loaded: AppSettings = serde_json::from_str(pre_0_15_0_json)
+            .expect("Pre-0.15.0 settings payload must deserialize cleanly without errors");
+
+        // Verify remaining settings survived unchanged
+        assert_eq!(loaded.hotkeys.show_hide_hotkey, "Ctrl+Shift+Space");
+        assert_eq!(loaded.hotkeys.dictation_hotkey, "Ctrl+Space");
+        assert!(loaded.hotkeys.toggle_to_talk);
+        assert_eq!(loaded.stt.dictation_quality, DictationSttQuality::Fast);
+        assert_eq!(loaded.stt.dictation_threads, Some(8));
+        assert_eq!(loaded.dictionary, vec!["Relay", "Tauri"]);
+    }
 }
