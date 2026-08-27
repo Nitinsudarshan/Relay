@@ -37,6 +37,7 @@ pub mod llm;
 pub mod model;
 pub mod modes;
 pub mod normalize;
+pub mod qualify;
 pub mod related;
 pub mod speakers;
 pub mod store;
@@ -48,9 +49,9 @@ use super::types::TranscriptSegmentStatus;
 use llm::MeetingLlm;
 pub use model::MeetingProcessing;
 use model::{
-    ActionItemStatus, MeetingExtension, ProcessingLogEntry, ProcessingStatus, ScribbleRef,
-    StageState, StageStatus, SummaryArtifact, SummaryMode, ValidationReport, PROCESSING_VERSION,
-    RULES_VERSION,
+    ActionItemStatus, MeetingExtension, ProcessingLogEntry, ProcessingStatus, ProviderOutputStatus,
+    ScribbleRef, StageState, StageStatus, SummaryArtifact, SummaryMode, SummarySource,
+    ValidationReport, PROCESSING_VERSION, RULES_VERSION,
 };
 use normalize::RawSegmentInput;
 use related::{find_related, MeetingIndexEntry, RelatedMeeting};
@@ -168,6 +169,7 @@ impl MeetingProcessor {
                 input_chars: Some(source_chars),
                 output_chars: Some(output_chars),
                 validation: None,
+                action_diagnostics: None,
             };
 
             processing.stages.speakers = StageState {
@@ -189,6 +191,7 @@ impl MeetingProcessor {
                 input_chars: None,
                 output_chars: None,
                 validation: Some(speaker_report.clone()),
+                action_diagnostics: None,
             };
 
             processing.stages.conversation = match &conversation {
@@ -203,6 +206,7 @@ impl MeetingProcessor {
                     input_chars: Some(output_chars),
                     output_chars: None,
                     validation: None,
+                    action_diagnostics: None,
                 },
                 None => StageState::skipped("conversation transcript is off in settings"),
             };
@@ -325,6 +329,7 @@ audio are unaffected."
             let duration_ms = started.elapsed().as_millis() as u64;
 
             let mut facts = output.facts;
+            let qualification = output.action_qualification;
             let mut action_report = validate::validate_action_items(&facts.action_items, &roster);
             let dropped = validate::drop_invalid_action_items(&mut facts.action_items, &roster);
             if !dropped.is_empty() {
@@ -358,7 +363,22 @@ audio are unaffected."
                 input_chars: Some(output.input_chars),
                 output_chars: serde_json::to_string(&facts).ok().map(|s| s.len()),
                 validation: Some(action_report),
+                action_diagnostics: Some(qualification.counts),
             };
+
+            tracing::info!(
+                meeting_id = %meeting_id,
+                stage = "extraction",
+                candidates = qualification.counts.candidates,
+                rejected = qualification.counts.rejected,
+                deduplicated = qualification.counts.deduplicated,
+                capped = qualification.counts.capped,
+                retained = qualification.counts.retained,
+                unassigned = qualification.counts.unassigned,
+                with_deadlines = qualification.counts.with_deadlines,
+                owners_downgraded = qualification.counts.owners_downgraded,
+                "meeting_processing: action items qualified"
+            );
 
             self.store.update(meeting_id, |p| {
                 p.facts = Some(facts.clone());
@@ -375,21 +395,47 @@ audio are unaffected."
         let summary_output =
             summarize::generate_summary(llm, &facts, &roster, options.summary_mode, &extension)
                 .await;
-        let mut markdown = summary_output.markdown;
-        let mut deterministic = summary_output.deterministic;
-        let mut llm_error = summary_output.llm_error;
+        let transcript_text = normalized.plain_text();
 
         // Step 7 — validate, and act on the verdict.
-        let transcript_text = normalized.plain_text();
+        //
+        // Three outcomes, kept distinct because the UI has to tell them apart:
+        //
+        // ```text
+        // model answered ──► validate ──┬── pass ──► show the model's prose
+        //                               └── fail ──► reject it
+        //                                              ↓
+        //                                     deterministic render
+        //                                              ↓
+        //                                          validate ──┬── pass ──► show the fallback
+        //                                                     └── fail ──► the summary failed
+        // ```
+        //
+        // "The model failed" and "the summary stage failed" are different facts.
+        // Merging the rejected draft's issues into the fallback's report — which
+        // is what this code used to do — made every rejected draft read as a
+        // failed stage, and the user was told "Summary unavailable" over a
+        // perfectly good summary.
+        let mut markdown = summary_output.markdown;
+        let mut provider_output_status = if summary_output.deterministic {
+            ProviderOutputStatus::Unavailable
+        } else {
+            ProviderOutputStatus::Accepted
+        };
+        let mut fallback_used = summary_output.deterministic;
+        let mut llm_error = summary_output.llm_error;
+        let mut rejected_issues: Vec<model::ValidationIssue> = Vec::new();
+
         let mut validation = validate::validate_summary(
             &markdown,
             &facts,
             &roster,
             options.summary_mode,
             &transcript_text,
+            fallback_used,
         );
 
-        if validation.has_errors() && !deterministic {
+        if validation.has_errors() && !fallback_used {
             // Model prose that fails validation is not shown. The same facts are
             // rendered deterministically instead, which cannot hallucinate and so
             // cannot fail these checks.
@@ -400,27 +446,36 @@ audio are unaffected."
                 issues = ?codes,
                 "meeting_processing: model prose failed validation; rendering deterministically"
             );
-            let previous_issues = validation.issues.clone();
-            markdown = summarize::render_markdown(&facts, &roster, options.summary_mode);
-            deterministic = true;
             llm_error = Some(format!(
                 "model output rejected by validation ({})",
                 codes.join(", ")
             ));
+            // Kept as diagnostics, not folded into the verdict on what is shown.
+            rejected_issues = std::mem::take(&mut validation.issues);
+            provider_output_status = ProviderOutputStatus::Rejected;
+            fallback_used = true;
+            markdown = summarize::render_markdown(&facts, &roster, options.summary_mode);
             validation = validate::validate_summary(
                 &markdown,
                 &facts,
                 &roster,
                 options.summary_mode,
                 &transcript_text,
+                true,
             );
-            // Keep the rejected output's issues on the record; they are the
-            // evidence for why this summary reads as it does.
-            validation.issues.extend(previous_issues);
-            validation.passed = !validation.has_errors();
         }
 
         let duration_ms = started.elapsed().as_millis() as u64;
+
+        // Provenance the user can act on: deterministic *presentation* of
+        // model-understood facts is a different thing from deterministic
+        // extraction, and neither is an AI summary.
+        let source = match (fallback_used, facts.deterministic) {
+            (false, _) => SummarySource::Model,
+            (true, false) => SummarySource::DeterministicPresentation,
+            (true, true) => SummarySource::DeterministicExtraction,
+        };
+
         let artifact = SummaryArtifact {
             markdown,
             mode: options.summary_mode,
@@ -430,11 +485,17 @@ audio are unaffected."
             model: summary_output.model.clone(),
             processing_version: PROCESSING_VERSION,
             rules_version: RULES_VERSION.to_string(),
-            deterministic,
+            deterministic: fallback_used,
+            source,
+            provider_output_status,
+            fallback_used,
+            rejected_issues: rejected_issues.clone(),
             speaker_names_stale: false,
             validation: validation.clone(),
         };
 
+        // The stage's verdict is on the prose actually shown. A rejected draft
+        // that the fallback replaced is recorded, not counted as a failure.
         let summary_stage = StageState {
             status: if validation.has_errors() {
                 StageStatus::Failed
@@ -450,6 +511,7 @@ audio are unaffected."
             input_chars: Some(summary_output.input_chars),
             output_chars: Some(artifact.markdown.len()),
             validation: Some(validation),
+            action_diagnostics: None,
         };
 
         // Step 8 — persist. Only derived state is written.
@@ -460,13 +522,20 @@ audio are unaffected."
             p.stages.summary = summary_stage.clone();
         })?;
 
-        self.record(meeting_id, "summary", &summary_stage);
+        self.record_summary(
+            meeting_id,
+            &summary_stage,
+            provider_output_status,
+            fallback_used,
+        );
         tracing::info!(
             meeting_id = %meeting_id,
             stage = "summary",
             mode = options.summary_mode.label(),
             extension = %extension.id,
-            deterministic,
+            provider_output = provider_output_status.label(),
+            fallback_used,
+            rejected_issue_codes = ?rejected_issues.iter().map(|i| i.code.as_str()).collect::<Vec<_>>(),
             title = %title,
             duration_ms,
             "meeting_processing: summary generated"
@@ -619,8 +688,11 @@ audio are unaffected."
             .collect())
     }
 
-    /// Writes one stage record to the processing log. Sizes and outcomes only —
-    /// never transcript content.
+    /// Writes one stage record to the processing log.
+    ///
+    /// Sizes, counts and outcomes only — never transcript content, and never a
+    /// candidate's text. That guarantee is what lets this log be read freely
+    /// while diagnosing a meeting nobody is allowed to read.
     fn record(&self, meeting_id: &str, stage: &str, state: &StageState) {
         let validation = state.validation.as_ref();
         self.store.append_log(&ProcessingLogEntry {
@@ -638,6 +710,42 @@ audio are unaffected."
                 .map(|v| v.issues.iter().map(|i| i.code.clone()).collect())
                 .unwrap_or_default(),
             error: state.error.clone(),
+            action_diagnostics: state.action_diagnostics,
+            provider_output_status: None,
+            fallback_used: None,
+            processing_version: PROCESSING_VERSION,
+            rules_version: RULES_VERSION.to_string(),
+        });
+    }
+
+    /// Writes the summary stage's record, including what became of the model's
+    /// draft. A separate entry point because that distinction exists only here.
+    fn record_summary(
+        &self,
+        meeting_id: &str,
+        state: &StageState,
+        provider_output_status: ProviderOutputStatus,
+        fallback_used: bool,
+    ) {
+        let validation = state.validation.as_ref();
+        self.store.append_log(&ProcessingLogEntry {
+            meeting_id: meeting_id.to_string(),
+            stage: "summary".to_string(),
+            status: format!("{:?}", state.status).to_lowercase(),
+            at: chrono::Utc::now().to_rfc3339(),
+            duration_ms: state.duration_ms,
+            provider: state.provider.clone(),
+            model: state.model.clone(),
+            input_chars: state.input_chars,
+            output_chars: state.output_chars,
+            validator_passed: validation.map(|v| v.passed),
+            validator_issue_codes: validation
+                .map(|v| v.issues.iter().map(|i| i.code.clone()).collect())
+                .unwrap_or_default(),
+            error: state.error.clone(),
+            action_diagnostics: None,
+            provider_output_status: Some(provider_output_status.label().to_string()),
+            fallback_used: Some(fallback_used),
             processing_version: PROCESSING_VERSION,
             rules_version: RULES_VERSION.to_string(),
         });

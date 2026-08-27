@@ -9,7 +9,9 @@
 use super::*;
 use crate::meetings_v2::processing::llm::test_support::ScriptedLlm;
 use crate::meetings_v2::processing::llm::LlmError;
-use crate::meetings_v2::processing::model::{OwnerType, SPEAKER_ID_ME, SPEAKER_ID_REMOTE};
+use crate::meetings_v2::processing::model::{
+    OwnerType, ProviderOutputStatus, SummarySource, SPEAKER_ID_ME, SPEAKER_ID_REMOTE,
+};
 use crate::meetings_v2::session_store::SessionStore;
 use crate::meetings_v2::types::{MeetingSession, MeetingState, TranscriptSegment};
 use std::fs;
@@ -580,16 +582,24 @@ async fn prose_that_fails_validation_is_replaced_rather_than_shown() {
         summary.deterministic,
         "the deterministic renderer took over"
     );
+    // The rejection is recorded against the model's draft, not against the
+    // summary the user is reading. `validation` describes only what is shown.
     assert!(summary
-        .validation
-        .issues
+        .rejected_issues
         .iter()
         .any(|i| i.code == "SUMMARY_INVENTED_PARTICIPANT"));
-    assert!(summary
-        .validation
-        .issues
-        .iter()
-        .any(|i| i.code == "SUMMARY_INVENTED_PARTICIPANT"));
+    assert_eq!(summary.provider_output_status, ProviderOutputStatus::Rejected);
+    assert!(summary.fallback_used);
+    assert!(
+        summary.validation.passed,
+        "the fallback that replaced it is valid: {:?}",
+        summary.validation.issues
+    );
+    assert_eq!(
+        processing.stages.summary.status,
+        StageStatus::Success,
+        "a rejected draft plus a valid fallback is a successful summary stage"
+    );
     // The facts survived — only the prose was rejected.
     assert!(!processing.facts.as_ref().unwrap().deterministic);
 }
@@ -1196,4 +1206,788 @@ async fn repeated_stt_fragments_are_cleaned_from_the_derived_transcript_only() {
     );
     assert_eq!(segment.raw_text.matches("should ship it").count(), 3);
     assert_eq!(harness.raw_fingerprint(), before);
+}
+
+
+// ---------------------------------------------------------------------------
+// Quality regression fixtures
+//
+// Each of these is built from a real meeting that produced bad output. They are
+// end-to-end on purpose: the failures they cover were not in any one function,
+// they were in how the stages handed work to each other.
+// ---------------------------------------------------------------------------
+
+/// Fixture A — a demo-heavy meeting.
+///
+/// Every line has an action verb and a first-person future, and not one of them
+/// is work that outlives the call. This transcript is what produced forty-nine
+/// "action items".
+fn fixture_demo_heavy() -> Vec<(&'static str, bool, bool)> {
+    vec![
+        ("okay so I'll project my screen now and I will show you the list of pointers that we have for today", true, false),
+        ("let me just check the ID for this one and I'll pull up the dashboard so we can look at it", true, false),
+        ("I'll move it to approved on this screen and then I will move it to processing so you can see the flow", true, false),
+        ("I'll click here and now I will change the role to member for this user account", true, false),
+        ("I'll just be back in a minute, let me grab some water before we continue", true, false),
+        ("yes I'll quickly check with Ayush to join him on this call in a moment", false, true),
+        ("I'll stop sharing now and let me take you through the next section of the deck", true, false),
+        ("but still we'll be maintaining that log and some of the things I will jump in wherever needed", false, true),
+        ("I'll upload a ticket here so let me show you on the dashboard how that actually looks", true, false),
+        ("let me show you the other tab and I'll switch to the reports view for a second", true, false),
+        ("I'll share my screen again because I will need to show you the filter that we added", true, false),
+        ("we're taking notes in the meeting right now so we will update her afterwards about it", false, true),
+    ]
+}
+
+/// Fixture B — a genuine requirements meeting.
+///
+/// Real commitments, a real assignment-and-acceptance, a spoken deadline, and a
+/// decision that is *not* a task.
+fn fixture_requirements() -> Vec<(&'static str, bool, bool)> {
+    vec![
+        ("so the main thing pending from our side is the trigger list, I'll send the list of mails that need to go out tomorrow", true, false),
+        ("can you review the employee guide and the FAQs for any discrepancies before we publish them", false, true),
+        ("sure, I'll go through the employee guide and send the corrections across", false, true),
+        ("on the mail service, let's use Gmail SMTP as the fallback since delivery is around eighty five percent", true, false),
+        ("agreed, cancellation will stay PNC only, that is the decision for now", false, true),
+        ("I'll circulate the MoM after this and I'll reshare the query tracker link as well", true, false),
+    ]
+}
+
+/// Fixture C — a degraded ASR transcript: decoder loops, collided fragments,
+/// bracketed tags, and a mangled name.
+fn fixture_noisy_asr() -> Vec<(&'static str, bool, bool)> {
+    vec![
+        ("[BLANK_AUDIO]", true, false),
+        ("I will pay the firm to fill the form. I will pay the firm to fill the form. I will pay the firm to fill the form. I will pay the firm to fill the form.", true, false),
+        ("there are few features that we will the specialty IUC has also joined in", false, true),
+        ("(speaking in foreign language) um uh so so so the the the thing is", true, false),
+        ("we will we will we will send a form to them at some point", false, true),
+        ("[NON-ENGLISH SPEECH]", false, true),
+    ]
+}
+
+/// Fixture D — an agreed piece of work that nobody took.
+fn fixture_ambiguous_owner() -> Vec<(&'static str, bool, bool)> {
+    // Both channels live for the whole chunk, so the capture data says nothing
+    // about who spoke — and the commitment itself is real.
+    vec![
+        // Mic-only, so the local user exists in the roster and could be named.
+        (
+            "so the last thing on the list is the employee document, it has been sitting there \
+for a while now and nobody on either side has actually picked it up yet",
+            true,
+            false,
+        ),
+        // Both channels live, so nothing in the capture data says who committed.
+        (
+            "right we'll update the employee document and get it circulated after this call, \
+somebody still needs to own that piece",
+            true,
+            true,
+        ),
+    ]
+}
+
+fn options_with_mode(mode: SummaryMode) -> ProcessingOptions {
+    ProcessingOptions {
+        summary_mode: mode,
+        ..options()
+    }
+}
+
+#[tokio::test]
+async fn fixture_a_a_demo_heavy_meeting_produces_almost_no_action_items() {
+    let harness = Harness::new(&fixture_demo_heavy());
+    // No model: the cue-based extractor runs, which is the harsher test — it
+    // proposes a candidate for every "I'll".
+    let llm = ScriptedLlm::always_unavailable();
+
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let items = &processing.facts.as_ref().unwrap().action_items;
+    assert!(
+        items.len() <= 1,
+        "demo narration is not post-meeting work, got {}: {:?}",
+        items.len(),
+        items.iter().map(|i| &i.description).collect::<Vec<_>>()
+    );
+
+    // The candidates were found and then rejected, not simply never noticed.
+    let diagnostics = processing
+        .stages
+        .extraction
+        .action_diagnostics
+        .expect("the extraction stage records what the gate did");
+    assert!(diagnostics.candidates >= 8, "counts: {:?}", diagnostics);
+    assert!(diagnostics.rejected >= diagnostics.candidates - 1);
+}
+
+#[tokio::test]
+async fn fixture_b_a_requirements_meeting_produces_the_right_small_set() {
+    let harness = Harness::new(&fixture_requirements());
+    let llm = ScriptedLlm::always_unavailable();
+
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let facts = processing.facts.as_ref().unwrap();
+    let descriptions: Vec<String> = facts
+        .action_items
+        .iter()
+        .map(|i| i.description.to_lowercase())
+        .collect();
+
+    assert!(
+        (1..=6).contains(&facts.action_items.len()),
+        "an ordinary meeting yields a handful of tasks, got {}: {:?}",
+        facts.action_items.len(),
+        descriptions
+    );
+    assert!(
+        descriptions.iter().any(|d| d.contains("list of mails")),
+        "the trigger-list commitment is the clearest task in the meeting: {:?}",
+        descriptions
+    );
+
+    // The decision is recorded as a decision, and does not silently become a
+    // task of its own.
+    assert!(
+        !descriptions
+            .iter()
+            .any(|d| d.contains("cancellation will stay")),
+        "a decision is not automatically an action item: {:?}",
+        descriptions
+    );
+
+    // Every item is traceable and none carries an invented date.
+    for item in &facts.action_items {
+        assert!(
+            !item.source_segment_ids.is_empty(),
+            "{:?} has no provenance",
+            item.description
+        );
+        assert!(
+            item.deadline.is_none() || item.deadline.as_deref() == Some("2026-08-28"),
+            "only a spoken date may become a deadline: {:?}",
+            item.deadline
+        );
+    }
+}
+
+#[tokio::test]
+async fn fixture_b_restated_commitments_collapse_into_one_task() {
+    let mut fixture = fixture_requirements();
+    // The same commitment, restated twice more — once mid-meeting and once in
+    // the closing recap, which is how real meetings say things.
+    fixture.push((
+        "just to confirm, I'll send you the required email list tomorrow morning",
+        true,
+        false,
+    ));
+    fixture.push((
+        "right, so to recap, I'll share the mail list and Pranjal reviews the guide",
+        true,
+        false,
+    ));
+
+    let harness = Harness::new(&fixture);
+    let llm = ScriptedLlm::always_unavailable();
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let facts = processing.facts.as_ref().unwrap();
+    let mail_items: Vec<&str> = facts
+        .action_items
+        .iter()
+        .filter(|i| {
+            let d = i.description.to_lowercase();
+            d.contains("mail") || d.contains("email")
+        })
+        .map(|i| i.description.as_str())
+        .collect();
+    assert_eq!(
+        mail_items.len(),
+        1,
+        "three restatements of one commitment are one task: {:?}",
+        mail_items
+    );
+    assert!(processing
+        .stages
+        .extraction
+        .action_diagnostics
+        .is_some_and(|d| d.deduplicated > 0));
+}
+
+#[tokio::test]
+async fn fixture_c_a_noisy_transcript_invents_nothing() {
+    let harness = Harness::new(&fixture_noisy_asr());
+    let before = harness.raw_fingerprint();
+    let llm = ScriptedLlm::always_unavailable();
+
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let normalized = processing.normalized.as_ref().unwrap();
+    let derived = normalized.plain_text();
+    assert!(!derived.contains("[BLANK_AUDIO]"));
+    assert!(!derived.contains("NON-ENGLISH"));
+    assert!(!derived.contains("speaking in foreign language"));
+
+    let facts = processing.facts.as_ref().unwrap();
+    for item in &facts.action_items {
+        let lower = item.description.to_lowercase();
+        assert!(
+            !lower.contains("pay the firm"),
+            "a decoder loop is never a task: {:?}",
+            item.description
+        );
+        assert!(
+            !lower.contains("specialty"),
+            "a collided fragment is discarded, never repaired: {:?}",
+            item.description
+        );
+    }
+    assert_eq!(
+        harness.raw_fingerprint(),
+        before,
+        "the raw transcript is untouched by any of this"
+    );
+}
+
+#[tokio::test]
+async fn fixture_d_an_unowned_task_is_never_attributed_to_a_guess() {
+    let harness = Harness::new(&fixture_ambiguous_owner());
+    let llm = ScriptedLlm::always_unavailable();
+
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    for item in &processing.facts.as_ref().unwrap().action_items {
+        assert!(
+            matches!(item.owner_type, OwnerType::Unassigned | OwnerType::Group),
+            "both channels were live, so nobody may be named: {:?} owns {:?}",
+            item.owner_type,
+            item.description
+        );
+        assert!(item.owner_speaker_id.is_none());
+    }
+}
+
+#[tokio::test]
+async fn fixture_d_a_model_owner_the_channel_cannot_support_is_demoted() {
+    let harness = Harness::new(&fixture_ambiguous_owner());
+    let draft = serde_json::json!({
+        "title": "Employee Document Update",
+        "meeting_type": "general",
+        "action_items": [{
+            "description": "Update and circulate the employee document",
+            "owner": "speaker_me",
+            "source_segment_ids": ["seg_00001"]
+        }]
+    })
+    .to_string();
+    let llm = ScriptedLlm::new(vec![Ok(draft), Ok(prose())]);
+
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let item = &processing.facts.as_ref().unwrap().action_items[0];
+    assert_eq!(
+        item.owner_type,
+        OwnerType::Unassigned,
+        "a model may not name an owner the capture channel cannot support"
+    );
+    assert!(processing
+        .stages
+        .extraction
+        .action_diagnostics
+        .is_some_and(|d| d.owners_downgraded == 1));
+}
+
+#[tokio::test]
+async fn fixture_e_a_long_meeting_stays_bounded_in_every_mode() {
+    let mut fixture = fixture_long();
+    // Salt a long meeting with a dozen genuine, distinct commitments, so the
+    // cap has something real to bite on.
+    let objects = [
+        "migration plan",
+        "rollback script",
+        "release notes",
+        "cancellation logic",
+        "city dropdown",
+        "analytics filter",
+        "mail service",
+        "employee guide",
+        "query tracker",
+        "slack channel",
+        "email templates",
+        "ticket workflow",
+        "billing report",
+        "vendor contract",
+        "status dashboard",
+        "onboarding checklist",
+        "audit trail",
+        "support rota",
+    ];
+    let owned: Vec<String> = objects
+        .iter()
+        .map(|object| format!("I'll update the {} once we are done here", object))
+        .collect();
+    for line in &owned {
+        fixture.push((Box::leak(line.clone().into_boxed_str()), true, false));
+    }
+
+    let harness = Harness::new(&fixture);
+
+    for mode in [
+        SummaryMode::Concise,
+        SummaryMode::Standard,
+        SummaryMode::Detailed,
+    ] {
+        let llm = ScriptedLlm::always_unavailable();
+        let processing = harness
+            .processor
+            .generate_summary(&harness.meeting_id, &llm, &options_with_mode(mode), true)
+            .await
+            .unwrap();
+
+        let summary = processing.summary.as_ref().unwrap();
+        let words = summary.markdown.split_whitespace().count();
+        assert!(
+            words <= mode.max_words(),
+            "{} summary ran to {} words",
+            mode.label(),
+            words
+        );
+
+        let items = &processing.facts.as_ref().unwrap().action_items;
+        assert!(
+            items.len() <= qualify::MAX_ACTION_ITEMS,
+            "{} mode produced {} action items",
+            mode.label(),
+            items.len()
+        );
+
+        let mut seen = std::collections::HashSet::new();
+        for item in items {
+            assert!(
+                seen.insert(item.description.to_lowercase()),
+                "duplicate action item: {:?}",
+                item.description
+            );
+        }
+
+        // A summary, not a transcript: the prose is a fraction of the source.
+        let transcript_words = processing.normalized.as_ref().unwrap().word_count();
+        assert!(
+            words * 2 < transcript_words,
+            "{} summary is {} words against a {}-word transcript",
+            mode.label(),
+            words,
+            transcript_words
+        );
+    }
+}
+
+#[tokio::test]
+async fn fixture_f_a_rejected_model_summary_still_shows_a_summary() {
+    let harness = Harness::new(&fixture_a());
+
+    // Prose that both copies the transcript verbatim and runs far over the cap —
+    // the exact pair of codes a real meeting produced.
+    let mut bad = String::from("## Summary\n\n- so um we decided to ship the release on Friday \
+and I will write the changelog tonight before the freeze because the client is expecting it\n");
+    for i in 0..200 {
+        bad.push_str(&format!(
+            "- padding line {} carrying enough words to run the summary well past its cap\n",
+            i
+        ));
+    }
+    let llm = ScriptedLlm::new(vec![Ok(facts_json()), Ok(bad)]);
+
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let summary = processing.summary.as_ref().unwrap();
+
+    // The model's draft was rejected, and says why.
+    assert_eq!(
+        summary.provider_output_status,
+        ProviderOutputStatus::Rejected
+    );
+    let rejected: Vec<&str> = summary
+        .rejected_issues
+        .iter()
+        .map(|i| i.code.as_str())
+        .collect();
+    assert!(rejected.contains(&"SUMMARY_TOO_LONG"), "{:?}", rejected);
+    assert!(
+        rejected.contains(&"SUMMARY_COPIES_TRANSCRIPT"),
+        "{:?}",
+        rejected
+    );
+
+    // The fallback rendered, and it is what the user sees.
+    assert!(summary.fallback_used);
+    assert!(!summary.markdown.contains("padding line"));
+    assert!(summary.markdown.contains("## Summary"));
+
+    // And the stage is a success, because a summary exists.
+    assert!(
+        summary.validation.passed,
+        "the fallback is valid: {:?}",
+        summary.validation.issues
+    );
+    assert_eq!(processing.stages.summary.status, StageStatus::Success);
+    assert_eq!(processing.status, ProcessingStatus::Ready);
+
+    // Provenance is honest: a model understood the meeting, but no model wrote
+    // this text.
+    assert_eq!(summary.source, SummarySource::DeterministicPresentation);
+    assert!(!summary.markdown.to_lowercase().contains("ai summary"));
+}
+
+#[tokio::test]
+async fn a_summary_only_fails_when_the_fallback_itself_fails() {
+    // No transcribed speech at all: there is nothing for either path to render,
+    // and the meeting must say so rather than pretend.
+    let harness = Harness::new(&[("[BLANK_AUDIO]", true, false)]);
+    let llm = ScriptedLlm::always_unavailable();
+
+    let result = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await;
+
+    assert!(result.is_err(), "an empty meeting cannot be summarized");
+    let processing = harness.processor.get(&harness.meeting_id).unwrap();
+    assert_eq!(processing.stages.normalization.status, StageStatus::Failed);
+    assert!(processing.summary.is_none());
+}
+
+#[tokio::test]
+async fn the_processing_log_explains_a_fallback_without_quoting_the_meeting() {
+    let harness = Harness::new(&fixture_demo_heavy());
+    let llm = ScriptedLlm::always_unavailable();
+    harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let log = harness.processor.log(&harness.meeting_id);
+    let extraction = log.iter().rev().find(|e| e.stage == "extraction").unwrap();
+    let counts = extraction
+        .action_diagnostics
+        .expect("the log carries the gate's counts");
+    assert!(counts.candidates > 0);
+    assert!(counts.rejected > 0);
+
+    let summary = log.iter().rev().find(|e| e.stage == "summary").unwrap();
+    assert_eq!(summary.fallback_used, Some(true));
+    assert_eq!(summary.provider_output_status.as_deref(), Some("unavailable"));
+
+    // The privacy guarantee: the log explains the run without reproducing it.
+    let serialized = serde_json::to_string(&log).unwrap();
+    for phrase in ["project my screen", "grab some water", "Ayush"] {
+        assert!(
+            !serialized.contains(phrase),
+            "the processing log must never carry transcript text: {}",
+            phrase
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// One whole meeting, end to end
+// ---------------------------------------------------------------------------
+
+/// A full UAT review, the way one actually sounds: joining noise, a demo
+/// stretch, a requirements discussion, a decision, and a closing recap.
+///
+/// This is the shape of transcript that produced forty-nine action items.
+fn fixture_real_meeting() -> Vec<(&'static str, bool, bool)> {
+    vec![
+        ("hi everyone good morning, sorry I was a bit late joining, can you hear me okay now", true, false),
+        ("yes we can hear you, let me just check if Pranjal is able to join us as well", false, true),
+        ("okay so I'll project my screen now and I will take you through the pointers we have", true, false),
+        ("I'll click here and now I will move it to approved so you can see what happens on this screen", true, false),
+        ("let me show you the reports tab, I'll switch over and pull up the dashboard for you", true, false),
+        ("I'll just be back in a minute, give me a second to get some water", true, false),
+        ("so the main pending item from our side is the trigger list, I'll send the list of mails that need to go out tomorrow", true, false),
+        ("can you review the employee guide and the FAQs and flag anything that looks inconsistent", false, true),
+        ("sure, I'll go through the employee guide and send the corrections back to you", false, true),
+        ("on the city field, can we have a dropdown of cities instead of people typing it in freely", false, true),
+        ("that can be done, we can add a dropdown with an other option for anything unlisted", true, false),
+        ("great, that works for us, team are we aligned on that one", false, true),
+        ("for the mail service, let's go with Gmail SMTP as the fallback, delivery is around eighty five percent", true, false),
+        ("agreed, and cancellation will stay PNC only, that is the decision for now", false, true),
+        ("let me give it a day to think about the cancellation coordination and I'll let you know tomorrow", false, true),
+        ("we could maybe look at a self service option in version two if there is appetite", false, true),
+        ("I already bumped the staging config this morning so that part is done", true, false),
+        ("we should probably set up a dedicated Slack channel for travel queries at launch", false, true),
+        ("yes that works, let's have it ready alongside the dashboard, we are aligned on that", true, false),
+        ("some of the things I will jump in wherever needed, but still we'll be maintaining that log", true, false),
+        ("I'll stop sharing now, and just to recap, I'll send the required email list and circulate the MoM", true, false),
+        ("and I'll reshare the query tracker link along with the MOM after this call", true, false),
+        ("perfect, thanks everyone, talk tomorrow, have a good day", false, true),
+    ]
+}
+
+#[tokio::test]
+async fn a_real_meeting_runs_end_to_end_and_stays_trustworthy() {
+    let harness = Harness::new(&fixture_real_meeting());
+    let before = harness.raw_fingerprint();
+    let raw_segments = harness
+        .sessions
+        .get_transcript_segments(&harness.meeting_id)
+        .unwrap()
+        .len();
+
+    // No model, which is the pessimistic case: the cue-based extractor proposes
+    // a candidate for every "I'll" in the transcript, and the gate is all that
+    // stands between those and the user's task list.
+    let llm = ScriptedLlm::always_unavailable();
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let normalized = processing.normalized.as_ref().unwrap();
+    let facts = processing.facts.as_ref().unwrap();
+    let summary = processing.summary.as_ref().unwrap();
+    let counts = processing.stages.extraction.action_diagnostics.unwrap();
+
+    eprintln!("\n===== end-to-end run =====");
+    eprintln!("raw segments:        {}", raw_segments);
+    eprintln!("normalized segments: {}", normalized.segments.len());
+    eprintln!(
+        "facts:               {} key points, {} topics, {} decisions, {} open questions, {} entities",
+        facts.key_points.len(),
+        facts.topics.len(),
+        facts.decisions.len(),
+        facts.open_questions.len(),
+        facts.entities.len()
+    );
+    eprintln!("action candidates:   {}", counts.candidates);
+    eprintln!("actions rejected:    {}", counts.rejected);
+    eprintln!("actions deduplicated:{}", counts.deduplicated);
+    eprintln!("actions capped:      {}", counts.capped);
+    eprintln!("actions retained:    {}", counts.retained);
+    eprintln!("  unassigned:        {}", counts.unassigned);
+    eprintln!("  with deadlines:    {}", counts.with_deadlines);
+    eprintln!("summary mode:        {}", summary.mode.label());
+    eprintln!(
+        "summary word count:  {} (cap {})",
+        summary.markdown.split_whitespace().count(),
+        summary.mode.max_words()
+    );
+    eprintln!("fallback used:       {}", summary.fallback_used);
+    eprintln!("provider output:     {}", summary.provider_output_status.label());
+    eprintln!("final validation:    passed={}", summary.validation.passed);
+    for item in &facts.action_items {
+        eprintln!("  [ ] {} — {:?}", item.description, item.owner_type);
+    }
+    eprintln!("==========================\n");
+
+    // What a person opening this meeting is entitled to assume.
+    assert!(
+        (1..=6).contains(&facts.action_items.len()),
+        "a normal meeting yields a handful of tasks, got {}",
+        facts.action_items.len()
+    );
+    assert!(facts.action_items.len() <= qualify::MAX_ACTION_ITEMS);
+
+    let descriptions: Vec<String> = facts
+        .action_items
+        .iter()
+        .map(|i| i.description.to_lowercase())
+        .collect();
+    for banned in [
+        "project my screen",
+        "back in a minute",
+        "stop sharing",
+        "click here",
+        "move it to approved",
+        "switch over",
+        "jump in wherever",
+        "maintaining that log",
+        "version two",
+        "already bumped",
+    ] {
+        assert!(
+            !descriptions.iter().any(|d| d.contains(banned)),
+            "{:?} reached the task list: {:?}",
+            banned,
+            descriptions
+        );
+    }
+
+    // Provenance holds for everything derived.
+    for item in &facts.action_items {
+        assert!(!item.source_segment_ids.is_empty());
+    }
+    for decision in &facts.decisions {
+        assert!(!decision.source_segment_ids.is_empty());
+    }
+    for point in &facts.key_points {
+        assert!(!point.source_segment_ids.is_empty());
+    }
+
+    // The summary is a summary.
+    assert!(summary.validation.passed);
+    assert_eq!(processing.stages.summary.status, StageStatus::Success);
+    assert!(summary.markdown.split_whitespace().count() <= summary.mode.max_words());
+    assert_eq!(summary.source, SummarySource::DeterministicExtraction);
+
+    // And none of it touched the recording.
+    assert_eq!(harness.raw_fingerprint(), before);
+    assert_eq!(
+        harness
+            .sessions
+            .get_transcript_segments(&harness.meeting_id)
+            .unwrap()
+            .len(),
+        raw_segments
+    );
+}
+
+#[tokio::test]
+async fn the_gate_keeps_the_hard_patterns_a_model_gets_right() {
+    // The gate's job is to remove what a model over-extracts, not to undo what
+    // it correctly understood. These are the patterns the cue-based path cannot
+    // reach — capability-plus-group-acceptance, a deferred decision, and an
+    // agreed task nobody took — and all of them must survive it.
+    let harness = Harness::new(&fixture_real_meeting());
+
+    let draft = serde_json::json!({
+        "title": "Travel Dashboard UAT Review",
+        "meeting_type": "client_meeting",
+        "key_points": [
+            {"text": "The trigger list is the last blocker on the mail templates.", "source_segment_ids": ["seg_00006"]},
+            {"text": "Free-text city entry was producing inconsistent data.", "source_segment_ids": ["seg_00009"]}
+        ],
+        "topics": [{"label": "Mail Service", "segment_ids": ["seg_00012"]}],
+        "decisions": [
+            {"statement": "Cancellation stays PNC-only.", "source_segment_ids": ["seg_00013"]},
+            {"statement": "Gmail SMTP is the mail fallback.", "source_segment_ids": ["seg_00012"]}
+        ],
+        "action_items": [
+            // §4.1 — direct undertaking.
+            {"description": "Send PNC the list of required system emails",
+             "owner": "speaker_me", "candidate_type": "action",
+             "source_segment_ids": ["seg_00006"]},
+            // §4.3 — capability answer plus group acceptance, across turns.
+            {"description": "Add a city dropdown with a free-text fallback",
+             "owner": "speaker_me", "candidate_type": "action",
+             "source_segment_ids": ["seg_00009", "seg_00010", "seg_00011"]},
+            // §4.4 — a deferred decision, with a spoken date.
+            {"description": "Decide whether cancellations stay PNC-only",
+             "owner": "speaker_1", "deadline": "2026-08-28", "candidate_type": "action",
+             "source_segment_ids": ["seg_00014"]},
+            // Agreed, but nobody took it.
+            // The proposal and the group's acceptance of it, both cited.
+            {"description": "Set up a dedicated Slack channel for travel queries",
+             "owner": "unassigned", "candidate_type": "action",
+             "source_segment_ids": ["seg_00017", "seg_00018"]},
+            // The model over-extracting, which is what the gate is for.
+            {"description": "Project the screen and walk through the pointers",
+             "owner": "speaker_me", "candidate_type": "action",
+             "source_segment_ids": ["seg_00002"]},
+            {"description": "Look at a self service option in version two",
+             "owner": "unassigned", "candidate_type": "action",
+             "source_segment_ids": ["seg_00015"]},
+            {"description": "Bump the staging config",
+             "owner": "speaker_me", "candidate_type": "action",
+             "source_segment_ids": ["seg_00016"]}
+        ],
+        "open_questions": [],
+        "entities": [{"name": "PNC", "kind": "organization", "segment_ids": ["seg_00013"]}]
+    })
+    .to_string();
+
+    let llm = ScriptedLlm::new(vec![Ok(draft), Ok(prose())]);
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let facts = processing.facts.as_ref().unwrap();
+    let kept: Vec<&str> = facts
+        .action_items
+        .iter()
+        .map(|i| i.description.as_str())
+        .collect();
+
+    for expected in [
+        "Send PNC the list of required system emails",
+        "Add a city dropdown with a free-text fallback",
+        "Decide whether cancellations stay PNC-only",
+        "Set up a dedicated Slack channel for travel queries",
+    ] {
+        assert!(
+            kept.contains(&expected),
+            "the gate removed a correctly extracted item: {:?} — kept {:?}",
+            expected,
+            kept
+        );
+    }
+    for rejected in [
+        "Project the screen and walk through the pointers",
+        "Look at a self service option in version two",
+        "Bump the staging config",
+    ] {
+        assert!(
+            !kept.contains(&rejected),
+            "{:?} should not have survived: {:?}",
+            rejected,
+            kept
+        );
+    }
+
+    // The unowned item stays unowned rather than being attached to whoever
+    // happened to be speaking.
+    let slack = facts
+        .action_items
+        .iter()
+        .find(|i| i.description.contains("Slack"))
+        .unwrap();
+    assert_eq!(slack.owner_type, OwnerType::Unassigned);
+
+    // The deferred decision keeps the date that was actually spoken.
+    let decision = facts
+        .action_items
+        .iter()
+        .find(|i| i.description.starts_with("Decide"))
+        .unwrap();
+    assert_eq!(decision.deadline.as_deref(), Some("2026-08-28"));
+
+    // The two decisions stay decisions and are not duplicated as tasks.
+    assert_eq!(facts.decisions.len(), 2);
+    assert!(!kept.iter().any(|d| d.contains("Gmail SMTP is")));
 }

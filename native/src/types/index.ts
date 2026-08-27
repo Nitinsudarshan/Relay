@@ -791,6 +791,27 @@ export interface ValidationReport {
   issues: ValidationIssue[];
 }
 
+/**
+ * What became of the model's proposed prose — independent of whether the summary
+ * stage succeeded. A rejected draft followed by a valid deterministic render is
+ * a successful summary that happens to have rejected the model.
+ */
+export type ProviderOutputStatus =
+  | 'NOT_ATTEMPTED'
+  | 'ACCEPTED'
+  | 'REJECTED'
+  | 'UNAVAILABLE';
+
+/**
+ * Where the prose came from. `DETERMINISTIC_PRESENTATION` means a model
+ * understood the meeting but did not write this text; `DETERMINISTIC_EXTRACTION`
+ * means no model was involved at any stage. Neither is an AI summary.
+ */
+export type SummarySource =
+  | 'MODEL'
+  | 'DETERMINISTIC_PRESENTATION'
+  | 'DETERMINISTIC_EXTRACTION';
+
 export interface SummaryArtifact {
   markdown: string;
   mode: SummaryMode;
@@ -802,12 +823,36 @@ export interface SummaryArtifact {
   rules_version: string;
   /** True when the prose was rendered from facts without a model. */
   deterministic: boolean;
+  source: SummarySource;
+  provider_output_status: ProviderOutputStatus;
+  /** True when the deterministic renderer produced the text being shown. */
+  fallback_used: boolean;
+  /**
+   * Why a model draft was rejected. Deliberately separate from `validation`,
+   * which describes only the prose actually on screen.
+   */
+  rejected_issues: ValidationIssue[];
   /** True when a speaker was renamed after this prose was written. */
   speaker_names_stale: boolean;
   validation: ValidationReport;
 }
 
 export type StageStatus = 'NOT_RUN' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'SKIPPED';
+
+/**
+ * What the action-item gate did with each candidate. Counts only — the
+ * candidates' own words never leave the backend.
+ */
+export interface ActionDiagnostics {
+  candidates: number;
+  rejected: number;
+  deduplicated: number;
+  capped: number;
+  retained: number;
+  unassigned: number;
+  with_deadlines: number;
+  owners_downgraded: number;
+}
 
 export interface StageState {
   status: StageStatus;
@@ -820,6 +865,8 @@ export interface StageState {
   input_chars?: number | null;
   output_chars?: number | null;
   validation?: ValidationReport | null;
+  /** Extraction only. */
+  action_diagnostics?: ActionDiagnostics | null;
 }
 
 export interface StageStates {

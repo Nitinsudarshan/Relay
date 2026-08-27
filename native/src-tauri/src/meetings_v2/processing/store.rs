@@ -376,6 +376,9 @@ mod tests {
                 validator_passed: Some(true),
                 validator_issue_codes: Vec::new(),
                 error: None,
+                action_diagnostics: None,
+                provider_output_status: None,
+                fallback_used: None,
                 processing_version: PROCESSING_VERSION,
                 rules_version: RULES_VERSION.into(),
             });
@@ -406,13 +409,32 @@ mod tests {
             validator_passed: None,
             validator_issue_codes: Vec::new(),
             error: None,
+            // The action-item gate records what it did per candidate, including
+            // the candidate's own words. Only the counts may be logged.
+            action_diagnostics: Some(crate::meetings_v2::processing::qualify::ActionDiagnostics {
+                candidates: 12,
+                rejected: 9,
+                deduplicated: 1,
+                capped: 0,
+                retained: 2,
+                unassigned: 1,
+                with_deadlines: 1,
+                owners_downgraded: 1,
+            }),
+            provider_output_status: Some("rejected".into()),
+            fallback_used: Some(true),
             processing_version: PROCESSING_VERSION,
             rules_version: RULES_VERSION.into(),
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("input_chars"));
+        assert!(json.contains("\"candidates\":12"), "counts are loggable");
         assert!(!json.contains("text"));
         assert!(!json.contains("transcript"));
+        assert!(
+            !json.contains("candidate_text"),
+            "a candidate's own words must never reach the log"
+        );
     }
 
     #[test]

@@ -14,7 +14,9 @@
 //! nothing to show.
 
 use super::llm::MeetingLlm;
-use super::model::{ActionItem, MeetingExtension, MeetingFacts, OwnerType, Speaker, SummaryMode};
+use super::model::{
+    ActionItem, MeetingExtension, MeetingFacts, OwnerType, Speaker, SummaryMode, SummarySource,
+};
 use super::modes::mode_instructions;
 use super::speakers::resolve_label;
 
@@ -124,6 +126,16 @@ STRUCTURE — include a section only if it has content:
 - One line per unresolved item.
 
 WHAT MATTERS
+A summary answers five questions: what was this meeting about, what actually
+mattered, what was decided, what is still unresolved, and what happens next. It
+does not answer "which sentences appeared in the transcript".
+
+Before a point goes in, ask whether somebody who missed the meeting would
+consider it important enough to know. Leave out greetings, introductions,
+screen-share mechanics, "let me show you", "I'll just check", logistics, filler,
+small talk, and demo narration. Keep substantive topics, decisions, risks,
+blockers, changes, commitments, unresolved questions, and conclusions.
+
 Lead with what actually mattered and what was decided. Do not narrate the
 meeting in order ("The meeting started with...", "Then Sarah said...") unless the
 chronology is itself the point. Never pad. A short summary that a reader trusts
@@ -207,14 +219,17 @@ pub fn render_markdown(facts: &MeetingFacts, speakers: &[Speaker], mode: Summary
     let mut out = String::new();
 
     out.push_str("## Summary\n\n");
-    if facts.deterministic {
-        // Honesty about provenance: without a model these points are lifted from
-        // the transcript rather than understood, and the reader should know.
-        out.push_str(
-            "_Generated without a language model. The points below are taken directly from the \
-transcript rather than summarized._\n\n",
-        );
-    }
+    // Honesty about provenance. Reaching this renderer at all means no model
+    // wrote the prose; whether a model *understood* the meeting is a separate
+    // question, and the two produce noticeably different text.
+    out.push_str(&format!(
+        "_{}_\n\n",
+        if facts.deterministic {
+            SummarySource::DeterministicExtraction.provenance()
+        } else {
+            SummarySource::DeterministicPresentation.provenance()
+        }
+    ));
     let point_budget = match mode {
         SummaryMode::Concise => 4,
         SummaryMode::Standard => 8,

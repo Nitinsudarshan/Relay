@@ -243,6 +243,10 @@ Markdown such as `- [ ] Send the deck — **Nitin** · Due: 2026-08-28`.
 string and cannot be queried, validated, re-rendered after a speaker rename,
 or checked off durably.
 
+> **Resolved in Phase A** — action items are structured objects. **Quality
+> resolved in Phase B** — see §B.2: the three gates, deduplication, ownership,
+> and the cap are enforced by `processing::qualify`, not by the prompt.
+
 ### 1.15 Topic / entity extraction
 
 **CURRENT** Exists for **Scribbles** only — `extract_deterministic_topics`,
@@ -470,3 +474,120 @@ pipeline has no channel signal whatsoever.
 
 Everything else in `capture.rs`, `live_stt.rs`, and the recording clock is
 untouched.
+
+---
+
+# Phase B — Intelligence Quality Pass
+
+Written after the Phase A pipeline shipped and was used on real meetings. The
+architecture held; the output quality did not. Two failures came back from real
+use, and both had a single root cause each.
+
+## B.1 "Summary unavailable" over a summary that existed
+
+**Symptom.** The Summary tab showed *Summary unavailable — model output rejected
+by validation* with codes such as `SUMMARY_TOO_LONG` and
+`SUMMARY_COPIES_TRANSCRIPT`, on meetings where the deterministic fallback had
+rendered a perfectly valid summary.
+
+**Root cause.** `MeetingProcessor::generate_summary` rejected the model draft,
+re-rendered deterministically, re-validated, and then did this:
+
+```rust
+validation.issues.extend(previous_issues);      // the rejected draft's errors
+validation.passed = !validation.has_errors();   // ...now false
+```
+
+The rejected draft's `Error` issues were merged into the *fallback's* report, so
+the fallback's verdict was always failure. `summary_stage.status` became
+`Failed`, and `MeetingProcessingStatus.tsx` renders `status === 'FAILED'` as
+"Summary unavailable". The summary was sitting in `processing.json` the whole
+time.
+
+A second, smaller bug sat underneath it: `validate_summary` decided whether
+transcript copying was an error by reading `facts.deterministic` — a fact about
+the *facts*, not about the prose being judged. The deterministic renderer is
+openly extractive, so its output was being judged by a rule written for models.
+
+**Fix.** Two facts are now recorded separately, because they are different
+things:
+
+| Field | Question it answers |
+|---|---|
+| `SummaryArtifact::provider_output_status` | What became of the model's draft — `ACCEPTED`, `REJECTED`, `UNAVAILABLE`, `NOT_ATTEMPTED` |
+| `SummaryArtifact::rejected_issues` | Why a draft was rejected, kept as diagnostics |
+| `SummaryArtifact::validation` | The verdict on the prose actually shown, and nothing else |
+| `SummaryArtifact::fallback_used` | Whether the deterministic renderer produced that prose |
+| `stages.summary.status` | Whether *a* summary exists — `Failed` only when the fallback itself failed |
+
+`validate_summary` now takes `prose_is_deterministic` explicitly.
+`SummarySource` distinguishes deterministic *presentation* (a model understood
+the meeting, no model wrote the text) from deterministic *extraction* (no model
+at any stage), so the UI never calls either one an AI summary.
+
+## B.2 Forty-nine action items from an ordinary meeting
+
+**Symptom.** A normal meeting produced ~49 action items: "I'll just be back in a
+minute", "I'll project my screen", "I'll check the ID", "I'll stop sharing".
+
+**Root cause.** The rules in `Meeting-rules/meeting_action_items_tasks.md` were
+correct and almost entirely unenforced. Concretely:
+
+* the cue-based extractor turned any sentence containing `i'll` / `we'll` into a
+  task, filtered only by a fourteen-phrase `NON_DURABLE_CUES` list;
+* `sanitize_draft` deduplicated model output by exact lowercased string, so
+  three phrasings of one commitment were three tasks;
+* **the cap of 15 existed only in the prompt.** No code enforced it;
+* nothing checked durability, deliverability, or commitment at all.
+
+**Fix.** `meetings_v2::processing::qualify` — a deterministic gate with exactly
+one call site, in `extract_facts`, so the model path and the cue-based path both
+run through it and cannot disagree about what qualifies:
+
+```text
+candidates → evidence → gate 1 (durability) → gate 2 (deliverable)
+          → gate 3 (commitment) → owner resolution → scoring
+          → semantic deduplication → ranking → hard cap
+```
+
+Design notes worth keeping:
+
+* **Evidence is per sentence, not per segment.** A 30-second chunk routinely
+  holds a screen-share aside and a real commitment in one breath. The gate picks
+  the sentence with the highest content-word overlap with the description and
+  judges that.
+* **Gate 1 runs before the verb is noticed**, because nearly every rejected
+  example contains "I'll".
+* **Demo verbs are not banned outright.** "switch the mail provider to SES" is
+  real work; "now I'll switch to the reports tab" is not. A UI verb only rejects
+  when the sentence also points at something on screen or narrates the next
+  second.
+* **The score is never shown.** It exists to rank at the cap and to draw one
+  threshold, calibrated so an unowned commitment the group made together with a
+  real deliverable is the weakest thing that still qualifies.
+* **Ownership is demoted, never guessed.** An item whose every cited segment had
+  both channels live becomes `Unassigned`.
+* **The cap never adds.** Three qualifying candidates return three.
+
+## B.3 Diagnostics and the privacy line
+
+Every candidate gets a `CandidateDiagnostic` with its text, owner, verdict, and
+rejection reason. That struct stays in memory, for tests and debugging.
+
+Only `ActionDiagnostics` — eight counters — reaches `processing.json` and
+`processing_log.jsonl`. The log's guarantee is unchanged: it explains a run
+without reproducing the meeting, and
+`the_processing_log_explains_a_fallback_without_quoting_the_meeting` asserts it.
+
+## B.4 What Phase B deliberately did not do
+
+* No second summary pipeline, and no second action-item pipeline. Action items
+  remain a projection of `MeetingFacts`.
+* No knowledge graph. Related meetings are unchanged.
+* No new user-facing settings. Thresholds, cue tables, and the cap are
+  implementation concerns.
+* No change to recording, chunking, the clocks, pause/resume, crash recovery,
+  dictation, or voice notes.
+
+`PROCESSING_VERSION` is bumped to 2: facts extracted under v1 carry action items
+that never passed the gate.

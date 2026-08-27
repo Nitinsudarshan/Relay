@@ -41,12 +41,18 @@ fn warning(code: &str, message: String) -> ValidationIssue {
 /// Validates generated prose against the facts it was supposed to come from.
 ///
 /// `transcript_text` is the normalized transcript, used only to detect copying.
+///
+/// `prose_is_deterministic` describes the text being judged, not the facts
+/// behind it. The distinction matters for exactly one rule — transcript copying
+/// — and getting it from the wrong place made the deterministic renderer's
+/// output fail a check that only ever applied to a model.
 pub fn validate_summary(
     markdown: &str,
     facts: &MeetingFacts,
     speakers: &[Speaker],
     mode: SummaryMode,
     transcript_text: &str,
+    prose_is_deterministic: bool,
 ) -> ValidationReport {
     let mut issues = Vec::new();
     let body = markdown.trim();
@@ -96,7 +102,7 @@ pub fn validate_summary(
             // it has no way to comprehend — and labels itself as such, so
             // copying there is a known limitation to record, not grounds for
             // rejecting the only summary available.
-            issues.push(if facts.deterministic {
+            issues.push(if prose_is_deterministic {
                 warning("SUMMARY_COPIES_TRANSCRIPT", message)
             } else {
                 error("SUMMARY_COPIES_TRANSCRIPT", message)
@@ -595,13 +601,14 @@ mod tests {
             &roster(),
             SummaryMode::Standard,
             "we decided to ship the release on friday",
+            false,
         );
         assert!(report.passed, "unexpected issues: {:?}", report.issues);
     }
 
     #[test]
     fn an_empty_summary_is_an_error() {
-        let report = validate_summary("   ", &facts(), &roster(), SummaryMode::Standard, "");
+        let report = validate_summary("   ", &facts(), &roster(), SummaryMode::Standard, "", false);
         assert!(!report.passed);
         assert_eq!(report.issues[0].code, "SUMMARY_EMPTY");
     }
@@ -616,6 +623,7 @@ mod tests {
             &roster(),
             SummaryMode::Concise,
             "unrelated transcript",
+            false,
         );
         assert!(!report.passed);
         assert!(report.issues.iter().any(|i| i.code == "SUMMARY_TOO_LONG"));
@@ -624,7 +632,7 @@ mod tests {
     #[test]
     fn leaked_json_is_an_error() {
         let markdown = r#"{"title": "Release", "summary": "we shipped"}"#;
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "");
+        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
         assert!(report
             .issues
             .iter()
@@ -634,7 +642,7 @@ mod tests {
     #[test]
     fn a_markdown_summary_containing_braces_in_code_is_not_flagged_as_json() {
         let markdown = "## Summary\n\n- The config change was agreed: ```{\"a\": \"b\", \"c\": \"d\"}``` stays as is for now.";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "");
+        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
         assert!(!report
             .issues
             .iter()
@@ -651,6 +659,7 @@ mod tests {
             &roster(),
             SummaryMode::Standard,
             transcript,
+            false,
         );
         assert!(!report.passed);
         assert!(report
@@ -670,6 +679,7 @@ mod tests {
             &roster(),
             SummaryMode::Standard,
             transcript,
+            false,
         );
         assert!(
             !report
@@ -684,7 +694,7 @@ mod tests {
     #[test]
     fn an_invented_participant_is_an_error() {
         let markdown = "## Summary\n\n- Work was assigned.\n\n## Action Items\n\n- [ ] Send the deck — **Rajesh**\n";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "");
+        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
         assert!(!report.passed);
         assert!(report
             .issues
@@ -695,7 +705,7 @@ mod tests {
     #[test]
     fn a_renamed_speaker_is_not_treated_as_invented() {
         let markdown = "## Summary\n\n- Work was assigned to the reviewer.\n\n## Action Items\n\n- [ ] Send the deck — **Pranjali**\n";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "");
+        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
         assert!(
             !report
                 .issues
@@ -709,7 +719,7 @@ mod tests {
     #[test]
     fn a_bold_section_label_is_not_mistaken_for_a_person() {
         let markdown = "## Summary\n\n**Topics discussed:** Release Planning, Schema\n\n- The release date was settled.";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "");
+        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
         assert!(!report
             .issues
             .iter()
@@ -720,7 +730,7 @@ mod tests {
     fn duplicate_bullets_are_a_warning_not_a_failure() {
         let markdown =
             "## Summary\n\n- The release date was settled.\n- The release date was settled.\n";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "");
+        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
         assert!(report.passed, "duplicates should not block a summary");
         assert!(report
             .issues
@@ -731,7 +741,7 @@ mod tests {
     #[test]
     fn a_fabricated_decision_is_flagged() {
         let markdown = "## Summary\n\n- Things were discussed at length.\n\n## Decisions\n\n- Acquire a competitor in the fourth quarter\n";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "");
+        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
         assert!(report
             .issues
             .iter()
@@ -741,7 +751,7 @@ mod tests {
     #[test]
     fn a_paraphrased_decision_is_accepted() {
         let markdown = "## Summary\n\n- Timing was agreed.\n\n## Decisions\n\n- The release will ship on Friday\n";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "");
+        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
         assert!(
             !report
                 .issues
@@ -755,7 +765,7 @@ mod tests {
     #[test]
     fn a_due_date_with_no_backing_action_item_is_an_error() {
         let markdown = "## Summary\n\n- Work was assigned to people.\n\n## Action Items\n\n- [ ] Send the deck — **Me** · Due: 2026-09-01\n";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "");
+        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
         assert!(report
             .issues
             .iter()

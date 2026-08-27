@@ -11,11 +11,26 @@
 use super::model::{Conversation, ConversationTurn, NormalizedSegment, Speaker};
 use super::speakers::resolve_label;
 
+/// Word count past which a continuous stretch from one speaker is broken into a
+/// new turn.
+///
+/// Attribution is per 30-second chunk, so an uninterrupted speaker produces one
+/// turn per *meeting*, not one per thought — twelve minutes of talking arrives
+/// as a single wall of text. Breaking it at a segment boundary keeps the same
+/// speaker id and invents no speaker change; it only stops the view from being
+/// unreadable. Set high enough that ordinary back-and-forth is untouched.
+const MAX_TURN_WORDS: usize = 180;
+
 /// Groups normalized segments into speaker turns.
 ///
 /// Consecutive segments sharing a speaker id merge into one turn, including
 /// consecutive *unattributed* segments, which merge into a single "Unknown
 /// speaker" turn rather than one per 30-second chunk.
+///
+/// Grouping is deliberately conservative in both directions. It never splits on
+/// anything but a real speaker change or [`MAX_TURN_WORDS`], so no turn boundary
+/// here implies a speaker change that the data does not support; and it never
+/// rewrites, reorders, or merges across a speaker change.
 pub fn build_conversation(segments: &[NormalizedSegment]) -> Conversation {
     let mut turns: Vec<ConversationTurn> = Vec::new();
 
@@ -24,9 +39,10 @@ pub fn build_conversation(segments: &[NormalizedSegment]) -> Conversation {
             continue;
         }
 
-        let continues_previous = turns
-            .last()
-            .is_some_and(|turn| turn.speaker_id == segment.speaker_id);
+        let continues_previous = turns.last().is_some_and(|turn| {
+            turn.speaker_id == segment.speaker_id
+                && turn.text.split_whitespace().count() < MAX_TURN_WORDS
+        });
 
         if continues_previous {
             let turn = turns
@@ -251,5 +267,83 @@ mod tests {
         assert!(
             render_conversation_markdown(&conversation, &speakers).contains("**Unknown speaker**")
         );
+    }
+}
+
+#[cfg(test)]
+mod turn_length_tests {
+    use super::*;
+    use crate::meetings_v2::processing::model::SPEAKER_ID_ME;
+    use crate::meetings_v2::processing::normalize::{normalize_transcript, RawSegmentInput};
+    use crate::meetings_v2::processing::speakers::{
+        attribute_speakers, SpeakerIdentificationMode,
+    };
+
+    #[test]
+    fn one_speaker_talking_for_a_long_time_does_not_become_one_wall_of_text() {
+        let line = "and then we looked at the migration strategy and what it means for the local \
+vault and the sync layer in some detail before moving on";
+        let raws: Vec<RawSegmentInput> = (0..12)
+            .map(|i| RawSegmentInput {
+                chunk_index: i,
+                start_time_s: i as f64 * 30.0,
+                end_time_s: (i + 1) as f64 * 30.0,
+                text: line.to_string(),
+                mic_had_audio: true,
+                sys_had_audio: false,
+            })
+            .collect();
+
+        let mut segments = normalize_transcript(&raws, &[]).segments;
+        let speakers = attribute_speakers(&mut segments, &[], SpeakerIdentificationMode::Automatic);
+        let conversation = build_conversation(&segments);
+
+        assert!(
+            conversation.turns.len() > 1,
+            "twelve minutes of one voice is not one readable turn"
+        );
+        for turn in &conversation.turns {
+            assert_eq!(
+                turn.speaker_id.as_deref(),
+                Some(SPEAKER_ID_ME),
+                "breaking a long turn must not invent a speaker change"
+            );
+        }
+        // Every segment is still accounted for exactly once, in order.
+        let ids: Vec<&String> = conversation
+            .turns
+            .iter()
+            .flat_map(|t| t.segment_ids.iter())
+            .collect();
+        assert_eq!(ids.len(), segments.len());
+        assert!(ids.windows(2).all(|w| w[0] < w[1]));
+
+        let rendered = render_conversation_markdown(&conversation, &speakers);
+        assert!(!rendered.contains("**Unknown speaker**"));
+    }
+
+    #[test]
+    fn ordinary_back_and_forth_is_not_split() {
+        let raws = vec![
+            RawSegmentInput {
+                chunk_index: 0,
+                start_time_s: 0.0,
+                end_time_s: 30.0,
+                text: "so I think we should ship on Friday".into(),
+                mic_had_audio: true,
+                sys_had_audio: false,
+            },
+            RawSegmentInput {
+                chunk_index: 1,
+                start_time_s: 30.0,
+                end_time_s: 60.0,
+                text: "and I will write the changelog tonight".into(),
+                mic_had_audio: true,
+                sys_had_audio: false,
+            },
+        ];
+        let mut segments = normalize_transcript(&raws, &[]).segments;
+        attribute_speakers(&mut segments, &[], SpeakerIdentificationMode::Automatic);
+        assert_eq!(build_conversation(&segments).turns.len(), 1);
     }
 }
