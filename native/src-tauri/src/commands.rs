@@ -1631,7 +1631,22 @@ pub async fn start_meeting_v2(
 ) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
     let settings = state.settings.lock().unwrap().clone();
     let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
-    let decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
+    let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
+
+    // Hand the recognizer the vocabulary before it guesses, rather than
+    // repairing its guess afterwards.
+    //
+    // `normalize::apply_glossary` already rewrites known terms by edit distance,
+    // but that can only fix a near-miss — it cannot recover a project name or a
+    // participant's name that Whisper never produced anything close to. The
+    // dictionary is the same list either way, so seeding it here costs nothing
+    // and is strictly more capable. `build_stt_prompt` also folds in
+    // Settings › STT's own custom prompt, so an explicitly configured prompt is
+    // still honoured.
+    if decoding_config.initial_prompt.is_none() {
+        decoding_config.initial_prompt = settings.build_stt_prompt();
+    }
+
     let models_dir = state.config_dir.join("models");
     let whisper_model_path = settings.stt.whisper_model_path;
 
@@ -2134,6 +2149,163 @@ pub async fn list_meeting_v2_processing(
             })
         })
         .collect())
+}
+
+/// Grows or shrinks the meeting pill for its hovered state.
+///
+/// Frontend-owned presentation, backend-owned geometry — the same split the
+/// dictation pill uses. The window is resized rather than left permanently large
+/// because a transparent margin would still swallow clicks for the whole
+/// meeting.
+#[tauri::command]
+pub async fn set_meeting_overlay_expanded(
+    app: AppHandle,
+    expanded: bool,
+) -> Result<(), CommandError> {
+    crate::overlay::set_meeting_overlay_expanded(&app, expanded);
+    Ok(())
+}
+
+/// One action item that reached (or failed to reach) a Kanban board.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MeetingTaskPushResult {
+    pub action_item_id: String,
+    pub kanban_card_id: Option<String>,
+    pub title: String,
+    pub assignee: String,
+    /// Set only when this item could not be added.
+    pub error: Option<String>,
+}
+
+/// Adds a meeting's action items to the Kanban board as tasks.
+///
+/// With `action_item_id` set, adds exactly that item; without it, adds every
+/// action item that is not already on the board. Pressing "add all" twice is
+/// therefore safe — the second press adds only what is new.
+///
+/// The mapping itself lives in `processing::tasks`, so what lands on a card is
+/// decided in one tested place rather than here.
+#[tauri::command]
+pub async fn push_meeting_v2_action_items_to_kanban(
+    app: AppHandle,
+    session_id: String,
+    action_item_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<MeetingTaskPushResult>, CommandError> {
+    use crate::meetings_v2::processing::tasks::{draft_from_action_item, pending_drafts};
+
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+
+    let session = state
+        .meetings_v2
+        .store()
+        .get_session(&session_id)
+        .map_err(|e| CommandError::new("MEETING_NOT_FOUND", &e))?;
+
+    let processing = state.meeting_processor.get(&session_id).ok_or_else(|| {
+        CommandError::new(
+            "MEETING_NOT_PROCESSED",
+            "Process this meeting before adding its to-dos as tasks",
+        )
+    })?;
+
+    let facts = processing.facts.as_ref().ok_or_else(|| {
+        CommandError::new(
+            "MEETING_NOT_PROCESSED",
+            "This meeting has no extracted to-dos yet",
+        )
+    })?;
+
+    let meeting_title = facts.title.trim();
+    let meeting_title = if meeting_title.is_empty() {
+        session.title.as_str()
+    } else {
+        meeting_title
+    };
+    let meeting_date = session.started_at.as_deref();
+
+    let drafts = match action_item_id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+        Some(id) => {
+            let item = facts
+                .action_items
+                .iter()
+                .find(|i| i.id == id)
+                .ok_or_else(|| {
+                    CommandError::new("UNKNOWN_ACTION_ITEM", "That to-do is no longer in this meeting")
+                })?;
+            if item.kanban_card_id.is_some() {
+                return Err(CommandError::new(
+                    "ALREADY_A_TASK",
+                    "This to-do is already on the board",
+                ));
+            }
+            vec![draft_from_action_item(
+                item,
+                &processing.speakers,
+                meeting_title,
+                meeting_date,
+            )]
+        }
+        None => pending_drafts(facts, &processing.speakers, meeting_title, meeting_date),
+    };
+
+    let mut results = Vec::with_capacity(drafts.len());
+    for draft in drafts {
+        let card = KanbanCard {
+            id: format!("card_{}", uuid::Uuid::new_v4()),
+            title: draft.title.clone(),
+            assignee: draft.assignee.clone(),
+            status: draft.status.to_string(),
+            priority: draft.priority.to_string(),
+            due_date: draft.due_date.clone(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            description: draft.description.clone(),
+            source_note_id: Some(session_id.clone()),
+        };
+
+        // Save the card first: a card without provenance is recoverable, but a
+        // to-do marked as pushed with no card behind it is not.
+        if let Err(e) = state.vault.save_kanban_card(&card) {
+            results.push(MeetingTaskPushResult {
+                action_item_id: draft.action_item_id,
+                kanban_card_id: None,
+                title: draft.title,
+                assignee: draft.assignee,
+                error: Some(e.to_string()),
+            });
+            continue;
+        }
+
+        if let Err(e) = state.meeting_processor.record_action_item_task(
+            &session_id,
+            &draft.action_item_id,
+            &card.id,
+        ) {
+            tracing::warn!(
+                meeting_id = %session_id,
+                action_item_id = %draft.action_item_id,
+                "meeting_tasks: card saved but the to-do could not be marked as pushed: {}",
+                e
+            );
+        }
+
+        results.push(MeetingTaskPushResult {
+            action_item_id: draft.action_item_id,
+            kanban_card_id: Some(card.id),
+            title: draft.title,
+            assignee: draft.assignee,
+            error: None,
+        });
+    }
+
+    if let Some(processing) = state.meeting_processor.get(&session_id) {
+        let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
+    }
+    let _ = app.emit("kanban-cards-changed", ());
+
+    Ok(results)
 }
 
 /// Converts a meeting into a Scribble.

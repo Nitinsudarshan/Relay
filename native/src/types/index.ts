@@ -652,6 +652,12 @@ export interface Speaker {
 export interface NormalizedSegment {
   id: string;
   chunk_index: number;
+  /**
+   * Which utterance within the chunk this is. Null for a whole-chunk segment —
+   * a transcript recorded before v2.5, or a chunk Whisper returned no timed
+   * spans for.
+   */
+  utterance_index?: number | null;
   start_time_s: number;
   end_time_s: number;
   text: string;
@@ -701,6 +707,11 @@ export interface ActionItem {
   status: ActionItemStatus;
   source_segment_ids: string[];
   confidence: number;
+  /**
+   * The Kanban card this to-do was added to, if it has been. Null means it has
+   * not left the meeting yet.
+   */
+  kanban_card_id?: string | null;
 }
 
 export interface Decision {
@@ -966,6 +977,12 @@ export interface TranscriptSegment {
    */
   mic_had_audio?: boolean;
   sys_had_audio?: boolean;
+  /**
+   * Whisper's own utterance spans within this chunk, each already resolved to a
+   * channel from the chunk's per-second energy track. Empty for transcripts
+   * recorded before v2.5, which are still read from the chunk-level flags above.
+   */
+  utterances?: TranscriptUtterance[];
 }
 
 /**
@@ -1009,7 +1026,25 @@ export interface MeetingDiagnostics {
   error?: string | null;
 }
 
+/** One utterance inside a chunk, with the channel live while it was spoken. */
+export interface TranscriptUtterance {
+  index: number;
+  /** Absolute session time, not an offset within the chunk. */
+  start_time_s: number;
+  end_time_s: number;
+  text: string;
+  mic_had_audio: boolean;
+  sys_had_audio: boolean;
+  /** Whisper's own no-speech probability for the span, for diagnostics. */
+  no_speech_prob?: number;
+}
 
-
-
-
+/** The outcome of adding one meeting to-do to the Kanban board. */
+export interface MeetingTaskPushResult {
+  action_item_id: string;
+  kanban_card_id?: string | null;
+  title: string;
+  assignee: string;
+  /** Set only when this to-do could not be added. */
+  error?: string | null;
+}

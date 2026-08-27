@@ -1,7 +1,12 @@
 # Meeting pipelines, mechanism by mechanism — and where Relay actually stands
 
-**Prepared for:** Relay v0.13.1 (Tauri/Rust + React, Windows-first, local-first, bot-free)
+**Prepared for:** Relay (Tauri/Rust + React, Windows-first, local-first, bot-free)
+**Analysis baseline:** v0.13.1
 **Date:** 27 August 2026
+
+> **Status update — Meetings v2.5.** Gaps 1, 3 and 5 are closed and gap 4 is
+> partly addressed; see §5.1 for what shipped and what each fix actually does.
+> The rest of the ledger stands as written.
 **Scope:** meetings only, and **bot-free architectures only.** Dictation, scribbles, and
 the Kanban/vault surfaces are out of scope except where a meeting exits into them.
 
@@ -317,9 +322,49 @@ Worth stating plainly, because it changes what the gaps below cost:
 
 ## 5. Where Relay falls short — ranked by what it costs a real meeting
 
+### 5.1 Closed in Meetings v2.5
+
+**Gap 1 — attribution resolves at utterance granularity now.** `capture.rs` keeps
+the per-source RMS it already measured as a per-second track on the chunk
+(`ChannelEnergy`), `stt.rs` returns Whisper's own timed utterance spans instead of
+one concatenated string, and `worker.rs` matches each span against the track. A
+10 dB dominance margin rejects speaker bleed into the microphone, so an utterance
+resolves to one source instead of registering both. Genuine crosstalk still
+resolves to no speaker — the module's rule that ambiguity is preserved rather
+than guessed is unchanged. Normalized segments are now one per utterance
+(`seg_<chunk>_<utterance>`), which is what lets `qualify.rs` keep the owner it
+computes instead of demoting it. `PROCESSING_VERSION` is 3.
+
+**Gap 3 — the recognizer gets the vocabulary before it guesses.**
+`AppSettings::build_stt_prompt` existed and was called from nowhere; the meetings
+path now seeds `initial_prompt` from it, so the user's dictionary reaches Whisper
+as well as the post-hoc glossary rewrite. An explicitly configured STT prompt
+still wins.
+
+**Gap 4 — partly.** Each chunk still gets a fresh Whisper state, so a decoder
+loop cannot propagate. What changed is that the tail of the previous chunk's text
+is carried into the next chunk's prompt, restoring cross-boundary context without
+restoring shared state. Silence, an empty decode, and a failed decode all clear
+the carry, so context never splices across a gap. *Still open:* an overlap window
+on the durable chunk with seam deduplication, and VAD-aligned cuts.
+
+**Gap 5 — to-dos leave the app.** `processing::tasks` maps an action item to a
+`MeetingTaskDraft` (title, assignee resolved through the speaker registry, due
+date from a spoken deadline only, priority from deadline plus extraction
+confidence, description carrying meeting and transcript provenance), and
+`push_meeting_v2_action_items_to_kanban` turns drafts into `KanbanCard`s. The card
+is saved before the to-do is marked as pushed, and `kanban_card_id` on the action
+item is what makes "add all" safe to press twice.
+
+*Unchanged and still open:* gaps 2, 6, 7, 8, 9, 10, and the tier-4 deferrals.
+Gap 2 is now the highest-value remaining item — the attribution machinery
+resolves *which* channel spoke, but nothing yet attaches a **name** to it.
+
+
+
 ### Tier 1 — the output is measurably worse than a competitor's for the same recording
 
-**Gap 1. Attribution resolves to "unknown" for most of a real conversation.**
+**Gap 1. Attribution resolves to "unknown" for most of a real conversation.** *(closed in v2.5 — see §5.1)*
 
 `capture.rs:632` computes `mic_had_audio` / `sys_had_audio` as one RMS boolean per
 source per **30-second chunk**, and `types.rs:123-126` persists exactly those two
@@ -352,7 +397,7 @@ typed names do not carry to the next meeting. anarlog and Littlebird both treat
 calendar/contacts as the primary source; Granola gets real names out of the transcript
 itself. Relay has neither.
 
-**Gap 3. Vocabulary is corrected after the fact, never given to the recognizer.**
+**Gap 3. Vocabulary is corrected after the fact, never given to the recognizer.** *(closed in v2.5 — see §5.1)*
 
 `normalize.rs:288 apply_glossary` rewrites known terms by edit distance *after* Whisper
 has already guessed. Whisper's own biasing mechanism — `initial_prompt` — is already
@@ -364,7 +409,7 @@ Post-hoc repair cannot recover a name Whisper never produced a near-miss for, an
 Hinglish that is exactly the hard case. This one costs nothing but wiring: the glossary
 table and the prompt path both already exist.
 
-**Gap 4. Chunk boundaries are decoded blind.**
+**Gap 4. Chunk boundaries are decoded blind.** *(partly closed in v2.5 — see §5.1)*
 
 `stt.rs:388-389` creates a **fresh** `WhisperState` per chunk. That is the right call
 for hallucination-loop safety — nothing carries over — but it means a sentence
@@ -376,7 +421,7 @@ chunk with seam deduplication, and/or carrying the tail of the previous chunk's 
 
 ### Tier 2 — the meeting cannot be acted on
 
-**Gap 5. Nothing leaves the app.** *(largest product value per unit of effort)*
+**Gap 5. Nothing leaves the app.** *(closed in v2.5 — see §5.1)*
 
 Relay's action items are already better-shaped data than the competitors hold: owner,
 deadline, status, evidence span, confidence — structured objects, with
@@ -455,15 +500,19 @@ attenuation would corrupt the very energy measurement attribution depends on.
 The old teardown's recommended sequence is now partly done. Given v0.13.1, this is the
 order that maximises value per unit of work:
 
-**First — unlock what is already built**
-1. **Per-second channel energy track** in `capture.rs`, persisted on the segment.
-   `qualify.rs` already computes owners and demotes them for lack of this signal.
-   Nothing else in this list has a comparable payoff.
-2. **Calendar + contacts integration.** One piece of work, three payoffs: attendee names
+**Done in v2.5**
+1. ~~**Per-second channel energy track** in `capture.rs`~~ — shipped, at utterance
+   granularity via Whisper's own segment timings.
+2. ~~**Meeting action item → Kanban card**~~ — shipped as `processing::tasks` plus
+   `push_meeting_v2_action_items_to_kanban`.
+3. ~~**Vocabulary at the recognizer**~~ — shipped; `initial_prompt` is seeded from
+   the dictionary and carries the previous chunk's tail.
+
+**First — the highest-value remaining item**
+1. **Calendar + contacts integration.** One piece of work, three payoffs: attendee names
    for the speaker registry, an `initial_prompt` seed of names and terms, and priors for
-   `related.rs`. Also delivers gap 12.
-3. **Meeting action item → Kanban card.** The objects are already structured; this is a
-   wire, not a feature.
+   `related.rs`. Also delivers gap 12. Now the top of the list: v2.5 resolves *which
+   channel* spoke, but nothing yet attaches a name to it.
 
 **Next — transcription quality where it actually breaks**
 4. Overlap window on durable chunks with seam dedup; `initial_prompt` auto-seeded from

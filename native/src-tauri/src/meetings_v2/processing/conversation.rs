@@ -136,6 +136,7 @@ mod tests {
     fn raw(chunk_index: usize, text: &str, mic: bool, sys: bool) -> RawSegmentInput {
         RawSegmentInput {
             chunk_index,
+            utterance_index: None,
             start_time_s: chunk_index as f64 * 30.0,
             end_time_s: (chunk_index + 1) as f64 * 30.0,
             text: text.to_string(),
@@ -246,6 +247,7 @@ mod tests {
         let segments = vec![NormalizedSegment {
             id: "seg_00000".into(),
             chunk_index: 0,
+            utterance_index: None,
             start_time_s: 0.0,
             end_time_s: 30.0,
             text: "Orphaned segment.".into(),
@@ -286,6 +288,7 @@ vault and the sync layer in some detail before moving on";
         let raws: Vec<RawSegmentInput> = (0..12)
             .map(|i| RawSegmentInput {
                 chunk_index: i,
+                utterance_index: None,
                 start_time_s: i as f64 * 30.0,
                 end_time_s: (i + 1) as f64 * 30.0,
                 text: line.to_string(),
@@ -327,6 +330,7 @@ vault and the sync layer in some detail before moving on";
         let raws = vec![
             RawSegmentInput {
                 chunk_index: 0,
+                utterance_index: None,
                 start_time_s: 0.0,
                 end_time_s: 30.0,
                 text: "so I think we should ship on Friday".into(),
@@ -335,6 +339,7 @@ vault and the sync layer in some detail before moving on";
             },
             RawSegmentInput {
                 chunk_index: 1,
+                utterance_index: None,
                 start_time_s: 30.0,
                 end_time_s: 60.0,
                 text: "and I will write the changelog tonight".into(),

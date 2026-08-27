@@ -267,6 +267,27 @@ impl WhisperDecodingConfig {
     }
 }
 
+/// One decoded utterance — a single Whisper segment, with the timing Whisper
+/// itself assigned to it.
+///
+/// Whisper already segments a decode into utterance-sized spans and reports a
+/// start and end for each. Before v2.5 the meetings worker concatenated those
+/// spans into one string and discarded the timings, which left the whole
+/// 30-second chunk as a single undifferentiated block of text — and therefore
+/// unattributable to any speaker finer than "someone spoke during these thirty
+/// seconds". Keeping the spans is what lets channel provenance resolve at
+/// roughly sentence granularity.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SttUtterance {
+    /// Offset from the start of the submitted audio, in seconds.
+    pub start_s: f64,
+    pub end_s: f64,
+    pub text: String,
+    /// Whisper's own confidence that this span is not speech. High values mark
+    /// the hallucinated filler Whisper emits over silence and music.
+    pub no_speech_prob: f32,
+}
+
 /// Diagnostic metadata recorded for an STT transcription session.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SttSessionDiagnostics {
@@ -323,6 +344,10 @@ impl SttEngine {
     }
 
     /// Transcribe with explicit Whisper decoding configuration and return diagnostic metrics.
+    ///
+    /// Text is joined from the same utterances
+    /// [`SttEngine::transcribe_utterances_with_config`] returns, so the two can
+    /// never disagree about what was said.
     pub fn transcribe_with_config(
         &self,
         model_path: Option<&str>,
@@ -330,6 +355,26 @@ impl SttEngine {
         language_config: &SttLanguageConfig,
         decoding_config: &WhisperDecodingConfig,
     ) -> Result<(String, SttSessionDiagnostics), SttError> {
+        let (utterances, diag) = self.transcribe_utterances_with_config(
+            model_path,
+            samples_16k_mono,
+            language_config,
+            decoding_config,
+        )?;
+        Ok((join_utterance_text(&utterances), diag))
+    }
+
+    /// Transcribe and return Whisper's own utterance spans, each with its timing.
+    ///
+    /// The one decode path. Callers that only want text go through
+    /// [`SttEngine::transcribe_with_config`], which joins these.
+    pub fn transcribe_utterances_with_config(
+        &self,
+        model_path: Option<&str>,
+        samples_16k_mono: &[f32],
+        language_config: &SttLanguageConfig,
+        decoding_config: &WhisperDecodingConfig,
+    ) -> Result<(Vec<SttUtterance>, SttSessionDiagnostics), SttError> {
         #[cfg(not(feature = "whisper-local"))]
         {
             let _ = (model_path, samples_16k_mono, language_config, decoding_config);
@@ -362,7 +407,7 @@ impl SttEngine {
                     is_empty: true,
                     transcript_char_count: 0,
                 };
-                return Ok((String::new(), diag));
+                return Ok((Vec::new(), diag));
             }
 
             let mut guard = self.loaded.lock().unwrap();
@@ -426,17 +471,27 @@ impl SttEngine {
                 .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
             let elapsed_ms = t0.elapsed().as_millis();
 
-            let mut text = String::new();
+            let mut utterances: Vec<SttUtterance> = Vec::new();
             let mut segment_count = 0;
             for segment in state.as_iter() {
                 segment_count += 1;
                 let segment_text = segment
                     .to_str_lossy()
                     .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
-                text.push_str(&segment_text);
+                let text = segment_text.trim();
+                if text.is_empty() {
+                    continue;
+                }
+                // whisper.cpp reports segment bounds in centiseconds.
+                utterances.push(SttUtterance {
+                    start_s: segment.start_timestamp() as f64 / 100.0,
+                    end_s: segment.end_timestamp() as f64 / 100.0,
+                    text: text.to_string(),
+                    no_speech_prob: segment.no_speech_probability(),
+                });
             }
 
-            let trimmed_text = text.trim().to_string();
+            let trimmed_text = join_utterance_text(&utterances);
             let rtf = if audio_dur > 0.0 {
                 (elapsed_ms as f32 / 1000.0) / audio_dur
             } else {
@@ -472,9 +527,21 @@ impl SttEngine {
                 diag.transcript_char_count
             );
 
-            Ok((trimmed_text, diag))
+            Ok((utterances, diag))
         }
     }
+}
+
+/// Joins utterance text the way a single Whisper decode would have produced it.
+pub fn join_utterance_text(utterances: &[SttUtterance]) -> String {
+    let mut out = String::new();
+    for utterance in utterances {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&utterance.text);
+    }
+    out.trim().to_string()
 }
 
 /// Encoder context used for live streaming windows.

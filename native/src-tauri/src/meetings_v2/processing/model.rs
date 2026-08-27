@@ -21,7 +21,13 @@ use std::collections::BTreeMap;
 /// persisted, and the summary artifact records what became of the model's draft
 /// separately from whether the stage succeeded. Facts extracted under v1 carry
 /// action items that never passed the gate.
-pub const PROCESSING_VERSION: u32 = 2;
+///
+/// v3: normalized segments are one per *utterance* rather than one per
+/// 30-second chunk, so segment ids gained an utterance suffix and speaker
+/// attribution resolves per utterance. Facts extracted under v1 or v2 cite
+/// chunk-level segment ids and carry owners that were demoted to `Unassigned`
+/// because chunk-level channel data could not resolve them.
+pub const PROCESSING_VERSION: u32 = 3;
 
 /// Identifies the `Meeting-rules/` revision the prompts encode. Recorded on
 /// every derived artifact so a quality change six months from now can be
@@ -133,6 +139,10 @@ pub struct NormalizedSegment {
     /// from the immutable chunk index.
     pub id: String,
     pub chunk_index: usize,
+    /// Which utterance within the chunk this segment is, when the recorder
+    /// resolved the chunk into utterances. `None` for a whole-chunk segment.
+    #[serde(default)]
+    pub utterance_index: Option<usize>,
     pub start_time_s: f64,
     pub end_time_s: f64,
     /// The cleaned text. Meaning-preserving: normalization may repair, it may
@@ -258,6 +268,13 @@ pub struct ActionItem {
     pub source_segment_ids: Vec<String>,
     #[serde(default = "default_confidence")]
     pub confidence: f32,
+    /// The Kanban card this item was pushed to, if it has been.
+    ///
+    /// Recorded so the same commitment cannot reach the board twice, and so the
+    /// meeting can show which of its to-dos have already left the app. `None`
+    /// means it has not been pushed.
+    #[serde(default)]
+    pub kanban_card_id: Option<String>,
 }
 
 fn default_action_status() -> ActionItemStatus {

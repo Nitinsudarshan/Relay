@@ -52,6 +52,11 @@ const MIN_FUZZY_GLOSSARY_LEN: usize = 6;
 #[derive(Debug, Clone)]
 pub struct RawSegmentInput {
     pub chunk_index: usize,
+    /// Which utterance within the chunk this is, when the recorder resolved the
+    /// chunk into utterances. `None` means the input covers the whole chunk —
+    /// a transcript recorded before v2.5, or a chunk Whisper returned no timed
+    /// spans for.
+    pub utterance_index: Option<usize>,
     pub start_time_s: f64,
     pub end_time_s: f64,
     pub text: String,
@@ -63,6 +68,22 @@ pub struct RawSegmentInput {
 /// it survives regeneration and can be cited by action items and decisions.
 pub fn segment_id(chunk_index: usize) -> String {
     format!("seg_{:05}", chunk_index)
+}
+
+/// The stable segment id for one utterance within a chunk.
+///
+/// Both indices are immutable properties of the raw transcript, so the id
+/// survives regeneration exactly as the chunk-level id does.
+pub fn utterance_segment_id(chunk_index: usize, utterance_index: usize) -> String {
+    format!("seg_{:05}_{:03}", chunk_index, utterance_index)
+}
+
+/// The id for a raw input, whichever granularity it carries.
+pub fn raw_segment_id(raw: &RawSegmentInput) -> String {
+    match raw.utterance_index {
+        Some(utterance_index) => utterance_segment_id(raw.chunk_index, utterance_index),
+        None => segment_id(raw.chunk_index),
+    }
 }
 
 /// Normalizes a whole raw transcript.
@@ -97,8 +118,9 @@ pub fn normalize_transcript(
 
         let channel = SegmentChannel::from_flags(raw.mic_had_audio, raw.sys_had_audio);
         segments.push(NormalizedSegment {
-            id: segment_id(raw.chunk_index),
+            id: raw_segment_id(raw),
             chunk_index: raw.chunk_index,
+            utterance_index: raw.utterance_index,
             start_time_s: raw.start_time_s,
             end_time_s: raw.end_time_s,
             text: outcome.text,
@@ -109,7 +131,14 @@ pub fn normalize_transcript(
         });
     }
 
-    segments.sort_by_key(|s| s.chunk_index);
+    // Chronological, and stable within a chunk. `utterance_index` is the tie
+    // break rather than the timestamp, because two utterances can share a
+    // rounded start.
+    segments.sort_by(|a, b| {
+        a.chunk_index
+            .cmp(&b.chunk_index)
+            .then(a.utterance_index.cmp(&b.utterance_index))
+    });
     let output_char_count = segments.iter().map(|s| s.text.len()).sum();
 
     NormalizedTranscript {
@@ -449,6 +478,7 @@ mod tests {
     fn seg(chunk_index: usize, text: &str) -> RawSegmentInput {
         RawSegmentInput {
             chunk_index,
+            utterance_index: None,
             start_time_s: chunk_index as f64 * 30.0,
             end_time_s: (chunk_index + 1) as f64 * 30.0,
             text: text.to_string(),

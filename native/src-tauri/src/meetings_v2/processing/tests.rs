@@ -51,6 +51,7 @@ impl Harness {
                         status: TranscriptSegmentStatus::Success,
                         mic_had_audio: *mic,
                         sys_had_audio: *sys,
+                        utterances: Vec::new(),
                     },
                 )
                 .unwrap();
@@ -1057,6 +1058,7 @@ async fn related_meetings_are_found_through_shared_metadata() {
                         status: TranscriptSegmentStatus::Success,
                         mic_had_audio: *mic,
                         sys_had_audio: *sys,
+                        utterances: Vec::new(),
                     },
                 )
                 .unwrap();
