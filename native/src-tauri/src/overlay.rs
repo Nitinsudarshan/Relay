@@ -178,17 +178,18 @@ fn active_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
 
 pub const MEETING_OVERLAY_LABEL: &str = "meeting-overlay";
 
-/// The resting meeting pill: a vertical capsule holding the mark and a live
-/// waveform, anchored to the right edge and centred vertically.
+/// The resting meeting pill: one horizontal capsule holding the status dot, the
+/// elapsed time, and a live waveform.
 ///
 /// Small on purpose. A meeting runs for an hour, so the recording indicator
-/// spends that hour on top of whatever the user is actually working in; it needs
-/// to say "still recording" and nothing more. Controls appear on hover
-/// ([`MEETING_OVERLAY_EXPANDED_SIZE`]), which is the only state that needs room.
-const MEETING_OVERLAY_RESTING_SIZE: (f64, f64) = (56.0, 84.0);
+/// spends that hour on top of whatever the user is actually working in. The
+/// window is transparent but still takes clicks, so every pixel wider than the
+/// pill is an invisible dead zone over the user's screen.
+const MEETING_OVERLAY_RESTING_SIZE: (f64, f64) = (248.0, 52.0);
 
-/// The hovered pill, wide enough for the timer and the pause/stop controls.
-const MEETING_OVERLAY_EXPANDED_SIZE: (f64, f64) = (232.0, 84.0);
+/// The hovered pill, wide enough for the pause and stop controls to open inside
+/// the same surface rather than floating beside it.
+const MEETING_OVERLAY_EXPANDED_SIZE: (f64, f64) = (330.0, 52.0);
 
 /// Gap between the pill and the right edge of the work area.
 const MEETING_OVERLAY_EDGE_MARGIN: f64 = 10.0;

@@ -1,5 +1,26 @@
 # Relay — Changelog
 
+## [0.15.1] - 2026-08-28
+
+### Meetings: A Working Pill Waveform & a Self-Contained Recording Pill
+
+**Type**: patch — `native/` only (`native/src-tauri/src/meetings_v2/capture.rs`, `native/src-tauri/src/overlay.rs`, `native/src/components/meetings_v2/{MeetingRecordingOverlay,MeetingPillMark}.tsx`).
+
+#### Fixes
+
+- **The pill's waveform now moves (`meetings_v2/capture.rs`)**: `meter_level` scaled RMS linearly (`rms * 5.0`), so a normal speaking voice — around -34 dBFS RMS — reached 0.1–0.4 of full scale and drew bars two or three pixels tall. The levels were arriving the whole time; they were unreadable. The meter now maps a decibel window (-55 dB to -15 dB) onto bar height, which is what a level meter is, and gates anything at or below the pipeline's existing audibility threshold to zero so silence is genuinely flat rather than animated room tone. Display only — every audibility decision already used `raw_rms` directly, so what the recorder considers audible is unchanged.
+
+#### Improvements
+
+- **The pill is one object (`MeetingRecordingOverlay.tsx`)**: the status dot, elapsed time, and waveform sit inside a single `rounded-lg` surface, and hovering opens pause and stop **inside that same surface** rather than floating them alongside it. Nothing is attached to the pill; the pill is the whole object.
+- **The waveform shows both channels again, readably (`MeetingPillMark.tsx`)**: one mirrored strip on a shared timeline — the microphone above the centreline in indigo, the meeting's audio below it in sky. The previous pair of separate opposing meters needed MIC and SYS labels to be read at all, and a single combined meter could not say who was talking; a mirrored strip says it without a legend. Twenty bars, just under a second of history.
+- **The spiral mark is gone (`MeetingPillMark.tsx`)**: the pill's identity is now the waveform itself, which is the part that carries information. `MeetingPillSpiral` is removed rather than left unused.
+- **The window still grows only while the controls are open (`overlay.rs`)**: resting 248×52, hovered 330×52, right-edge anchored. The window is transparent but still takes clicks, so unused width is an invisible dead zone rather than free space. Measured against every state, including an hour-long timer with a capture warning showing: 189–238 px resting, 261–310 px hovered.
+
+#### Tests
+
+- `the_meter_puts_conversational_speech_in_the_visible_middle` pins the regression: silence and room tone read zero, speech at -34 dBFS lands between 0.35 and 0.75 of full scale, and the curve is monotonic across the audible range.
+
 ## [0.15.0] - 2026-08-28
 
 ### Prompt Mode Removal & Architectural Archiving

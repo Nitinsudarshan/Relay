@@ -236,8 +236,32 @@ impl Drop for DualAudioCapture {
 }
 
 /// Scales an RMS reading into the 0..1 range the Dictation meter draws.
+/// The decibel window the level meter maps onto bar height.
+///
+/// Conversational speech sits around -34 dBFS RMS. The floor is set below a
+/// quiet room and the ceiling below full scale, so a normal speaking voice lands
+/// near the middle of the bar rather than against either end.
+const METER_FLOOR_DB: f32 = -55.0;
+const METER_CEILING_DB: f32 = -15.0;
+
+/// Maps an RMS reading onto `0.0..=1.0` for the recording pill's waveform.
+///
+/// Display only — every audibility decision uses [`raw_rms`] directly, so this
+/// curve can be tuned for the eye without touching what the recorder considers
+/// audible.
+///
+/// A meter is a perceptual instrument, not a linear one. Scaling RMS linearly
+/// (the previous `rms * 5.0`) put speech at 0.1–0.4 of full scale: bars that
+/// moved by two or three pixels and read as a flat line. Mapping a decibel
+/// window instead puts speech where it can actually be seen.
 fn meter_level(rms: f32) -> f32 {
-    (rms * 5.0).clamp(0.0, 1.0)
+    if rms <= AUDIBLE_RMS_THRESHOLD {
+        // Below what the rest of the pipeline already calls silence, the meter
+        // reads flat rather than animating the room tone.
+        return 0.0;
+    }
+    let db = 20.0 * rms.log10();
+    ((db - METER_FLOOR_DB) / (METER_CEILING_DB - METER_FLOOR_DB)).clamp(0.0, 1.0)
 }
 
 /// True root-mean-square, unscaled — used for every audibility decision.
@@ -1196,6 +1220,34 @@ mod tests {
         assert_eq!(meter_level(0.0), 0.0);
         assert!(meter_level(0.1) > 0.0 && meter_level(0.1) <= 1.0);
         assert_eq!(meter_level(5.0), 1.0);
+    }
+
+    #[test]
+    fn the_meter_puts_conversational_speech_in_the_visible_middle() {
+        // Silence and room tone read flat.
+        assert_eq!(meter_level(0.0), 0.0);
+        assert_eq!(meter_level(0.001), 0.0, "room tone is not a waveform");
+
+        // A normal speaking voice — around -34 dBFS — must land where a bar is
+        // actually legible, not pinned near the floor. This is the regression:
+        // the linear meter put this at 0.1.
+        let speech = meter_level(0.02);
+        assert!(
+            (0.35..=0.75).contains(&speech),
+            "speech read {speech}, which is not a visible bar"
+        );
+
+        // Loud speech is clearly higher again, and nothing exceeds full scale.
+        assert!(meter_level(0.1) > speech);
+        assert!(meter_level(0.9) <= 1.0);
+
+        // The curve is monotonic across the audible range.
+        let mut previous = 0.0;
+        for step in 1..=40 {
+            let level = meter_level(step as f32 * 0.005);
+            assert!(level >= previous, "meter is not monotonic at step {step}");
+            previous = level;
+        }
     }
 
     #[test]

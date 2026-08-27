@@ -3,11 +3,18 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Square, Loader2, Pause, Play, AlertTriangle } from 'lucide-react';
 import { AudioLevels, MeetingSession } from '../../types';
-import { MeetingPillSpiral, MeetingPillWaveform } from './MeetingPillMark';
+import { MeetingPillWaveform } from './MeetingPillMark';
 
-/** Bars in the resting waveform. Four reads as a meter; twelve read as noise. */
-const WAVEFORM_BAR_COUNT = 4;
-const SILENT_LEVELS = new Array(WAVEFORM_BAR_COUNT).fill(0);
+/**
+ * Samples held in the waveform, one per bar.
+ *
+ * The backend emits a level pair every 40 ms and each event shifts the history
+ * by one bar, so this is a little under a second of audio on screen — long
+ * enough to read as a wave, short enough that it tracks the voice rather than
+ * lagging behind it.
+ */
+const WAVEFORM_BAR_COUNT = 20;
+const SILENT_LEVELS: number[] = new Array(WAVEFORM_BAR_COUNT).fill(0);
 
 /** States in which a session is no longer occupying the pill. */
 const TERMINAL_STATES = ['COMPLETED', 'IDLE', 'INTERRUPTED', 'RECOVERED', 'ERROR'];
@@ -28,19 +35,21 @@ const TIMER_TICK_MS = 250;
 /**
  * The floating meeting recording pill.
  *
- * A meeting runs for an hour, and for that hour this sits on top of whatever the
- * user is actually working in. So at rest it is a vertical capsule showing two
- * things — the mark, and a live level meter — and nothing else. That is enough
- * to answer the only question it needs to: is Relay still hearing this.
+ * One self-contained surface: the status dot, the elapsed time, and the live
+ * waveform are inside it, and hovering opens pause and stop inside it too
+ * rather than floating them alongside. Nothing is attached to the pill; the
+ * pill is the whole object.
  *
- * Controls are not removed, they are deferred: hovering grows the window and
- * reveals the timer, pause and stop. A recording you cannot stop from the
- * indicator that represents it would be a worse pill, not a more minimal one.
+ * A meeting runs for an hour, and for that hour this sits on top of whatever the
+ * user is actually working in — so it stays narrow at rest and the window grows
+ * only while the controls are open. The window is transparent but still takes
+ * clicks, so unused width is an invisible dead zone, not free space.
  */
 export const MeetingRecordingOverlay: React.FC = () => {
   const [session, setSession] = useState<MeetingSession | null>(null);
   const [elapsedSec, setElapsedSec] = useState<number>(0);
-  const [levels, setLevels] = useState<number[]>(SILENT_LEVELS);
+  const [micLevels, setMicLevels] = useState<number[]>(SILENT_LEVELS);
+  const [sysLevels, setSysLevels] = useState<number[]>(SILENT_LEVELS);
   const [isBusy, setIsBusy] = useState<boolean>(false);
   const [isHovered, setIsHovered] = useState<boolean>(false);
 
@@ -57,7 +66,8 @@ export const MeetingRecordingOverlay: React.FC = () => {
       durationAnchor.current = null;
       setSession(null);
       setElapsedSec(0);
-      setLevels(SILENT_LEVELS);
+      setMicLevels(SILENT_LEVELS);
+      setSysLevels(SILENT_LEVELS);
       return;
     }
 
@@ -93,10 +103,12 @@ export const MeetingRecordingOverlay: React.FC = () => {
 
     const unlistenLevels = listen<AudioLevels>('meeting-audio-levels', (event) => {
       const { mic_level, sys_level } = event.payload;
-      // One meter for both sources: at this size the pill answers "is Relay
-      // hearing anything", and whichever side is louder answers it.
-      const level = Math.min(1, Math.max(mic_level || 0, sys_level || 0));
-      setLevels((prev) => [...prev.slice(1), level]);
+      // Both channels shift the same way — newest on the right — so a bar's top
+      // and bottom halves are the same instant. Opposing directions would put
+      // the two meters on different timelines and the mirrored wave would be
+      // showing something that never happened.
+      setMicLevels((prev) => [...prev.slice(1), Math.min(1, mic_level || 0)]);
+      setSysLevels((prev) => [...prev.slice(1), Math.min(1, sys_level || 0)]);
     });
 
     return () => {
@@ -198,50 +210,81 @@ export const MeetingRecordingOverlay: React.FC = () => {
       onMouseEnter={() => setExpanded(true)}
       onMouseLeave={() => setExpanded(false)}
     >
-      <div className="flex items-center gap-2">
+      <div
+        className="inline-flex items-center gap-3 h-11 pl-3.5 pr-2 rounded-lg
+                   bg-[#141414]/95 backdrop-blur-xl
+                   border border-white/10 ring-1 ring-indigo-500/15
+                   shadow-[0_10px_30px_rgba(0,0,0,0.55)]"
+      >
+        {/* Status dot and elapsed recorded time — the only text in the pill. */}
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="relative flex w-2 h-2">
+            {isRecording && (
+              <span className="absolute inline-flex w-2 h-2 rounded-full bg-red-500 opacity-70 animate-ping" />
+            )}
+            <span
+              className={`relative inline-flex w-2 h-2 rounded-full ${
+                isPaused ? 'bg-amber-400' : isFinalizing ? 'bg-indigo-400' : 'bg-red-500'
+              }`}
+            />
+          </span>
+          <span className="font-mono text-[13px] leading-none font-medium tabular-nums text-neutral-100">
+            {formatTimer(elapsedSec)}
+          </span>
+        </div>
+
+        {session.capture_warning && (
+          <span
+            className="flex items-center shrink-0 text-amber-400"
+            title={session.capture_warning}
+          >
+            <AlertTriangle className="w-3.5 h-3.5" />
+          </span>
+        )}
+
+        {isFinalizing ? (
+          <span className="flex items-center shrink-0 text-neutral-400">
+            <Loader2 className="w-4 h-4 animate-spin" />
+          </span>
+        ) : (
+          <div className="shrink-0" title="You above the line, the meeting below it">
+            <MeetingPillWaveform mic={micLevels} sys={sysLevels} muted={isPaused} />
+          </div>
+        )}
+
+        {/* Controls open inside the pill, not beside it. */}
         {showControls && (
-          <div className="flex items-center gap-1.5 pl-1">
-            <span className="font-mono text-[11px] font-semibold tabular-nums text-neutral-300">
-              {formatTimer(elapsedSec)}
-            </span>
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={handleTogglePause}
               disabled={isBusy}
               title={isPaused ? 'Resume recording' : 'Pause recording'}
-              className="grid place-items-center w-7 h-7 rounded-full bg-neutral-800/90 text-neutral-200 border border-white/10 hover:bg-neutral-700 disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-400"
+              aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
+              className="grid place-items-center w-7 h-7 rounded-md text-neutral-300
+                         hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed
+                         focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400
+                         cursor-pointer"
             >
               {isPaused ? (
-                <Play className="w-3 h-3 fill-current" />
+                <Play className="w-3.5 h-3.5 fill-current" />
               ) : (
-                <Pause className="w-3 h-3 fill-current" />
+                <Pause className="w-3.5 h-3.5 fill-current" />
               )}
             </button>
             <button
               onClick={handleStop}
               disabled={isBusy}
               title="Stop and save this meeting"
-              className="grid place-items-center w-7 h-7 rounded-full bg-red-500/90 text-white border border-red-400/40 hover:bg-red-500 disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-400"
+              aria-label="Stop and save this meeting"
+              className="grid place-items-center w-7 h-7 rounded-md text-white bg-red-500
+                         hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed
+                         focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400
+                         cursor-pointer"
             >
-              <Square className="w-2.5 h-2.5 fill-current" />
+              <Square className="w-3 h-3 fill-current" />
             </button>
           </div>
         )}
-
-        {/* The pill itself. Fixed size, so hovering reveals controls beside it
-            rather than moving the mark the user is tracking. */}
-        <div
-          className="flex flex-col items-center justify-center gap-2 w-[44px] h-[72px] rounded-[18px] bg-[#141414] border border-white/10 ring-1 ring-black/40 shadow-[0_10px_30px_rgba(0,0,0,0.55)]"
-          title={session.capture_warning ?? undefined}
-        >
-          {isFinalizing ? (
-            <Loader2 className="w-[22px] h-[22px] animate-spin text-neutral-400" />
-          ) : session.capture_warning ? (
-            <AlertTriangle className="w-[20px] h-[20px] text-amber-400" />
-          ) : (
-            <MeetingPillSpiral className={`w-[22px] h-[22px] ${isPaused ? 'text-amber-400' : 'text-neutral-400'}`} />
-          )}
-          <MeetingPillWaveform levels={levels} muted={isPaused || isFinalizing} />
-        </div>
       </div>
     </div>
   );
