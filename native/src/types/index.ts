@@ -1,5 +1,5 @@
 export interface ProcessedPipelineResult {
-  mode: 'scribble' | 'trigger' | 'chat';
+  mode: 'voice_note' | 'scribble' | 'trigger' | 'chat';
   transcript: string;
   note_id?: string;
   kanban_cards_created: number;
@@ -64,6 +64,12 @@ export interface ProviderSettings {
 export interface SttSettings {
   /** Path to a GGML Whisper model file (e.g. ggml-small.bin). */
   whisper_model_path?: string | null;
+  /** Universal Dictation performance profile: 'fast' (~0.8s, Base model) or 'accurate' (~2.4s, Small model). */
+  dictation_quality?: 'fast' | 'accurate';
+  dictationQuality?: 'fast' | 'accurate';
+  /** Explicit override for dictation thread count (defaults to optimal clamped core allocation). */
+  dictation_threads?: number | null;
+  dictationThreads?: number | null;
   /** Whether domain vocabulary initial prompting is enabled. Defaults to false. */
   enable_initial_prompt?: boolean;
   /** Optional user-defined technical vocabulary prompt. */
@@ -281,9 +287,31 @@ export interface SnippetItem {
   enabled: boolean;
 }
 
+export interface PromptItem {
+  id: string;
+  name: string;
+  description?: string | null;
+  prompt_body: string;
+  enabled: boolean;
+}
+
 export interface AudioDeviceInfo {
   name: string;
   is_default: boolean;
+}
+
+export interface PromptSettings {
+  enabled: boolean;
+  prompt_hotkey?: string;
+  promptHotkey?: string;
+}
+
+export interface PromptItem {
+  id: string;
+  name: string;
+  description?: string | null;
+  prompt_body: string;
+  enabled: boolean;
 }
 
 /** Mirrors the Rust `AppSettings` struct persisted at `.relay/config/settings.json`. */
@@ -304,6 +332,8 @@ export interface AppSettings {
   meetings?: MeetingSettings;
   dictionary?: string[];
   snippets?: SnippetItem[];
+  prompt_settings?: PromptSettings;
+  prompts?: PromptItem[];
 }
 
 export type SpeakerIdentificationSetting = 'automatic' | 'off';

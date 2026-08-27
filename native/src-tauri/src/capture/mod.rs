@@ -67,6 +67,16 @@ pub enum CaptureError {
     SessionAlreadyActive,
 }
 
+// TEMP: dictation latency instrumentation
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CaptureTimingMetrics {
+    pub thread_stop_ms: u128,
+    pub resample_ms: u128,
+    pub vad_ms: u128,
+    pub wav_write_ms: u128,
+    pub total_stop_ms: u128,
+}
+
 /// Raw captured audio, resampled to 16kHz mono, ready to hand to an STT engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapturedAudio {
@@ -86,6 +96,9 @@ pub struct CapturedAudio {
     pub had_audio: bool,
     pub audio_stats: AudioStats,
     pub vad_result: VadResult,
+    // TEMP: dictation latency instrumentation
+    #[serde(default)]
+    pub timing_metrics: Option<CaptureTimingMetrics>,
 }
 
 /// Per-session state for telling speech apart from ambient noise: spends
@@ -191,6 +204,9 @@ impl AudioRecorder {
     }
 
     pub async fn stop(&self) -> Result<CapturedAudio, CaptureError> {
+        // TEMP: dictation latency instrumentation
+        let t_stop_start = std::time::Instant::now();
+
         let session = {
             let mut guard = self.active_session.lock().unwrap();
             guard.take().ok_or(CaptureError::NoActiveSession)?
@@ -207,11 +223,20 @@ impl AudioRecorder {
             })?
             .map_err(CaptureError::DeviceError)?;
 
+        // TEMP: dictation latency instrumentation
+        let t_thread_done = std::time::Instant::now();
+
         let mono_16k = resample_to_16k_mono(&capture_result.samples, capture_result.input_rate);
+
+        // TEMP: dictation latency instrumentation
+        let t_resampled = std::time::Instant::now();
 
         // Apply Voice Activity Detection (VAD) boundary trimming
         let vad_config = VadConfig::default();
         let (processed_samples, vad_result) = vad_config.process(&mono_16k, TARGET_SAMPLE_RATE);
+
+        // TEMP: dictation latency instrumentation
+        let t_vad_done = std::time::Instant::now();
 
         let had_audio = capture_result.had_audio && vad_result.speech_detected;
         let final_samples = if had_audio {
@@ -221,6 +246,9 @@ impl AudioRecorder {
         };
 
         write_wav(&session.file_path, if final_samples.is_empty() { &mono_16k } else { &final_samples })?;
+
+        // TEMP: dictation latency instrumentation
+        let t_wav_done = std::time::Instant::now();
 
         let stats = AudioStats::compute(&final_samples, TARGET_SAMPLE_RATE, 1);
         tracing::info!(
@@ -235,6 +263,15 @@ impl AudioRecorder {
             had_audio
         );
 
+        // TEMP: dictation latency instrumentation
+        let timing_metrics = CaptureTimingMetrics {
+            thread_stop_ms: t_thread_done.duration_since(t_stop_start).as_millis(),
+            resample_ms: t_resampled.duration_since(t_thread_done).as_millis(),
+            vad_ms: t_vad_done.duration_since(t_resampled).as_millis(),
+            wav_write_ms: t_wav_done.duration_since(t_vad_done).as_millis(),
+            total_stop_ms: t_stop_start.elapsed().as_millis(),
+        };
+
         Ok(CapturedAudio {
             session_id: session.session_id,
             mode: session.mode,
@@ -245,6 +282,7 @@ impl AudioRecorder {
             had_audio,
             audio_stats: stats,
             vad_result,
+            timing_metrics: Some(timing_metrics),
         })
     }
 }

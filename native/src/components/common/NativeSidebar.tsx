@@ -14,6 +14,7 @@ import {
   Sparkle,
   Sliders,
   Bell,
+  Wand2,
 } from 'lucide-react';
 import { RelayLogo } from '@/components/common/RelayLogo';
 import { Badge } from '@/components/ui/badge';
@@ -38,6 +39,7 @@ export type TabType =
   | 'capture'
   | 'meetings'
   | 'scribble'
+  | 'prompts'
   | 'settings';
 
 interface NativeSidebarProps {
@@ -48,6 +50,7 @@ interface NativeSidebarProps {
   account: RelayAccount | null;
   profile: RelayProfile | null;
   appVersion: string;
+  promptModeEnabled?: boolean;
   onOpenChangelog: () => void;
   onOpenWelcome: () => void;
   onOpenExplanation: () => void;
@@ -61,6 +64,7 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
   account,
   profile,
   appVersion,
+  promptModeEnabled = false,
   onOpenChangelog,
   onOpenWelcome,
   onOpenExplanation,
@@ -98,13 +102,20 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {
+      id: 'prompts' as TabType,
+      label: 'Prompts',
+      icon: Wand2,
+      color: 'text-sky-500',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+    {
       id: 'settings' as TabType,
       label: 'Settings',
       icon: Settings,
       color: 'text-muted-foreground',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
-  ];
+  ].filter((item) => item.id !== 'prompts' || promptModeEnabled);
 
   const displayName = profile?.display_name || account?.display_name || 'Local User';
   const emailOrMode = account?.authenticated ? account.email : '100% On-Device';

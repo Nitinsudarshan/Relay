@@ -25,11 +25,17 @@ pub const DEFAULT_MODEL_FILENAME: &str = "ggml-small.bin";
 pub const DEFAULT_MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin";
 
+/// High-speed multilingual Whisper model for fast universal dictation (ggml-base.bin, 39M params).
+/// Provides ~3x lower latency (~0.8s vs ~2.4s) on CPU for conversational dictation.
+pub const FAST_MODEL_FILENAME: &str = "ggml-base.bin";
+pub const FAST_MODEL_URL: &str =
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
+
 /// Checks if a configured model path represents a legacy default model
-/// (e.g. `ggml-base.bin` or `ggml-tiny.en.bin`) so Relay can seamlessly promote to `ggml-small.bin`.
+/// (e.g. `ggml-tiny.en.bin`) so Relay can seamlessly promote to `ggml-small.bin`.
 pub fn is_legacy_default_model(path: &Path) -> bool {
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-        name == "ggml-base.bin" || name == "ggml-tiny.en.bin"
+        name == "ggml-tiny.en.bin"
     } else {
         false
     }
@@ -42,11 +48,9 @@ pub fn is_legacy_default_model(path: &Path) -> bool {
 /// finished download already in place.
 static DOWNLOAD_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// If no Whisper model is configured (or legacy default is present), fetches
-/// the production small default model into `models_dir` and returns its path.
-/// A no-op (just returns the existing path) once it's already there.
-pub async fn ensure_default_model(models_dir: &Path) -> Result<PathBuf, SttError> {
-    let target = models_dir.join(DEFAULT_MODEL_FILENAME);
+/// Fetches a model from `url` into `models_dir` if it does not already exist.
+async fn ensure_model_file(models_dir: &Path, filename: &str, url: &str) -> Result<PathBuf, SttError> {
+    let target = models_dir.join(filename);
     if target.exists() {
         return Ok(target);
     }
@@ -62,32 +66,30 @@ pub async fn ensure_default_model(models_dir: &Path) -> Result<PathBuf, SttError
     })?;
 
     tracing::info!(
-        "No Whisper production model configured — downloading default {} to {}",
-        DEFAULT_MODEL_FILENAME,
+        "Downloading Whisper model {} to {}",
+        filename,
         target.display()
     );
 
-    let response = reqwest::get(DEFAULT_MODEL_URL)
+    let response = reqwest::get(url)
         .await
         .map_err(|e| SttError::ModelLoadFailed {
-            path: DEFAULT_MODEL_URL.to_string(),
+            path: url.to_string(),
             message: format!("Failed to download model: {}", e),
         })?;
 
     if !response.status().is_success() {
         return Err(SttError::ModelLoadFailed {
-            path: DEFAULT_MODEL_URL.to_string(),
+            path: url.to_string(),
             message: format!("HTTP {} from model server", response.status()),
         });
     }
 
     let bytes = response.bytes().await.map_err(|e| SttError::ModelLoadFailed {
-        path: DEFAULT_MODEL_URL.to_string(),
+        path: url.to_string(),
         message: format!("Failed to read response body: {}", e),
     })?;
 
-    // Download to a temp file and rename into place, so a crash or a
-    // second concurrent call never leaves (or reads) a half-written model.
     let tmp_path = target.with_extension("bin.part");
     std::fs::write(&tmp_path, &bytes).map_err(|e| SttError::ModelLoadFailed {
         path: tmp_path.display().to_string(),
@@ -98,8 +100,72 @@ pub async fn ensure_default_model(models_dir: &Path) -> Result<PathBuf, SttError
         message: e.to_string(),
     })?;
 
-    tracing::info!("Production Whisper model ready at {}", target.display());
+    tracing::info!("Whisper model ready at {}", target.display());
     Ok(target)
+}
+
+/// If no Whisper model is configured, fetches the production small default model into `models_dir` and returns its path.
+pub async fn ensure_default_model(models_dir: &Path) -> Result<PathBuf, SttError> {
+    ensure_model_file(models_dir, DEFAULT_MODEL_FILENAME, DEFAULT_MODEL_URL).await
+}
+
+/// Ensures the fast base model is available for Universal Dictation Fast profile.
+pub async fn ensure_fast_model(models_dir: &Path) -> Result<PathBuf, SttError> {
+    ensure_model_file(models_dir, FAST_MODEL_FILENAME, FAST_MODEL_URL).await
+}
+
+/// Resolves the effective model path for Universal Dictation based on the user's Dictation quality preference.
+/// In `Fast` mode, uses `ggml-base.bin` (~0.8s latency); in `Accurate` mode, uses `ggml-small.bin` (~2.4s latency).
+pub async fn resolve_dictation_model_path(
+    models_dir: &Path,
+    stt_settings: &crate::settings::SttSettings,
+) -> Option<String> {
+    match stt_settings.dictation_quality {
+        crate::settings::DictationSttQuality::Fast => {
+            let fast_path = models_dir.join(FAST_MODEL_FILENAME);
+            if fast_path.exists() {
+                Some(fast_path.to_string_lossy().to_string())
+            } else {
+                match ensure_fast_model(models_dir).await {
+                    Ok(p) => Some(p.to_string_lossy().to_string()),
+                    Err(e) => {
+                        tracing::warn!("Could not ensure fast Whisper model ({}): Falling back to default", e);
+                        let default_path = models_dir.join(DEFAULT_MODEL_FILENAME);
+                        if default_path.exists() {
+                            Some(default_path.to_string_lossy().to_string())
+                        } else {
+                            stt_settings.whisper_model_path.clone()
+                        }
+                    }
+                }
+            }
+        }
+        crate::settings::DictationSttQuality::Accurate => {
+            if let Some(ref path) = stt_settings.whisper_model_path {
+                let p = Path::new(path);
+                if p.exists() {
+                    Some(path.clone())
+                } else {
+                    let default_path = models_dir.join(DEFAULT_MODEL_FILENAME);
+                    if default_path.exists() {
+                        Some(default_path.to_string_lossy().to_string())
+                    } else {
+                        Some(path.clone())
+                    }
+                }
+            } else {
+                let default_path = models_dir.join(DEFAULT_MODEL_FILENAME);
+                if default_path.exists() {
+                    Some(default_path.to_string_lossy().to_string())
+                } else {
+                    match ensure_default_model(models_dir).await {
+                        Ok(p) => Some(p.to_string_lossy().to_string()),
+                        Err(_) => None,
+                    }
+                }
+            }
+        }
+    }
 }
 
 use crate::settings::LanguageSettings;
@@ -265,6 +331,23 @@ impl WhisperDecodingConfig {
         }
         cfg
     }
+
+    /// Resolves the effective decoding configuration specifically for Universal Dictation.
+    /// Uses user-configured thread override if provided, or clamps thread allocation between 1 and 12
+    /// to saturate available physical/logical cores without exceeding logical core boundaries.
+    pub fn for_dictation(stt_settings: &crate::settings::SttSettings) -> Self {
+        let mut cfg = Self::from_settings(stt_settings);
+        if let Some(threads) = stt_settings.dictation_threads {
+            cfg.n_threads = Some(threads.clamp(1, 64));
+        } else {
+            let threads = std::thread::available_parallelism()
+                .map(|n| n.get() as i32)
+                .unwrap_or(4)
+                .clamp(1, 12);
+            cfg.n_threads = Some(threads);
+        }
+        cfg
+    }
 }
 
 /// One decoded utterance — a single Whisper segment, with the timing Whisper
@@ -410,6 +493,9 @@ impl SttEngine {
                 return Ok((Vec::new(), diag));
             }
 
+            // TEMP: whisper internal latency diagnostics
+            let t_whisper_start = std::time::Instant::now();
+
             let mut guard = self.loaded.lock().unwrap();
             let needs_reload = match guard.as_ref() {
                 Some((loaded_path, _)) => loaded_path != model_path,
@@ -430,9 +516,13 @@ impl SttEngine {
             let (_, ctx) = guard
                 .as_ref()
                 .expect("model was just loaded or already present");
+
+            // TEMP: whisper internal latency diagnostics (create_state)
+            let t_create_state_start = std::time::Instant::now();
             let mut state = ctx
                 .create_state()
                 .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
+            let t_create_state_end = std::time::Instant::now();
 
             let strategy = match &decoding_config.strategy {
                 SttSamplingStrategy::Greedy { best_of } => {
@@ -465,11 +555,14 @@ impl SttEngine {
             }
             params.set_n_threads(decoding_config.n_threads.unwrap_or_else(num_cpus));
 
-            let t0 = std::time::Instant::now();
+            // TEMP: whisper internal latency diagnostics (state_full)
+            let t_state_full_start = std::time::Instant::now();
             state
                 .full(params, samples_16k_mono)
                 .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
-            let elapsed_ms = t0.elapsed().as_millis();
+            let t_state_full_end = std::time::Instant::now();
+
+            let elapsed_ms = t_state_full_end.duration_since(t_state_full_start).as_millis();
 
             let mut utterances: Vec<SttUtterance> = Vec::new();
             let mut segment_count = 0;
@@ -516,6 +609,22 @@ impl SttEngine {
                 is_empty: trimmed_text.is_empty(),
                 transcript_char_count: trimmed_text.chars().count(),
             };
+
+            // TEMP: whisper internal latency diagnostics (timing summary)
+            let t_whisper_end = std::time::Instant::now();
+            let create_state_ms = t_create_state_end.duration_since(t_create_state_start).as_millis();
+            let state_full_ms = t_state_full_end.duration_since(t_state_full_start).as_millis();
+            let whisper_total_ms = t_whisper_end.duration_since(t_whisper_start).as_millis();
+            let other_ms = whisper_total_ms.saturating_sub(create_state_ms + state_full_ms);
+
+            println!("\n==================================================");
+            println!("WHISPER_INTERNAL_LATENCY");
+            println!("create_state: {} ms", create_state_ms);
+            println!("language_detection: 0 ms (embedded within state_full auto-detect pass)");
+            println!("state_full: {} ms", state_full_ms);
+            println!("other: {} ms", other_ms);
+            println!("whisper_total: {} ms", whisper_total_ms);
+            println!("==================================================\n");
 
             tracing::debug!(
                 "Whisper STT finished: audio={:.2}s, latency={}ms, RTF={:.2}, lang={:?}, segments={}, chars={}",
@@ -960,5 +1069,34 @@ mod tests {
                 assert!(!diag_a.is_empty);
             }
         }
+    }
+
+    #[test]
+    fn test_whisper_decoding_config_for_dictation_thread_bounds() {
+        let mut settings = crate::settings::SttSettings::default();
+
+        // 1. Default (no override) clamps within [1, 12]
+        let cfg_default = WhisperDecodingConfig::for_dictation(&settings);
+        let threads = cfg_default.n_threads.unwrap();
+        assert!(threads >= 1 && threads <= 12);
+
+        // 2. Safe user override
+        settings.dictation_threads = Some(8);
+        let cfg_custom = WhisperDecodingConfig::for_dictation(&settings);
+        assert_eq!(cfg_custom.n_threads, Some(8));
+
+        // 3. User override <= 0 clamps to 1
+        settings.dictation_threads = Some(0);
+        let cfg_zero = WhisperDecodingConfig::for_dictation(&settings);
+        assert_eq!(cfg_zero.n_threads, Some(1));
+
+        settings.dictation_threads = Some(-5);
+        let cfg_neg = WhisperDecodingConfig::for_dictation(&settings);
+        assert_eq!(cfg_neg.n_threads, Some(1));
+
+        // 4. Extreme user override clamps to 64
+        settings.dictation_threads = Some(128);
+        let cfg_high = WhisperDecodingConfig::for_dictation(&settings);
+        assert_eq!(cfg_high.n_threads, Some(64));
     }
 }

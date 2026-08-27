@@ -1479,6 +1479,7 @@ pub mod tests {
             had_audio: true,
             audio_stats: stats,
             vad_result: vad_res,
+            timing_metrics: None,
         };
 
         let lang_settings = LanguageSettings {

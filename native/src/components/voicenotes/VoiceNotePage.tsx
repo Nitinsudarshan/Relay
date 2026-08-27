@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { HardDrive, Mic, ShieldCheck, Edit3, Trash2, GitMerge, Copy, Check, X, Save, Sparkles } from 'lucide-react';
+import { HardDrive, Mic, ShieldCheck, Edit3, Trash2, GitMerge, Copy, Check, X, Save, Sparkles, Wand2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { VaultLocationInfo, VaultNote } from '../../types';
+import { AppSettings, VaultLocationInfo, VaultNote } from '../../types';
+import { PromptTransformModal } from '../prompts/PromptTransformModal';
 
 type VaultViewState =
   | { status: 'loading' }
@@ -82,6 +83,18 @@ export const VoiceNotePage: React.FC = () => {
   const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
   const [promotedNoteIds, setPromotedNoteIds] = useState<Set<string>>(new Set());
   const [actionBusy, setActionBusy] = useState(false);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [promptModalOpen, setPromptModalOpen] = useState(false);
+  const [promptInputText, setPromptInputText] = useState('');
+  const [promptSourceTitle, setPromptSourceTitle] = useState('');
+
+  const promptModeEnabled = Boolean(settings?.prompt_settings?.enabled);
+
+  const handleOpenPromptModal = (content: string, title?: string) => {
+    setPromptInputText(content);
+    setPromptSourceTitle(title || 'Voice Note');
+    setPromptModalOpen(true);
+  };
 
   const handlePromoteToScribble = async (note: VaultNote) => {
     setActionBusy(true);
@@ -99,7 +112,11 @@ export const VoiceNotePage: React.FC = () => {
 
   const refreshLocation = async () => {
     try {
-      const info = await invoke<VaultLocationInfo>('get_vault_location');
+      const [info, appSetts] = await Promise.all([
+        invoke<VaultLocationInfo>('get_vault_location'),
+        invoke<AppSettings>('get_settings').catch(() => null),
+      ]);
+      if (appSetts) setSettings(appSetts);
       setDefaultPath(info.default_path);
       if (!info.configured) {
         setVaultState({ status: 'setup' });
@@ -117,6 +134,14 @@ export const VoiceNotePage: React.FC = () => {
 
   useEffect(() => {
     refreshLocation();
+
+    const unlistenSettings = listen<AppSettings>('settings-changed', ({ payload }) => {
+      if (payload) setSettings(payload);
+    });
+
+    return () => {
+      unlistenSettings.then((unlisten) => unlisten());
+    };
   }, []);
 
   const refreshPromotedScribbles = useCallback(() => {
@@ -406,6 +431,20 @@ export const VoiceNotePage: React.FC = () => {
                           )}
                         </Button>
 
+                        {/* Wand: Transform with AI Prompt */}
+                        {promptModeEnabled && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleOpenPromptModal(note.content, note.title)}
+                            className="h-7 w-7 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
+                            title="Transform with Prompt (Wand)"
+                            aria-label="Transform with Prompt"
+                          >
+                            <Wand2 className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+
                         {/* Edit Note */}
                         <Button
                           size="icon"
@@ -575,6 +614,18 @@ export const VoiceNotePage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Cross-Object Prompt Transformation Modal */}
+      <PromptTransformModal
+        isOpen={promptModalOpen}
+        onClose={() => setPromptModalOpen(false)}
+        inputText={promptInputText}
+        sourceTitle={promptSourceTitle}
+        sourceType="voice_note"
+        onScribbleCreated={() => {
+          refreshPromotedScribbles();
+        }}
+      />
     </div>
   );
 };

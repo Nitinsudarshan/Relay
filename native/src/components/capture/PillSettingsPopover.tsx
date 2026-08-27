@@ -149,32 +149,6 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
             </span>
           </div>
 
-          {/* 4. Prompt mode toggle */}
-          <div className="flex items-center justify-between px-3 py-2">
-            <div className="flex flex-col gap-0.5">
-              <span className="font-medium text-slate-800 dark:text-neutral-200">Prompt mode</span>
-              <span className="text-[10px] font-normal text-slate-500 dark:text-neutral-400">
-                Rewrite speech into a prompt
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={onTogglePromptMode}
-              className={cn(
-                'relative w-8 h-[18px] rounded-full border-none cursor-pointer transition-colors duration-150 p-0 shrink-0',
-                promptMode ? 'bg-blue-600 dark:bg-blue-500' : 'bg-slate-300 dark:bg-neutral-700'
-              )}
-              aria-label="Toggle Prompt Mode"
-            >
-              <span
-                className={cn(
-                  'absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white dark:bg-[#171717] shadow-sm transition-all duration-150',
-                  promptMode ? 'left-[16px]' : 'left-[2px]'
-                )}
-              />
-            </button>
-          </div>
-
           <div className="h-px bg-slate-100 dark:bg-[#262626] my-1" />
 
           {/* 5. Language row (opens sub-page) */}

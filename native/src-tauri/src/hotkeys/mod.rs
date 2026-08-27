@@ -199,7 +199,9 @@ fn on_dictation_pressed(app: &AppHandle, dictation_state: &SharedDictationState)
         // always stopped by its own key release before a genuine next press
         // could land. This fresh press is the user's "stop now" signal.
         if toggle_to_talk {
-            stop_dictation_session(app.clone(), dictation_state.clone(), None);
+            // TEMP: dictation latency instrumentation
+            let t_key_release = std::time::Instant::now();
+            stop_dictation_session(app.clone(), dictation_state.clone(), None, Some(t_key_release));
         }
         return;
     }
@@ -246,6 +248,9 @@ fn on_dictation_pressed(app: &AppHandle, dictation_state: &SharedDictationState)
 /// recording by itself — only a subsequent press does, handled in
 /// `on_dictation_pressed` — so this only clears the "physically held" flag.
 fn on_dictation_released(app: &AppHandle, dictation_state: &SharedDictationState) {
+    // TEMP: dictation latency instrumentation (T0: key_release)
+    let t_key_release = std::time::Instant::now();
+
     {
         let mut guard = dictation_state.lock().unwrap();
         guard.key_down = false;
@@ -257,7 +262,7 @@ fn on_dictation_released(app: &AppHandle, dictation_state: &SharedDictationState
         return;
     }
 
-    stop_dictation_session(app.clone(), dictation_state.clone(), None);
+    stop_dictation_session(app.clone(), dictation_state.clone(), None, Some(t_key_release));
 }
 
 /// Stops the current dictation session (if any) and, in the background,
@@ -269,7 +274,11 @@ fn stop_dictation_session(
     app: AppHandle,
     dictation_state: SharedDictationState,
     expected_generation: Option<u64>,
+    t_key_release: Option<std::time::Instant>, // TEMP: dictation latency instrumentation
 ) {
+    // TEMP: dictation latency instrumentation
+    let t_release = t_key_release.unwrap_or_else(std::time::Instant::now);
+
     {
         let mut guard = dictation_state.lock().unwrap();
         if !guard.active {
@@ -293,6 +302,10 @@ fn stop_dictation_session(
                 return;
             }
         };
+
+        // TEMP: dictation latency instrumentation (T1: recorder_stop_complete)
+        let t_recorder_stop_complete = std::time::Instant::now();
+
         if !captured.had_audio {
             // Recording genuinely happened, but nothing crossed the mic
             // input threshold the whole time it was open — never hand
@@ -320,55 +333,12 @@ fn stop_dictation_session(
             None,
         );
 
-        let configured_model_path = state
-            .settings
-            .lock()
-            .unwrap()
-            .stt
-            .whisper_model_path
-            .clone()
-            .filter(|p| !p.trim().is_empty());
         let models_dir = state.config_dir.join("models");
-        let model_path = match configured_model_path {
-            Some(path) => {
-                let p = std::path::Path::new(&path);
-                if crate::capture::stt::is_legacy_default_model(p) {
-                    match crate::capture::stt::ensure_default_model(&models_dir).await {
-                        Ok(small_path) => {
-                            let path_str = small_path.to_string_lossy().to_string();
-                            let settings_path = state.config_dir.join("settings.json");
-                            let mut guard = state.settings.lock().unwrap();
-                            guard.stt.whisper_model_path = Some(path_str.clone());
-                            let _ = guard.save(&settings_path);
-                            Some(path_str)
-                        }
-                        Err(_) => Some(path),
-                    }
-                } else {
-                    Some(path)
-                }
-            }
-            None => {
-                match crate::capture::stt::ensure_default_model(&models_dir).await {
-                    Ok(path) => {
-                        let path_str = path.to_string_lossy().to_string();
-                        let settings_path = state.config_dir.join("settings.json");
-                        let mut guard = state.settings.lock().unwrap();
-                        guard.stt.whisper_model_path = Some(path_str.clone());
-                        let _ = guard.save(&settings_path);
-                        Some(path_str)
-                    }
-                    Err(e) => {
-                        tracing::warn!("Could not auto-provision production Whisper model: {}", e);
-                        None
-                    }
-                }
-            }
-        };
         let language_settings = state.settings.lock().unwrap().language.clone();
         let stt_settings = state.settings.lock().unwrap().stt.clone();
+        let model_path = crate::capture::stt::resolve_dictation_model_path(&models_dir, &stt_settings).await;
         let language_config = crate::capture::SttLanguageConfig::from_settings(&language_settings);
-        let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&stt_settings);
+        let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::for_dictation(&stt_settings);
         if let Some(prompt) = state.settings.lock().unwrap().build_stt_prompt() {
             decoding_config.initial_prompt = Some(prompt);
         }
@@ -378,6 +348,9 @@ fn stop_dictation_session(
         let mp_clone = model_path.clone();
         let lang_clone = language_config.clone();
         let dec_clone = decoding_config.clone();
+
+        // TEMP: dictation latency instrumentation (T5: whisper_start)
+        let t_whisper_start = std::time::Instant::now();
 
         let (text_res, diag, err) = tauri::async_runtime::spawn_blocking(move || {
             match stt.transcribe_with_config(
@@ -393,6 +366,9 @@ fn stop_dictation_session(
         .await
         .unwrap_or_else(|e| (String::new(), None, Some(e.to_string())));
 
+        // TEMP: dictation latency instrumentation (T6: whisper_complete)
+        let t_whisper_complete = std::time::Instant::now();
+
         let model_str = model_path.as_deref().unwrap_or(crate::capture::stt::DEFAULT_MODEL_FILENAME);
         let snapshot = crate::capture::build_diagnostic_snapshot(
             &captured.mode,
@@ -407,6 +383,9 @@ fn stop_dictation_session(
             err.clone(),
         );
         crate::commands::record_stt_diagnostics(&app, &state, snapshot);
+
+        // TEMP: dictation latency instrumentation (T7: diagnostics_complete)
+        let _t_diagnostics_complete = std::time::Instant::now();
 
         if let Some(err_msg) = err {
             tracing::error!("Dictation transcription failed: {}", err_msg);
@@ -425,10 +404,16 @@ fn stop_dictation_session(
             let expanded_text = state.settings.lock().unwrap().expand_snippets(&text_res);
             let final_text = if !expanded_text.trim().is_empty() { expanded_text } else { text_res };
 
+            // TEMP: dictation latency instrumentation (T8: snippet_expansion_complete)
+            let t_snippet_complete = std::time::Instant::now();
+
             // Voice Note persistence happens from the successful
             // transcript itself, not from injection's outcome — it must
             // still be saved below even if injection fails.
             crate::commands::save_voice_note(&app, &state.vault, &final_text);
+
+            // TEMP: dictation latency instrumentation (T9: vault_save_complete)
+            let t_vault_complete = std::time::Instant::now();
 
             let (auto_paste, copy_to_clipboard) = {
                 let s = state.settings.lock().unwrap();
@@ -438,6 +423,9 @@ fn stop_dictation_session(
             if copy_to_clipboard {
                 let _ = app.emit("dictation-clipboard-copy", &final_text);
             }
+
+            // TEMP: dictation latency instrumentation (T10: injection_start)
+            let t_injection_start = std::time::Instant::now();
 
             if auto_paste {
                 match injection::inject_text(&final_text) {
@@ -458,6 +446,66 @@ fn stop_dictation_session(
             } else {
                 emit_capture_status_event(&app, false, None, "SUCCESS", None);
             }
+
+            // TEMP: dictation latency instrumentation (T11: injection_complete)
+            let t_injection_complete = std::time::Instant::now();
+
+            // Calculate metrics
+            let metrics = captured.timing_metrics.clone().unwrap_or_default();
+            let recording_to_audio_ready = t_recorder_stop_complete.duration_since(t_release).as_millis();
+            let audio_ready_to_stt_start = t_whisper_start.duration_since(t_recorder_stop_complete).as_millis();
+            let stt_execution = t_whisper_complete.duration_since(t_whisper_start).as_millis();
+            let stt_to_text_available = t_snippet_complete.duration_since(t_whisper_complete).as_millis();
+            let text_available_to_injection = t_injection_complete.duration_since(t_snippet_complete).as_millis();
+            let injection_duration = t_injection_complete.duration_since(t_injection_start).as_millis();
+            let total_e2e_latency = t_injection_complete.duration_since(t_release).as_millis();
+
+            let now = std::time::SystemTime::now();
+            let format_ts = |t_inst: std::time::Instant| -> String {
+                let dt = if t_inst <= t_injection_complete {
+                    let diff = t_injection_complete.duration_since(t_inst);
+                    now.checked_sub(diff).unwrap_or(now)
+                } else {
+                    now
+                };
+                let dur = dt.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                let secs = dur.as_secs();
+                let millis = dur.subsec_millis();
+                let hours = (secs / 3600) % 24;
+                let mins = (secs / 60) % 60;
+                let s = secs % 60;
+                format!("{:02}:{:02}:{:02}.{:03}", hours, mins, s, millis)
+            };
+
+            println!("\n==================================================");
+            println!("DICTATION LATENCY TRACE");
+            println!("-----------------------");
+            println!("recording_stop       : {}", format_ts(t_release));
+            println!("audio_ready          : {}", format_ts(t_recorder_stop_complete));
+            println!("stt_start            : {}", format_ts(t_whisper_start));
+            println!("stt_end              : {}", format_ts(t_whisper_complete));
+            println!("text_available       : {}", format_ts(t_snippet_complete));
+            println!("injection_start      : {}", format_ts(t_injection_start));
+            println!("injection_complete   : {}", format_ts(t_injection_complete));
+            println!("\nDurations:");
+            println!("recording → audio_ready       : {} ms", recording_to_audio_ready);
+            println!("audio_ready → STT start       : {} ms", audio_ready_to_stt_start);
+            println!("STT execution                 : {} ms", stt_execution);
+            println!("STT → text available          : {} ms", stt_to_text_available);
+            println!("text available → injection    : {} ms", text_available_to_injection);
+            println!("TOTAL                         : {} ms", total_e2e_latency);
+            println!("==================================================\n");
+
+            tracing::info!(
+                "[DICTATION_LATENCY] total={}ms, whisper={}ms, rec_stop={}ms, vad={}ms, wav_io={}ms, vault_io={}ms, inject={}ms",
+                total_e2e_latency,
+                stt_execution,
+                recording_to_audio_ready,
+                metrics.vad_ms,
+                metrics.wav_write_ms,
+                t_vault_complete.duration_since(t_snippet_complete).as_millis(),
+                injection_duration
+            );
         } else {
             tracing::info!("Dictation produced no speech (silence or too short)");
             emit_capture_status_event(&app, false, None, "NO_SPEECH", None);
@@ -482,7 +530,7 @@ fn spawn_release_watchdog(
                 "Dictation session exceeded {:?} without being stopped — forcing stop so the microphone isn't left stuck.",
                 timeout
             );
-            stop_dictation_session(app, dictation_state, Some(generation));
+            stop_dictation_session(app, dictation_state, Some(generation), None);
         }
     });
 }

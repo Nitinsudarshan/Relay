@@ -344,51 +344,12 @@ async fn process_captured_audio(
     let stt = state.stt.clone();
     let samples = captured.samples.clone();
 
-    // Nobody should have to go find and download a GGML file themselves
+    // Use the shared Capture STT Profile (Fast / ggml-base.bin vs Accurate / ggml-small.bin)
     let models_dir = state.config_dir.join("models");
-    let model_path = match settings
-        .stt
-        .whisper_model_path
-        .clone()
-        .filter(|p| !p.trim().is_empty())
-    {
-        Some(configured) => {
-            let path = std::path::Path::new(&configured);
-            if crate::capture::stt::is_legacy_default_model(path) {
-                // Promote legacy default model (e.g. ggml-base.bin) to production ggml-small.bin
-                match crate::capture::stt::ensure_default_model(&models_dir).await {
-                    Ok(small_path) => {
-                        let path_str = small_path.to_string_lossy().to_string();
-                        let mut guard = state.settings.lock().unwrap();
-                        guard.stt.whisper_model_path = Some(path_str.clone());
-                        let _ = guard.save(&state.settings_path());
-                        Some(path_str)
-                    }
-                    Err(_) => Some(configured),
-                }
-            } else {
-                Some(configured)
-            }
-        }
-        None => {
-            match crate::capture::stt::ensure_default_model(&models_dir).await {
-                Ok(path) => {
-                    let path_str = path.to_string_lossy().to_string();
-                    let mut guard = state.settings.lock().unwrap();
-                    guard.stt.whisper_model_path = Some(path_str.clone());
-                    let _ = guard.save(&state.settings_path());
-                    Some(path_str)
-                }
-                Err(e) => {
-                    tracing::warn!("Could not auto-provision production Whisper model: {}", e);
-                    None
-                }
-            }
-        }
-    };
+    let model_path = crate::capture::stt::resolve_dictation_model_path(&models_dir, &settings.stt).await;
 
     let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
-    let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
+    let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::for_dictation(&settings.stt);
     if let Some(prompt) = settings.build_stt_prompt() {
         decoding_config.initial_prompt = Some(prompt);
     }
@@ -453,17 +414,39 @@ async fn process_captured_audio(
         save_voice_note(app, &state.vault, &transcript);
     }
 
-    let llm = LLMClient::new(settings.provider.clone());
-
     match captured.mode.as_str() {
-        "chat" => crate::pipeline::process_chat(&llm, &state.vault, &settings.tts, &transcript)
-            .await
-            .map(Some)
-            .map_err(|e| CommandError::new("PIPELINE_ERROR", &e.to_string())),
-        _ => PipelineEngine::process_scribble(&llm, &state.vault, &transcript)
-            .await
-            .map(Some)
-            .map_err(|e| CommandError::new("PIPELINE_ERROR", &e.to_string())),
+        "voice_note" => Ok(Some(ProcessedPipelineResult {
+            mode: "voice_note".to_string(),
+            transcript: transcript.clone(),
+            note_id: None,
+            kanban_cards_created: 0,
+            output_markdown: transcript,
+            sources: Vec::new(),
+            spoken_audio_base64: None,
+        })),
+        "scribble" => {
+            let llm = LLMClient::new(settings.provider.clone());
+            PipelineEngine::process_scribble(&llm, &state.vault, &transcript)
+                .await
+                .map(Some)
+                .map_err(|e| CommandError::new("PIPELINE_ERROR", &e.to_string()))
+        }
+        "chat" => {
+            let llm = LLMClient::new(settings.provider.clone());
+            crate::pipeline::process_chat(&llm, &state.vault, &settings.tts, &transcript)
+                .await
+                .map(Some)
+                .map_err(|e| CommandError::new("PIPELINE_ERROR", &e.to_string()))
+        }
+        _ => Ok(Some(ProcessedPipelineResult {
+            mode: captured.mode.clone(),
+            transcript: transcript.clone(),
+            note_id: None,
+            kanban_cards_created: 0,
+            output_markdown: transcript,
+            sources: Vec::new(),
+            spoken_audio_base64: None,
+        })),
     }
 }
 
@@ -471,6 +454,51 @@ async fn process_captured_audio(
 pub struct AudioDeviceInfo {
     pub name: String,
     pub is_default: bool,
+}
+
+/// Executes an AI Prompt transformation against the provided `input_text`
+/// using the existing `LLMClient` and configured provider (Ollama / Cloud).
+#[tauri::command]
+pub async fn execute_prompt(
+    state: State<'_, AppState>,
+    prompt_id: Option<String>,
+    prompt_body: Option<String>,
+    input_text: String,
+) -> Result<String, CommandError> {
+    if input_text.trim().is_empty() {
+        return Err(CommandError::new("EMPTY_INPUT", "Input text cannot be empty"));
+    }
+
+    let settings = state.settings.lock().unwrap().clone();
+
+    // Resolve template
+    let template = if let Some(body) = prompt_body.filter(|b| !b.trim().is_empty()) {
+        body
+    } else if let Some(id) = prompt_id {
+        settings
+            .prompts
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.prompt_body.clone())
+            .ok_or_else(|| CommandError::new("PROMPT_NOT_FOUND", "Selected prompt template not found"))?
+    } else {
+        return Err(CommandError::new("INVALID_PROMPT", "No prompt template specified"));
+    };
+
+    // Interpolate transcript into {{text}} or append
+    let final_prompt = if template.contains("{{text}}") {
+        template.replace("{{text}}", &input_text)
+    } else {
+        format!("{}\n\n{}", template, input_text)
+    };
+
+    let llm = LLMClient::new(settings.provider.clone());
+    let response = llm
+        .complete(&final_prompt, None)
+        .await
+        .map_err(|e| CommandError::new("LLM_ERROR", &e.to_string()))?;
+
+    Ok(response.text)
 }
 
 #[tauri::command]
