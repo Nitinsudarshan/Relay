@@ -17,7 +17,8 @@ Relay processes speech locally using Whisper and structured pipelines to instant
 ## Features
 
 - **Universal Dictation** — Transcribes push-to-talk audio and injects text directly into whatever Windows app or field has active focus.
-- **Meeting & Scribble Pipelines** — Automatically parses live meeting audio and rough voice scribbles into structured Kanban task cards.
+- **Meeting Intelligence** — Records mic and system audio into durable 30-second chunks with live transcription, then derives a summary, decisions, owned action items, topics, and speakers from the transcript. The raw speech-to-text output is kept immutable as the diagnostic source, and any meeting can become a Scribble that references it.
+- **Scribble Pipeline** — Parses rough voice scribbles into structured Kanban task cards and vault notes.
 - **Local Vault Storage** — Saves audio recordings, transcripts, and structured entities locally in Markdown files and LanceDB vector store.
 - **Ground-in-Vault Voice Chat** — Answers user questions in real-time, strictly grounded in your local markdown vault notes.
 - **Hybrid Cloud Sync** — Optional Next.js + Supabase web dashboard for cross-device visibility and team synchronization when enabled.

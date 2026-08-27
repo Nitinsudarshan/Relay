@@ -16,6 +16,26 @@ Two things are deliberately kept separate throughout:
 
 Conflating them is the most common design error. Diarization can succeed completely while identification fails, and the UI must be able to show that state honestly.
 
+> [!NOTE]
+> **What is implemented today.** Only **rung 1** of §1's attribution ladder is
+> built: microphone input is the local user (`speaker_me`), system audio is
+> everyone else (`speaker_1`). It needs no model, no ONNX runtime, and no consent
+> flow, and it creates no biometric data.
+>
+> Its resolution is bounded by what the recorder preserves: channel provenance
+> survives only as two booleans per 30-second chunk, so a chunk where both
+> sources were audible is left **unattributed** rather than guessed. Rungs 2–5
+> are not implemented; the data model accepts `SpeakerOrigin::Diarization` so
+> they can be added without a schema change. The follow-up needed for
+> turn-level attribution is recorded as out-of-scope issue 1 in
+> `docs/meetings/MEETINGS_INTELLIGENCE_AUDIT.md`.
+>
+> §2.1's settings surface is likewise partial by design: Settings › Meetings
+> exposes "Speaker identification: Automatic / Off". The voice-library toggles
+> in §2.1 are deliberately absent, because the feature that would create
+> biometric data does not exist yet.
+
+
 ---
 
 ## 1. The attribution ladder

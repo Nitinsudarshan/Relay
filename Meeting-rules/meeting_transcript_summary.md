@@ -3,6 +3,26 @@
 **Applies to:** any agent or local model summarizing a raw meeting transcript.
 **Output:** Markdown only. No preamble, no closing remarks, no description of your process.
 
+> [!NOTE]
+> **Where this rule runs in the pipeline.** Relay's meeting pipeline splits
+> comprehension from writing across two stages, and this rule's two-stage
+> procedure maps onto them directly:
+>
+> - **Stage A — extraction** (`meetings_v2::processing::extract`) performs §2's
+>   Stage A and emits **JSON** consumed by code: the canonical `MeetingFacts`.
+>   JSON there is not a violation of "Markdown only" — it is the machine-readable
+>   boundary between two stages, and it never reaches a person.
+> - **Stage B — summarization** (`meetings_v2::processing::summarize`) performs
+>   §2's Stage B and emits the **Markdown** this rule specifies. It is given only
+>   the structured facts, never the transcript, which is what makes §3's rewrite
+>   rule enforceable rather than aspirational: a model cannot copy sentences it
+>   was never shown.
+>
+> So: structured JSON internally, Markdown at the presentation boundary. Nothing
+> is asked to produce machine-readable and human-facing output at once. See
+> `docs/meetings/MEETINGS_INTELLIGENCE_AUDIT.md` §1.11.
+
+
 ---
 
 ## 0. The two failures this rule exists to prevent

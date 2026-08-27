@@ -411,6 +411,8 @@ mod tests {
             text: "Hello everyone.".to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
             status: TranscriptSegmentStatus::Success,
+            mic_had_audio: true,
+            sys_had_audio: false,
         };
         let seg2 = TranscriptSegment {
             chunk_index: 1,
@@ -419,6 +421,8 @@ mod tests {
             text: "Let's review the architecture.".to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
             status: TranscriptSegmentStatus::Success,
+            mic_had_audio: true,
+            sys_had_audio: false,
         };
 
         store.append_transcript_segment(&session.id, &seg1).unwrap();
@@ -561,6 +565,8 @@ mod tests {
             text: "This was preserved before crash.".to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
             status: TranscriptSegmentStatus::Success,
+            mic_had_audio: true,
+            sys_had_audio: false,
         };
         store.append_transcript_segment(&session.id, &seg).unwrap();
 

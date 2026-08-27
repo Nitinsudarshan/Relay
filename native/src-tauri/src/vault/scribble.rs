@@ -161,6 +161,42 @@ impl Scribble {
         scribble
     }
 
+    /// Builds a Scribble from a processed meeting.
+    ///
+    /// Mirrors `from_voice_note`: same constructor, same vault, same source-type
+    /// mechanism. The meeting is referenced rather than duplicated — the
+    /// recording, raw transcript, and derived artifacts all stay where they are,
+    /// and `source_metadata` carries enough to navigate back to them.
+    ///
+    /// `topics` and `entities` come from the meeting's already-extracted facts,
+    /// so promoting a meeting does not re-derive knowledge a second time through
+    /// a different path.
+    pub fn from_meeting(
+        meeting_id: &str,
+        meeting_title: &str,
+        content: &str,
+        title: &str,
+        topics: Vec<String>,
+        entities: Vec<String>,
+    ) -> Self {
+        let mut scribble = Self::new_text(content, Some(title));
+        scribble.source_type = SOURCE_TYPE_MEETING.to_string();
+        scribble.source_metadata = serde_json::json!({
+            "source_type": SOURCE_TYPE_MEETING,
+            "source_id": meeting_id,
+            "source_meeting_id": meeting_id,
+            "source_meeting_title": meeting_title,
+            "source_modality": "MEETING",
+            "promoted_at": chrono::Utc::now().to_rfc3339()
+        });
+        scribble.topics = topics;
+        scribble.entities = entities;
+        if !scribble.tags.iter().any(|t| t == "meeting") {
+            scribble.tags.push("meeting".to_string());
+        }
+        scribble
+    }
+
     pub fn from_file(
         filename: &str,
         content: &str,

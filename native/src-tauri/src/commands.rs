@@ -85,6 +85,9 @@ pub struct AppState {
     pub stt: SttEngine,
     pub last_stt_diagnostics: Mutex<Option<crate::capture::SttDiagnosticSnapshot>>,
     pub meetings_v2: Arc<crate::meetings_v2::MeetingsV2Engine>,
+    /// Derived meeting intelligence. Shares the recorder's session directory but
+    /// only reads from it — everything it produces goes to `processing.json`.
+    pub meeting_processor: Arc<crate::meetings_v2::MeetingProcessor>,
 }
 
 impl AppState {
@@ -1672,7 +1675,70 @@ pub async fn stop_meeting_v2(
         crate::overlay::hide_meeting_overlay(&app);
     }
 
+    // The recording is now safely on disk. Derived processing starts here, in the
+    // background, and the meeting is already openable — nothing below can affect
+    // the recording, the chunks, or the raw transcript.
+    if let Ok(session) = result.as_ref() {
+        spawn_meeting_processing(app.clone(), &state, session.id.clone());
+    }
+
     result.map_err(|e: String| CommandError::new("STOP_MEETING_FAILED", &e))
+}
+
+/// Kicks off derived processing for a finished meeting without blocking the
+/// caller.
+///
+/// The deterministic stages always run — they are cheap and need no model. A
+/// summary follows only if the user has left auto-generation on. Every failure
+/// path here is logged and dropped: the meeting, its audio, and its raw
+/// transcript are already durable, and none of them depends on this succeeding.
+pub fn spawn_meeting_processing(app: AppHandle, state: &AppState, meeting_id: String) {
+    let (options, provider, auto_summary) = {
+        let settings = state.settings.lock().unwrap();
+        (
+            meeting_processing_options(&settings, None, None),
+            settings.provider.clone(),
+            settings.meetings.auto_generate_summary,
+        )
+    };
+    let processor = state.meeting_processor.clone();
+
+    tauri::async_runtime::spawn(async move {
+        match processor.prepare(&meeting_id, &options) {
+            Ok(processing) => {
+                let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    meeting_id = %meeting_id,
+                    "meeting_processing: deterministic stages failed: {}",
+                    e
+                );
+                // Without a normalized transcript there is nothing to summarize,
+                // so stop here rather than failing again downstream.
+                return;
+            }
+        }
+
+        if !auto_summary {
+            return;
+        }
+
+        let llm = crate::meetings_v2::processing::llm::ProviderLlm::new(provider);
+        match processor
+            .generate_summary(&meeting_id, &llm, &options, false)
+            .await
+        {
+            Ok(processing) => {
+                let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
+            }
+            Err(e) => tracing::warn!(
+                meeting_id = %meeting_id,
+                "meeting_processing: automatic summary failed: {}",
+                e
+            ),
+        }
+    });
 }
 
 #[tauri::command]
@@ -1762,21 +1828,406 @@ pub async fn delete_meeting_v2(
         .map_err(|e| CommandError::new("DELETE_MEETING_FAILED", &e.to_string()))
 }
 
+// ---------------------------------------------------------------------------
+// MEETING PROCESSING (derived intelligence)
+//
+// These commands are thin: they validate input, translate settings into
+// `ProcessingOptions`, and hand off to `meetings_v2::processing`. None of them
+// touches the recorder, the audio chunks, or the raw transcript for writing.
+// ---------------------------------------------------------------------------
+
+/// Event emitted whenever a meeting's derived data changes, so any open view can
+/// refresh without polling.
+pub const MEETING_PROCESSING_EVENT: &str = "meeting-processing-updated";
+
+/// Builds the processing options in force right now from user settings.
+fn meeting_processing_options(
+    settings: &AppSettings,
+    summary_mode: Option<&str>,
+    extension_id: Option<String>,
+) -> crate::meetings_v2::ProcessingOptions {
+    use crate::meetings_v2::processing::model::{MeetingExtension, SummaryMode};
+    use crate::meetings_v2::processing::speakers::SpeakerIdentificationMode;
+    use crate::settings::{DefaultSummaryMode, SpeakerIdentification};
+
+    let default_mode = match settings.meetings.default_summary_mode {
+        DefaultSummaryMode::Concise => SummaryMode::Concise,
+        DefaultSummaryMode::Standard => SummaryMode::Standard,
+        DefaultSummaryMode::Detailed => SummaryMode::Detailed,
+    };
+
+    crate::meetings_v2::ProcessingOptions {
+        // The dictation dictionary doubles as the normalization glossary: these
+        // are exactly the terms the user has already told Relay it mishears.
+        glossary: settings.dictionary.clone(),
+        generate_conversation: settings.meetings.generate_conversation_transcript,
+        speaker_identification: match settings.meetings.speaker_identification {
+            SpeakerIdentification::Automatic => SpeakerIdentificationMode::Automatic,
+            SpeakerIdentification::Off => SpeakerIdentificationMode::Off,
+        },
+        summary_mode: summary_mode.map(SummaryMode::parse).unwrap_or(default_mode),
+        extension_id: extension_id
+            .filter(|id| !id.trim().is_empty())
+            .unwrap_or_else(|| settings.meetings.default_extension_id.clone()),
+        user_extensions: settings
+            .meetings
+            .extensions
+            .iter()
+            .map(|e| MeetingExtension {
+                id: e.id.clone(),
+                name: e.name.clone(),
+                instructions: e.instructions.clone(),
+                builtin: false,
+            })
+            .collect(),
+    }
+}
+
+/// A meeting's derived data, or `None` if it has never been processed.
+#[tauri::command]
+pub async fn get_meeting_v2_processing(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::meetings_v2::MeetingProcessing>, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+    Ok(state.meeting_processor.get(&session_id))
+}
+
+/// Runs the deterministic stages — normalize, attribute speakers, build the
+/// conversation. No model, no network.
+#[tauri::command]
+pub async fn prepare_meeting_v2(
+    app: AppHandle,
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingProcessing, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+    let options = {
+        let settings = state.settings.lock().unwrap();
+        meeting_processing_options(&settings, None, None)
+    };
+
+    let processing = state
+        .meeting_processor
+        .prepare(&session_id, &options)
+        .map_err(|e| CommandError::new("PREPARE_MEETING_FAILED", &e))?;
+
+    let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
+    Ok(processing)
+}
+
+/// Generates (or regenerates) a meeting summary through the canonical pipeline.
+///
+/// `mode` and `extensionId` override the defaults for this run only. `force`
+/// re-runs structured extraction as well as prose; without it, changing the mode
+/// or extension re-renders from the facts already extracted.
+#[tauri::command]
+pub async fn generate_meeting_v2_summary(
+    app: AppHandle,
+    session_id: String,
+    mode: Option<String>,
+    extension_id: Option<String>,
+    force: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingProcessing, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+
+    let (options, provider) = {
+        let settings = state.settings.lock().unwrap();
+        (
+            meeting_processing_options(&settings, mode.as_deref(), extension_id),
+            settings.provider.clone(),
+        )
+    };
+
+    let llm = crate::meetings_v2::processing::llm::ProviderLlm::new(provider);
+    let processing = state
+        .meeting_processor
+        .generate_summary(&session_id, &llm, &options, force.unwrap_or(false))
+        .await
+        .map_err(|e| CommandError::new("GENERATE_MEETING_SUMMARY_FAILED", &e))?;
+
+    let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
+    Ok(processing)
+}
+
+/// Kept for compatibility with the existing "Generate Summary" call site. Routes
+/// to the canonical pipeline rather than the retired single-call prompt.
 #[tauri::command]
 pub async fn summarize_meeting_v2(
     app: AppHandle,
     session_id: String,
     state: State<'_, AppState>,
-) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
+) -> Result<crate::meetings_v2::MeetingProcessing, CommandError> {
+    generate_meeting_v2_summary(app, session_id, None, None, None, state).await
+}
+
+/// Renames a speaker. Updates the registry only — the raw transcript is
+/// untouched and every derived view resolves the new name on read.
+#[tauri::command]
+pub async fn rename_meeting_v2_speaker(
+    app: AppHandle,
+    session_id: String,
+    speaker_id: String,
+    display_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingProcessing, CommandError> {
+    if session_id.trim().is_empty() || speaker_id.trim().is_empty() {
+        return Err(CommandError::new(
+            "INVALID_SPEAKER_RENAME",
+            "A meeting id and a speaker id are required",
+        ));
+    }
+
+    let processing = state
+        .meeting_processor
+        .rename_speaker(&session_id, &speaker_id, display_name.as_deref())
+        .map_err(|e| CommandError::new("RENAME_SPEAKER_FAILED", &e))?;
+
+    let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
+    Ok(processing)
+}
+
+/// Persists an action item's checked state.
+#[tauri::command]
+pub async fn set_meeting_v2_action_item_status(
+    app: AppHandle,
+    session_id: String,
+    action_item_id: String,
+    done: bool,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingProcessing, CommandError> {
+    use crate::meetings_v2::processing::model::ActionItemStatus;
+
+    if session_id.trim().is_empty() || action_item_id.trim().is_empty() {
+        return Err(CommandError::new(
+            "INVALID_ACTION_ITEM",
+            "A meeting id and an action item id are required",
+        ));
+    }
+
+    let status = if done {
+        ActionItemStatus::Done
+    } else {
+        ActionItemStatus::Open
+    };
+
+    let processing = state
+        .meeting_processor
+        .set_action_item_status(&session_id, &action_item_id, status)
+        .map_err(|e| CommandError::new("SET_ACTION_ITEM_STATUS_FAILED", &e))?;
+
+    let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
+    Ok(processing)
+}
+
+/// Meetings related to this one, by shared topics, entities, participants, and
+/// type.
+#[tauri::command]
+pub async fn get_meeting_v2_related(
+    session_id: String,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::meetings_v2::processing::related::RelatedMeeting>, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+    state
+        .meeting_processor
+        .related(&session_id, limit.unwrap_or(5).clamp(1, 25))
+        .map_err(|e| CommandError::new("GET_RELATED_MEETINGS_FAILED", &e))
+}
+
+/// The per-stage processing log, for diagnosing a meeting that did not process
+/// cleanly without reading source or log files.
+#[tauri::command]
+pub async fn get_meeting_v2_processing_log(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::meetings_v2::processing::model::ProcessingLogEntry>, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+    Ok(state.meeting_processor.log(&session_id))
+}
+
+/// Every available summary extension — the shipped ones plus the user's.
+#[tauri::command]
+pub async fn get_meeting_v2_extensions(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::meetings_v2::processing::model::MeetingExtension>, CommandError> {
+    use crate::meetings_v2::processing::model::MeetingExtension;
+
     let settings = state.settings.lock().unwrap().clone();
-    let llm = LLMClient::new(settings.provider);
+    let user_defined: Vec<MeetingExtension> = settings
+        .meetings
+        .extensions
+        .iter()
+        .map(|e| MeetingExtension {
+            id: e.id.clone(),
+            name: e.name.clone(),
+            instructions: e.instructions.clone(),
+            builtin: false,
+        })
+        .collect();
 
-    let updated = crate::pipeline::summarize_meeting(&llm, &state.meetings_v2.store(), &session_id)
-        .await
-        .map_err(|e| CommandError::new("SUMMARIZE_MEETING_FAILED", &e))?;
+    Ok(crate::meetings_v2::processing::modes::resolve_extensions(
+        &user_defined,
+    ))
+}
 
-    let _ = app.emit("meeting-session-state-changed", &updated);
-    Ok(updated)
+/// A compact per-meeting view for the meetings list: the extracted title,
+/// processing status, type, and outstanding task count.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MeetingProcessingIndexEntry {
+    pub meeting_id: String,
+    /// The extracted title, when one exists. The list falls back to the
+    /// recorder's own title, which this deliberately does not overwrite.
+    pub title: Option<String>,
+    pub status: crate::meetings_v2::processing::model::ProcessingStatus,
+    pub meeting_type: Option<String>,
+    pub has_summary: bool,
+    pub open_action_item_count: usize,
+    pub action_item_count: usize,
+}
+
+/// The processing index for every processed meeting, in one call, so the list
+/// view does not fan out per row.
+#[tauri::command]
+pub async fn list_meeting_v2_processing(
+    state: State<'_, AppState>,
+) -> Result<Vec<MeetingProcessingIndexEntry>, CommandError> {
+    use crate::meetings_v2::processing::model::ActionItemStatus;
+
+    let sessions = state
+        .meetings_v2
+        .store()
+        .list_sessions()
+        .map_err(|e| CommandError::new("LIST_MEETINGS_FAILED", &e))?;
+
+    Ok(sessions
+        .into_iter()
+        .filter_map(|session| {
+            let processing = state.meeting_processor.get(&session.id)?;
+            let facts = processing.facts.as_ref();
+            Some(MeetingProcessingIndexEntry {
+                meeting_id: session.id,
+                title: facts.map(|f| f.title.clone()),
+                status: processing.status,
+                meeting_type: facts.map(|f| f.meeting_type.label().to_string()),
+                has_summary: processing.summary.is_some(),
+                open_action_item_count: facts
+                    .map(|f| {
+                        f.action_items
+                            .iter()
+                            .filter(|a| a.status == ActionItemStatus::Open)
+                            .count()
+                    })
+                    .unwrap_or(0),
+                action_item_count: facts.map(|f| f.action_items.len()).unwrap_or(0),
+            })
+        })
+        .collect())
+}
+
+/// Converts a meeting into a Scribble.
+///
+/// Reuses the existing Scribble infrastructure rather than adding a second
+/// implementation: same `Scribble` type, same vault, same saved event. The
+/// Scribble references the meeting as its source instead of duplicating it, and
+/// the meeting records the Scribble it produced.
+#[tauri::command]
+pub async fn promote_meeting_v2_to_scribble(
+    app: AppHandle,
+    session_id: String,
+    custom_title: Option<String>,
+    include_conversation: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<Scribble, CommandError> {
+    use crate::meetings_v2::processing::model::ScribbleRef;
+
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+
+    let session = state
+        .meetings_v2
+        .store()
+        .get_session(&session_id)
+        .map_err(|e| CommandError::new("MEETING_NOT_FOUND", &e))?;
+
+    let processing = state.meeting_processor.get(&session_id).ok_or_else(|| {
+        CommandError::new(
+            "MEETING_NOT_PROCESSED",
+            "Process this meeting before turning it into a Scribble",
+        )
+    })?;
+
+    let content = crate::meetings_v2::processing::render_scribble_markdown(
+        &processing,
+        &session.title,
+        include_conversation.unwrap_or(false),
+    );
+
+    let title = custom_title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+        .or_else(|| processing.facts.as_ref().map(|f| f.title.clone()))
+        .unwrap_or_else(|| session.title.clone());
+
+    let scribble = Scribble::from_meeting(
+        &session_id,
+        &session.title,
+        &content,
+        &title,
+        processing
+            .facts
+            .as_ref()
+            .map(|f| f.topics.iter().map(|t| t.label.clone()).collect())
+            .unwrap_or_default(),
+        processing
+            .facts
+            .as_ref()
+            .map(|f| f.entities.iter().map(|e| e.name.clone()).collect())
+            .unwrap_or_default(),
+    );
+
+    state
+        .vault
+        .save_scribble(&scribble)
+        .map_err(|e| CommandError::new("VAULT_SAVE_FAILED", &e.to_string()))?;
+
+    // Provenance in both directions: the Scribble names its source meeting, and
+    // the meeting names the Scribble it produced.
+    let updated = state.meeting_processor.record_scribble(
+        &session_id,
+        ScribbleRef {
+            scribble_id: scribble.id.clone(),
+            created_at: scribble.created_at.clone(),
+            title: scribble.title.clone(),
+        },
+    );
+    match updated {
+        Ok(processing) => {
+            let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
+        }
+        Err(e) => tracing::warn!(
+            meeting_id = %session_id,
+            "meeting_processing: could not record the Scribble reference: {}",
+            e
+        ),
+    }
+
+    let _ = app.emit(SCRIBBLE_SAVED_EVENT, &scribble);
+    Ok(scribble)
 }
 
 

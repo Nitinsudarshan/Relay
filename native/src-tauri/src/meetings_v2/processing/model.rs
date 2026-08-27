@@ -1,0 +1,842 @@
+//! The canonical derived model for a processed meeting.
+//!
+//! Everything in this file is *derived* data: it is computed from the raw
+//! transcript and can be thrown away and recomputed at any time. It is
+//! persisted to `processing.json`, deliberately separate from `session.json`
+//! and `transcript.jsonl`, which are the recorder's source artifacts and are
+//! never written by the processing pipeline.
+//!
+//! The raw transcript is the only source of truth for what was said. Every
+//! derived object here therefore carries the segment ids it came from, so
+//! "why did Relay think this was an action item?" is answerable from the data
+//! alone.
+
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+/// Bumped whenever the shape or semantics of derived output change enough that
+/// a previously generated `processing.json` should be regarded as stale.
+pub const PROCESSING_VERSION: u32 = 1;
+
+/// Identifies the `Meeting-rules/` revision the prompts encode. Recorded on
+/// every derived artifact so a quality change six months from now can be
+/// attributed to a rules change rather than a model change.
+pub const RULES_VERSION: &str = "meeting-rules-2026-08";
+
+/// The local user's stable speaker id. Resolved from the microphone channel,
+/// which is the one attribution that needs no model and no diarization.
+pub const SPEAKER_ID_ME: &str = "speaker_me";
+
+/// Stable id for the "everyone else" bucket produced by system-audio-only
+/// stretches. Diarization can later split this into `speaker_2`, `speaker_3`,
+/// … without any other id changing.
+pub const SPEAKER_ID_REMOTE: &str = "speaker_1";
+
+/// Which capture channel a transcript segment came from.
+///
+/// Derived from the per-chunk energy flags the recorder already measures.
+/// `Mixed` means both the microphone and system audio were audible within the
+/// same 30-second chunk, so the channel says nothing about who spoke —
+/// deliberately not resolved to a speaker rather than guessed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SegmentChannel {
+    Mic,
+    System,
+    Mixed,
+    Unknown,
+}
+
+impl SegmentChannel {
+    /// Resolves the channel flags recorded on a raw transcript segment.
+    pub fn from_flags(mic_had_audio: bool, sys_had_audio: bool) -> Self {
+        match (mic_had_audio, sys_had_audio) {
+            (true, false) => Self::Mic,
+            (false, true) => Self::System,
+            (true, true) => Self::Mixed,
+            (false, false) => Self::Unknown,
+        }
+    }
+
+    /// The speaker this channel unambiguously implies, if any.
+    pub fn implied_speaker_id(self) -> Option<&'static str> {
+        match self {
+            Self::Mic => Some(SPEAKER_ID_ME),
+            Self::System => Some(SPEAKER_ID_REMOTE),
+            Self::Mixed | Self::Unknown => None,
+        }
+    }
+}
+
+/// How a speaker's identity was established.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SpeakerOrigin {
+    /// Rung 1: microphone stream vs system stream.
+    Channel,
+    /// Rung 4: a diarization cluster. Not produced yet; the model accepts it
+    /// so diarization can be added without a schema change.
+    Diarization,
+    /// Rung 6: the user named this speaker.
+    Manual,
+}
+
+/// A participant in the meeting.
+///
+/// `id` is the only identifier that anything else may reference. `display_name`
+/// is presentation, is user-editable, and is resolved at read time — renaming a
+/// speaker must never rewrite a transcript or a conversation turn.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Speaker {
+    pub id: String,
+    /// `None` until the user names this speaker. Renderers fall back to
+    /// `fallback_label`.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// What to call this speaker before anyone has named them — "Me",
+    /// "Speaker 1". Stored rather than derived so the label a summary was
+    /// generated against stays stable.
+    pub fallback_label: String,
+    pub origin: SpeakerOrigin,
+    pub channel: SegmentChannel,
+    /// True for the local user, whose commitments are the ones that matter most
+    /// when assigning action items.
+    #[serde(default)]
+    pub is_local_user: bool,
+    #[serde(default)]
+    pub segment_count: usize,
+}
+
+impl Speaker {
+    /// The name to show. Never invents a human name.
+    pub fn label(&self) -> &str {
+        match self.display_name.as_deref() {
+            Some(name) if !name.trim().is_empty() => name,
+            _ => &self.fallback_label,
+        }
+    }
+}
+
+/// A raw transcript segment after deterministic cleanup.
+///
+/// `raw_text` is retained alongside `text` so the effect of normalization is
+/// inspectable without reopening `transcript.jsonl`, and so a normalization bug
+/// can be diagnosed from the derived artifact.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NormalizedSegment {
+    /// `seg_<chunk_index>`, stable across regeneration because it is derived
+    /// from the immutable chunk index.
+    pub id: String,
+    pub chunk_index: usize,
+    pub start_time_s: f64,
+    pub end_time_s: f64,
+    /// The cleaned text. Meaning-preserving: normalization may repair, it may
+    /// not invent.
+    pub text: String,
+    pub raw_text: String,
+    pub channel: SegmentChannel,
+    /// `None` where the channel is ambiguous. Never guessed.
+    #[serde(default)]
+    pub speaker_id: Option<String>,
+    /// Names of the normalization rules that changed this segment, for
+    /// debugging STT and glossary quality.
+    #[serde(default)]
+    pub applied_rules: Vec<String>,
+}
+
+/// The normalized transcript — the canonical human-readable transcript, and the
+/// input to every stage after it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NormalizedTranscript {
+    pub segments: Vec<NormalizedSegment>,
+    /// How many segments each rule changed. A glossary rule that never fires,
+    /// or a dedup rule that fires on every segment, both show up here.
+    #[serde(default)]
+    pub rule_hits: BTreeMap<String, usize>,
+    pub source_char_count: usize,
+    pub output_char_count: usize,
+    /// Raw segments dropped because they normalized to nothing.
+    #[serde(default)]
+    pub dropped_segment_count: usize,
+}
+
+impl NormalizedTranscript {
+    /// The normalized transcript as one block of prose.
+    pub fn plain_text(&self) -> String {
+        self.segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    pub fn word_count(&self) -> usize {
+        self.segments
+            .iter()
+            .map(|s| s.text.split_whitespace().count())
+            .sum()
+    }
+}
+
+/// One speaker's contiguous stretch of the conversation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConversationTurn {
+    pub id: String,
+    /// `None` where attribution was ambiguous; renderers say so rather than
+    /// picking a speaker.
+    #[serde(default)]
+    pub speaker_id: Option<String>,
+    pub start_time_s: f64,
+    pub end_time_s: f64,
+    pub text: String,
+    /// The normalized segments merged into this turn.
+    pub segment_ids: Vec<String>,
+}
+
+/// The speaker-labelled, chronological, readable transcript.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Conversation {
+    pub turns: Vec<ConversationTurn>,
+    /// Turns whose speaker could not be resolved. Surfaced so the UI can be
+    /// honest about how much of the conversation is attributed.
+    #[serde(default)]
+    pub unattributed_turn_count: usize,
+}
+
+/// Who owns an action item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum OwnerType {
+    /// The local user committed to it in their own voice.
+    Me,
+    /// A specific identified speaker.
+    Speaker,
+    /// Named in the transcript but not matchable to a speaker (e.g. someone who
+    /// was not in the call).
+    External,
+    /// Stated as a group commitment ("we'll").
+    Group,
+    /// Ownership was not established. The honest default.
+    Unassigned,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ActionItemStatus {
+    Open,
+    Done,
+}
+
+/// A commitment made in the meeting that has to happen after it ends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActionItem {
+    pub id: String,
+    pub description: String,
+    pub owner_type: OwnerType,
+    /// Set only for `Me` and `Speaker`. The rendered name is resolved from the
+    /// speaker registry at read time, so a rename updates this item's display
+    /// without regenerating anything.
+    #[serde(default)]
+    pub owner_speaker_id: Option<String>,
+    /// A name for owners that are not speakers (`External`). Never a
+    /// substitute for an unresolved speaker.
+    #[serde(default)]
+    pub owner_label: Option<String>,
+    /// ISO `YYYY-MM-DD`, and only when a date was actually spoken. Never
+    /// inferred from "soon" or "next week" without an anchor.
+    #[serde(default)]
+    pub deadline: Option<String>,
+    #[serde(default = "default_action_status")]
+    pub status: ActionItemStatus,
+    /// Normalized segments this was read out of.
+    #[serde(default)]
+    pub source_segment_ids: Vec<String>,
+    #[serde(default = "default_confidence")]
+    pub confidence: f32,
+}
+
+fn default_action_status() -> ActionItemStatus {
+    ActionItemStatus::Open
+}
+
+fn default_confidence() -> f32 {
+    0.5
+}
+
+/// Something the meeting settled.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Decision {
+    pub id: String,
+    pub statement: String,
+    /// Speaker id of whoever decided, when that is known.
+    #[serde(default)]
+    pub decided_by_speaker_id: Option<String>,
+    #[serde(default)]
+    pub source_segment_ids: Vec<String>,
+    #[serde(default = "default_confidence")]
+    pub confidence: f32,
+}
+
+/// A subject that occupied a sustained stretch of the meeting.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Topic {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub segment_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EntityKind {
+    Person,
+    Organization,
+    Product,
+    Project,
+    Technology,
+    Other,
+}
+
+/// A named thing referenced in the meeting.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Entity {
+    pub id: String,
+    pub name: String,
+    pub kind: EntityKind,
+    #[serde(default)]
+    pub segment_ids: Vec<String>,
+}
+
+/// Something raised and left unresolved.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenQuestion {
+    pub id: String,
+    pub question: String,
+    #[serde(default)]
+    pub source_segment_ids: Vec<String>,
+}
+
+/// A substantive discussion point — what a reader who missed the meeting needs
+/// in order to follow it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KeyPoint {
+    pub id: String,
+    pub text: String,
+    #[serde(default)]
+    pub topic_id: Option<String>,
+    #[serde(default)]
+    pub source_segment_ids: Vec<String>,
+}
+
+/// Lightweight classification, used for grouping and for finding related
+/// meetings. Deliberately a small closed set rather than free text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum MeetingType {
+    Scrum,
+    OneOnOne,
+    ProjectReview,
+    ClientMeeting,
+    Planning,
+    Interview,
+    General,
+}
+
+impl MeetingType {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Scrum => "Scrum",
+            Self::OneOnOne => "1:1",
+            Self::ProjectReview => "Project Review",
+            Self::ClientMeeting => "Client Meeting",
+            Self::Planning => "Planning",
+            Self::Interview => "Interview",
+            Self::General => "General",
+        }
+    }
+
+    /// Parses a model-supplied type string. Unrecognized values become
+    /// `General` rather than inventing a category.
+    pub fn parse(raw: &str) -> Self {
+        let key: String = raw
+            .trim()
+            .to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect();
+        match key.as_str() {
+            "scrum" | "standup" | "dailyscrum" | "dailystandup" => Self::Scrum,
+            "oneonone" | "11" | "1on1" | "onetoone" => Self::OneOnOne,
+            "projectreview" | "review" => Self::ProjectReview,
+            "clientmeeting" | "client" => Self::ClientMeeting,
+            "planning" | "sprintplanning" => Self::Planning,
+            "interview" => Self::Interview,
+            _ => Self::General,
+        }
+    }
+}
+
+/// The structured intermediate representation — Stage A's output, and the
+/// single source every derived view is projected from.
+///
+/// Prose generation reads this, not the transcript, so no model is ever asked
+/// to comprehend, extract, and write at the same time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeetingFacts {
+    pub title: String,
+    pub meeting_type: MeetingType,
+    #[serde(default)]
+    pub key_points: Vec<KeyPoint>,
+    #[serde(default)]
+    pub topics: Vec<Topic>,
+    #[serde(default)]
+    pub decisions: Vec<Decision>,
+    #[serde(default)]
+    pub action_items: Vec<ActionItem>,
+    #[serde(default)]
+    pub open_questions: Vec<OpenQuestion>,
+    #[serde(default)]
+    pub entities: Vec<Entity>,
+    /// Speaker ids that actually contributed, for the related-meetings signal.
+    #[serde(default)]
+    pub speaker_ids: Vec<String>,
+    /// True when these facts came from the deterministic extractor because no
+    /// model was reachable. Surfaced so a thin summary is explainable.
+    #[serde(default)]
+    pub deterministic: bool,
+}
+
+/// How long and how detailed a generated summary should be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SummaryMode {
+    Concise,
+    #[default]
+    Standard,
+    Detailed,
+}
+
+impl SummaryMode {
+    pub fn parse(raw: &str) -> Self {
+        match raw.trim().to_lowercase().as_str() {
+            "concise" => Self::Concise,
+            "detailed" => Self::Detailed,
+            _ => Self::Standard,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Concise => "Concise",
+            Self::Standard => "Standard",
+            Self::Detailed => "Detailed",
+        }
+    }
+
+    /// Upper bound on the prose body, enforced by the validator. Prevents a
+    /// "summary" that is really a transcript.
+    pub fn max_words(self) -> usize {
+        match self {
+            Self::Concise => 220,
+            Self::Standard => 550,
+            Self::Detailed => 1100,
+        }
+    }
+}
+
+/// A named presentation treatment applied on top of a summary mode.
+///
+/// An extension changes instructions and layout only. It never bypasses
+/// extraction, so two extensions of the same meeting cannot disagree about
+/// what was decided.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeetingExtension {
+    pub id: String,
+    pub name: String,
+    /// Appended to the Stage B instructions.
+    pub instructions: String,
+    /// True for the extensions Relay ships; those cannot be deleted.
+    #[serde(default)]
+    pub builtin: bool,
+}
+
+/// Severity of a validator finding. `Error` means the artifact is not fit to
+/// show and the deterministic renderer is used instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum IssueSeverity {
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ValidationIssue {
+    /// Stable machine-readable code, e.g. `SUMMARY_TOO_LONG`.
+    pub code: String,
+    pub severity: IssueSeverity,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ValidationReport {
+    pub passed: bool,
+    #[serde(default)]
+    pub issues: Vec<ValidationIssue>,
+}
+
+impl ValidationReport {
+    pub fn ok() -> Self {
+        Self {
+            passed: true,
+            issues: Vec::new(),
+        }
+    }
+
+    pub fn from_issues(issues: Vec<ValidationIssue>) -> Self {
+        let passed = !issues.iter().any(|i| i.severity == IssueSeverity::Error);
+        Self { passed, issues }
+    }
+
+    pub fn has_errors(&self) -> bool {
+        self.issues
+            .iter()
+            .any(|i| i.severity == IssueSeverity::Error)
+    }
+}
+
+/// A generated human-facing summary, with everything needed to explain why it
+/// reads the way it does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SummaryArtifact {
+    pub markdown: String,
+    pub mode: SummaryMode,
+    pub extension_id: String,
+    pub generated_at: String,
+    pub provider: String,
+    pub model: String,
+    pub processing_version: u32,
+    pub rules_version: String,
+    /// True when the prose was rendered deterministically from facts because no
+    /// model was reachable, or because the model's output failed validation.
+    #[serde(default)]
+    pub deterministic: bool,
+    /// Set when a speaker was renamed after this summary was written. The prose
+    /// still carries the old label; action items and the conversation resolve
+    /// live, so only the prose is stale.
+    #[serde(default)]
+    pub speaker_names_stale: bool,
+    #[serde(default)]
+    pub validation: ValidationReport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StageStatus {
+    #[default]
+    NotRun,
+    Running,
+    Success,
+    Failed,
+    /// Deliberately not run — e.g. the conversation transcript is switched off
+    /// in settings. Distinct from `Failed` so the UI does not offer a retry for
+    /// something the user turned off.
+    Skipped,
+}
+
+/// Per-stage bookkeeping. This is what makes a failed meeting diagnosable
+/// without reading source: which stages ran, which model, how long, and what
+/// the validator said.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct StageState {
+    pub status: StageStatus,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub finished_at: Option<String>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub input_chars: Option<usize>,
+    #[serde(default)]
+    pub output_chars: Option<usize>,
+    #[serde(default)]
+    pub validation: Option<ValidationReport>,
+}
+
+impl StageState {
+    pub fn skipped(reason: &str) -> Self {
+        Self {
+            status: StageStatus::Skipped,
+            error: Some(reason.to_string()),
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct StageStates {
+    #[serde(default)]
+    pub normalization: StageState,
+    #[serde(default)]
+    pub speakers: StageState,
+    #[serde(default)]
+    pub conversation: StageState,
+    #[serde(default)]
+    pub extraction: StageState,
+    #[serde(default)]
+    pub summary: StageState,
+}
+
+/// Overall processing state, rolled up from the individual stages. Never
+/// conflated with `MeetingState`, which is about recording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProcessingStatus {
+    #[default]
+    NotStarted,
+    Running,
+    /// Everything that was asked for succeeded.
+    Ready,
+    /// Some stages succeeded and some did not. The meeting is usable.
+    Partial,
+    /// Nothing usable was produced.
+    Failed,
+}
+
+/// Where a meeting's exported Scribble lives, so the meeting can link to it
+/// instead of duplicating it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScribbleRef {
+    pub scribble_id: String,
+    pub created_at: String,
+    pub title: String,
+}
+
+/// The complete derived artifact for one meeting: `processing.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeetingProcessing {
+    pub meeting_id: String,
+    pub processing_version: u32,
+    pub rules_version: String,
+    pub updated_at: String,
+    pub status: ProcessingStatus,
+    #[serde(default)]
+    pub stages: StageStates,
+    #[serde(default)]
+    pub normalized: Option<NormalizedTranscript>,
+    #[serde(default)]
+    pub speakers: Vec<Speaker>,
+    #[serde(default)]
+    pub conversation: Option<Conversation>,
+    #[serde(default)]
+    pub facts: Option<MeetingFacts>,
+    #[serde(default)]
+    pub summary: Option<SummaryArtifact>,
+    #[serde(default)]
+    pub scribble_ref: Option<ScribbleRef>,
+}
+
+impl MeetingProcessing {
+    pub fn new(meeting_id: &str) -> Self {
+        Self {
+            meeting_id: meeting_id.to_string(),
+            processing_version: PROCESSING_VERSION,
+            rules_version: RULES_VERSION.to_string(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            status: ProcessingStatus::NotStarted,
+            stages: StageStates::default(),
+            normalized: None,
+            speakers: Vec::new(),
+            conversation: None,
+            facts: None,
+            summary: None,
+            scribble_ref: None,
+        }
+    }
+
+    /// Recomputes `status` from the stage states.
+    ///
+    /// A meeting counts as `Partial` — not `Failed` — as long as any stage
+    /// produced something, because the raw transcript and whatever was derived
+    /// remain usable. Only a run where nothing succeeded is `Failed`.
+    pub fn recompute_status(&mut self) {
+        let stages = [
+            &self.stages.normalization,
+            &self.stages.speakers,
+            &self.stages.conversation,
+            &self.stages.extraction,
+            &self.stages.summary,
+        ];
+
+        let any_running = stages.iter().any(|s| s.status == StageStatus::Running);
+        let succeeded = stages
+            .iter()
+            .filter(|s| s.status == StageStatus::Success)
+            .count();
+        let failed = stages
+            .iter()
+            .filter(|s| s.status == StageStatus::Failed)
+            .count();
+        let attempted = stages
+            .iter()
+            .filter(|s| s.status != StageStatus::NotRun)
+            .count();
+
+        self.status = if any_running {
+            ProcessingStatus::Running
+        } else if attempted == 0 {
+            ProcessingStatus::NotStarted
+        } else if failed == 0 {
+            ProcessingStatus::Ready
+        } else if succeeded > 0 {
+            ProcessingStatus::Partial
+        } else {
+            ProcessingStatus::Failed
+        };
+    }
+
+    /// Looks up a speaker's presentation name without inventing one.
+    pub fn speaker_label(&self, speaker_id: &str) -> Option<&str> {
+        self.speakers
+            .iter()
+            .find(|s| s.id == speaker_id)
+            .map(|s| s.label())
+    }
+}
+
+/// One line of `processing_log.jsonl` — the observability record for a single
+/// stage run. Deliberately carries sizes and outcomes, never transcript text.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProcessingLogEntry {
+    pub meeting_id: String,
+    pub stage: String,
+    pub status: String,
+    pub at: String,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub input_chars: Option<usize>,
+    #[serde(default)]
+    pub output_chars: Option<usize>,
+    #[serde(default)]
+    pub validator_passed: Option<bool>,
+    #[serde(default)]
+    pub validator_issue_codes: Vec<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    pub processing_version: u32,
+    pub rules_version: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_resolves_only_unambiguous_speakers() {
+        assert_eq!(
+            SegmentChannel::from_flags(true, false).implied_speaker_id(),
+            Some(SPEAKER_ID_ME)
+        );
+        assert_eq!(
+            SegmentChannel::from_flags(false, true).implied_speaker_id(),
+            Some(SPEAKER_ID_REMOTE)
+        );
+        // Both channels audible in the same chunk says nothing about who spoke.
+        assert_eq!(
+            SegmentChannel::from_flags(true, true).implied_speaker_id(),
+            None
+        );
+        // Old transcripts have no channel data at all.
+        assert_eq!(
+            SegmentChannel::from_flags(false, false).implied_speaker_id(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_speaker_falls_back_to_its_label_rather_than_inventing_a_name() {
+        let mut speaker = Speaker {
+            id: SPEAKER_ID_REMOTE.to_string(),
+            display_name: None,
+            fallback_label: "Speaker 1".to_string(),
+            origin: SpeakerOrigin::Channel,
+            channel: SegmentChannel::System,
+            is_local_user: false,
+            segment_count: 3,
+        };
+        assert_eq!(speaker.label(), "Speaker 1");
+
+        speaker.display_name = Some("   ".to_string());
+        assert_eq!(speaker.label(), "Speaker 1", "whitespace is not a name");
+
+        speaker.display_name = Some("Pranjali".to_string());
+        assert_eq!(speaker.label(), "Pranjali");
+    }
+
+    #[test]
+    fn a_partly_failed_run_stays_usable_rather_than_failed() {
+        let mut processing = MeetingProcessing::new("meet_1");
+        processing.stages.normalization.status = StageStatus::Success;
+        processing.stages.summary.status = StageStatus::Failed;
+        processing.recompute_status();
+        assert_eq!(processing.status, ProcessingStatus::Partial);
+
+        processing.stages.normalization.status = StageStatus::Failed;
+        processing.recompute_status();
+        assert_eq!(processing.status, ProcessingStatus::Failed);
+
+        processing.stages.normalization.status = StageStatus::Success;
+        processing.stages.summary.status = StageStatus::Success;
+        processing.recompute_status();
+        assert_eq!(processing.status, ProcessingStatus::Ready);
+    }
+
+    #[test]
+    fn a_skipped_stage_is_not_a_failure() {
+        let mut processing = MeetingProcessing::new("meet_1");
+        processing.stages.normalization.status = StageStatus::Success;
+        processing.stages.conversation = StageState::skipped("disabled in settings");
+        processing.recompute_status();
+        assert_eq!(processing.status, ProcessingStatus::Ready);
+    }
+
+    #[test]
+    fn unknown_meeting_types_do_not_become_new_categories() {
+        assert_eq!(MeetingType::parse("Daily Scrum"), MeetingType::Scrum);
+        assert_eq!(MeetingType::parse("1:1"), MeetingType::OneOnOne);
+        assert_eq!(MeetingType::parse("Sprint Planning"), MeetingType::Planning);
+        assert_eq!(
+            MeetingType::parse("Quarterly Vibes Alignment"),
+            MeetingType::General
+        );
+    }
+
+    #[test]
+    fn validation_fails_only_on_errors() {
+        let warnings = ValidationReport::from_issues(vec![ValidationIssue {
+            code: "X".into(),
+            severity: IssueSeverity::Warning,
+            message: "m".into(),
+        }]);
+        assert!(warnings.passed);
+
+        let errors = ValidationReport::from_issues(vec![ValidationIssue {
+            code: "Y".into(),
+            severity: IssueSeverity::Error,
+            message: "m".into(),
+        }]);
+        assert!(!errors.passed);
+        assert!(errors.has_errors());
+    }
+}

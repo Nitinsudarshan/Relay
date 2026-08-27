@@ -26,6 +26,7 @@ import {
   Globe,
   Sparkles,
   BookOpen,
+  Users,
   Volume2,
   Terminal,
   Check,
@@ -43,12 +44,14 @@ import { TrashSettings } from './TrashSettings';
 import { AccountSettings } from './AccountSettings';
 import { DeveloperSettingsView } from './DeveloperSettingsView';
 import { DictionarySnippetsSettings } from './DictionarySnippetsSettings';
+import { MeetingsSettings } from './MeetingsSettings';
 
 export type SettingsSection =
   | 'account'
   | 'general'
   | 'dictation'
   | 'dictionary'
+  | 'meetings'
   | 'languages'
   | 'advanced'
   | 'privacy'
@@ -467,7 +470,21 @@ export const ProviderSettings: React.FC = () => {
           <span>Dictionary & Snippets</span>
         </button>
 
-        {/* 4. Languages & Script */}
+        {/* 4. Meetings */}
+        <button
+          type="button"
+          onClick={() => setActiveSection('meetings')}
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
+            activeSection === 'meetings'
+              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          }`}
+        >
+          <Users className="w-4 h-4 text-primary" />
+          <span>Meetings</span>
+        </button>
+
+        {/* 5. Languages & Script */}
         <button
           type="button"
           onClick={() => setActiveSection('languages')}
@@ -1769,6 +1786,20 @@ export const ProviderSettings: React.FC = () => {
         )}
 
         {/* 7. TRASH SECTION */}
+        {activeSection === 'meetings' && (
+          <MeetingsSettings
+            settings={settings}
+            onChange={async (next) => {
+              setSettings(next);
+              try {
+                await invoke('save_settings', { settings: next });
+              } catch (err) {
+                console.error('Failed to save meeting settings', err);
+              }
+            }}
+          />
+        )}
+
         {activeSection === 'trash' && <TrashSettings />}
 
         {/* 8. DEVELOPER SECTION */}

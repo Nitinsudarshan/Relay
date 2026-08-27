@@ -346,6 +346,109 @@ pub fn default_snippets() -> Vec<SnippetItem> {
     ]
 }
 
+/// Whether Relay tries to tell speakers apart in a meeting.
+///
+/// `Automatic` runs the cheap, non-biometric attribution: the microphone is the
+/// local user, system audio is everyone else. It creates no voiceprints and
+/// stores no biometric data. Diarization and a persistent voice library are
+/// deliberately not options here yet — see
+/// `Meeting-rules/meeting_speaker_identification.md` §6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeakerIdentification {
+    #[default]
+    Automatic,
+    Off,
+}
+
+/// How a summary is shaped by default. Mirrors
+/// `meetings_v2::processing::model::SummaryMode`, kept separate so the settings
+/// file format does not move whenever the pipeline's internals do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultSummaryMode {
+    Concise,
+    #[default]
+    Standard,
+    Detailed,
+}
+
+/// A user-defined summary extension: a named presentation treatment layered on
+/// top of a summary mode.
+///
+/// `instructions` shapes how the summary reads. It cannot change what was
+/// extracted — the canonical meeting facts are produced before any extension is
+/// applied — so a badly written extension can produce an awkward summary but
+/// never a false one.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MeetingExtensionSetting {
+    pub id: String,
+    pub name: String,
+    pub instructions: String,
+}
+
+/// Meeting behavior the user controls.
+///
+/// Deliberately small. The processing pipeline has seven internal stages; none
+/// of them is a setting. What is exposed is what someone would actually want to
+/// change: whether the debug view is visible, whether the readable transcript is
+/// built, how long summaries are, and which presentations exist.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MeetingSettings {
+    /// Whether the Raw Transcript tab is offered.
+    ///
+    /// This controls **visibility only**. The raw transcript is the diagnostic
+    /// source artifact for everything derived from a meeting, and turning this
+    /// off never deletes it — `transcript.jsonl` stays on disk and the pipeline
+    /// keeps reading it.
+    #[serde(default = "default_true", alias = "showRawTranscript")]
+    pub show_raw_transcript: bool,
+    /// Whether the speaker-labelled conversation transcript is built.
+    #[serde(default = "default_true", alias = "generateConversationTranscript")]
+    pub generate_conversation_transcript: bool,
+    /// Whether a summary is generated automatically once a recording finishes.
+    ///
+    /// Either way this happens after the recording is safely persisted and never
+    /// blocks the recorder, the live transcript, or opening the meeting.
+    #[serde(default = "default_true", alias = "autoGenerateSummary")]
+    pub auto_generate_summary: bool,
+    #[serde(default, alias = "defaultSummaryMode")]
+    pub default_summary_mode: DefaultSummaryMode,
+    #[serde(default = "default_extension_id", alias = "defaultExtensionId")]
+    pub default_extension_id: String,
+    #[serde(default, alias = "speakerIdentification")]
+    pub speaker_identification: SpeakerIdentification,
+    /// The user's own extensions. The shipped ones live in code and are always
+    /// available; this list only adds to them.
+    #[serde(default)]
+    pub extensions: Vec<MeetingExtensionSetting>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_extension_id() -> String {
+    "default".to_string()
+}
+
+impl Default for MeetingSettings {
+    fn default() -> Self {
+        Self {
+            // Both transcript switches default on: the pipeline is new, and
+            // being able to compare raw against derived output is how its
+            // quality gets judged.
+            show_raw_transcript: true,
+            generate_conversation_transcript: true,
+            auto_generate_summary: true,
+            default_summary_mode: DefaultSummaryMode::default(),
+            default_extension_id: default_extension_id(),
+            speaker_identification: SpeakerIdentification::default(),
+            extensions: Vec::new(),
+        }
+    }
+}
+
 pub fn default_dictionary_words() -> Vec<String> {
     vec![
         "Relay".to_string(),
@@ -386,6 +489,8 @@ pub struct AppSettings {
     pub startup: StartupSettings,
     #[serde(default)]
     pub audio_input: AudioInputSettings,
+    #[serde(default)]
+    pub meetings: MeetingSettings,
     #[serde(default = "default_dictionary_words")]
     pub dictionary: Vec<String>,
     #[serde(default = "default_snippets")]
@@ -408,6 +513,7 @@ impl Default for AppSettings {
             clipboard: ClipboardSettings::default(),
             startup: StartupSettings::default(),
             audio_input: AudioInputSettings::default(),
+            meetings: MeetingSettings::default(),
             dictionary: default_dictionary_words(),
             snippets: default_snippets(),
         }

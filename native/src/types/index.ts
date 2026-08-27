@@ -301,8 +301,39 @@ export interface AppSettings {
   clipboard?: ClipboardSettings;
   startup?: StartupSettings;
   audio_input?: AudioInputSettings;
+  meetings?: MeetingSettings;
   dictionary?: string[];
   snippets?: SnippetItem[];
+}
+
+export type SpeakerIdentificationSetting = 'automatic' | 'off';
+export type DefaultSummaryModeSetting = 'concise' | 'standard' | 'detailed';
+
+/** A user-defined summary extension, stored in settings. */
+export interface MeetingExtensionSetting {
+  id: string;
+  name: string;
+  instructions: string;
+}
+
+/**
+ * Meeting behavior the user controls. Deliberately small — the pipeline's
+ * internal stages are not settings.
+ */
+export interface MeetingSettings {
+  /**
+   * Whether the Raw Transcript tab is offered. Visibility only: turning this off
+   * never deletes the transcript, which remains the source for everything
+   * derived from a meeting.
+   */
+  show_raw_transcript: boolean;
+  generate_conversation_transcript: boolean;
+  /** Whether a summary is generated automatically once a recording finishes. */
+  auto_generate_summary: boolean;
+  default_summary_mode: DefaultSummaryModeSetting;
+  default_extension_id: string;
+  speaker_identification: SpeakerIdentificationSetting;
+  extensions: MeetingExtensionSetting[];
 }
 
 export type AccountMode = 'local' | 'hybrid';
@@ -578,10 +609,298 @@ export interface MeetingSession {
   total_audio_bytes: number;
   transcript_segment_count: number;
   word_count?: number;
+  /**
+   * @deprecated Legacy derived fields, retained so meetings summarized before
+   * the processing pipeline existed remain readable. New summaries live in
+   * `MeetingProcessing`; nothing writes these any more.
+   */
   summary?: string | null;
+  /** @deprecated See `summary`. Superseded by `MeetingFacts.action_items`. */
   action_items?: string[];
   pending_transcription_chunks: number;
   error_message?: string | null;
+}
+
+/**
+ * Derived meeting data — everything the processing pipeline produces from a raw
+ * transcript, mirroring `meetings_v2::processing::model` in the Rust backend.
+ *
+ * The distinction that matters throughout: `MeetingSession` and
+ * `TranscriptSegment` are *source* records written by the recorder;
+ * everything below is *derived* and can be regenerated at any time. Nothing in
+ * the UI should write to the former.
+ */
+
+export type SegmentChannel = 'MIC' | 'SYSTEM' | 'MIXED' | 'UNKNOWN';
+export type SpeakerOrigin = 'CHANNEL' | 'DIARIZATION' | 'MANUAL';
+
+/**
+ * A meeting participant. `id` is the stable identifier used by every derived
+ * object; `display_name` is presentation and may be changed at any time.
+ */
+export interface Speaker {
+  id: string;
+  display_name?: string | null;
+  /** What to call this speaker before anyone has named them — "Me", "Speaker 1". */
+  fallback_label: string;
+  origin: SpeakerOrigin;
+  channel: SegmentChannel;
+  is_local_user: boolean;
+  segment_count: number;
+}
+
+export interface NormalizedSegment {
+  id: string;
+  chunk_index: number;
+  start_time_s: number;
+  end_time_s: number;
+  text: string;
+  /** The raw STT text this was cleaned from, carried through for comparison. */
+  raw_text: string;
+  channel: SegmentChannel;
+  speaker_id?: string | null;
+  applied_rules: string[];
+}
+
+export interface NormalizedTranscript {
+  segments: NormalizedSegment[];
+  rule_hits: Record<string, number>;
+  source_char_count: number;
+  output_char_count: number;
+  dropped_segment_count: number;
+}
+
+export interface ConversationTurn {
+  id: string;
+  /** Null where channel attribution was ambiguous. Never guessed. */
+  speaker_id?: string | null;
+  start_time_s: number;
+  end_time_s: number;
+  text: string;
+  segment_ids: string[];
+}
+
+export interface Conversation {
+  turns: ConversationTurn[];
+  unattributed_turn_count: number;
+}
+
+export type OwnerType = 'ME' | 'SPEAKER' | 'EXTERNAL' | 'GROUP' | 'UNASSIGNED';
+export type ActionItemStatus = 'OPEN' | 'DONE';
+
+export interface ActionItem {
+  id: string;
+  description: string;
+  owner_type: OwnerType;
+  /** Set only for ME and SPEAKER owners; the name is resolved at render time. */
+  owner_speaker_id?: string | null;
+  /** A name for owners who are not captured speakers. */
+  owner_label?: string | null;
+  /** ISO date, and only when a date was actually spoken. */
+  deadline?: string | null;
+  status: ActionItemStatus;
+  source_segment_ids: string[];
+  confidence: number;
+}
+
+export interface Decision {
+  id: string;
+  statement: string;
+  decided_by_speaker_id?: string | null;
+  source_segment_ids: string[];
+  confidence: number;
+}
+
+export interface MeetingTopic {
+  id: string;
+  label: string;
+  segment_ids: string[];
+}
+
+export type EntityKind =
+  | 'PERSON'
+  | 'ORGANIZATION'
+  | 'PRODUCT'
+  | 'PROJECT'
+  | 'TECHNOLOGY'
+  | 'OTHER';
+
+export interface MeetingEntity {
+  id: string;
+  name: string;
+  kind: EntityKind;
+  segment_ids: string[];
+}
+
+export interface OpenQuestion {
+  id: string;
+  question: string;
+  source_segment_ids: string[];
+}
+
+export interface KeyPoint {
+  id: string;
+  text: string;
+  topic_id?: string | null;
+  source_segment_ids: string[];
+}
+
+export type MeetingType =
+  | 'SCRUM'
+  | 'ONE_ON_ONE'
+  | 'PROJECT_REVIEW'
+  | 'CLIENT_MEETING'
+  | 'PLANNING'
+  | 'INTERVIEW'
+  | 'GENERAL';
+
+/** The structured intermediate representation every derived view projects from. */
+export interface MeetingFacts {
+  title: string;
+  meeting_type: MeetingType;
+  key_points: KeyPoint[];
+  topics: MeetingTopic[];
+  decisions: Decision[];
+  action_items: ActionItem[];
+  open_questions: OpenQuestion[];
+  entities: MeetingEntity[];
+  speaker_ids: string[];
+  /** True when no model was reachable and these came from the cue-based extractor. */
+  deterministic: boolean;
+}
+
+export type SummaryMode = 'CONCISE' | 'STANDARD' | 'DETAILED';
+
+export interface MeetingExtension {
+  id: string;
+  name: string;
+  instructions: string;
+  builtin: boolean;
+}
+
+export type IssueSeverity = 'WARNING' | 'ERROR';
+
+export interface ValidationIssue {
+  code: string;
+  severity: IssueSeverity;
+  message: string;
+}
+
+export interface ValidationReport {
+  passed: boolean;
+  issues: ValidationIssue[];
+}
+
+export interface SummaryArtifact {
+  markdown: string;
+  mode: SummaryMode;
+  extension_id: string;
+  generated_at: string;
+  provider: string;
+  model: string;
+  processing_version: number;
+  rules_version: string;
+  /** True when the prose was rendered from facts without a model. */
+  deterministic: boolean;
+  /** True when a speaker was renamed after this prose was written. */
+  speaker_names_stale: boolean;
+  validation: ValidationReport;
+}
+
+export type StageStatus = 'NOT_RUN' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'SKIPPED';
+
+export interface StageState {
+  status: StageStatus;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  error?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  input_chars?: number | null;
+  output_chars?: number | null;
+  validation?: ValidationReport | null;
+}
+
+export interface StageStates {
+  normalization: StageState;
+  speakers: StageState;
+  conversation: StageState;
+  extraction: StageState;
+  summary: StageState;
+}
+
+/**
+ * Processing status, rolled up from the stages. Never conflated with
+ * `MeetingState`, which describes recording.
+ */
+export type ProcessingStatus = 'NOT_STARTED' | 'RUNNING' | 'READY' | 'PARTIAL' | 'FAILED';
+
+export interface ScribbleRef {
+  scribble_id: string;
+  created_at: string;
+  title: string;
+}
+
+/** A meeting's complete derived artifact (`processing.json`). */
+export interface MeetingProcessing {
+  meeting_id: string;
+  processing_version: number;
+  rules_version: string;
+  updated_at: string;
+  status: ProcessingStatus;
+  stages: StageStates;
+  normalized?: NormalizedTranscript | null;
+  speakers: Speaker[];
+  conversation?: Conversation | null;
+  facts?: MeetingFacts | null;
+  summary?: SummaryArtifact | null;
+  scribble_ref?: ScribbleRef | null;
+}
+
+export interface RelatedSignals {
+  shared_topics: string[];
+  shared_entities: string[];
+  shared_speakers: string[];
+  same_meeting_type: boolean;
+  title_similarity: number;
+}
+
+export interface RelatedMeeting {
+  meeting_id: string;
+  title: string;
+  created_at: string;
+  meeting_type: MeetingType;
+  score: number;
+  signals: RelatedSignals;
+}
+
+export interface ProcessingLogEntry {
+  meeting_id: string;
+  stage: string;
+  status: string;
+  at: string;
+  duration_ms?: number | null;
+  provider?: string | null;
+  model?: string | null;
+  input_chars?: number | null;
+  output_chars?: number | null;
+  validator_passed?: boolean | null;
+  validator_issue_codes: string[];
+  error?: string | null;
+  processing_version: number;
+  rules_version: string;
+}
+
+/** Compact per-meeting processing info for the meetings list. */
+export interface MeetingProcessingIndexEntry {
+  meeting_id: string;
+  title?: string | null;
+  status: ProcessingStatus;
+  meeting_type?: string | null;
+  has_summary: boolean;
+  open_action_item_count: number;
+  action_item_count: number;
 }
 
 export type TranscriptSegmentStatus = 'SUCCESS' | 'EMPTY' | 'FAILED';
@@ -593,6 +912,13 @@ export interface TranscriptSegment {
   text: string;
   created_at: string;
   status: TranscriptSegmentStatus;
+  /**
+   * Whether each capture source was audible in this chunk. The basis for
+   * channel-based speaker attribution; both false means the channel is unknown,
+   * as it is for transcripts recorded before this was persisted.
+   */
+  mic_had_audio?: boolean;
+  sys_had_audio?: boolean;
 }
 
 /**
