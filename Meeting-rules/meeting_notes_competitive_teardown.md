@@ -142,6 +142,14 @@ Ten things that show up in nearly every mature implementation:
 
 ## 4. Gap analysis for Relay
 
+> **Superseded.** This table was written against the pre-v0.13.0 codebase. Items 1, 4,
+> 8, 9 and 14 have since shipped, and items 2 and 6 changed shape. For the current,
+> code-grounded position see
+> [`meeting_pipeline_gap_analysis.md`](./meeting_pipeline_gap_analysis.md) §4–§6, which
+> cites the file and line for every claim about Relay at v0.13.1. The per-app research
+> in §2 and the legal note in §2.9 below remain current.
+
+
 | # | Capability | Best reference | Relay today | Priority |
 |---|---|---|---|---|
 | 1 | Deterministic transcript preprocessor (loop collapse, tag stripping) | — nobody documents this; it's the silent prerequisite | Missing — asked of the LLM | **P0** |

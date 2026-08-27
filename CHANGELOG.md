@@ -1,5 +1,43 @@
 # Relay — Changelog
 
+## [0.13.2] - 2026-08-27
+
+### Docs: Meeting Pipeline Gap Analysis Re-Grounded Against the v0.13.1 Code
+
+**Type**: patch — documentation only (`Meeting-rules/meeting_pipeline_gap_analysis.md` (new), `Meeting-rules/meeting_notes_competitive_teardown.md`). No source in `native/` or `web/` is touched.
+
+The competitive teardown's gap table was written before the 0.13.0 pipeline and the
+0.13.1 quality pass shipped, so it now understates what exists and misprices what is
+missing. This replaces the analysis half of it with one traced from the checked-out
+tree.
+
+#### Documentation
+
+- **`Meeting-rules/meeting_pipeline_gap_analysis.md` (new)**: a stage-by-stage
+  comparison of eleven meeting-notes products against Relay's pipeline as actually
+  built, on the seven stages Relay's own `processing` module is organized around
+  (trigger, capture, transcription, attribution, comprehension, generation,
+  correction/exit). Covers Fathom, Fireflies, Otter, Granola, Jamie, tl;dv, MeetGeek,
+  Meetily, anarlog, OpenWhispr, Whisper Notes/Vowen, and the raw engines. Every claim
+  about Relay cites the file and line that implements it; the app-side mechanisms cite
+  their source.
+  - Identifies bot-vs-bot-free as the structural fork that determines where speaker
+    *names* come from, and therefore why Relay inherited the hard version of
+    attribution: a bot gets the platform roster free, a device-level tap gets one
+    mixed stream and no roster.
+  - Ranks thirteen gaps by what they cost a real meeting rather than by feature
+    parity, with the mechanism and the code location for each.
+  - Records what Relay already does better than this field — the in-code action-item
+    quality gate, Stage B's structural blindness to the transcript, enforced
+    source/derived separation, the deterministic summary floor, honest provider-failure
+    reporting, and durable audio that never left the machine.
+  - Revises the recommended sequence: per-second channel energy in `capture.rs` first
+    (it unlocks the owner resolution `qualify.rs` already computes and demotes for lack
+    of signal), then calendar attendees, then the action-item exit path.
+- **`Meeting-rules/meeting_notes_competitive_teardown.md`**: §4's gap table is marked
+  superseded with a pointer to the new document. The per-app research in §2 and the
+  biometric-privacy note in §2.9 are unchanged and remain current.
+
 ## [0.13.1] - 2026-08-27
 
 ### Meetings: Action-Item Quality Gate, Honest Summary Fallback State & Quality Regression Fixtures
