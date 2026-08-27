@@ -78,8 +78,17 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
   const label = isBusy ? 'Processing meeting…' : headline.label;
 
   const summaryStage = processing?.stages.summary;
+  // A summary is unavailable only when nothing rendered. A model draft that was
+  // rejected and replaced by the deterministic renderer is a *successful*
+  // summary — the user has something to read, and saying otherwise over a
+  // perfectly good summary is what this distinction exists to prevent.
   const summaryFailed = summaryStage?.status === 'FAILED';
-  const usedFallback = processing?.summary?.deterministic === true;
+  const summary = processing?.summary;
+  const usedFallback = summary?.fallback_used === true;
+  const modelRejected = summary?.provider_output_status === 'REJECTED';
+  const rejectionCodes = (summary?.rejected_issues ?? [])
+    .map((issue) => issue.code)
+    .join(', ');
 
   return (
     <div className="flex flex-col gap-2 px-6 py-2.5 border-b border-white/5 bg-zinc-950/30">
@@ -102,10 +111,13 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
           ))}
         </div>
 
-        {processing?.summary && (
+        {summary && (
           <span className="text-[10px] font-mono text-zinc-600 ml-auto">
-            {processing.summary.mode.toLowerCase()} · {processing.summary.model} · v
-            {processing.summary.processing_version}
+            {summary.mode.toLowerCase()} ·{' '}
+            {/* Naming the model on prose no model wrote would be a lie about
+                provenance, however small. */}
+            {usedFallback ? 'no model' : summary.model} · v
+            {summary.processing_version}
           </span>
         )}
       </div>
@@ -130,9 +142,19 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
 
       {!summaryFailed && usedFallback && (
         <p className="text-[11px] text-amber-300/80">
-          Written without a language model
-          {summaryStage?.error ? ` — ${summaryStage.error}` : ''}. The transcript is
-          unaffected; retry once a model is available.
+          {modelRejected ? (
+            <>
+              Generated from fallback because the model output failed validation
+              {rejectionCodes ? ` (${rejectionCodes})` : ''}. Regenerate to try the
+              model again.
+            </>
+          ) : (
+            <>
+              Written without a language model
+              {summaryStage?.error ? ` — ${summaryStage.error}` : ''}. The transcript
+              is unaffected; retry once a model is available.
+            </>
+          )}
         </p>
       )}
     </div>

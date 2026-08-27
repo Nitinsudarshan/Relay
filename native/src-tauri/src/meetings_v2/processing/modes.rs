@@ -92,8 +92,9 @@ pub fn find_extension(user_defined: &[MeetingExtension], id: &str) -> MeetingExt
 pub fn mode_instructions(mode: SummaryMode) -> &'static str {
     match mode {
         SummaryMode::Concise => {
-            "Length: 4 to 6 strong bullets in the Summary section, no paragraphs. \
-Only what someone must know. Omit any section that would be empty."
+            "Length: 3 to 5 strong bullets in the Summary section, no paragraphs. \
+Only what someone must know. No procedural narration. Omit any section that \
+would be empty."
         }
         SummaryMode::Standard => {
             "Length: 2 to 4 short paragraphs, or 4 to 8 strong bullets, in the Summary \

@@ -12,11 +12,22 @@
 > those objects are *rendered* — by Stage B, or by the deterministic renderer in
 > `summarize::render_markdown`.
 >
-> Two of this rule's requirements are enforced in code rather than left to the
-> prompt: an owner only resolves to a speaker who actually appears in the
-> meeting's speaker registry, and a deadline is kept only when a segment the item
-> cites contains a real temporal expression. Anything else becomes
-> `Unassigned` / no deadline. See `docs/meetings/MEETINGS_INTELLIGENCE_AUDIT.md` §1.14.
+> **Most of this rule is enforced in code, not asked for in a prompt.**
+> `meetings_v2::processing::qualify` is a deterministic gate that both extraction
+> paths — the model and the cue-based fallback — run their candidates through, so
+> neither can produce a class of to-do the other would have rejected. It applies
+> the three gates in §2, the exclusions in §3, the deduplication in §7, and the
+> cap in §7, and it records a rejection reason per candidate. What the prompt
+> still owns is *comprehension*: the cross-turn patterns in §4.3 and §4.4 that no
+> keyword table can see.
+>
+> Also enforced in code: an owner only resolves to a speaker who appears in the
+> meeting's speaker registry **and** whose claim the capture channel can support
+> — an item whose every cited segment had both microphone and system audio live
+> is demoted to `Unassigned` rather than attributed to a guess. A deadline is kept
+> only when a segment the item cites contains a real temporal expression. An
+> action item that cites no segment at all is discarded. See
+> `docs/meetings/MEETINGS_INTELLIGENCE_AUDIT.md` §1.14.
 
 
 ---
@@ -218,6 +229,9 @@ No apology, no explanation, no speculation about what the to-dos might have been
 - If a to-do is later cancelled or superseded ("actually, skip that", "let's park it"), drop it.
 - If the owner changes mid-meeting, use the final owner.
 - Cap at 15. If more qualify, keep those with explicit owners.
+- **15 is a ceiling, never a target.** If three qualify, return three. Padding the
+  list toward the cap is the failure this rule exists to prevent — the cap is
+  applied by `qualify::apply_cap` after ranking, and it never adds anything.
 
 ---
 

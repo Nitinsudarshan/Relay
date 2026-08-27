@@ -16,12 +16,17 @@ use std::collections::BTreeMap;
 
 /// Bumped whenever the shape or semantics of derived output change enough that
 /// a previously generated `processing.json` should be regarded as stale.
-pub const PROCESSING_VERSION: u32 = 1;
+///
+/// v2: action items are qualified by `processing::qualify` before they are
+/// persisted, and the summary artifact records what became of the model's draft
+/// separately from whether the stage succeeded. Facts extracted under v1 carry
+/// action items that never passed the gate.
+pub const PROCESSING_VERSION: u32 = 2;
 
 /// Identifies the `Meeting-rules/` revision the prompts encode. Recorded on
 /// every derived artifact so a quality change six months from now can be
 /// attributed to a rules change rather than a model change.
-pub const RULES_VERSION: &str = "meeting-rules-2026-08";
+pub const RULES_VERSION: &str = "meeting-rules-2026-08-quality-pass";
 
 /// The local user's stable speaker id. Resolved from the microphone channel,
 /// which is the one attribution that needs no model and no diarization.
@@ -504,6 +509,74 @@ impl ValidationReport {
     }
 }
 
+/// What became of the model's proposed prose.
+///
+/// Separated from the summary stage's own outcome because they are different
+/// facts about a run: a rejected model draft followed by a valid deterministic
+/// render is a **successful** summary stage that happens to have rejected the
+/// model. Conflating the two is what made the UI say "Summary unavailable" over
+/// a summary that was sitting right there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProviderOutputStatus {
+    /// No model was asked — the transcript was too short, or none was configured.
+    #[default]
+    NotAttempted,
+    /// A model answered and its prose is what the user is reading.
+    Accepted,
+    /// A model answered and the validator refused the answer.
+    Rejected,
+    /// A model was asked and could not answer.
+    Unavailable,
+}
+
+impl ProviderOutputStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NotAttempted => "not attempted",
+            Self::Accepted => "accepted",
+            Self::Rejected => "rejected",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+/// How the prose the user is reading came to exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SummarySource {
+    /// A model wrote it and the validator accepted it.
+    #[default]
+    Model,
+    /// Rendered from model-extracted facts without a model writing the prose.
+    /// Comprehension was a model's; presentation was not.
+    DeterministicPresentation,
+    /// Rendered from cue-extracted facts. No model was involved at any stage,
+    /// and the points are lifted from the transcript rather than understood.
+    DeterministicExtraction,
+}
+
+impl SummarySource {
+    pub fn is_deterministic(self) -> bool {
+        !matches!(self, Self::Model)
+    }
+
+    /// What to tell the user about where this text came from. Never calls
+    /// deterministic output an AI summary.
+    pub fn provenance(self) -> &'static str {
+        match self {
+            Self::Model => "Written by a language model from the extracted facts.",
+            Self::DeterministicPresentation => {
+                "Written without a language model, from facts a model extracted."
+            }
+            Self::DeterministicExtraction => {
+                "Written without a language model. The points are taken from the transcript \
+rather than summarized."
+            }
+        }
+    }
+}
+
 /// A generated human-facing summary, with everything needed to explain why it
 /// reads the way it does.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -520,11 +593,29 @@ pub struct SummaryArtifact {
     /// model was reachable, or because the model's output failed validation.
     #[serde(default)]
     pub deterministic: bool,
+    /// Where the prose came from, and — for deterministic prose — whether the
+    /// *facts* behind it were understood by a model or lifted from the
+    /// transcript. `deterministic` alone cannot tell those apart.
+    #[serde(default)]
+    pub source: SummarySource,
+    /// What became of the model's draft, independently of whether this summary
+    /// stage succeeded.
+    #[serde(default)]
+    pub provider_output_status: ProviderOutputStatus,
+    /// True when the deterministic renderer produced the text being shown.
+    #[serde(default)]
+    pub fallback_used: bool,
+    /// The issues that caused a model draft to be rejected. Kept as the record
+    /// of why this summary reads the way it does — deliberately *not* merged
+    /// into `validation`, which describes only the prose actually shown.
+    #[serde(default)]
+    pub rejected_issues: Vec<ValidationIssue>,
     /// Set when a speaker was renamed after this summary was written. The prose
     /// still carries the old label; action items and the conversation resolve
     /// live, so only the prose is stale.
     #[serde(default)]
     pub speaker_names_stale: bool,
+    /// The verdict on the prose the user is reading. Nothing else.
     #[serde(default)]
     pub validation: ValidationReport,
 }
@@ -567,6 +658,11 @@ pub struct StageState {
     pub output_chars: Option<usize>,
     #[serde(default)]
     pub validation: Option<ValidationReport>,
+    /// Set on the extraction stage: how many action-item candidates there were
+    /// and what happened to them. Counts only — no candidate text, so this is
+    /// safe to persist and to log.
+    #[serde(default)]
+    pub action_diagnostics: Option<super::qualify::ActionDiagnostics>,
 }
 
 impl StageState {
@@ -734,6 +830,16 @@ pub struct ProcessingLogEntry {
     pub validator_issue_codes: Vec<String>,
     #[serde(default)]
     pub error: Option<String>,
+    /// Extraction only. Counts, never candidate text — the privacy guarantee on
+    /// this log is that it explains a run without quoting the meeting.
+    #[serde(default)]
+    pub action_diagnostics: Option<super::qualify::ActionDiagnostics>,
+    /// Summary only. What became of the model's draft, so a fallback is
+    /// distinguishable from a failure without reading `processing.json`.
+    #[serde(default)]
+    pub provider_output_status: Option<String>,
+    #[serde(default)]
+    pub fallback_used: Option<bool>,
     pub processing_version: u32,
     pub rules_version: String,
 }

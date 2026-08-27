@@ -1,5 +1,52 @@
 # Relay — Changelog
 
+## [0.13.1] - 2026-08-27
+
+### Meetings: Action-Item Quality Gate, Honest Summary Fallback State & Quality Regression Fixtures
+
+**Type**: patch — `native/` only (`native/src-tauri/src/meetings_v2/processing/{qualify.rs,qualify/tests.rs}` (new), `native/src-tauri/src/meetings_v2/processing/{mod,model,extract,summarize,validate,conversation,modes,store,tests}.rs`, `native/src/components/meetings_v2/MeetingProcessingStatus.tsx`, `native/src/types/index.ts`, `Meeting-rules/meeting_action_items_tasks.md`, `docs/meetings/MEETINGS_INTELLIGENCE_AUDIT.md`).
+
+The Meetings V2 pipeline from 0.13.0 is unchanged in shape. This makes what it
+produces trustworthy: real meetings were yielding ~49 action items and a
+"Summary unavailable" banner over a summary that existed. Recording, chunking,
+the clocks, pause/resume, crash recovery, voice notes, and dictation are
+untouched.
+
+#### Fixes
+
+- **A rejected model summary no longer reads as a failed summary (`processing/mod.rs`, `model.rs`)**: when model prose failed validation, its `Error` issues were merged into the *fallback's* validation report before recomputing `passed`, so a valid deterministic summary always ended up with `stages.summary.status = FAILED` and the UI said "Summary unavailable". The two facts are now recorded separately — `provider_output_status` (`ACCEPTED` / `REJECTED` / `UNAVAILABLE` / `NOT_ATTEMPTED`) and `rejected_issues` describe the model's draft; `validation` describes only the prose actually shown; and the stage fails only when the fallback itself fails.
+- **The deterministic renderer is no longer judged by a rule written for models (`processing/validate.rs`)**: `validate_summary` decided whether transcript copying was an error by reading `facts.deterministic` — a fact about the facts, not about the prose being validated. It now takes `prose_is_deterministic` explicitly.
+- **An id-shaped owner that matches no speaker is unassigned, not a person (`processing/extract.rs`)**: a model citing `speaker_me` against an empty roster produced an action item owned by an external person literally named "speaker_me".
+- **"We'll" is no longer treated as a group commitment (`processing/extract.rs`)**: one person saying "we" for the room is not the group taking work on. `Group` now requires the speaker to have said so ("as a team", "between us"); otherwise the work is `Unassigned`.
+
+#### Features
+
+- **Action-item quality gate (`processing/qualify.rs`, new)**: a deterministic gate with exactly one call site, in `extract_facts`, so the model path and the cue-based path both run through it and cannot disagree about what qualifies as work. Candidates pass through evidence selection, the three gates from `Meeting-rules/meeting_action_items_tasks.md` §2, owner resolution, scoring, semantic deduplication, ranking, and the cap:
+  - **Gate 1 — durability**: screen sharing, presenting, joining logistics, stepping away, turn-taking, live lookups, note-taking-right-now, and demo narration are rejected before the verb is noticed, because nearly every one of them contains "I'll".
+  - **Gate 2 — deliverable**: a candidate must name something that exists once it is done. "Help with this", "look into it", "we'll handle it", and "maintain the log" are rejected unless the description carries a concrete object.
+  - **Gate 3 — commitment**: hypotheticals ("we could", "maybe", "in version two"), already-completed work, and observations are rejected. A proposal plus the group's acceptance (§4.3) and an assignment plus acceptance (§4.2) both qualify.
+  - **Structural**: decoder loops, collided ASR fragments, and candidates citing no transcript segment are discarded rather than repaired.
+  - **The cap of 15 is enforced in code, and is a ceiling rather than a target** — it never adds. Three qualifying candidates return three.
+  - **Deduplication is semantic**: "I'll send the mail list", "I'll send you the list of mails", and "I'll share the required email list" become one to-do, keeping the version with an owner and a date and merging the provenance of all three. Two different acts on the same object stay two to-dos.
+- **Ownership is demoted, never guessed (`processing/qualify.rs`)**: an action item whose every cited segment had both the microphone and system audio live cannot be attributed from channel data, so it becomes `Unassigned` — attribution here is channel-level, not diarization, and this makes the code say so.
+- **Honest summary provenance (`processing/model.rs`, `summarize.rs`)**: `SummarySource` distinguishes deterministic *presentation* (a model understood the meeting; no model wrote this text) from deterministic *extraction* (no model at any stage, points lifted from the transcript). Neither is presented as an AI summary, and the status bar shows "no model" rather than naming a model that wrote nothing.
+- **Action-item diagnostics (`processing/qualify.rs`, `model.rs`)**: every candidate gets an in-memory record of its text, owner, verdict, and rejection reason (`MEETING_MECHANIC`, `DEMO_NARRATION`, `ALREADY_COMPLETED`, `HYPOTHETICAL`, `NO_DELIVERABLE`, `NO_COMMITMENT`, `NO_EVIDENCE`, `BROKEN_FRAGMENT`, `DECODER_LOOP`, `DUPLICATE`, `LOW_CONFIDENCE`, `CAP_EXCEEDED`). Only eight counters reach `processing.json` and `processing_log.jsonl` — the log still explains a run without reproducing the meeting, now asserted by test.
+
+#### Improvements
+
+- **Stage A prompt selects rather than collects (`processing/extract.rs`)**: two explicit passes — list candidates, then classify and reject — with the rejection classes named, "15 is a ceiling, never a target", and "a decision is not automatically an action item" stated outright. An optional `candidate_type` field lets the model record its own verdict; only `action` is kept, and it is never persisted.
+- **Summary relevance filter (`processing/extract.rs`, `summarize.rs`)**: procedural narration is kept out of key points on both extraction paths, and Stage B is told the five questions a summary answers and which categories never belong in one. Concise is now 3–5 bullets.
+- **Readable fallback action items (`processing/extract.rs`)**: the cue-based extractor trims a candidate back to where the commitment starts, so a task reads "I'll send the list of mails that need to go out tomorrow" rather than the whole sentence it was embedded in. Pure substring selection — nothing is rewritten, and the full sentence stays reachable through the cited segment.
+- **Long turns no longer become one wall of text (`processing/conversation.rs`)**: attribution is per 30-second chunk, so an uninterrupted speaker previously produced one turn per meeting. A same-speaker run is now broken at a segment boundary past 180 words, keeping the same speaker id — no turn boundary implies a speaker change the data does not support.
+- **The UI tells the truth about fallbacks (`MeetingProcessingStatus.tsx`)**: "Generated from fallback because the model output failed validation (…)" with the rejection codes, instead of "Summary unavailable".
+
+#### Tests
+
+- 304 backend tests (up from 292), including 21 unit tests for the gate and end-to-end regression fixtures A–F built from the meetings that produced the bad output: a demo-heavy meeting (expects ~0 action items), a genuine requirements meeting (expects the right small set with owners, a deadline, and a decision kept separate), a noisy ASR transcript (decoder loops and collided fragments invent nothing), an ambiguous owner (never guessed), a long meeting (bounded in every mode, ≤15 items, no duplicates), and a rejected model summary (fallback shown, stage successful, rejection preserved).
+- A full 23-chunk meeting run end to end asserts the whole shape at once: 10 candidates → 7 rejected → 3 retained, with every mechanic and demo phrase named in the assertions, and `transcript.jsonl` hashed before and after.
+- A companion test drives the model path with a draft containing the hard patterns the cue-based path cannot reach — capability-plus-group-acceptance, a deferred decision, an agreed task nobody took — and asserts the gate keeps all of them while dropping the over-extraction alongside.
+- `PROCESSING_VERSION` is bumped to 2: facts extracted under v1 carry action items that never passed the gate.
+
 ## [0.13.0] - 2026-08-27
 
 ### Meetings: Transcript Separation, Normalization Pipeline, Structured Extraction, Speakers, Extensions & Meeting → Scribble
