@@ -33,6 +33,7 @@ import {
   Layers,
   Power,
   Clipboard,
+  Wand2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -372,6 +373,25 @@ export const ProviderSettings: React.FC = () => {
     } catch (err: any) {
       console.error('Failed to apply hotkey', err);
       setError(err?.message || 'Failed to apply hotkey — it may already be in use by another app');
+    }
+  };
+
+  const applyPromptHotkey = async (accelerator: string) => {
+    const updatedSettings: AppSettings = {
+      ...settings,
+      prompt_settings: {
+        ...settings.prompt_settings,
+        enabled: settings.prompt_settings?.enabled ?? true,
+        prompt_hotkey: accelerator,
+      },
+    };
+    setSettings(updatedSettings);
+    try {
+      await invoke('save_settings', { settings: updatedSettings });
+      setError('');
+    } catch (err: any) {
+      console.error('Failed to save prompt hotkey', err);
+      setError(err?.message || 'Failed to save prompt hotkey');
     }
   };
 
@@ -716,6 +736,74 @@ export const ProviderSettings: React.FC = () => {
                 </div>
               </div>
 
+              {/* Prompt Mode Capability Layer */}
+              <div className="py-3 border-b border-border space-y-3">
+                <div className="flex items-center gap-2">
+                  <Wand2 className="w-4 h-4 text-sky-500" />
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">Prompt Mode</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Enable AI Prompt transformation actions across Voice Notes, Scribbles, and the Prompt Library
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-lg bg-muted/40 border border-border space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Enable Prompt Mode</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Shows the Prompts navigation tab, Prompt hotkeys, and Wand transformation actions throughout Relay
+                      </p>
+                    </div>
+                    <Switch
+                      checked={settings.prompt_settings?.enabled ?? false}
+                      onCheckedChange={async (checked) => {
+                        const updated: AppSettings = {
+                          ...settings,
+                          prompt_settings: {
+                            ...settings.prompt_settings,
+                            enabled: checked,
+                            prompt_hotkey: settings.prompt_settings?.prompt_hotkey ?? 'Ctrl+Alt+Space',
+                          },
+                        };
+                        setSettings(updated);
+                        try {
+                          await invoke('save_settings', { settings: updated });
+                        } catch (err) {
+                          console.error('Failed to update prompt mode setting', err);
+                        }
+                      }}
+                    />
+                  </div>
+
+                  {/* When Prompt Mode is Enabled, Expose Hotkey Configuration */}
+                  {settings.prompt_settings?.enabled && (
+                    <>
+                      <div className="h-px bg-border/60" />
+                      <div className="space-y-2 pt-1">
+                        <div>
+                          <p className="text-xs font-semibold text-foreground">Prompt Capture Hotkey</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            Global hotkey to capture speech and transform directly with AI
+                          </p>
+                        </div>
+                        <div className="max-w-md">
+                          <HotkeyRecorder
+                            id="general-prompt-hotkey"
+                            value={settings.prompt_settings?.prompt_hotkey || 'Ctrl+Alt+Space'}
+                            onCapture={applyPromptHotkey}
+                          />
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">
+                          Click to change hotkey. (Note: Fn+Space is handled by PC hardware/firmware on Windows, so Ctrl/Alt/Shift modifiers are used).
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
               {/* Vault Directory Location */}
               <div className="py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -788,6 +876,29 @@ export const ProviderSettings: React.FC = () => {
                   Press and hold (or toggle) to speak into any text box across your operating system.
                 </p>
               </div>
+
+              {/* Prompt Capture Hotkey (Visible when Prompt Mode is Enabled) */}
+              {settings.prompt_settings?.enabled && (
+                <div className="py-3 border-b border-border">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Wand2 className="w-4 h-4 text-sky-500" />
+                    <p className="text-xs font-semibold text-foreground">Prompt Capture Hotkey</p>
+                  </div>
+                  <div className="max-w-md">
+                    <label htmlFor="dictation-prompt-hotkey" className="block text-[11px] text-muted-foreground mb-1">
+                      Capture speech and run through AI Prompt transformation
+                    </label>
+                    <HotkeyRecorder
+                      id="dictation-prompt-hotkey"
+                      value={settings.prompt_settings?.prompt_hotkey || 'Ctrl+Alt+Space'}
+                      onCapture={applyPromptHotkey}
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-2">
+                    Global shortcut for Prompt Mode voice capture. (Fn+Space is firmware-handled on Windows, so Ctrl/Alt/Shift modifiers are used).
+                  </p>
+                </div>
+              )}
 
               {/* Toggle-to-Talk Switch */}
               <div className="py-3 border-b border-border flex items-center justify-between">
@@ -1403,20 +1514,78 @@ export const ProviderSettings: React.FC = () => {
                 )}
 
                 {/* Local Whisper Model Path */}
-                <div className="py-3 border-b border-border">
-                  <div className="flex items-center gap-2 mb-2">
+                <div className="py-3 border-b border-border space-y-3">
+                  <div className="flex items-center gap-2 mb-1">
                     <Mic className="w-4 h-4 text-primary" />
                     <p className="text-xs font-semibold text-foreground">Speech-to-Text Model (Whisper)</p>
                   </div>
-                  <label htmlFor="whisper-model-path" className="block text-[11px] text-muted-foreground mb-1">
-                    GGML Model Path (optional — leave blank to use the auto-downloaded default)
-                  </label>
-                  <Input
-                    id="whisper-model-path"
-                    placeholder="Leave blank for the auto-downloaded default, or point at your own model"
-                    value={settings.stt.whisper_model_path || ''}
-                    onChange={(e) => setSettings({ ...settings, stt: { ...settings.stt, whisper_model_path: e.target.value } })}
-                  />
+
+                  {/* Dictation Performance Profile */}
+                  <div>
+                    <label className="block text-[11px] font-medium text-foreground mb-1.5">
+                      Universal Dictation Performance Profile
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSettings({
+                            ...settings,
+                            stt: { ...settings.stt, dictation_quality: 'fast', dictationQuality: 'fast' },
+                          })
+                        }
+                        className={`p-2.5 rounded-lg border text-left transition-all ${
+                          (settings.stt.dictation_quality ?? 'fast') === 'fast'
+                            ? 'border-primary bg-primary/10 text-foreground shadow-sm'
+                            : 'border-border bg-card/50 text-muted-foreground hover:border-border/80'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-semibold text-foreground">Fast (Base)</span>
+                          <Badge variant="emerald" className="text-[9px] px-1.5 py-0">~0.8s</Badge>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground leading-snug">
+                          3x lower latency using Base model. Recommended for conversational speech.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSettings({
+                            ...settings,
+                            stt: { ...settings.stt, dictation_quality: 'accurate', dictationQuality: 'accurate' },
+                          })
+                        }
+                        className={`p-2.5 rounded-lg border text-left transition-all ${
+                          settings.stt.dictation_quality === 'accurate'
+                            ? 'border-primary bg-primary/10 text-foreground shadow-sm'
+                            : 'border-border bg-card/50 text-muted-foreground hover:border-border/80'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-semibold text-foreground">Accurate (Small)</span>
+                          <Badge variant="outline" className="text-[9px] px-1.5 py-0">~2.4s</Badge>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground leading-snug">
+                          Maximum vocabulary fidelity. Recommended for long technical monologues.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="whisper-model-path" className="block text-[11px] text-muted-foreground mb-1">
+                      Custom Model Path (optional — leave blank for auto-managed models)
+                    </label>
+                    <Input
+                      id="whisper-model-path"
+                      placeholder="Leave blank for auto-managed models, or point at a custom GGML file"
+                      value={settings.stt.whisper_model_path || ''}
+                      onChange={(e) => setSettings({ ...settings, stt: { ...settings.stt, whisper_model_path: e.target.value } })}
+                    />
+                  </div>
+
                   <div className="flex items-center justify-between mt-2 p-3 rounded-lg bg-muted/40 border border-border">
                     <div className="text-xs">
                       {sttModelStatus.state === 'checking' && (

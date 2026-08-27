@@ -48,14 +48,6 @@ interface DictationPillProps {
   onProcessComplete?: (result: ProcessedPipelineResult) => void;
 }
 
-const PROCESSING_CAPTIONS = [
-  'transcribing speech...',
-  'extracting kanban tasks...',
-  'writing note to vault...',
-  'summarizing voice note...',
-  'running pipeline triggers...',
-];
-
 const HOVER_EXPAND_DELAY_MS = 150;
 const HOVER_COLLAPSE_DELAY_MS = 1000;
 
@@ -79,9 +71,9 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const [language, setLanguage] = useState<SpeechLanguage>('auto');
   const [dictationShortcut, setDictationShortcut] = useState('Ctrl+Space');
 
-  // Audio Level & Captions
+  // Audio Level & Mode-Aware Status
   const [levelHistory, setLevelHistory] = useState<number[]>(SILENT_LEVEL_HISTORY);
-  const [captionIndex, setCaptionIndex] = useState(0);
+  const [captureMode, setCaptureMode] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string>('Inserted into document');
@@ -100,7 +92,6 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     hotkey: 'Ctrl+Space',
   });
 
-  const captionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverEnterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -376,6 +367,9 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       .catch(() => {});
 
     const unlistenState = listen<CaptureStatePayload>('capture-state-changed', ({ payload }) => {
+      if (payload.mode) {
+        setCaptureMode(payload.mode);
+      }
       if (payload.active) {
         if (!isRecordingRef.current) {
           isRecordingRef.current = true;
@@ -400,7 +394,14 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
           setPhase('processing');
         } else if (payload.status === 'SUCCESS') {
           setPhase('success');
-          setSuccessMessage(promptMode ? 'Prompt inserted into document' : 'Inserted into document');
+          const isDictation = payload.mode === 'dictation' || captureMode === 'dictation';
+          if (promptMode) {
+            setSuccessMessage('Prompt inserted into document');
+          } else if (isDictation) {
+            setSuccessMessage('Inserted into document');
+          } else {
+            setSuccessMessage('Voice note saved');
+          }
           if (successTimerRef.current) clearTimeout(successTimerRef.current);
           successTimerRef.current = setTimeout(() => setPhase('collapsed'), 2200);
         } else if (payload.status === 'ERROR' || payload.message) {
@@ -455,7 +456,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       if (hoverEnterTimerRef.current) clearTimeout(hoverEnterTimerRef.current);
       if (hoverLeaveTimerRef.current) clearTimeout(hoverLeaveTimerRef.current);
     };
-  }, []);
+  }, [captureMode, promptMode]);
 
   // Update Rust native window geometry
   useEffect(() => {
@@ -470,21 +471,6 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       invoke('set_pill_expanded', { expanded: isExpanded }).catch(() => {});
     });
   }, [isExpanded, popoverOpen]);
-
-  // Caption timer effect
-  useEffect(() => {
-    if (phase === 'processing') {
-      setCaptionIndex(0);
-      captionTimerRef.current = setInterval(() => {
-        setCaptionIndex((prev) => (prev + 1) % PROCESSING_CAPTIONS.length);
-      }, 1200);
-    } else {
-      if (captionTimerRef.current) clearInterval(captionTimerRef.current);
-    }
-    return () => {
-      if (captionTimerRef.current) clearInterval(captionTimerRef.current);
-    };
-  }, [phase]);
 
   // Hover Handlers
   const handleMouseEnter = () => {
@@ -530,7 +516,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         const result = await invoke<ProcessedPipelineResult | null>('stop_capture');
         if (result) {
           setPhase('success');
-          setSuccessMessage('Inserted into document');
+          setSuccessMessage('Voice note saved');
           if (onProcessComplete) onProcessComplete(result);
           if (successTimerRef.current) clearTimeout(successTimerRef.current);
           successTimerRef.current = setTimeout(() => setPhase('collapsed'), 2200);
@@ -545,6 +531,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       try {
         setErrorMessage(null);
         setWarningMessage(null);
+        setCaptureMode('voice_note');
         // No optimistic setPhase('listening') here either — the native
         // recorder is the source of truth for whether capture actually
         // started. Claiming "listening" before start_capture resolves (or
@@ -552,7 +539,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         // let the pill show recording state independent of whether
         // anything was actually recording. The capture-state-changed
         // listener above flips this to 'listening' once Rust confirms it.
-        await invoke('start_capture', { mode: 'scribble' });
+        await invoke('start_capture', { mode: 'voice_note' });
       } catch (err: any) {
         setErrorMessage(err.message || 'Failed to start capture');
         setPhase('error');
@@ -578,6 +565,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     <div
       className={cn(
         "absolute inset-0 flex items-end select-none font-sans overflow-hidden bg-transparent",
+        popoverOpen && "pointer-events-auto",
         isLeft ? "justify-start" : isRight ? "justify-end" : "justify-center"
       )}
       onMouseEnter={handleMouseEnter}
@@ -678,7 +666,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
             {(phase === 'collapsed' || phase === 'expanded') && (
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-xs font-semibold text-slate-900 dark:text-neutral-100 tracking-tight whitespace-nowrap">
-                  {promptMode ? 'Click to prompt' : 'Click to dictate'}
+                  Click to dictate
                 </span>
               </div>
             )}
@@ -708,7 +696,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
               <div className="flex items-center gap-2 max-w-[220px] overflow-hidden">
                 <span className="w-2.5 h-2.5 rounded-full border-[1.4px] border-slate-300 dark:border-neutral-700 border-t-blue-600 dark:border-t-blue-400 animate-spin shrink-0" />
                 <span className="font-mono text-[10.5px] tracking-wide text-slate-600 dark:text-neutral-400 whitespace-nowrap animate-in fade-in duration-200">
-                  {PROCESSING_CAPTIONS[captionIndex]}
+                  Transcribing...
                 </span>
               </div>
             )}
@@ -746,26 +734,8 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
           <div className="w-px h-[20px] bg-slate-200 dark:bg-[#262626] shrink-0" />
 
-          {/* Action Buttons: Prompt Mode + Settings Chevron */}
+          {/* Action Buttons: Settings Chevron */}
           <div className="flex items-center gap-1 pl-1.5 shrink-0 pill-actions">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleTogglePromptMode();
-              }}
-              className={cn(
-                'w-7 h-7 rounded-lg border-none bg-transparent flex items-center justify-center cursor-pointer transition-colors p-0',
-                promptMode
-                  ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 font-bold'
-                  : 'text-slate-400 dark:text-neutral-400 hover:text-slate-800 dark:hover:text-neutral-100 hover:bg-slate-100 dark:hover:bg-[#262626]'
-              )}
-              title="Prompt mode — rewrite speech into a prompt"
-              aria-label="Prompt mode"
-            >
-              <Sparkles className="w-3.5 h-3.5 stroke-[1.5]" />
-            </button>
-
             <button
               type="button"
               onClick={(e) => {

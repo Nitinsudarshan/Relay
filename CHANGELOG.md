@@ -1,5 +1,50 @@
 # Relay — Changelog
 
+## [0.14.0] - 2026-08-27
+
+### Prompt Mode Capability Layer & Cross-Object Prompt Funnel
+
+**Type**: minor — `native/` only (`native/src-tauri/src/settings/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`, `native/src/types/index.ts`, `native/src/components/prompts/PromptTransformModal.tsx` (new), `native/src/components/prompts/PromptsPage.tsx`, `native/src/components/common/NativeSidebar.tsx`, `native/src/App.tsx`, `native/src/components/settings/ProviderSettings.tsx`, `native/src/components/voicenotes/VoiceNotePage.tsx`, `native/src/components/scribble/ScribbleDetailEditor.tsx`, `native/src/components/capture/DictationPill.tsx`).
+
+#### Features
+
+- **Prompt Mode Capability Layer (`settings/mod.rs`, `ProviderSettings.tsx`, `App.tsx`, `NativeSidebar.tsx`)**:
+  - Added `PromptSettings` with `enabled: bool` (default `false`) and `prompt_hotkey: String` (default `"Ctrl+Alt+Space"`).
+  - When disabled, Prompt-related UI, sidebar tab, and Wand actions are hidden; existing Voice Notes, Dictation, Scribbles, and Meetings remain unchanged.
+  - When enabled, unlocks Prompts sidenav tab, Prompt Hotkey configuration in General & Dictation settings, and Wand transformation actions across Voice Notes and Scribbles.
+- **Cross-Object Prompt Transformation Funnel (`PromptTransformModal.tsx`, `VoiceNotePage.tsx`, `ScribbleDetailEditor.tsx`, `PromptsPage.tsx`)**:
+  - **Voice Note $\xrightarrow{\text{Wand}}$ Prompt**: Wand action on Voice Note cards opens Prompt selection modal to transform speech transcript with AI. Original Voice Note remains intact.
+  - **Scribble $\xrightarrow{\text{Wand}}$ Prompt**: Wand action in Scribble detail toolbar allows transforming note content with prompt templates while preserving the source Scribble.
+  - **Prompt $\xrightarrow{\text{Scribble}}$ Scribble**: Added "Save as Scribble" (`Sparkles` icon) on prompt transformation outputs to save structured results into the Obsidian-compatible Knowledge Layer.
+- **Dedicated Prompt Execution Command (`commands.rs`, `lib.rs`)**:
+  - Added `execute_prompt` command leveraging existing unified `LLMClient` (Ollama + Cloud OpenAI/Gemini/Anthropic).
+
+#### Improvements & Alignment
+
+- **Capture Terminology & Execution Path Alignment (`commands.rs`, `DictationPill.tsx`)**:
+  - Decoupled Voice Note capture (`mode: "voice_note"`) from Scribble/LLM execution: saves directly to Voice Notes history without triggering unnecessary LLM summaries or creating duplicate scribble files.
+  - Pill Voice Note capture and Universal Dictation now share the same optimized Capture STT Profile (`Fast` / `ggml-base.bin` vs `Accurate` / `ggml-small.bin`, 12-thread clamped execution).
+  - Pill status copy strictly adheres to: `Listening...` $\rightarrow$ `Transcribing...` $\rightarrow$ `Voice note saved` (or `Inserted into document` for Universal Dictation).
+
+## [0.13.2] - 2026-08-27
+
+### Dictation STT Optimization, Truthful Status Copy & Prompts Library Funnel
+
+**Type**: patch — `native/` only (`native/src-tauri/src/settings/mod.rs`, `native/src-tauri/src/hotkeys/mod.rs`, `native/src/components/capture/DictationPill.tsx`, `native/src/components/prompts/PromptsPage.tsx`, `native/src/components/common/NativeSidebar.tsx`, `native/src/App.tsx`, `native/src/types/index.ts`).
+
+#### Features & Improvements
+
+- **Dictation STT Performance Isolation (`settings/mod.rs`, `hotkeys/mod.rs`)**:
+  - Universal Dictation (`Ctrl+Space`) defaults to the fast performance profile (`ggml-base.bin`, 12 clamped CPU worker threads), reducing utterance latency from ~2.4–3.2s down to ~0.8–0.9s.
+  - Meeting STT, Voice Notes, and audio recording architectures remain completely isolated and unchanged.
+- **Truthful Dictation Pill Status Copy (`DictationPill.tsx`)**:
+  - Eliminated the frontend decorative dummy rotation timer (`PROCESSING_CAPTIONS`) that previously cycled through misleading states ("extracting kanban tasks...", "summarizing voice note...", "running pipeline triggers...").
+  - Status copy is now path-aware and reflects actual pipeline stages: `"Listening..."` $\rightarrow$ `"Transcribing..."` / `"Saving voice note..."` $\rightarrow$ `"Inserted into document"` / `"Voice note saved"`.
+- **Prompts Sidenav & Management Funnel (`PromptsPage.tsx`, `NativeSidebar.tsx`, `App.tsx`)**:
+  - Added dedicated **Prompts** tab to the navigation sidebar.
+  - Built comprehensive Prompt Library management interface supporting Create, Edit, Duplicate, and Delete prompt templates, text placeholder tags (`{{text}}`), active status toggling, and instant local settings persistence.
+  - Dictation Pill remains focused on voice-capture and Voice Notes; Prompt execution is deferred to a future pass.
+
 ## [0.13.1] - 2026-08-27
 
 ### Meetings: Action-Item Quality Gate, Honest Summary Fallback State & Quality Regression Fixtures

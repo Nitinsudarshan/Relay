@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { VoiceNotePage } from './components/voicenotes/VoiceNotePage';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
 import { MeetingsV2View } from './components/meetings_v2/MeetingsV2View';
+import { PromptsPage } from './components/prompts/PromptsPage';
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RelayLogo } from './components/common/RelayLogo';
@@ -24,6 +25,7 @@ import {
   Settings,
   Sidebar as SidebarIcon,
   ChevronRight,
+  Wand2,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,12 +34,14 @@ export type MainTabType =
   | 'capture'
   | 'meetings'
   | 'scribble'
+  | 'prompts'
   | 'settings';
 
 const TAB_LABELS: Record<MainTabType, string> = {
   capture: 'Voice Note',
   meetings: 'Meetings',
   scribble: 'Scribbles',
+  prompts: 'Prompts',
   settings: 'Settings',
 };
 
@@ -49,20 +53,25 @@ export const App: React.FC = () => {
   const [appVersion, setAppVersion] = useState<string>('0.9.0');
   const [account, setAccount] = useState<RelayAccount | null>(null);
   const [profile, setProfile] = useState<RelayProfile | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [explanationOpen, setExplanationOpen] = useState(false);
 
+  const promptModeEnabled = Boolean(settings?.prompt_settings?.enabled);
+
   const refreshAccountAndSettings = async () => {
     try {
-      const [ver, acc, prof, devSetts] = await Promise.all([
+      const [ver, acc, prof, devSetts, appSetts] = await Promise.all([
         invoke<string>('get_app_version'),
         invoke<RelayAccount>('get_account_state'),
         invoke<RelayProfile>('get_relay_profile'),
         invoke<DeveloperSettings>('get_developer_settings'),
+        invoke<AppSettings>('get_settings'),
       ]);
       if (ver) setAppVersion(ver);
       if (acc) setAccount(acc);
       if (prof) setProfile(prof);
+      if (appSetts) setSettings(appSetts);
 
       // Onboarding visibility: developer override forces replay, or first-run incomplete
       const shouldShowOnboarding = devSetts?.force_onboarding_on_launch || !prof?.onboarding_completed;
@@ -96,7 +105,7 @@ export const App: React.FC = () => {
 
     setupNotifications();
 
-    // 2. Listen for backend Tauri account & profile events
+    // 2. Listen for backend Tauri account, profile, & settings events
     const unlistenAccount = listen<RelayAccount>('account-changed', (event) => {
       if (event.payload) {
         setAccount(event.payload);
@@ -106,6 +115,12 @@ export const App: React.FC = () => {
     const unlistenProfile = listen<RelayProfile>('profile-changed', (event) => {
       if (event.payload) {
         setProfile(event.payload);
+      }
+    });
+
+    const unlistenSettings = listen<AppSettings>('settings-changed', (event) => {
+      if (event.payload) {
+        setSettings(event.payload);
       }
     });
 
@@ -130,10 +145,18 @@ export const App: React.FC = () => {
     return () => {
       unlistenAccount.then((unlisten) => unlisten());
       unlistenProfile.then((unlisten) => unlisten());
+      unlistenSettings.then((unlisten) => unlisten());
       window.removeEventListener('relay-account-changed', handleDomAccountChange);
       window.removeEventListener('relay-profile-changed', handleDomProfileChange);
     };
   }, []);
+
+  // If prompt mode is disabled while on prompts tab, fallback to capture
+  useEffect(() => {
+    if (activeTab === 'prompts' && !promptModeEnabled) {
+      setActiveTab('capture');
+    }
+  }, [activeTab, promptModeEnabled]);
 
   const handleWelcomeGoogle = async (displayName: string) => {
     try {
@@ -211,6 +234,26 @@ export const App: React.FC = () => {
             </div>
           </div>
         );
+      case 'prompts':
+        return (
+          <div className="relative rounded-lg border border-border/80 bg-gradient-to-br from-card via-card/95 to-sky-500/5 p-5 md:p-6 shadow-xs overflow-hidden mb-5 shrink-0">
+            <div className="absolute -right-10 -top-10 w-40 h-40 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] font-mono uppercase tracking-wider text-sky-500 border-sky-500/30 bg-sky-500/5 gap-1.5 py-0.5 px-2">
+                  <Wand2 className="w-3 h-3 text-sky-500" />
+                  <span>Prompt Library</span>
+                </Badge>
+              </div>
+              <h1 className="text-xl md:text-2xl font-extrabold tracking-tight text-foreground">
+                AI Transformations & <span className="italic text-primary">Prompts</span>
+              </h1>
+              <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
+                Manage custom instructions, rewrite rules, and formatting templates.
+              </p>
+            </div>
+          </div>
+        );
       case 'settings':
         return (
           <div className="relative rounded-lg border border-border/80 bg-gradient-to-br from-card via-card/95 to-purple-500/5 p-5 md:p-6 shadow-xs overflow-hidden mb-5 shrink-0">
@@ -245,6 +288,7 @@ export const App: React.FC = () => {
         account={account}
         profile={profile}
         appVersion={appVersion}
+        promptModeEnabled={promptModeEnabled}
         onOpenChangelog={() => setChangelogOpen(true)}
         onOpenWelcome={() => setWelcomeOpen(true)}
         onOpenExplanation={() => setExplanationOpen(true)}
@@ -309,6 +353,8 @@ export const App: React.FC = () => {
           {activeTab === 'meetings' && <MeetingsV2View />}
 
           {activeTab === 'scribble' && <ScribbleViewer />}
+
+          {activeTab === 'prompts' && <PromptsPage />}
 
           {activeTab === 'settings' && <ProviderSettings />}
         </main>
