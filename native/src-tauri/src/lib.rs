@@ -211,7 +211,7 @@ pub fn run() {
             commands::update_scribble,
             commands::delete_scribble,
             commands::merge_scribbles,
-            commands::execute_prompt,
+
             commands::get_trash_items,
             commands::restore_trash_item,
             commands::delete_trash_item_permanently,

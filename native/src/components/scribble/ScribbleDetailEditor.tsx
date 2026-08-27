@@ -31,14 +31,12 @@ import {
   Clipboard,
   Globe,
   Users,
-  Wand2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ConnectAndMergeModal } from './ConnectAndMergeModal';
 import { ConfirmationModal } from '../common/ConfirmationModal';
 import { MarkdownView } from '../common/MarkdownView';
-import { PromptTransformModal } from '../prompts/PromptTransformModal';
 
 interface ScribbleDetailEditorProps {
   scribble: Scribble;
@@ -80,9 +78,7 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
   const [isEnriching, setIsEnriching] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [promptModalOpen, setPromptModalOpen] = useState(false);
 
-  const promptModeEnabled = Boolean(settings?.prompt_settings?.enabled);
 
   useEffect(() => {
     invoke<AppSettings>('get_settings')
@@ -367,19 +363,7 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
             </Button>
           )}
 
-          {/* Wand: Transform with AI Prompt */}
-          {!isEditing && promptModeEnabled && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setPromptModalOpen(true)}
-              className="h-8 text-xs gap-1.5 text-sky-500 border-sky-500/30 hover:bg-sky-500/10 transition-colors"
-              title="Transform with Prompt (Wand)"
-            >
-              <Wand2 className="w-3.5 h-3.5" />
-              <span>Prompt</span>
-            </Button>
-          )}
+
 
           {isEditing ? (
             <>
@@ -877,19 +861,6 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
         />
       )}
 
-      {/* Cross-Object Prompt Transformation Modal */}
-      <PromptTransformModal
-        isOpen={promptModalOpen}
-        onClose={() => setPromptModalOpen(false)}
-        inputText={scribble.content}
-        sourceTitle={scribble.title}
-        sourceType="scribble"
-        onScribbleCreated={(newScribble) => {
-          if (onScribbleCreated) {
-            onScribbleCreated(newScribble);
-          }
-        }}
-      />
     </div>
   );
 };

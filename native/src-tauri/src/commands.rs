@@ -133,8 +133,12 @@ pub async fn update_hotkeys(
     hotkeys: HotkeySettings,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    hotkeys::apply_hotkeys(&app, &hotkeys.show_hide_hotkey, &hotkeys.dictation_hotkey)
-        .map_err(|e| CommandError::new("HOTKEY_REGISTER_FAILED", &e))?;
+    hotkeys::apply_hotkeys(
+        &app,
+        &hotkeys.show_hide_hotkey,
+        &hotkeys.dictation_hotkey,
+    )
+    .map_err(|e| CommandError::new("HOTKEY_REGISTER_FAILED", &e))?;
 
     let mut settings = state.settings.lock().unwrap();
     settings.hotkeys = hotkeys;
@@ -456,50 +460,6 @@ pub struct AudioDeviceInfo {
     pub is_default: bool,
 }
 
-/// Executes an AI Prompt transformation against the provided `input_text`
-/// using the existing `LLMClient` and configured provider (Ollama / Cloud).
-#[tauri::command]
-pub async fn execute_prompt(
-    state: State<'_, AppState>,
-    prompt_id: Option<String>,
-    prompt_body: Option<String>,
-    input_text: String,
-) -> Result<String, CommandError> {
-    if input_text.trim().is_empty() {
-        return Err(CommandError::new("EMPTY_INPUT", "Input text cannot be empty"));
-    }
-
-    let settings = state.settings.lock().unwrap().clone();
-
-    // Resolve template
-    let template = if let Some(body) = prompt_body.filter(|b| !b.trim().is_empty()) {
-        body
-    } else if let Some(id) = prompt_id {
-        settings
-            .prompts
-            .iter()
-            .find(|p| p.id == id)
-            .map(|p| p.prompt_body.clone())
-            .ok_or_else(|| CommandError::new("PROMPT_NOT_FOUND", "Selected prompt template not found"))?
-    } else {
-        return Err(CommandError::new("INVALID_PROMPT", "No prompt template specified"));
-    };
-
-    // Interpolate transcript into {{text}} or append
-    let final_prompt = if template.contains("{{text}}") {
-        template.replace("{{text}}", &input_text)
-    } else {
-        format!("{}\n\n{}", template, input_text)
-    };
-
-    let llm = LLMClient::new(settings.provider.clone());
-    let response = llm
-        .complete(&final_prompt, None)
-        .await
-        .map_err(|e| CommandError::new("LLM_ERROR", &e.to_string()))?;
-
-    Ok(response.text)
-}
 
 #[tauri::command]
 pub async fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, CommandError> {
@@ -1073,6 +1033,14 @@ pub async fn save_settings(
         .save(&state.settings_path())
         .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
     *state.settings.lock().unwrap() = settings.clone();
+
+    // Re-register hotkeys dynamically with the OS immediately
+    let _ = hotkeys::apply_hotkeys(
+        &app,
+        &settings.hotkeys.show_hide_hotkey,
+        &settings.hotkeys.dictation_hotkey,
+    );
+
     let _ = app.emit("settings-changed", &settings);
     Ok(())
 }

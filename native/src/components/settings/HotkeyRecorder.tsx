@@ -9,16 +9,47 @@ const NAMED_KEYS: Record<string, string> = {
   ArrowRight: 'Right',
   Tab: 'Tab',
   Enter: 'Return',
+  NumpadEnter: 'Return',
   Backspace: 'Backspace',
   Delete: 'Delete',
+  Insert: 'Insert',
+  Home: 'Home',
+  End: 'End',
+  PageUp: 'PageUp',
+  PageDown: 'PageDown',
+  Numpad0: 'Num0',
+  Numpad1: 'Num1',
+  Numpad2: 'Num2',
+  Numpad3: 'Num3',
+  Numpad4: 'Num4',
+  Numpad5: 'Num5',
+  Numpad6: 'Num6',
+  Numpad7: 'Num7',
+  Numpad8: 'Num8',
+  Numpad9: 'Num9',
+  NumpadDecimal: 'NumDecimal',
+  NumpadAdd: 'NumAdd',
+  NumpadSubtract: 'NumSubtract',
+  NumpadMultiply: 'NumMultiply',
+  NumpadDivide: 'NumDivide',
+  '.': 'Period',
+  ',': 'Comma',
+  ';': 'Semicolon',
+  '/': 'Slash',
+  '\\': 'Backslash',
+  '-': 'Minus',
+  '=': 'Equal',
+  '`': 'Backquote',
 };
 
 function normalizeKey(e: KeyboardEvent): string | null {
   if (e.code === 'Space') return 'Space';
+  if (NAMED_KEYS[e.code]) return NAMED_KEYS[e.code];
+  if (NAMED_KEYS[e.key]) return NAMED_KEYS[e.key];
   if (/^F([1-9]|1[0-9]|2[0-4])$/.test(e.key)) return e.key;
   if (/^[a-zA-Z]$/.test(e.key)) return e.key.toUpperCase();
   if (/^[0-9]$/.test(e.key)) return e.key;
-  return NAMED_KEYS[e.key] ?? null;
+  return null;
 }
 
 /** Builds a `tauri-plugin-global-shortcut` accelerator string, e.g. "Ctrl+Shift+Space". */

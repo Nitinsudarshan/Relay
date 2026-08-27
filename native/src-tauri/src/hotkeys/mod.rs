@@ -75,11 +75,18 @@ type SharedDictationState = Arc<Mutex<DictationState>>;
 /// Safe to call again after [`apply_hotkeys`] has unregistered the previous
 /// bindings — e.g. when the user changes a hotkey in Settings — since it
 /// only ever registers, never assumes it's the first registration.
-pub fn register_hotkeys(app: &AppHandle, show_hide_hotkey: &str, dictation_hotkey: &str) {
+/// Safe to call again after [`apply_hotkeys`] has unregistered the previous
+/// bindings — e.g. when the user changes a hotkey in Settings — since it
+/// only ever registers, never assumes it's the first registration.
+pub fn register_hotkeys(
+    app: &AppHandle,
+    show_hide_hotkey: &str,
+    dictation_hotkey: &str,
+) {
     try_register_hotkeys(app, show_hide_hotkey, dictation_hotkey);
 }
 
-/// Re-registers both hotkeys with new bindings, replacing whatever is
+/// Re-registers hotkeys with new bindings, replacing whatever is
 /// currently bound. Used both at startup and whenever Settings saves new
 /// hotkeys — hotkeys take effect immediately, no app restart required.
 pub fn apply_hotkeys(
@@ -107,11 +114,7 @@ pub fn apply_hotkeys(
 /// Registers each hotkey *independently* — one binding failing (e.g. a
 /// conflict with another app, or an OS-reserved combination such as
 /// Ctrl+Space being bound to IME/input-language switching on some Windows
-/// locales) must never prevent the other from being attempted. Previously
-/// both were chained with `?` through one `Result`, so a failure on
-/// `show_hide_hotkey` silently skipped registering `dictation_hotkey`
-/// entirely — the dictation hotkey could end up completely unregistered
-/// with no error ever reaching anywhere visible.
+/// locales) must never prevent the other from being attempted.
 fn try_register_hotkeys(
     app: &AppHandle,
     show_hide_hotkey: &str,
@@ -141,7 +144,7 @@ fn try_register_hotkeys(
         .on_shortcut(
             dictation_hotkey,
             move |app, _shortcut, event| match event.state {
-                ShortcutState::Pressed => on_dictation_pressed(app, &dictation_state),
+                ShortcutState::Pressed => on_dictation_pressed_with_mode(app, &dictation_state, "dictation"),
                 ShortcutState::Released => on_dictation_released(app, &dictation_state),
             },
         )
@@ -176,8 +179,10 @@ fn toggle_main_window(app: &AppHandle) {
     }
 }
 
-fn on_dictation_pressed(app: &AppHandle, dictation_state: &SharedDictationState) {
-    tracing::debug!("[Hotkey] Ctrl+Space received (pressed)");
+
+
+fn on_dictation_pressed_with_mode(app: &AppHandle, dictation_state: &SharedDictationState, mode: &str) {
+    tracing::debug!("[Hotkey] {} received (pressed)", mode);
 
     let (is_repeat, session_active) = {
         let mut guard = dictation_state.lock().unwrap();
@@ -213,17 +218,13 @@ fn on_dictation_pressed(app: &AppHandle, dictation_state: &SharedDictationState)
         guard.generation
     };
 
-    tracing::debug!("[Dictation] Start requested via hotkey");
+    tracing::debug!("[Dictation] Start requested via hotkey for mode: {}", mode);
     let audio_dir = state.config_dir.join("audio");
-    match state.recorder.start("dictation", &audio_dir, Some(app.clone())) {
+    match state.recorder.start(mode, &audio_dir, Some(app.clone())) {
         Ok(_) => {
-            tracing::debug!("[Audio] Capture started");
+            tracing::debug!("[Audio] Capture started for mode: {}", mode);
             // `emit_capture_state` broadcasts `active: true`, which the
-            // floating dictation pill reacts to by expanding — its window
-            // always exists (just possibly hidden-and-idle) and is always
-            // on top, so this alone is enough to make a hotkey-triggered
-            // recording visible; there's no docked/main-window fallback to
-            // compensate for anymore (see docs/decisions.md Decision 36).
+            // floating dictation pill reacts to by expanding
             emit_capture_state(app, &state.recorder);
             let timeout = if toggle_to_talk {
                 MAX_PERSISTENT_RECORDING
@@ -234,8 +235,7 @@ fn on_dictation_pressed(app: &AppHandle, dictation_state: &SharedDictationState)
         }
         Err(e) => {
             // Most commonly: the in-app Click-to-dictate button already
-            // owns the microphone. Back off quietly rather than erroring —
-            // the hotkey will simply work again once that session ends.
+            // owns the microphone. Back off quietly rather than erroring
             tracing::info!("Dictation hotkey could not start capture: {}", e);
             dictation_state.lock().unwrap().active = false;
         }
@@ -533,5 +533,33 @@ fn spawn_release_watchdog(
             stop_dictation_session(app, dictation_state, Some(generation), None);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+    use tauri_plugin_global_shortcut::Shortcut;
+
+    #[test]
+    fn test_shortcut_parsing_variants() {
+        assert!(Shortcut::from_str("Ctrl+Space").is_ok());
+        assert!(Shortcut::from_str("Ctrl+Shift+Space").is_ok());
+        assert!(Shortcut::from_str("Ctrl+Alt+Space").is_ok());
+        assert!(Shortcut::from_str("Ctrl+0").is_ok());
+        
+        let num0 = Shortcut::from_str("Ctrl+Num0");
+        let numpad0 = Shortcut::from_str("Ctrl+Numpad0");
+        let period = Shortcut::from_str("Ctrl+Period");
+        let numdecimal = Shortcut::from_str("Ctrl+NumDecimal");
+        let decimal = Shortcut::from_str("Ctrl+Decimal");
+        let numpaddecimal = Shortcut::from_str("Ctrl+NumpadDecimal");
+
+        println!("Ctrl+Num0: {:?}", num0);
+        println!("Ctrl+Numpad0: {:?}", numpad0);
+        println!("Ctrl+Period: {:?}", period);
+        println!("Ctrl+NumDecimal: {:?}", numdecimal);
+        println!("Ctrl+Decimal: {:?}", decimal);
+        println!("Ctrl+NumpadDecimal: {:?}", numpaddecimal);
+    }
 }
 

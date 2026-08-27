@@ -287,31 +287,9 @@ export interface SnippetItem {
   enabled: boolean;
 }
 
-export interface PromptItem {
-  id: string;
-  name: string;
-  description?: string | null;
-  prompt_body: string;
-  enabled: boolean;
-}
-
 export interface AudioDeviceInfo {
   name: string;
   is_default: boolean;
-}
-
-export interface PromptSettings {
-  enabled: boolean;
-  prompt_hotkey?: string;
-  promptHotkey?: string;
-}
-
-export interface PromptItem {
-  id: string;
-  name: string;
-  description?: string | null;
-  prompt_body: string;
-  enabled: boolean;
 }
 
 /** Mirrors the Rust `AppSettings` struct persisted at `.relay/config/settings.json`. */
@@ -332,8 +310,6 @@ export interface AppSettings {
   meetings?: MeetingSettings;
   dictionary?: string[];
   snippets?: SnippetItem[];
-  prompt_settings?: PromptSettings;
-  prompts?: PromptItem[];
 }
 
 export type SpeakerIdentificationSetting = 'automatic' | 'off';

@@ -1,5 +1,26 @@
 # Relay — Changelog
 
+## [0.15.0] - 2026-08-28
+
+### Prompt Mode Removal & Architectural Archiving
+
+**Type**: minor — `native/` only (`native/src-tauri/src/{settings/mod,commands,lib,hotkeys/mod}.rs`, `native/src/{App,types/index}.ts`, `native/src/components/{common/NativeSidebar,voicenotes/VoiceNotePage,scribble/ScribbleDetailEditor,settings/ProviderSettings,capture/{DictationPill,PillSettingsPopover,PillTypes}}.tsx`, `remove_prompt.md`).
+
+Prompt Mode was completely removed as a standalone product mode from Relay, and its architectural context and product philosophy were preserved in `remove_prompt.md`.
+
+#### Removals
+
+- **Prompt Mode UI & components (`components/prompts/*`)**: Deleted `PromptsPage.tsx` and `PromptTransformModal.tsx`. Removed the Prompts navigation tab, Wand actions in Voice Notes and Scribbles, and Prompt hero headers.
+- **Prompt Mode settings & hotkeys (`settings/mod.rs`, `ProviderSettings.tsx`, `hotkeys/mod.rs`)**: Removed `PromptSettings`, `PromptItem`, default prompts, prompt hotkey configuration, and dynamic prompt hotkey registration hooks.
+- **Prompt command (`commands.rs`, `lib.rs`)**: Removed the `execute_prompt` command and its invoke handler registration.
+
+#### Preserved
+
+- Shared LLM infrastructure (`LLMClient`, `ProviderConfig`, Ollama / cloud integration).
+- Meetings processing, intelligence extraction, action items to Kanban tasks, summaries.
+- Universal Dictation, Voice Notes capture, Scribble markdown management & enrichment.
+- Universal `HotkeyRecorder` component and OS global shortcut management.
+
 ## [0.14.0] - 2026-08-27
 
 ### Meetings v2.5: Utterance-Level Speaker Attribution, Vocabulary at the Recognizer, To-dos as Tasks & a Minimal Right-Edge Pill

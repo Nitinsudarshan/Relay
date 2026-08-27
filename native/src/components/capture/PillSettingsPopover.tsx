@@ -14,8 +14,6 @@ interface PillSettingsPopoverProps {
   onToggleDictationSounds?: (val: boolean) => void;
   cleanupStyle: CleanupStyle;
   onChangeCleanupStyle: (style: CleanupStyle) => void;
-  promptMode: boolean;
-  onTogglePromptMode: () => void;
   language: SpeechLanguage;
   onChangeLanguage: (lang: SpeechLanguage) => void;
   whisperStatus: WhisperStatusInfo;
@@ -50,8 +48,6 @@ export const PillSettingsPopover: React.FC<PillSettingsPopoverProps> = ({
   onToggleDictationSounds,
   cleanupStyle,
   onChangeCleanupStyle,
-  promptMode,
-  onTogglePromptMode,
   language,
   onChangeLanguage,
 }) => {

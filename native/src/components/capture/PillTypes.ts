@@ -37,6 +37,5 @@ export interface DiagnosticInfo {
   llmStatus: string;
   hotkeyStatus: string;
   windowMode: 'resting' | 'expanded' | 'popover';
-  promptMode: boolean;
   activeApp: string;
 }

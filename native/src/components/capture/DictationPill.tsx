@@ -67,7 +67,6 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const [autoPaste, setAutoPaste] = useState(true);
   const [textTransform, setTextTransform] = useState(true);
   const [cleanupStyle, setCleanupStyle] = useState<CleanupStyle>('faithful');
-  const [promptMode, setPromptMode] = useState(false);
   const [language, setLanguage] = useState<SpeechLanguage>('auto');
   const [dictationShortcut, setDictationShortcut] = useState('Ctrl+Space');
 
@@ -395,9 +394,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         } else if (payload.status === 'SUCCESS') {
           setPhase('success');
           const isDictation = payload.mode === 'dictation' || captureMode === 'dictation';
-          if (promptMode) {
-            setSuccessMessage('Prompt inserted into document');
-          } else if (isDictation) {
+          if (isDictation) {
             setSuccessMessage('Inserted into document');
           } else {
             setSuccessMessage('Voice note saved');
@@ -456,7 +453,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       if (hoverEnterTimerRef.current) clearTimeout(hoverEnterTimerRef.current);
       if (hoverLeaveTimerRef.current) clearTimeout(hoverLeaveTimerRef.current);
     };
-  }, [captureMode, promptMode]);
+  }, [captureMode]);
 
   // Update Rust native window geometry
   useEffect(() => {
@@ -493,16 +490,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     }, HOVER_COLLAPSE_DELAY_MS);
   };
 
-  const handleTogglePromptMode = () => {
-    const isLlmReady = ollamaStatus.status === 'ready' || ollamaStatus.status === 'cloud_active';
-    if (!promptMode && !isLlmReady) {
-      setWarningMessage('Prompt mode requires a configured LLM');
-      setPhase('warning');
-      return;
-    }
-    setPromptMode((prev) => !prev);
-    setWarningMessage(null);
-  };
+
 
   const toggleClickToTalk = async () => {
     if (phase === 'listening') {
@@ -553,7 +541,6 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     llmStatus: ollamaStatus.status,
     hotkeyStatus: hotkeyStatus.status,
     windowMode: popoverOpen ? 'popover' : isExpanded ? 'expanded' : 'resting',
-    promptMode,
     activeApp: 'Relay',
   };
 
@@ -770,8 +757,6 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
           onToggleDictationSounds={handleToggleDictationSounds}
           cleanupStyle={cleanupStyle}
           onChangeCleanupStyle={setCleanupStyle}
-          promptMode={promptMode}
-          onTogglePromptMode={handleTogglePromptMode}
           language={language}
           onChangeLanguage={handleLanguageChange}
           whisperStatus={whisperStatus}

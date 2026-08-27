@@ -363,77 +363,6 @@ pub fn default_snippets() -> Vec<SnippetItem> {
     ]
 }
 
-/// User-defined prompt item for the Prompt Library and future AI transformations.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PromptItem {
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub description: Option<String>,
-    pub prompt_body: String,
-    #[serde(default = "default_prompt_enabled")]
-    pub enabled: bool,
-}
-
-fn default_prompt_enabled() -> bool {
-    true
-}
-
-/// Prompt Mode capability layer configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PromptSettings {
-    /// Whether Prompt Mode is enabled across Relay.
-    /// When disabled (default), Prompts tab and Wand actions are hidden.
-    #[serde(default = "default_prompt_mode_enabled", alias = "enabled")]
-    pub enabled: bool,
-    /// Global hotkey for prompt capture (e.g. "Ctrl+Alt+Space").
-    /// Note: Fn+Space is not exposed as an application-level modifier on Windows/PC firmware.
-    #[serde(default = "default_prompt_hotkey", alias = "promptHotkey")]
-    pub prompt_hotkey: String,
-}
-
-fn default_prompt_mode_enabled() -> bool {
-    false
-}
-
-fn default_prompt_hotkey() -> String {
-    "Ctrl+Alt+Space".to_string()
-}
-
-impl Default for PromptSettings {
-    fn default() -> Self {
-        Self {
-            enabled: default_prompt_mode_enabled(),
-            prompt_hotkey: default_prompt_hotkey(),
-        }
-    }
-}
-
-pub fn default_prompts() -> Vec<PromptItem> {
-    vec![
-        PromptItem {
-            id: "prompt_bullet_points".to_string(),
-            name: "Summarize into Bullet Points".to_string(),
-            description: Some("Converts rambling speech into crisp, formatted bullet points.".to_string()),
-            prompt_body: "Summarize the following transcript into clear, actionable bullet points:\n\n{{text}}".to_string(),
-            enabled: true,
-        },
-        PromptItem {
-            id: "prompt_professional_email".to_string(),
-            name: "Draft Professional Email".to_string(),
-            description: Some("Polishes dictated thoughts into a polite, structured business email.".to_string()),
-            prompt_body: "Turn the following dictated thoughts into a professional and courteous email:\n\n{{text}}".to_string(),
-            enabled: true,
-        },
-        PromptItem {
-            id: "prompt_action_items".to_string(),
-            name: "Extract Action Items".to_string(),
-            description: Some("Finds tasks, assignees, and deadlines mentioned in the voice note.".to_string()),
-            prompt_body: "Extract all action items and tasks from the following text with check-boxes:\n\n{{text}}".to_string(),
-            enabled: true,
-        },
-    ]
-}
 
 /// Whether Relay tries to tell speakers apart in a meeting.
 ///
@@ -584,10 +513,7 @@ pub struct AppSettings {
     pub dictionary: Vec<String>,
     #[serde(default = "default_snippets")]
     pub snippets: Vec<SnippetItem>,
-    #[serde(default)]
-    pub prompt_settings: PromptSettings,
-    #[serde(default = "default_prompts")]
-    pub prompts: Vec<PromptItem>,
+
 }
 
 impl Default for AppSettings {
@@ -609,8 +535,6 @@ impl Default for AppSettings {
             meetings: MeetingSettings::default(),
             dictionary: default_dictionary_words(),
             snippets: default_snippets(),
-            prompt_settings: PromptSettings::default(),
-            prompts: default_prompts(),
         }
     }
 }
@@ -897,33 +821,5 @@ mod tests {
         assert_eq!(camel.stt.dictation_threads, Some(12));
     }
 
-    #[test]
-    fn test_prompts_settings_defaults_and_serialization() {
-        let defaults = AppSettings::default();
-        assert_eq!(defaults.prompts.len(), 3);
-        assert_eq!(defaults.prompts[0].id, "prompt_bullet_points");
-        assert!(defaults.prompts[0].enabled);
 
-        // Serialization & roundtrip
-        let json = serde_json::to_string_pretty(&defaults).unwrap();
-        let loaded: AppSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(loaded.prompts, defaults.prompts);
-
-        // Deserialization from empty settings populates default prompts
-        let empty: AppSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(empty.prompts.len(), 3);
-        assert!(!empty.prompt_settings.enabled);
-        assert_eq!(empty.prompt_settings.prompt_hotkey, "Ctrl+Alt+Space");
-
-        // Custom prompt settings
-        let custom_json = r#"{
-            "prompt_settings": {
-                "enabled": true,
-                "promptHotkey": "Ctrl+Shift+P"
-            }
-        }"#;
-        let custom_loaded: AppSettings = serde_json::from_str(custom_json).unwrap();
-        assert!(custom_loaded.prompt_settings.enabled);
-        assert_eq!(custom_loaded.prompt_settings.prompt_hotkey, "Ctrl+Shift+P");
-    }
 }

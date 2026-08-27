@@ -33,7 +33,6 @@ import {
   Layers,
   Power,
   Clipboard,
-  Wand2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -376,24 +375,7 @@ export const ProviderSettings: React.FC = () => {
     }
   };
 
-  const applyPromptHotkey = async (accelerator: string) => {
-    const updatedSettings: AppSettings = {
-      ...settings,
-      prompt_settings: {
-        ...settings.prompt_settings,
-        enabled: settings.prompt_settings?.enabled ?? true,
-        prompt_hotkey: accelerator,
-      },
-    };
-    setSettings(updatedSettings);
-    try {
-      await invoke('save_settings', { settings: updatedSettings });
-      setError('');
-    } catch (err: any) {
-      console.error('Failed to save prompt hotkey', err);
-      setError(err?.message || 'Failed to save prompt hotkey');
-    }
-  };
+
 
   const handleSaveDirect = async () => {
     try {
@@ -736,73 +718,7 @@ export const ProviderSettings: React.FC = () => {
                 </div>
               </div>
 
-              {/* Prompt Mode Capability Layer */}
-              <div className="py-3 border-b border-border space-y-3">
-                <div className="flex items-center gap-2">
-                  <Wand2 className="w-4 h-4 text-sky-500" />
-                  <div>
-                    <p className="text-xs font-semibold text-foreground">Prompt Mode</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      Enable AI Prompt transformation actions across Voice Notes, Scribbles, and the Prompt Library
-                    </p>
-                  </div>
-                </div>
 
-                <div className="p-3.5 rounded-lg bg-muted/40 border border-border space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-medium text-foreground">Enable Prompt Mode</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        Shows the Prompts navigation tab, Prompt hotkeys, and Wand transformation actions throughout Relay
-                      </p>
-                    </div>
-                    <Switch
-                      checked={settings.prompt_settings?.enabled ?? false}
-                      onCheckedChange={async (checked) => {
-                        const updated: AppSettings = {
-                          ...settings,
-                          prompt_settings: {
-                            ...settings.prompt_settings,
-                            enabled: checked,
-                            prompt_hotkey: settings.prompt_settings?.prompt_hotkey ?? 'Ctrl+Alt+Space',
-                          },
-                        };
-                        setSettings(updated);
-                        try {
-                          await invoke('save_settings', { settings: updated });
-                        } catch (err) {
-                          console.error('Failed to update prompt mode setting', err);
-                        }
-                      }}
-                    />
-                  </div>
-
-                  {/* When Prompt Mode is Enabled, Expose Hotkey Configuration */}
-                  {settings.prompt_settings?.enabled && (
-                    <>
-                      <div className="h-px bg-border/60" />
-                      <div className="space-y-2 pt-1">
-                        <div>
-                          <p className="text-xs font-semibold text-foreground">Prompt Capture Hotkey</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            Global hotkey to capture speech and transform directly with AI
-                          </p>
-                        </div>
-                        <div className="max-w-md">
-                          <HotkeyRecorder
-                            id="general-prompt-hotkey"
-                            value={settings.prompt_settings?.prompt_hotkey || 'Ctrl+Alt+Space'}
-                            onCapture={applyPromptHotkey}
-                          />
-                        </div>
-                        <p className="text-[10px] text-muted-foreground">
-                          Click to change hotkey. (Note: Fn+Space is handled by PC hardware/firmware on Windows, so Ctrl/Alt/Shift modifiers are used).
-                        </p>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
 
               {/* Vault Directory Location */}
               <div className="py-3 flex items-center justify-between gap-3">
@@ -877,28 +793,7 @@ export const ProviderSettings: React.FC = () => {
                 </p>
               </div>
 
-              {/* Prompt Capture Hotkey (Visible when Prompt Mode is Enabled) */}
-              {settings.prompt_settings?.enabled && (
-                <div className="py-3 border-b border-border">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Wand2 className="w-4 h-4 text-sky-500" />
-                    <p className="text-xs font-semibold text-foreground">Prompt Capture Hotkey</p>
-                  </div>
-                  <div className="max-w-md">
-                    <label htmlFor="dictation-prompt-hotkey" className="block text-[11px] text-muted-foreground mb-1">
-                      Capture speech and run through AI Prompt transformation
-                    </label>
-                    <HotkeyRecorder
-                      id="dictation-prompt-hotkey"
-                      value={settings.prompt_settings?.prompt_hotkey || 'Ctrl+Alt+Space'}
-                      onCapture={applyPromptHotkey}
-                    />
-                  </div>
-                  <p className="text-[10px] text-muted-foreground mt-2">
-                    Global shortcut for Prompt Mode voice capture. (Fn+Space is firmware-handled on Windows, so Ctrl/Alt/Shift modifiers are used).
-                  </p>
-                </div>
-              )}
+
 
               {/* Toggle-to-Talk Switch */}
               <div className="py-3 border-b border-border flex items-center justify-between">
