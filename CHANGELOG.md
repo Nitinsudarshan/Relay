@@ -1,5 +1,46 @@
 # Relay — Changelog
 
+## [0.13.3] - 2026-08-27
+
+### Docs: Narrow the Meeting Gap Analysis to Bot-Free Architectures Only
+
+**Type**: patch — documentation only (`Meeting-rules/meeting_pipeline_gap_analysis.md`). No source in `native/` or `web/` is touched.
+
+Relay is not building a meeting bot, so comparing its pipeline against products that
+join the call as a participant compared it against a pipeline that is handed the
+participant roster by the conferencing platform. That comparison could not produce an
+actionable finding, and the roster asymmetry was doing too much of the document's
+framing work.
+
+#### Documentation
+
+- **Bot-based products removed entirely (`meeting_pipeline_gap_analysis.md`)**: the
+  five bot-based teardowns are gone, along with every reference to them in the gap
+  ledger, the recommended sequence, and the sources. Nine bot-free products remain —
+  Granola, Circleback, Littlebird, Jamie, Meetily, anarlog, OpenWhispr, Whisper
+  Notes/Vowen — plus the raw engines. Circleback and Littlebird are restored from the
+  original teardown, since they carry the exit-path and pre-meeting-context arguments
+  first-hand rather than by analogy to a bot-based tool.
+- **§2 reframed from "bot vs bot-free" to the four ways a name gets in**: calendar +
+  contacts, channel provenance, transcript context, and diarization + enrollment —
+  tabulated against who uses each and what it costs. Relay uses source 2 only, and at
+  the coarsest granularity its capture layer permits. This states the constraint from
+  inside the bot-free world instead of deriving it from a contrast with bots, and it
+  surfaces a gap the previous framing had folded into gap 2: **transcript context is
+  nearly free**, because Stage A already reads the whole transcript and could name a
+  speaker from "thanks, Pranjali" for the cost of one extra field in a prompt Relay
+  already sends.
+- **Gap 3 re-grounded on Whisper's own `initial_prompt`** rather than on two cloud
+  vendors' custom-vocabulary features. The mechanism is already wired in `stt.rs:239`
+  and `:256` and fires only from a manually typed setting — so the gap is wiring, not
+  a missing capability.
+- **Scope note added** explaining why bot-based tools are excluded, without naming
+  them, so the exclusion survives future edits.
+- **The teardown's legal note is flagged as architecture-independent**: diarizing
+  within a single recording is not the regulatory trigger, persisting an identity
+  template across recordings is. That still governs gap 11 regardless of anyone's
+  capture architecture.
+
 ## [0.13.2] - 2026-08-27
 
 ### Docs: Meeting Pipeline Gap Analysis Re-Grounded Against the v0.13.1 Code
