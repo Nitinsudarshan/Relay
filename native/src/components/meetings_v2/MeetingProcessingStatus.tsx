@@ -12,7 +12,7 @@ interface MeetingProcessingStatusProps {
 
 const TONE_CLASSES: Record<string, string> = {
   idle: 'text-zinc-400 bg-white/5 border-white/10',
-  busy: 'text-indigo-300 bg-indigo-500/10 border-indigo-500/25',
+  busy: 'text-zinc-300 bg-white/5 border-white/15',
   ok: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
   warn: 'text-amber-400 bg-amber-500/10 border-amber-500/25',
   error: 'text-red-400 bg-red-500/10 border-red-500/25',
@@ -36,7 +36,7 @@ const StageChip: React.FC<{ label: string; stage?: StageState | null }> = ({
     ) : status === 'FAILED' ? (
       <AlertTriangle className="w-3 h-3 text-red-400" />
     ) : status === 'RUNNING' ? (
-      <Loader2 className="w-3 h-3 text-indigo-400 animate-spin" />
+      <Loader2 className="w-3 h-3 text-zinc-300 animate-spin" />
     ) : (
       <Minus className="w-3 h-3 text-zinc-600" />
     );

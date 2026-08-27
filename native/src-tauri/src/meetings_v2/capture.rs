@@ -28,9 +28,39 @@ const MAX_STREAM_LAG_SAMPLES: usize = (TARGET_SAMPLE_RATE as f64 * 0.25) as usiz
 /// RMS above which a source counts as audible rather than merely connected.
 const AUDIBLE_RMS_THRESHOLD: f32 = 0.004;
 
+/// Resolution of the per-source channel energy track carried on every chunk —
+/// one bucket per second at the target rate.
+///
+/// The mixer already measures both sources sample by sample in order to set
+/// `mic_had_audio` / `sys_had_audio`; before v2.5 it summed that measurement
+/// across the whole 30-second chunk and kept one boolean per source. In a real
+/// two-way conversation almost every 30-second window contains both sources, so
+/// chunk-level attribution resolved to "unknown" for the majority of segments
+/// and every action item read out of them lost its owner.
+///
+/// Bucketing the same measurement per second costs ~30 float pairs per chunk and
+/// lets attribution resolve at roughly sentence granularity once Whisper's own
+/// segment timestamps are matched against it. Both [`SAMPLES_PER_CHUNK`] and
+/// [`SAMPLES_PER_LIVE_FRAME`] are exact multiples of this, so slicing never
+/// splits a bucket in the steady state.
+const SAMPLES_PER_ENERGY_BUCKET: usize = TARGET_SAMPLE_RATE as usize;
+
 const LEVEL_SMOOTHING_ALPHA: f32 = 0.35;
 const LEVEL_EMIT_INTERVAL: Duration = Duration::from_millis(40);
 const MIXER_TICK: Duration = Duration::from_millis(20);
+
+/// One second of per-source loudness, measured on the samples that were mixed.
+///
+/// Kept as RMS rather than a boolean so a later stage can pick its own
+/// threshold, and so a marginal second is distinguishable from a silent one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChannelEnergy {
+    /// Offset of this bucket from the start of its chunk, in seconds.
+    pub offset_s: f64,
+    pub duration_s: f64,
+    pub mic_rms: f32,
+    pub sys_rms: f32,
+}
 
 pub struct AudioChunk {
     pub session_id: String,
@@ -40,8 +70,15 @@ pub struct AudioChunk {
     pub samples: Vec<f32>,
     /// Whether each source was audible *within this chunk*, measured from the
     /// samples that went into it rather than from an instantaneous meter read.
+    ///
+    /// Retained unchanged: these are the chunk-wide roll-up of
+    /// [`AudioChunk::channel_track`] and every existing consumer still reads
+    /// them.
     pub mic_had_audio: bool,
     pub sys_had_audio: bool,
+    /// The same measurement at one-second resolution, oldest first. Empty only
+    /// if the chunk carried no samples.
+    pub channel_track: Vec<ChannelEnergy>,
 }
 
 pub struct LiveAudioFrame {
@@ -299,56 +336,208 @@ struct CaptureLoopContext {
     app: Option<AppHandle>,
 }
 
-/// Accumulator for one pending output slice (durable chunk or live frame).
-struct SliceAccumulator {
-    samples: Vec<f32>,
+/// One bucket of the channel energy track, still accumulating.
+#[derive(Debug, Clone, Copy, Default)]
+struct EnergyBucket {
     mic_sum_sq: f32,
     sys_sum_sq: f32,
+    count: usize,
+}
+
+impl EnergyBucket {
+    /// Splits off the leading `count` samples' worth of energy, apportioning the
+    /// sums by the fraction taken. Only ever called on a bucket a slice boundary
+    /// lands inside — which, given both slice sizes are exact multiples of
+    /// [`SAMPLES_PER_ENERGY_BUCKET`], happens only on the final drain.
+    fn split_front(&mut self, count: usize) -> EnergyBucket {
+        let take = count.min(self.count);
+        let fraction = if self.count == 0 {
+            0.0
+        } else {
+            take as f32 / self.count as f32
+        };
+        let front = EnergyBucket {
+            mic_sum_sq: self.mic_sum_sq * fraction,
+            sys_sum_sq: self.sys_sum_sq * fraction,
+            count: take,
+        };
+        self.mic_sum_sq -= front.mic_sum_sq;
+        self.sys_sum_sq -= front.sys_sum_sq;
+        self.count -= take;
+        front
+    }
+}
+
+/// Accumulator for one pending output slice (durable chunk or live frame).
+///
+/// Channel energy is bucketed per second rather than summed across the whole
+/// slice, so a slice can report *when* each source was audible instead of only
+/// whether it ever was. The chunk-wide booleans are recovered by summing the
+/// buckets, which is arithmetically identical to the single running total this
+/// held before v2.5.
+struct SliceAccumulator {
+    samples: Vec<f32>,
+    buckets: VecDeque<EnergyBucket>,
 }
 
 impl SliceAccumulator {
     fn with_capacity(capacity: usize) -> Self {
         Self {
             samples: Vec::with_capacity(capacity),
-            mic_sum_sq: 0.0,
-            sys_sum_sq: 0.0,
+            buckets: VecDeque::new(),
         }
     }
 
     fn push(&mut self, mixed: f32, mic: f32, sys: f32) {
         self.samples.push(mixed);
-        self.mic_sum_sq += mic * mic;
-        self.sys_sum_sq += sys * sys;
+        if self
+            .buckets
+            .back()
+            .is_none_or(|b| b.count >= SAMPLES_PER_ENERGY_BUCKET)
+        {
+            self.buckets.push_back(EnergyBucket::default());
+        }
+        let bucket = self
+            .buckets
+            .back_mut()
+            .expect("a bucket was just ensured to exist");
+        bucket.mic_sum_sq += mic * mic;
+        bucket.sys_sum_sq += sys * sys;
+        bucket.count += 1;
     }
 
-    /// Removes the leading `count` samples, scaling the energy accumulators by
-    /// the fraction retained. Exact per-sample energy bookkeeping is not worth
-    /// a second buffer here — these values only drive audibility flags.
-    fn take_front(&mut self, count: usize) -> (Vec<f32>, f32, f32) {
+    /// Removes the leading `count` samples together with the energy buckets
+    /// covering them.
+    fn take_front(&mut self, count: usize) -> (Vec<f32>, Vec<EnergyBucket>) {
         let total = self.samples.len();
         let taken: Vec<f32> = self.samples.drain(0..count.min(total)).collect();
-        let fraction = if total == 0 {
-            0.0
-        } else {
-            taken.len() as f32 / total as f32
-        };
-        let mic = self.mic_sum_sq * fraction;
-        let sys = self.sys_sum_sq * fraction;
-        self.mic_sum_sq -= mic;
-        self.sys_sum_sq -= sys;
-        (taken, mic, sys)
+
+        let mut remaining = taken.len();
+        let mut buckets = Vec::new();
+        while remaining > 0 {
+            let Some(front) = self.buckets.front_mut() else {
+                break;
+            };
+            if front.count <= remaining {
+                remaining -= front.count;
+                buckets.push(self.buckets.pop_front().expect("front was just borrowed"));
+            } else {
+                buckets.push(front.split_front(remaining));
+                remaining = 0;
+            }
+        }
+        (taken, buckets)
     }
 
-    fn drain_all(&mut self) -> (Vec<f32>, f32, f32) {
+    fn drain_all(&mut self) -> (Vec<f32>, Vec<EnergyBucket>) {
         let samples = std::mem::take(&mut self.samples);
-        let mic = std::mem::replace(&mut self.mic_sum_sq, 0.0);
-        let sys = std::mem::replace(&mut self.sys_sum_sq, 0.0);
-        (samples, mic, sys)
+        let buckets = std::mem::take(&mut self.buckets).into_iter().collect();
+        (samples, buckets)
     }
 
     fn len(&self) -> usize {
         self.samples.len()
     }
+}
+
+/// Converts accumulated buckets into the chunk's channel track plus the
+/// chunk-wide audibility flags.
+fn resolve_channel_track(buckets: &[EnergyBucket]) -> (Vec<ChannelEnergy>, bool, bool) {
+    let mut offset_s = 0.0_f64;
+    let mut mic_total = 0.0_f32;
+    let mut sys_total = 0.0_f32;
+    let mut total_samples = 0usize;
+    let mut track = Vec::with_capacity(buckets.len());
+
+    for bucket in buckets {
+        if bucket.count == 0 {
+            continue;
+        }
+        let duration_s = bucket.count as f64 / TARGET_SAMPLE_RATE as f64;
+        track.push(ChannelEnergy {
+            offset_s,
+            duration_s,
+            mic_rms: rms_from_sum_sq(bucket.mic_sum_sq, bucket.count),
+            sys_rms: rms_from_sum_sq(bucket.sys_sum_sq, bucket.count),
+        });
+        offset_s += duration_s;
+        mic_total += bucket.mic_sum_sq;
+        sys_total += bucket.sys_sum_sq;
+        total_samples += bucket.count;
+    }
+
+    let mic_had_audio = rms_from_sum_sq(mic_total, total_samples) > AUDIBLE_RMS_THRESHOLD;
+    let sys_had_audio = rms_from_sum_sq(sys_total, total_samples) > AUDIBLE_RMS_THRESHOLD;
+    (track, mic_had_audio, sys_had_audio)
+}
+
+/// How much louder one source must be than the other before the quieter one is
+/// treated as leakage rather than as a second speaker.
+///
+/// Device-level capture has no acoustic isolation: with speakers rather than
+/// headphones, the microphone picks up the remote party, and every utterance
+/// would otherwise register both channels as audible and resolve to no speaker
+/// at all. Requiring roughly a 10 dB margin rejects that bleed without
+/// guessing — it encodes a physical property of the room, not an inference about
+/// who was talking. Genuine crosstalk fails the margin in both directions and is
+/// correctly left unresolved.
+const CHANNEL_DOMINANCE_RATIO: f32 = 3.0;
+
+/// Which sources were audible during `[start_offset_s, end_offset_s)` of a chunk.
+///
+/// Offsets are relative to the start of the chunk, matching both the channel
+/// track's own offsets and the timestamps Whisper reports for a decode.
+///
+/// Loudness is averaged over the overlapping buckets in proportion to how much
+/// of each falls inside the span, so a bucket straddling a speaker change
+/// contributes to both neighbours in proportion rather than marking both of them
+/// ambiguous. `(false, false)` means the span was silent or fell outside the
+/// track; the caller decides what to do with that.
+pub fn resolve_utterance_channel(
+    track: &[ChannelEnergy],
+    start_offset_s: f64,
+    end_offset_s: f64,
+) -> (bool, bool) {
+    let mut mic_weighted = 0.0_f64;
+    let mut sys_weighted = 0.0_f64;
+    let mut weight = 0.0_f64;
+
+    for bucket in track {
+        let bucket_end = bucket.offset_s + bucket.duration_s;
+        let overlap = end_offset_s.min(bucket_end) - start_offset_s.max(bucket.offset_s);
+        if overlap <= 0.0 {
+            continue;
+        }
+        mic_weighted += bucket.mic_rms as f64 * overlap;
+        sys_weighted += bucket.sys_rms as f64 * overlap;
+        weight += overlap;
+    }
+
+    if weight <= 0.0 {
+        return (false, false);
+    }
+
+    let mic_mean = (mic_weighted / weight) as f32;
+    let sys_mean = (sys_weighted / weight) as f32;
+    let mut mic_audible = mic_mean > AUDIBLE_RMS_THRESHOLD;
+    let mut sys_audible = sys_mean > AUDIBLE_RMS_THRESHOLD;
+
+    if mic_audible && sys_audible {
+        if mic_mean >= sys_mean * CHANNEL_DOMINANCE_RATIO {
+            sys_audible = false;
+        } else if sys_mean >= mic_mean * CHANNEL_DOMINANCE_RATIO {
+            mic_audible = false;
+        }
+    }
+
+    (mic_audible, sys_audible)
+}
+
+/// Total accumulated energy across buckets, for the `*_heard` session flags.
+fn bucket_totals(buckets: &[EnergyBucket]) -> (f32, f32, usize) {
+    buckets.iter().fold((0.0, 0.0, 0), |(m, s, c), b| {
+        (m + b.mic_sum_sq, s + b.sys_sum_sq, c + b.count)
+    })
 }
 
 fn run_dual_capture_loop(
@@ -482,13 +671,13 @@ fn run_dual_capture_loop(
         // --- CLOCK B: hand contiguous 1 s frames to the live transcriber ---
         if let Some(ref l_tx) = live_tx {
             while live.len() >= SAMPLES_PER_LIVE_FRAME {
-                let (samples, mic_energy, sys_energy) = live.take_front(SAMPLES_PER_LIVE_FRAME);
+                let (samples, buckets) = live.take_front(SAMPLES_PER_LIVE_FRAME);
                 let start_time_s = live_elapsed_samples as f64 / TARGET_SAMPLE_RATE as f64;
                 live_elapsed_samples += samples.len();
                 let end_time_s = live_elapsed_samples as f64 / TARGET_SAMPLE_RATE as f64;
 
-                let count = samples.len();
                 let is_speech = raw_rms(&samples) > AUDIBLE_RMS_THRESHOLD;
+                let (mic_energy, sys_energy, count) = bucket_totals(&buckets);
                 mark_heard(&mic_heard, mic_energy, count);
                 mark_heard(&sys_heard, sys_energy, count);
 
@@ -520,15 +709,14 @@ fn run_dual_capture_loop(
 
         // --- CLOCK A: slice durable 30 s WAV chunks ---
         while durable.len() >= SAMPLES_PER_CHUNK {
-            let (samples, mic_energy, sys_energy) = durable.take_front(SAMPLES_PER_CHUNK);
+            let (samples, buckets) = durable.take_front(SAMPLES_PER_CHUNK);
             emit_chunk(
                 &chunk_tx,
                 &session_id,
                 &mut chunk_index,
                 &mut elapsed_samples,
                 samples,
-                mic_energy,
-                sys_energy,
+                &buckets,
             );
         }
 
@@ -553,28 +741,26 @@ fn run_dual_capture_loop(
     }
 
     while durable.len() >= SAMPLES_PER_CHUNK {
-        let (samples, mic_energy, sys_energy) = durable.take_front(SAMPLES_PER_CHUNK);
+        let (samples, buckets) = durable.take_front(SAMPLES_PER_CHUNK);
         emit_chunk(
             &chunk_tx,
             &session_id,
             &mut chunk_index,
             &mut elapsed_samples,
             samples,
-            mic_energy,
-            sys_energy,
+            &buckets,
         );
     }
 
     if durable.len() > 0 {
-        let (samples, mic_energy, sys_energy) = durable.drain_all();
+        let (samples, buckets) = durable.drain_all();
         emit_chunk(
             &chunk_tx,
             &session_id,
             &mut chunk_index,
             &mut elapsed_samples,
             samples,
-            mic_energy,
-            sys_energy,
+            &buckets,
         );
     }
 
@@ -608,20 +794,20 @@ fn emit_levels(app: &Option<AppHandle>, mic_level: f32, sys_level: f32) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn emit_chunk(
     chunk_tx: &std_mpsc::Sender<AudioChunk>,
     session_id: &str,
     chunk_index: &mut usize,
     elapsed_samples: &mut usize,
     samples: Vec<f32>,
-    mic_energy: f32,
-    sys_energy: f32,
+    buckets: &[EnergyBucket],
 ) {
     let count = samples.len();
     let start_time_s = *elapsed_samples as f64 / TARGET_SAMPLE_RATE as f64;
     *elapsed_samples += count;
     let end_time_s = *elapsed_samples as f64 / TARGET_SAMPLE_RATE as f64;
+
+    let (channel_track, mic_had_audio, sys_had_audio) = resolve_channel_track(buckets);
 
     let chunk = AudioChunk {
         session_id: session_id.to_string(),
@@ -629,8 +815,9 @@ fn emit_chunk(
         start_time_s,
         end_time_s,
         samples,
-        mic_had_audio: rms_from_sum_sq(mic_energy, count) > AUDIBLE_RMS_THRESHOLD,
-        sys_had_audio: rms_from_sum_sq(sys_energy, count) > AUDIBLE_RMS_THRESHOLD,
+        mic_had_audio,
+        sys_had_audio,
+        channel_track,
     };
 
     let _ = chunk_tx.send(chunk);
@@ -825,10 +1012,11 @@ mod tests {
         for _ in 0..100 {
             acc.push(0.5, 0.5, 0.0); // mic audible, system silent
         }
-        let (samples, mic_energy, sys_energy) = acc.drain_all();
+        let (samples, buckets) = acc.drain_all();
         assert_eq!(samples.len(), 100);
-        assert!(rms_from_sum_sq(mic_energy, 100) > AUDIBLE_RMS_THRESHOLD);
-        assert!(rms_from_sum_sq(sys_energy, 100) <= AUDIBLE_RMS_THRESHOLD);
+        let (_, mic_had_audio, sys_had_audio) = resolve_channel_track(&buckets);
+        assert!(mic_had_audio);
+        assert!(!sys_had_audio);
     }
 
     #[test]
@@ -837,12 +1025,170 @@ mod tests {
         for _ in 0..200 {
             acc.push(0.4, 0.4, 0.2);
         }
-        let (taken, mic_energy, _) = acc.take_front(100);
+        let (taken, buckets) = acc.take_front(100);
         assert_eq!(taken.len(), 100);
         assert_eq!(acc.len(), 100);
         // Half the samples carry roughly half the energy, and the rest stays.
-        assert!(rms_from_sum_sq(mic_energy, 100) > AUDIBLE_RMS_THRESHOLD);
-        assert!(rms_from_sum_sq(acc.mic_sum_sq, 100) > AUDIBLE_RMS_THRESHOLD);
+        let (mic_energy, _, count) = bucket_totals(&buckets);
+        assert_eq!(count, 100);
+        assert!(rms_from_sum_sq(mic_energy, count) > AUDIBLE_RMS_THRESHOLD);
+        let (_, remaining) = acc.drain_all();
+        let (mic_rest, _, rest_count) = bucket_totals(&remaining);
+        assert_eq!(rest_count, 100);
+        assert!(rms_from_sum_sq(mic_rest, rest_count) > AUDIBLE_RMS_THRESHOLD);
+    }
+
+    #[test]
+    fn the_channel_track_resolves_one_bucket_per_second() {
+        let mut acc = SliceAccumulator::with_capacity(SAMPLES_PER_CHUNK);
+        // Three seconds: mic alone, then system alone, then both.
+        for _ in 0..SAMPLES_PER_ENERGY_BUCKET {
+            acc.push(0.5, 0.5, 0.0);
+        }
+        for _ in 0..SAMPLES_PER_ENERGY_BUCKET {
+            acc.push(0.5, 0.0, 0.5);
+        }
+        for _ in 0..SAMPLES_PER_ENERGY_BUCKET {
+            acc.push(0.5, 0.4, 0.4);
+        }
+
+        let (_, buckets) = acc.drain_all();
+        let (track, mic_had_audio, sys_had_audio) = resolve_channel_track(&buckets);
+
+        assert_eq!(track.len(), 3);
+        // Chunk-wide flags stay what they always were: both sources were heard.
+        assert!(mic_had_audio && sys_had_audio);
+
+        // But the track localizes each one, which the flags alone cannot.
+        assert!(track[0].mic_rms > AUDIBLE_RMS_THRESHOLD);
+        assert!(track[0].sys_rms <= AUDIBLE_RMS_THRESHOLD);
+        assert!(track[1].mic_rms <= AUDIBLE_RMS_THRESHOLD);
+        assert!(track[1].sys_rms > AUDIBLE_RMS_THRESHOLD);
+        assert!(track[2].mic_rms > AUDIBLE_RMS_THRESHOLD);
+        assert!(track[2].sys_rms > AUDIBLE_RMS_THRESHOLD);
+
+        // Offsets are contiguous and one second apart.
+        assert_eq!(track[0].offset_s, 0.0);
+        assert!((track[1].offset_s - 1.0).abs() < 1e-9);
+        assert!((track[2].offset_s - 2.0).abs() < 1e-9);
+        assert!(track.iter().all(|b| (b.duration_s - 1.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn a_chunk_sized_slice_never_splits_a_bucket() {
+        let mut acc = SliceAccumulator::with_capacity(SAMPLES_PER_CHUNK);
+        for _ in 0..SAMPLES_PER_CHUNK + SAMPLES_PER_ENERGY_BUCKET {
+            acc.push(0.3, 0.3, 0.1);
+        }
+        let (samples, buckets) = acc.take_front(SAMPLES_PER_CHUNK);
+        assert_eq!(samples.len(), SAMPLES_PER_CHUNK);
+        assert_eq!(buckets.len(), SAMPLES_PER_CHUNK / SAMPLES_PER_ENERGY_BUCKET);
+        assert!(buckets
+            .iter()
+            .all(|b| b.count == SAMPLES_PER_ENERGY_BUCKET));
+    }
+
+    /// Builds a channel track from one `(mic_rms, sys_rms)` pair per second.
+    fn track(seconds: &[(f32, f32)]) -> Vec<ChannelEnergy> {
+        seconds
+            .iter()
+            .enumerate()
+            .map(|(i, &(mic_rms, sys_rms))| ChannelEnergy {
+                offset_s: i as f64,
+                duration_s: 1.0,
+                mic_rms,
+                sys_rms,
+            })
+            .collect()
+    }
+
+    const LOUD: f32 = 0.20;
+    const QUIET: f32 = 0.001;
+    /// Speaker bleed into the microphone: audible, but far below the real source.
+    const BLEED: f32 = 0.02;
+
+    #[test]
+    fn an_utterance_resolves_to_whichever_source_was_speaking() {
+        // Me for three seconds, then them for five.
+        let t = track(&[
+            (LOUD, QUIET),
+            (LOUD, QUIET),
+            (LOUD, QUIET),
+            (QUIET, LOUD),
+            (QUIET, LOUD),
+            (QUIET, LOUD),
+            (QUIET, LOUD),
+            (QUIET, LOUD),
+        ]);
+
+        assert_eq!(resolve_utterance_channel(&t, 0.0, 3.0), (true, false));
+        assert_eq!(resolve_utterance_channel(&t, 3.0, 8.0), (false, true));
+    }
+
+    #[test]
+    fn chunk_wide_flags_cannot_make_this_distinction() {
+        // The exact case the chunk booleans collapse: both sources were heard
+        // during the chunk, so `(true, true)` -> Mixed -> no speaker at all.
+        let t = track(&[(LOUD, QUIET), (QUIET, LOUD)]);
+        let (mic_any, sys_any) = (
+            t.iter().any(|b| b.mic_rms > AUDIBLE_RMS_THRESHOLD),
+            t.iter().any(|b| b.sys_rms > AUDIBLE_RMS_THRESHOLD),
+        );
+        assert_eq!((mic_any, sys_any), (true, true));
+
+        // Per utterance, each second resolves to exactly one source.
+        assert_eq!(resolve_utterance_channel(&t, 0.0, 1.0), (true, false));
+        assert_eq!(resolve_utterance_channel(&t, 1.0, 2.0), (false, true));
+    }
+
+    #[test]
+    fn microphone_bleed_from_the_speakers_is_not_a_second_speaker() {
+        let t = track(&[(BLEED, LOUD), (BLEED, LOUD)]);
+        assert!(BLEED > AUDIBLE_RMS_THRESHOLD, "bleed must clear the gate");
+        assert_eq!(resolve_utterance_channel(&t, 0.0, 2.0), (false, true));
+    }
+
+    #[test]
+    fn genuine_crosstalk_stays_unresolved_rather_than_guessed() {
+        let t = track(&[(LOUD, LOUD), (LOUD, LOUD)]);
+        assert_eq!(resolve_utterance_channel(&t, 0.0, 2.0), (true, true));
+    }
+
+    #[test]
+    fn a_straddling_bucket_is_outweighed_by_an_utterance_own_seconds() {
+        // Three seconds of me, one second of crosstalk, three seconds of them.
+        // Each utterance takes half of the crosstalk second and still resolves,
+        // because its own seconds dominate the weighted mean.
+        let t = track(&[
+            (LOUD, QUIET),
+            (LOUD, QUIET),
+            (LOUD, QUIET),
+            (LOUD, LOUD),
+            (QUIET, LOUD),
+            (QUIET, LOUD),
+            (QUIET, LOUD),
+        ]);
+        assert_eq!(resolve_utterance_channel(&t, 0.0, 3.5), (true, false));
+        assert_eq!(resolve_utterance_channel(&t, 3.5, 7.0), (false, true));
+    }
+
+    #[test]
+    fn a_short_utterance_mostly_inside_crosstalk_stays_unresolved() {
+        // The honest limit of the mechanism, asserted rather than hidden: when a
+        // straddling second is a large fraction of a short utterance, neither
+        // source clears the dominance margin and the utterance keeps no speaker.
+        // Consistent with the module's rule that ambiguity is preserved, and the
+        // reason `speaker_id` stays `None` rather than being guessed.
+        let t = track(&[(LOUD, QUIET), (LOUD, LOUD)]);
+        assert_eq!(resolve_utterance_channel(&t, 0.0, 1.5), (true, true));
+    }
+
+    #[test]
+    fn silence_and_out_of_range_spans_resolve_to_nothing() {
+        let t = track(&[(QUIET, QUIET)]);
+        assert_eq!(resolve_utterance_channel(&t, 0.0, 1.0), (false, false));
+        assert_eq!(resolve_utterance_channel(&t, 5.0, 6.0), (false, false));
+        assert_eq!(resolve_utterance_channel(&[], 0.0, 1.0), (false, false));
     }
 
     #[test]

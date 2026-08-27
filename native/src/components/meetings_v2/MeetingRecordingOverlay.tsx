@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Square, Loader2, Mic, Volume2, Pause, Play, AlertTriangle } from 'lucide-react';
+import { Square, Loader2, Pause, Play, AlertTriangle } from 'lucide-react';
 import { AudioLevels, MeetingSession } from '../../types';
+import { MeetingPillSpiral, MeetingPillWaveform } from './MeetingPillMark';
 
-// Matching DictationPill waveform bar parameters
-const WAVEFORM_BAR_COUNT = 12;
-const SILENT_LEVEL_HISTORY = new Array(WAVEFORM_BAR_COUNT).fill(0);
+/** Bars in the resting waveform. Four reads as a meter; twelve read as noise. */
+const WAVEFORM_BAR_COUNT = 4;
+const SILENT_LEVELS = new Array(WAVEFORM_BAR_COUNT).fill(0);
 
 /** States in which a session is no longer occupying the pill. */
 const TERMINAL_STATES = ['COMPLETED', 'IDLE', 'INTERRUPTED', 'RECOVERED', 'ERROR'];
@@ -24,12 +25,24 @@ const TERMINAL_STATES = ['COMPLETED', 'IDLE', 'INTERRUPTED', 'RECOVERED', 'ERROR
 const RECONCILE_INTERVAL_MS = 1000;
 const TIMER_TICK_MS = 250;
 
+/**
+ * The floating meeting recording pill.
+ *
+ * A meeting runs for an hour, and for that hour this sits on top of whatever the
+ * user is actually working in. So at rest it is a vertical capsule showing two
+ * things — the mark, and a live level meter — and nothing else. That is enough
+ * to answer the only question it needs to: is Relay still hearing this.
+ *
+ * Controls are not removed, they are deferred: hovering grows the window and
+ * reveals the timer, pause and stop. A recording you cannot stop from the
+ * indicator that represents it would be a worse pill, not a more minimal one.
+ */
 export const MeetingRecordingOverlay: React.FC = () => {
   const [session, setSession] = useState<MeetingSession | null>(null);
   const [elapsedSec, setElapsedSec] = useState<number>(0);
-  const [micHistory, setMicHistory] = useState<number[]>(SILENT_LEVEL_HISTORY);
-  const [sysHistory, setSysHistory] = useState<number[]>(SILENT_LEVEL_HISTORY);
+  const [levels, setLevels] = useState<number[]>(SILENT_LEVELS);
   const [isBusy, setIsBusy] = useState<boolean>(false);
+  const [isHovered, setIsHovered] = useState<boolean>(false);
 
   /**
    * Backend-reported recorded duration plus the local instant it arrived.
@@ -44,8 +57,7 @@ export const MeetingRecordingOverlay: React.FC = () => {
       durationAnchor.current = null;
       setSession(null);
       setElapsedSec(0);
-      setMicHistory(SILENT_LEVEL_HISTORY);
-      setSysHistory(SILENT_LEVEL_HISTORY);
+      setLevels(SILENT_LEVELS);
       return;
     }
 
@@ -81,13 +93,10 @@ export const MeetingRecordingOverlay: React.FC = () => {
 
     const unlistenLevels = listen<AudioLevels>('meeting-audio-levels', (event) => {
       const { mic_level, sys_level } = event.payload;
-      const mic = Math.min(1.0, mic_level || 0);
-      const sys = Math.min(1.0, sys_level || 0);
-
-      // Mic wave: newest sample enters at left [0] and scrolls left-to-right.
-      // Sys wave: newest sample enters at right [last] and scrolls right-to-left.
-      setMicHistory((prev) => [mic, ...prev.slice(0, prev.length - 1)]);
-      setSysHistory((prev) => [...prev.slice(1), sys]);
+      // One meter for both sources: at this size the pill answers "is Relay
+      // hearing anything", and whichever side is louder answers it.
+      const level = Math.min(1, Math.max(mic_level || 0, sys_level || 0));
+      setLevels((prev) => [...prev.slice(1), level]);
     });
 
     return () => {
@@ -118,6 +127,22 @@ export const MeetingRecordingOverlay: React.FC = () => {
     const timer = setInterval(update, TIMER_TICK_MS);
     return () => clearInterval(timer);
   }, [isRecording, session?.id, session?.state, session?.duration_seconds]);
+
+  // The window has to grow before the controls can be seen, so hover state is
+  // pushed to the backend rather than handled in CSS alone.
+  const setExpanded = useCallback((expanded: boolean) => {
+    setIsHovered(expanded);
+    invoke('set_meeting_overlay_expanded', { expanded }).catch((err) => {
+      console.error('Failed to resize the meeting pill:', err);
+    });
+  }, []);
+
+  // Never leave the window expanded behind a pill that has gone away.
+  useEffect(() => {
+    if (!session && isHovered) {
+      setExpanded(false);
+    }
+  }, [session, isHovered, setExpanded]);
 
   const formatTimer = (totalSeconds: number) => {
     const hrs = Math.floor(totalSeconds / 3600);
@@ -161,154 +186,62 @@ export const MeetingRecordingOverlay: React.FC = () => {
     }
   };
 
-  const statusLabel = isFinalizing ? 'Finalizing' : isPaused ? 'Paused' : 'Recording';
-  const statusColor = isPaused
-    ? 'text-amber-500 dark:text-amber-400'
-    : 'text-red-500 dark:text-red-400';
-  const dotColor = isPaused ? 'bg-amber-500' : 'bg-red-500';
-  const waveMic = isPaused ? SILENT_LEVEL_HISTORY : micHistory;
-  const waveSys = isPaused ? SILENT_LEVEL_HISTORY : sysHistory;
+  if (!session) {
+    return <div className="w-full h-full bg-transparent" />;
+  }
+
+  const showControls = isHovered && !isFinalizing;
 
   return (
-    <div className="w-full h-full flex items-center justify-center p-1 bg-transparent select-none">
-      <div className="inline-flex items-center gap-3 px-4 h-[44px] rounded-lg bg-white dark:bg-[#171717] border border-slate-200 dark:border-[#262626] shadow-[0_16px_40px_rgba(0,0,0,0.5)] text-slate-900 dark:text-neutral-100 ring-1 ring-black/30">
-        {/* Left: Recording Status Badge */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="relative flex items-center justify-center">
-            {!isPaused && (
-              <span className={`w-2.5 h-2.5 rounded-full ${dotColor} animate-ping absolute`} />
-            )}
-            <span className={`w-2.5 h-2.5 rounded-full ${dotColor} relative`} />
-          </div>
-          <span className={`text-[11px] font-bold tracking-wider uppercase ${statusColor}`}>
-            {statusLabel}
-          </span>
-        </div>
-
-        {/* Center: Authoritative Timer (recorded time, excluding pauses) */}
-        <div className="font-mono text-xs font-semibold tracking-wider text-slate-800 dark:text-neutral-200 tabular-nums shrink-0">
-          {formatTimer(elapsedSec)}
-        </div>
-
-        {session?.capture_warning && (
-          <div
-            className="flex items-center text-amber-500 dark:text-amber-400 shrink-0"
-            title={session.capture_warning}
-          >
-            <AlertTriangle className="w-3.5 h-3.5" />
+    <div
+      className="w-full h-full flex items-center justify-end pr-1 bg-transparent select-none"
+      onMouseEnter={() => setExpanded(true)}
+      onMouseLeave={() => setExpanded(false)}
+    >
+      <div className="flex items-center gap-2">
+        {showControls && (
+          <div className="flex items-center gap-1.5 pl-1">
+            <span className="font-mono text-[11px] font-semibold tabular-nums text-neutral-300">
+              {formatTimer(elapsedSec)}
+            </span>
+            <button
+              onClick={handleTogglePause}
+              disabled={isBusy}
+              title={isPaused ? 'Resume recording' : 'Pause recording'}
+              className="grid place-items-center w-7 h-7 rounded-full bg-neutral-800/90 text-neutral-200 border border-white/10 hover:bg-neutral-700 disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-400"
+            >
+              {isPaused ? (
+                <Play className="w-3 h-3 fill-current" />
+              ) : (
+                <Pause className="w-3 h-3 fill-current" />
+              )}
+            </button>
+            <button
+              onClick={handleStop}
+              disabled={isBusy}
+              title="Stop and save this meeting"
+              className="grid place-items-center w-7 h-7 rounded-full bg-red-500/90 text-white border border-red-400/40 hover:bg-red-500 disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-400"
+            >
+              <Square className="w-2.5 h-2.5 fill-current" />
+            </button>
           </div>
         )}
 
-        {/* Dual Opposing Waveform Container (DictationPill styling) */}
-        <div className="flex items-center gap-2.5 px-3 py-1 bg-slate-100 dark:bg-black/40 rounded-md border border-slate-200 dark:border-white/5 shrink-0">
-          {/* Extreme Left: Mic Icon & Label */}
-          <div
-            className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400"
-            title="Your Microphone Input (Propagates Left to Right)"
-          >
-            <Mic className="w-3.5 h-3.5 stroke-[2.2]" />
-            <span className="text-[9px] opacity-80">MIC</span>
-          </div>
-
-          {/* Left-to-Right Scrolling Wave (Mic) */}
-          <div className="flex items-center gap-[2.5px] h-[22px] justify-start shrink-0">
-            {waveMic.map((level, i) => {
-              const heightPx = Math.max(3, Math.min(22, Math.round(level * 22)));
-              const active = level > 0.01;
-              return (
-                <span
-                  key={i}
-                  className={`w-[2.5px] rounded-sm transition-all duration-75 origin-center ${
-                    active
-                      ? 'bg-emerald-500 dark:bg-emerald-400 shadow-xs shadow-emerald-400/40'
-                      : 'bg-slate-300 dark:bg-neutral-700'
-                  }`}
-                  style={{ height: `${heightPx}px` }}
-                />
-              );
-            })}
-          </div>
-
-          {/* Center Divider */}
-          <div className="w-px h-3.5 bg-slate-300 dark:bg-white/10 mx-0.5" />
-
-          {/* Right-to-Left Scrolling Wave (System Audio) */}
-          <div className="flex items-center gap-[2.5px] h-[22px] justify-end shrink-0">
-            {waveSys.map((level, i) => {
-              const heightPx = Math.max(3, Math.min(22, Math.round(level * 22)));
-              const active = level > 0.01;
-              return (
-                <span
-                  key={i}
-                  className={`w-[2.5px] rounded-sm transition-all duration-75 origin-center ${
-                    active
-                      ? 'bg-blue-600 dark:bg-blue-400 shadow-xs shadow-blue-400/40'
-                      : 'bg-slate-300 dark:bg-neutral-700'
-                  }`}
-                  style={{ height: `${heightPx}px` }}
-                />
-              );
-            })}
-          </div>
-
-          {/* Extreme Right: System Audio Label & Icon */}
-          <div
-            className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400"
-            title="Meeting Audio / System Participants (Propagates Right to Left)"
-          >
-            <span className="text-[9px] opacity-80">SYS</span>
-            <Volume2 className="w-3.5 h-3.5 stroke-[2.2]" />
-          </div>
-        </div>
-
-        {/* Pause / Resume */}
-        <button
-          onClick={handleTogglePause}
-          disabled={isBusy || isFinalizing || !session}
-          title={isPaused ? 'Resume recording' : 'Pause recording'}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold tracking-wide transition-all shadow-sm active:scale-95 shrink-0 border ${
-            isBusy || isFinalizing || !session
-              ? 'bg-slate-200 dark:bg-neutral-800 text-slate-400 dark:text-neutral-500 cursor-not-allowed border-slate-300 dark:border-neutral-700'
-              : isPaused
-              ? 'bg-emerald-500/90 hover:bg-emerald-500 text-white border-emerald-400/40'
-              : 'bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-700 dark:text-neutral-200 border-slate-300 dark:border-neutral-700'
-          }`}
-        >
-          {isPaused ? (
-            <>
-              <Play className="w-2.5 h-2.5 fill-current" />
-              <span>Resume</span>
-            </>
-          ) : (
-            <>
-              <Pause className="w-2.5 h-2.5 fill-current" />
-              <span>Pause</span>
-            </>
-          )}
-        </button>
-
-        {/* Right: Stop / Finalize Button */}
-        <button
-          onClick={handleStop}
-          disabled={isBusy || isFinalizing}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold tracking-wide transition-all shadow-sm active:scale-95 shrink-0 ${
-            isBusy || isFinalizing
-              ? 'bg-slate-200 dark:bg-neutral-800 text-slate-400 dark:text-neutral-500 cursor-not-allowed border border-slate-300 dark:border-neutral-700'
-              : 'bg-red-500/90 hover:bg-red-500 text-white border border-red-400/40 hover:shadow-red-500/20'
-          }`}
+        {/* The pill itself. Fixed size, so hovering reveals controls beside it
+            rather than moving the mark the user is tracking. */}
+        <div
+          className="flex flex-col items-center justify-center gap-2 w-[44px] h-[72px] rounded-[18px] bg-[#141414] border border-white/10 ring-1 ring-black/40 shadow-[0_10px_30px_rgba(0,0,0,0.55)]"
+          title={session.capture_warning ?? undefined}
         >
           {isFinalizing ? (
-            <>
-              <Loader2 className="w-3 h-3 animate-spin" />
-              <span>Saving...</span>
-            </>
+            <Loader2 className="w-[22px] h-[22px] animate-spin text-neutral-400" />
+          ) : session.capture_warning ? (
+            <AlertTriangle className="w-[20px] h-[20px] text-amber-400" />
           ) : (
-            <>
-              <Square className="w-2.5 h-2.5 fill-current" />
-              <span>Stop</span>
-            </>
+            <MeetingPillSpiral className={`w-[22px] h-[22px] ${isPaused ? 'text-amber-400' : 'text-neutral-400'}`} />
           )}
-        </button>
+          <MeetingPillWaveform levels={levels} muted={isPaused || isFinalizing} />
+        </div>
       </div>
     </div>
   );

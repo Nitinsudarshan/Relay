@@ -783,6 +783,7 @@ mod tests {
             status: ActionItemStatus::Open,
             source_segment_ids: vec!["seg_00000".into()],
             confidence: 0.8,
+            kanban_card_id: None,
         }
     }
 

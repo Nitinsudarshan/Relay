@@ -42,10 +42,12 @@ pub mod related;
 pub mod speakers;
 pub mod store;
 pub mod summarize;
+/// Meeting action items as tasks, and the mapping that gets them onto a board.
+pub mod tasks;
 pub mod validate;
 
 use super::session_store::SessionStore;
-use super::types::TranscriptSegmentStatus;
+use super::types::{TranscriptSegment, TranscriptSegmentStatus};
 use llm::MeetingLlm;
 pub use model::MeetingProcessing;
 use model::{
@@ -615,6 +617,37 @@ audio are unaffected."
         Ok(updated)
     }
 
+    /// Records that an action item has been pushed onto a Kanban board.
+    ///
+    /// Kept on the action item rather than in a separate ledger, so "already a
+    /// task" travels with the to-do it describes and survives a regeneration
+    /// that reuses existing facts.
+    pub fn record_action_item_task(
+        &self,
+        meeting_id: &str,
+        action_item_id: &str,
+        kanban_card_id: &str,
+    ) -> Result<MeetingProcessing, String> {
+        let mut found = false;
+        let updated = self.store.update(meeting_id, |processing| {
+            if let Some(facts) = processing.facts.as_mut() {
+                if let Some(item) = facts
+                    .action_items
+                    .iter_mut()
+                    .find(|i| i.id == action_item_id)
+                {
+                    item.kanban_card_id = Some(kanban_card_id.to_string());
+                    found = true;
+                }
+            }
+        })?;
+
+        if !found {
+            return Err(format!("Unknown action item {}", action_item_id));
+        }
+        Ok(updated)
+    }
+
     /// Records that this meeting has been exported as a Scribble.
     pub fn record_scribble(
         &self,
@@ -677,14 +710,7 @@ audio are unaffected."
             .into_iter()
             .filter(|s| s.status == TranscriptSegmentStatus::Success)
             .filter(|s| !s.text.trim().is_empty())
-            .map(|s| RawSegmentInput {
-                chunk_index: s.chunk_index,
-                start_time_s: s.start_time_s,
-                end_time_s: s.end_time_s,
-                text: s.text,
-                mic_had_audio: s.mic_had_audio,
-                sys_had_audio: s.sys_had_audio,
-            })
+            .flat_map(raw_inputs_from_segment)
             .collect())
     }
 
@@ -818,3 +844,41 @@ pub fn processing_headline(processing: Option<&MeetingProcessing>) -> &'static s
 
 #[cfg(test)]
 mod tests;
+
+/// Fans one raw transcript record out into the inputs the normalizer sees.
+///
+/// A chunk that carries utterances becomes one input per utterance, each with
+/// the channel measured over that utterance's own span. That is the whole point
+/// of the v2.5 capture change: at chunk granularity a two-way conversation
+/// resolves to `Mixed` almost everywhere, and `Mixed` means no speaker.
+///
+/// A chunk with no utterances — recorded before v2.5, or one Whisper returned no
+/// timed spans for — becomes a single whole-chunk input, exactly as before.
+fn raw_inputs_from_segment(segment: TranscriptSegment) -> Vec<RawSegmentInput> {
+    if segment.utterances.is_empty() {
+        return vec![RawSegmentInput {
+            chunk_index: segment.chunk_index,
+            utterance_index: None,
+            start_time_s: segment.start_time_s,
+            end_time_s: segment.end_time_s,
+            text: segment.text,
+            mic_had_audio: segment.mic_had_audio,
+            sys_had_audio: segment.sys_had_audio,
+        }];
+    }
+
+    segment
+        .utterances
+        .into_iter()
+        .filter(|u| !u.text.trim().is_empty())
+        .map(|u| RawSegmentInput {
+            chunk_index: segment.chunk_index,
+            utterance_index: Some(u.index),
+            start_time_s: u.start_time_s,
+            end_time_s: u.end_time_s,
+            text: u.text,
+            mic_had_audio: u.mic_had_audio,
+            sys_had_audio: u.sys_had_audio,
+        })
+        .collect()
+}

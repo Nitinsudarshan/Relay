@@ -124,6 +124,35 @@ pub struct TranscriptSegment {
     pub mic_had_audio: bool,
     #[serde(default)]
     pub sys_had_audio: bool,
+    /// Whisper's own utterance spans within this chunk, each already resolved to
+    /// a channel from the chunk's per-second energy track.
+    ///
+    /// This is what lifts attribution off the 30-second chunk. The chunk-level
+    /// booleans above stay as the roll-up and as the fallback for transcripts
+    /// written before v2.5, which deserialize with an empty list and are still
+    /// read exactly as they were.
+    #[serde(default)]
+    pub utterances: Vec<TranscriptUtterance>,
+}
+
+/// One utterance inside a chunk, with the channel that was audible while it was
+/// spoken.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TranscriptUtterance {
+    /// Index within the chunk, so an id can be derived without a counter.
+    pub index: usize,
+    /// Absolute session time, not an offset within the chunk.
+    pub start_time_s: f64,
+    pub end_time_s: f64,
+    pub text: String,
+    /// Measured over exactly this utterance's span of the channel track.
+    pub mic_had_audio: bool,
+    pub sys_had_audio: bool,
+    /// Whisper's own no-speech probability for the span. Kept for diagnostics:
+    /// a high value on a confidently-transcribed sentence is the signature of a
+    /// decoder hallucination over silence.
+    #[serde(default)]
+    pub no_speech_prob: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

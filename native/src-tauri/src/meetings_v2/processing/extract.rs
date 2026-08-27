@@ -622,6 +622,7 @@ fn sanitize_draft(
             deadline,
             status: ActionItemStatus::Open,
             confidence: if sources.is_empty() { 0.4 } else { 0.8 },
+            kanban_card_id: None,
             source_segment_ids: sources,
         });
     }
@@ -933,6 +934,7 @@ pub fn deterministic_facts(
                     status: ActionItemStatus::Open,
                     source_segment_ids: vec![segment.id.clone()],
                     confidence: 0.3,
+                    kanban_card_id: None,
                 });
             }
 
@@ -1046,6 +1048,7 @@ mod tests {
     fn raw(chunk_index: usize, text: &str, mic: bool, sys: bool) -> RawSegmentInput {
         RawSegmentInput {
             chunk_index,
+            utterance_index: None,
             start_time_s: chunk_index as f64 * 30.0,
             end_time_s: (chunk_index + 1) as f64 * 30.0,
             text: text.to_string(),
@@ -1348,6 +1351,7 @@ going to own that piece so it does not keep slipping between the two of us",
         // Fixture H — no channel data at all, as with a pre-existing transcript.
         let raws = vec![RawSegmentInput {
             chunk_index: 0,
+            utterance_index: None,
             start_time_s: 0.0,
             end_time_s: 30.0,
             text: "I will send the notes round".to_string(),

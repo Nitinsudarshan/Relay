@@ -14,6 +14,7 @@ fn segment(index: usize, text: &str, speaker: Option<&str>) -> NormalizedSegment
     NormalizedSegment {
         id: format!("seg_{:05}", index),
         chunk_index: index,
+        utterance_index: None,
         start_time_s: index as f64 * 30.0,
         end_time_s: (index + 1) as f64 * 30.0,
         text: text.to_string(),
@@ -43,6 +44,7 @@ fn candidate(description: &str, owner: OwnerType, segment_ids: &[&str]) -> Actio
         status: ActionItemStatus::Open,
         source_segment_ids: segment_ids.iter().map(|s| s.to_string()).collect(),
         confidence: 0.8,
+        kanban_card_id: None,
     }
 }
 

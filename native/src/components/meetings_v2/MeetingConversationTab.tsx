@@ -40,7 +40,7 @@ const SpeakerRow: React.FC<{
             if (e.key === 'Escape') setEditing(false);
           }}
           placeholder={speaker.fallback_label}
-          className="w-32 px-2 py-1 rounded-md bg-zinc-900 border border-indigo-500/40 text-xs text-zinc-100 outline-none"
+          className="w-32 px-2 py-1 rounded-md bg-zinc-900 border border-white/25 text-xs text-zinc-100 outline-none focus-visible:border-lime-400"
         />
         <button
           onClick={commit}
@@ -166,7 +166,7 @@ export const MeetingConversationTab: React.FC<MeetingConversationTabProps> = ({
               <div className="flex items-center gap-2">
                 <span
                   className={`text-xs font-semibold ${
-                    isMe ? 'text-indigo-300' : turn.speaker_id ? 'text-zinc-200' : 'text-zinc-500'
+                    isMe ? 'text-lime-400' : turn.speaker_id ? 'text-zinc-200' : 'text-zinc-500'
                   }`}
                 >
                   {label}

@@ -375,6 +375,7 @@ mod tests {
                     status: ActionItemStatus::Open,
                     source_segment_ids: vec!["seg_00000".into()],
                     confidence: 0.8,
+                    kanban_card_id: None,
                 },
                 ActionItem {
                     id: "action_1".into(),
@@ -386,6 +387,7 @@ mod tests {
                     status: ActionItemStatus::Open,
                     source_segment_ids: vec!["seg_00001".into()],
                     confidence: 0.5,
+                    kanban_card_id: None,
                 },
             ],
             open_questions: vec![OpenQuestion {

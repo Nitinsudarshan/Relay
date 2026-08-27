@@ -27,6 +27,7 @@ import {
   MeetingProcessing,
   MeetingProcessingIndexEntry,
   MeetingSession,
+  MeetingTaskPushResult,
   RelatedMeeting,
   SummaryMode,
   TranscriptSegment,
@@ -94,6 +95,7 @@ export const MeetingsV2View: React.FC = () => {
   );
   const [isRenamingSpeaker, setIsRenamingSpeaker] = useState<boolean>(false);
   const [busyActionItemId, setBusyActionItemId] = useState<string | null>(null);
+  const [isAddingAllTasks, setIsAddingAllTasks] = useState<boolean>(false);
   const [isPromoting, setIsPromoting] = useState<boolean>(false);
   const [promotedScribbleTitle, setPromotedScribbleTitle] = useState<string | null>(
     null,
@@ -494,6 +496,41 @@ export const MeetingsV2View: React.FC = () => {
     }
   };
 
+  /**
+   * Adds a meeting's to-dos to the Kanban board.
+   *
+   * `item` adds exactly one; omitting it adds everything not already on the
+   * board, which is what makes the button safe to press twice. The backend
+   * returns the refreshed processing record, so an added to-do shows as a task
+   * without a reload.
+   */
+  const handleAddTasks = async (sessionId: string, item?: ActionItem) => {
+    if (item) {
+      setBusyActionItemId(item.id);
+    } else {
+      setIsAddingAllTasks(true);
+    }
+    try {
+      const results = await invoke<MeetingTaskPushResult[]>(
+        'push_meeting_v2_action_items_to_kanban',
+        { sessionId, actionItemId: item?.id ?? null },
+      );
+      const failed = results.filter((r) => r.error);
+      if (failed.length > 0) {
+        console.error('Some to-dos could not be added as tasks:', failed);
+      }
+      const refreshed = await invoke<MeetingProcessing | null>('get_meeting_v2_processing', {
+        sessionId,
+      });
+      if (refreshed) setProcessing(refreshed);
+    } catch (err) {
+      console.error('Failed to add to-dos as tasks:', err);
+    } finally {
+      setBusyActionItemId(null);
+      setIsAddingAllTasks(false);
+    }
+  };
+
   const handlePromoteToScribble = async (sessionId: string) => {
     if (isPromoting) return;
     setIsPromoting(true);
@@ -580,13 +617,13 @@ export const MeetingsV2View: React.FC = () => {
       {/* Top Header */}
       <div className="border-b border-white/5 px-6 py-4 flex items-center justify-between bg-zinc-950/40 backdrop-blur-md">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500/20 to-violet-500/20 border border-indigo-500/30 flex items-center justify-center shadow-inner">
-            <Mic className="w-5 h-5 text-indigo-400" />
+          <div className="w-9 h-9 rounded-md bg-white/5 border border-white/10 flex items-center justify-center">
+            <Mic className="w-4.5 h-4.5 text-zinc-400" />
           </div>
           <div>
             <h1 className="text-base font-semibold tracking-tight text-white flex items-center gap-2">
               Meetings
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-white/5 text-zinc-400 border border-white/10">
                 V2 Crash-Resilient
               </span>
             </h1>
@@ -606,9 +643,9 @@ export const MeetingsV2View: React.FC = () => {
               <button
                 onClick={handleTogglePause}
                 disabled={isTogglingPause || isFinalizing}
-                className={`flex items-center gap-2 px-3 py-2 rounded-xl font-medium text-xs shadow-lg active:scale-95 transition-all border disabled:opacity-50 disabled:cursor-not-allowed ${
+                className={`flex items-center gap-2 px-3 py-2 rounded-md font-medium text-xs transition-colors border disabled:opacity-50 disabled:cursor-not-allowed ${
                   isPaused
-                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400/30'
+                    ? 'bg-zinc-100 hover:bg-white text-zinc-900 border-transparent'
                     : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-100 border-white/10'
                 }`}
               >
@@ -627,7 +664,7 @@ export const MeetingsV2View: React.FC = () => {
               <button
                 onClick={handleStopRecording}
                 disabled={isStopping || isFinalizing}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-500/90 hover:bg-red-500 text-white font-medium text-xs shadow-lg shadow-red-500/20 active:scale-95 transition-all border border-red-400/30 disabled:opacity-70"
+                className="flex items-center gap-2 px-4 py-2 rounded-md bg-red-500/90 hover:bg-red-500 text-white font-medium text-xs transition-colors border border-red-400/30 disabled:opacity-50"
               >
                 {isStopping || isFinalizing ? (
                   <>
@@ -649,12 +686,12 @@ export const MeetingsV2View: React.FC = () => {
                 value={meetingTitleInput}
                 onChange={(e) => setMeetingTitleInput(e.target.value)}
                 placeholder="Meeting Title (optional)..."
-                className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-white/10 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500/50 w-56"
+                className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-white/10 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-white/25 w-56"
               />
               <button
                 onClick={handleStartRecording}
                 disabled={isStarting}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs shadow-lg shadow-indigo-600/20 active:scale-95 transition-all border border-indigo-400/30"
+                className="flex items-center gap-2 px-4 py-2 rounded-md bg-zinc-100 hover:bg-white text-zinc-900 font-medium text-xs transition-colors border border-transparent"
               >
                 {isStarting ? (
                   <>
@@ -721,9 +758,9 @@ export const MeetingsV2View: React.FC = () => {
                     key={item.id}
                     onClick={() => handleSelectSession(item.id)}
                     title={displayTitle}
-                    className={`group relative w-full text-left p-3 rounded-xl border transition-all flex flex-col gap-1.5 cursor-pointer ${
+                    className={`group relative w-full text-left p-3 rounded-md border transition-colors flex flex-col gap-1.5 cursor-pointer ${
                       isSelected
-                        ? 'bg-indigo-600/10 border-indigo-500/30 text-white'
+                        ? 'bg-white/[0.07] border-white/20 text-white'
                         : 'bg-zinc-900/40 hover:bg-zinc-900/80 border-white/5 text-zinc-300'
                     }`}
                   >
@@ -744,7 +781,7 @@ export const MeetingsV2View: React.FC = () => {
                             ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                             : itemState === 'INTERRUPTED' || itemState === 'ERROR'
                             ? 'bg-zinc-800 text-zinc-400'
-                            : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : 'bg-lime-500/10 text-lime-400 border border-lime-500/20'
                         }`}
                       >
                         {isItemActive && itemState === 'RECORDING' ? 'Recording' : itemState}
@@ -786,7 +823,7 @@ export const MeetingsV2View: React.FC = () => {
                                 ? 'Summary available'
                                 : 'Summarized before the processing pipeline existed'
                             }
-                            className="flex items-center text-indigo-400"
+                            className="flex items-center text-zinc-400"
                           >
                             <Sparkles className="w-3 h-3" />
                           </span>
@@ -842,17 +879,17 @@ export const MeetingsV2View: React.FC = () => {
                       <button
                         onClick={() => handleGenerateSummary(selectedSession.id)}
                         disabled={isSummarizing || (selectedSessionWords === 0 && transcriptSegments.length === 0)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 hover:border-indigo-500/50 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xs cursor-pointer"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/10 text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                         title="Read the transcript, extract what was decided and who owns what, then write it up"
                       >
                         {isSummarizing ? (
                           <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-zinc-300" />
                             <span>Generating…</span>
                           </>
                         ) : (
                           <>
-                            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                            <Sparkles className="w-3.5 h-3.5 text-zinc-300" />
                             <span>{processing?.summary ? 'Regenerate' : 'Generate Summary'}</span>
                           </>
                         )}
@@ -897,7 +934,7 @@ export const MeetingsV2View: React.FC = () => {
                   </span>
                   <button
                     onClick={() => setPromotedScribbleTitle(null)}
-                    className="text-emerald-400/70 hover:text-emerald-200 font-medium cursor-pointer shrink-0"
+                    className="text-lime-500/80 hover:text-lime-300 font-medium cursor-pointer shrink-0"
                   >
                     Dismiss
                   </button>
@@ -932,14 +969,14 @@ export const MeetingsV2View: React.FC = () => {
                       onClick={() => setActiveMeetingTab(tab.key)}
                       className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer ${
                         isActive
-                          ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5'
+                          ? 'border-zinc-200 text-zinc-100'
                           : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
                       }`}
                     >
                       <Icon className="w-3.5 h-3.5" />
                       <span>{tab.label}</span>
                       {tab.key === 'summary' && processing?.summary && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-lime-400" />
                       )}
                       {tab.key !== 'summary' && count > 0 && (
                         <span className="text-[10px] font-mono px-1.5 rounded bg-white/5 text-zinc-400">
@@ -964,7 +1001,10 @@ export const MeetingsV2View: React.FC = () => {
                   onToggleActionItem={(item) =>
                     handleToggleActionItem(selectedSession.id, item)
                   }
+                  onAddTask={(item) => handleAddTasks(selectedSession.id, item)}
+                  onAddAllTasks={() => handleAddTasks(selectedSession.id)}
                   busyActionItemId={busyActionItemId}
+                  isAddingAllTasks={isAddingAllTasks}
                   onSelectRelated={handleSelectSession}
                 />
               )}

@@ -2,6 +2,118 @@
 
 ## [0.14.0] - 2026-08-27
 
+### Meetings v2.5: Utterance-Level Speaker Attribution, Vocabulary at the Recognizer, To-dos as Tasks & a Minimal Right-Edge Pill
+
+**Type**: minor — `native/` only (`native/src-tauri/src/meetings_v2/{capture,worker,types}.rs`, `native/src-tauri/src/meetings_v2/processing/{tasks.rs (new),mod,model,normalize}.rs`, `native/src-tauri/src/capture/stt.rs`, `native/src-tauri/src/{commands,lib,overlay}.rs`, `native/src/components/meetings_v2/*`, `native/src/types/index.ts`, `Meeting-rules/meeting_pipeline_gap_analysis.md`).
+
+Closes gaps 1, 3 and 5 of `Meeting-rules/meeting_pipeline_gap_analysis.md` and
+partly closes gap 4. Recording, chunking, the two clocks, pause/resume, crash
+recovery, dictation, and voice notes are untouched.
+
+#### Features
+
+- **Speaker attribution resolves per utterance instead of per 30-second chunk (`meetings_v2/capture.rs`, `capture/stt.rs`, `meetings_v2/worker.rs`)**: the mixer already measured per-source RMS sample by sample in order to set `mic_had_audio` / `sys_had_audio`, then summed it across the whole chunk and kept one boolean per source. In a real two-way conversation almost every 30-second window contains both sources, so attribution resolved to `Mixed` — meaning no speaker — for most segments, and `qualify.rs` demoted every action-item owner it had carefully computed to `Unassigned`. Three changes together fix that:
+  - `SliceAccumulator` now buckets channel energy per second and each `AudioChunk` carries a `channel_track: Vec<ChannelEnergy>`. Both slice sizes are exact multiples of the bucket, so the steady state never splits one. The chunk-wide booleans are recovered by summing the buckets and are arithmetically identical to the previous single running total, so no existing consumer changes behaviour.
+  - `SttEngine::transcribe_utterances_with_config` returns Whisper's own timed segment spans (`SttUtterance`, with `no_speech_prob` kept for diagnostics) rather than one concatenated string. `transcribe_with_config` now joins those utterances, so the text path and the utterance path cannot disagree about what was said.
+  - `attribute_utterances` matches each span against the chunk's track, weighting overlapping buckets by how much of each falls inside the span, so a bucket straddling a speaker change contributes to both neighbours in proportion instead of marking both ambiguous.
+- **Microphone bleed is rejected without guessing (`meetings_v2/capture.rs`)**: device-level capture has no acoustic isolation, so with speakers rather than headphones the microphone hears the remote party and every utterance would register both channels. `resolve_utterance_channel` requires roughly a 10 dB margin (`CHANNEL_DOMINANCE_RATIO`) before the quieter source is discarded as leakage — a physical property of the room, not an inference about content. Genuine crosstalk fails the margin in both directions and is still left unresolved, and a short utterance mostly inside a straddling second stays unresolved too; both are asserted by test rather than hidden.
+- **Normalized segments are one per utterance (`meetings_v2/processing/{normalize,mod,model}.rs`)**: `RawSegmentInput` and `NormalizedSegment` carry an `utterance_index`, segment ids gained an utterance suffix (`seg_00002_001`), and `raw_inputs_from_segment` fans a chunk out into one input per utterance. A chunk with no utterances — a transcript recorded before v2.5, or one Whisper returned no timed spans for — still becomes a single whole-chunk input, so old transcripts read exactly as they did. `PROCESSING_VERSION` is 3.
+- **The recognizer gets the vocabulary before it guesses (`commands.rs`)**: `AppSettings::build_stt_prompt` already folded the user's dictionary and the STT custom prompt into one string and was called from nowhere. `start_meeting_v2` now seeds `initial_prompt` from it. `normalize::apply_glossary` can only repair a near-miss; it cannot recover a project or participant name Whisper never produced anything close to. An explicitly configured STT prompt still wins.
+- **Chunk boundaries keep their context without sharing decoder state (`meetings_v2/worker.rs`)**: each chunk still gets a fresh `WhisperState`, so a decoder loop cannot propagate — but the tail of the previous chunk's text (`CONTEXT_CARRY_CHARS`, cut on a word boundary and multibyte-safe) is now carried into the next chunk's prompt, so a sentence spanning a boundary is no longer decoded as two blind halves. Silence, an empty decode, and a failed decode all clear the carry, so context never splices across a gap.
+- **Meeting to-dos become Kanban tasks (`meetings_v2/processing/tasks.rs` (new), `commands.rs`)**: the only exit from a meeting was a Scribble, which produces a note rather than a to-do — while a Kanban board sat in the same application. `processing::tasks` maps an action item to a `MeetingTaskDraft`: title trimmed to a board-sized line on a word boundary with the full text kept in the description, assignee resolved through the speaker registry (an id that matches no speaker becomes `Unassigned` rather than leaking onto a board), due date only from a spoken deadline, priority from deadline plus extraction confidence, and a description carrying the meeting, its date, and the transcript segments the commitment was read out of. The draft is deliberately not a `KanbanCard`: `push_meeting_v2_action_items_to_kanban` does that conversion, so the derived layer stays free of the vault's storage types.
+- **Adding to-dos twice is safe (`meetings_v2/processing/{model,mod}.rs`)**: `ActionItem` carries a `kanban_card_id`, set by `record_action_item_task` after the card is saved. `pending_drafts` skips anything already pushed, so "Add N to tasks" adds only what is new. The card is saved before the to-do is marked — a card without provenance is recoverable, a to-do marked as pushed with no card behind it is not.
+
+#### Improvements
+
+- **The recording pill is a minimal right-edge capsule (`overlay.rs`, `MeetingRecordingOverlay.tsx`, `MeetingPillMark.tsx` (new))**: a meeting runs for an hour, and for that hour the indicator sits on top of whatever the user is actually working in. At rest it is now a 44×72 vertical capsule anchored to the right edge and centred vertically, showing two things — the mark and one live level meter — and nothing else. The old 640×56 top-centre bar with its status badge, timer, two opposing waveforms, mic/sys labels, and pause and stop buttons is gone. Controls are deferred rather than removed: hovering grows the window and reveals the timer, pause and stop, because a recording you cannot stop from the indicator representing it would be a worse pill, not a more minimal one. The window is resized on hover rather than left permanently large, since a transparent margin would still swallow clicks for the whole meeting.
+- **The meetings UI is flat (`MeetingSummaryTab.tsx`, `MeetingsV2View.tsx`, `MeetingActionItems.tsx`, `MeetingConversationTab.tsx`, `MeetingProcessingStatus.tsx`, `MeetingRelatedList.tsx`)**: the summary now reads as a document rather than sitting in a tinted gradient card, to-dos are a divided list rather than an amber panel, topics and mentions are labelled rows rather than a boxed panel, and every indigo/violet/emerald accent is gone in favour of neutral surfaces with a single lime accent shared with the pill. `rounded-xl` and drop shadows are reduced to hairline borders throughout.
+
+#### Fixes
+
+- **`emit_chunk` no longer needs a `too_many_arguments` exemption (`meetings_v2/capture.rs`)**: passing the energy buckets as one slice replaced two float parameters.
+
+#### Tests
+
+- 330 tests pass. New coverage: per-second bucket resolution and offsets, chunk-sized slices never splitting a bucket, utterances resolving to the source that was speaking, the case chunk-wide flags cannot distinguish, bleed rejection, crosstalk staying unresolved, a straddling bucket being outweighed by an utterance's own seconds, a short utterance inside crosstalk staying unresolved, silent and out-of-range spans, timing rebased onto the session clock, Whisper spans clamped to the audio, pre-v2.5 chunks falling back to chunk flags, prompt composition, the carried tail being bounded and multibyte-safe, and the full action-item-to-task mapping including the push-twice guard.
+
+## [0.13.3] - 2026-08-27
+
+### Docs: Narrow the Meeting Gap Analysis to Bot-Free Architectures Only
+
+**Type**: patch — documentation only (`Meeting-rules/meeting_pipeline_gap_analysis.md`). No source in `native/` or `web/` is touched.
+
+Relay is not building a meeting bot, so comparing its pipeline against products that
+join the call as a participant compared it against a pipeline that is handed the
+participant roster by the conferencing platform. That comparison could not produce an
+actionable finding, and the roster asymmetry was doing too much of the document's
+framing work.
+
+#### Documentation
+
+- **Bot-based products removed entirely (`meeting_pipeline_gap_analysis.md`)**: the
+  five bot-based teardowns are gone, along with every reference to them in the gap
+  ledger, the recommended sequence, and the sources. Nine bot-free products remain —
+  Granola, Circleback, Littlebird, Jamie, Meetily, anarlog, OpenWhispr, Whisper
+  Notes/Vowen — plus the raw engines. Circleback and Littlebird are restored from the
+  original teardown, since they carry the exit-path and pre-meeting-context arguments
+  first-hand rather than by analogy to a bot-based tool.
+- **§2 reframed from "bot vs bot-free" to the four ways a name gets in**: calendar +
+  contacts, channel provenance, transcript context, and diarization + enrollment —
+  tabulated against who uses each and what it costs. Relay uses source 2 only, and at
+  the coarsest granularity its capture layer permits. This states the constraint from
+  inside the bot-free world instead of deriving it from a contrast with bots, and it
+  surfaces a gap the previous framing had folded into gap 2: **transcript context is
+  nearly free**, because Stage A already reads the whole transcript and could name a
+  speaker from "thanks, Pranjali" for the cost of one extra field in a prompt Relay
+  already sends.
+- **Gap 3 re-grounded on Whisper's own `initial_prompt`** rather than on two cloud
+  vendors' custom-vocabulary features. The mechanism is already wired in `stt.rs:239`
+  and `:256` and fires only from a manually typed setting — so the gap is wiring, not
+  a missing capability.
+- **Scope note added** explaining why bot-based tools are excluded, without naming
+  them, so the exclusion survives future edits.
+- **The teardown's legal note is flagged as architecture-independent**: diarizing
+  within a single recording is not the regulatory trigger, persisting an identity
+  template across recordings is. That still governs gap 11 regardless of anyone's
+  capture architecture.
+
+## [0.13.2] - 2026-08-27
+
+### Docs: Meeting Pipeline Gap Analysis Re-Grounded Against the v0.13.1 Code
+
+**Type**: patch — documentation only (`Meeting-rules/meeting_pipeline_gap_analysis.md` (new), `Meeting-rules/meeting_notes_competitive_teardown.md`). No source in `native/` or `web/` is touched.
+
+The competitive teardown's gap table was written before the 0.13.0 pipeline and the
+0.13.1 quality pass shipped, so it now understates what exists and misprices what is
+missing. This replaces the analysis half of it with one traced from the checked-out
+tree.
+
+#### Documentation
+
+- **`Meeting-rules/meeting_pipeline_gap_analysis.md` (new)**: a stage-by-stage
+  comparison of eleven meeting-notes products against Relay's pipeline as actually
+  built, on the seven stages Relay's own `processing` module is organized around
+  (trigger, capture, transcription, attribution, comprehension, generation,
+  correction/exit). Covers Fathom, Fireflies, Otter, Granola, Jamie, tl;dv, MeetGeek,
+  Meetily, anarlog, OpenWhispr, Whisper Notes/Vowen, and the raw engines. Every claim
+  about Relay cites the file and line that implements it; the app-side mechanisms cite
+  their source.
+  - Identifies bot-vs-bot-free as the structural fork that determines where speaker
+    *names* come from, and therefore why Relay inherited the hard version of
+    attribution: a bot gets the platform roster free, a device-level tap gets one
+    mixed stream and no roster.
+  - Ranks thirteen gaps by what they cost a real meeting rather than by feature
+    parity, with the mechanism and the code location for each.
+  - Records what Relay already does better than this field — the in-code action-item
+    quality gate, Stage B's structural blindness to the transcript, enforced
+    source/derived separation, the deterministic summary floor, honest provider-failure
+    reporting, and durable audio that never left the machine.
+  - Revises the recommended sequence: per-second channel energy in `capture.rs` first
+    (it unlocks the owner resolution `qualify.rs` already computes and demotes for lack
+    of signal), then calendar attendees, then the action-item exit path.
+- **`Meeting-rules/meeting_notes_competitive_teardown.md`**: §4's gap table is marked
+  superseded with a pointer to the new document. The per-app research in §2 and the
+  biometric-privacy note in §2.9 are unchanged and remain current.
 ### Prompt Mode Capability Layer & Cross-Object Prompt Funnel
 
 **Type**: minor — `native/` only (`native/src-tauri/src/settings/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`, `native/src/types/index.ts`, `native/src/components/prompts/PromptTransformModal.tsx` (new), `native/src/components/prompts/PromptsPage.tsx`, `native/src/components/common/NativeSidebar.tsx`, `native/src/App.tsx`, `native/src/components/settings/ProviderSettings.tsx`, `native/src/components/voicenotes/VoiceNotePage.tsx`, `native/src/components/scribble/ScribbleDetailEditor.tsx`, `native/src/components/capture/DictationPill.tsx`).

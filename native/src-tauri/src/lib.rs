@@ -257,6 +257,8 @@ pub fn run() {
             commands::get_meeting_v2_extensions,
             commands::list_meeting_v2_processing,
             commands::promote_meeting_v2_to_scribble,
+            commands::push_meeting_v2_action_items_to_kanban,
+            commands::set_meeting_overlay_expanded,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

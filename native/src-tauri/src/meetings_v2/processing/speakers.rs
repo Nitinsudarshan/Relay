@@ -199,6 +199,7 @@ mod tests {
     fn raw(chunk_index: usize, text: &str, mic: bool, sys: bool) -> RawSegmentInput {
         RawSegmentInput {
             chunk_index,
+            utterance_index: None,
             start_time_s: chunk_index as f64 * 30.0,
             end_time_s: (chunk_index + 1) as f64 * 30.0,
             text: text.to_string(),
