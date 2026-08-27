@@ -3,6 +3,22 @@
 **Applies to:** any agent or local model extracting to-dos from a meeting transcript.
 **Output:** owner-grouped Markdown checklists only. No preamble, no summary, no explanation.
 
+> [!NOTE]
+> **Where this rule runs in the pipeline.** Action items are extracted as
+> **structured objects** by Stage A (`meetings_v2::processing::extract`), not as
+> pre-rendered checklist strings: each carries an owner type, an owner speaker
+> id, an optional ISO deadline, a status, a confidence, and the transcript
+> segment ids it came from. The Markdown checklist this rule specifies is how
+> those objects are *rendered* — by Stage B, or by the deterministic renderer in
+> `summarize::render_markdown`.
+>
+> Two of this rule's requirements are enforced in code rather than left to the
+> prompt: an owner only resolves to a speaker who actually appears in the
+> meeting's speaker registry, and a deadline is kept only when a segment the item
+> cites contains a real temporal expression. Anything else becomes
+> `Unassigned` / no deadline. See `docs/meetings/MEETINGS_INTELLIGENCE_AUDIT.md` §1.14.
+
+
 ---
 
 ## 0. What this output is

@@ -98,6 +98,11 @@ impl MeetingSession {
 }
 
 /// A single incremental transcript segment derived from an audio chunk.
+///
+/// This is the **raw** transcript record: one line of `transcript.jsonl`, written
+/// once by the durable transcription worker and never rewritten. Derived text
+/// (normalized, conversation, summary) lives in `processing.json` instead — see
+/// `meetings_v2::processing`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptSegment {
     pub chunk_index: usize,
@@ -106,6 +111,19 @@ pub struct TranscriptSegment {
     pub text: String,
     pub created_at: String,
     pub status: TranscriptSegmentStatus,
+    /// Whether each capture source was audible within this chunk, copied from
+    /// the `AudioChunk` the segment came from.
+    ///
+    /// This is rung 1 of `Meeting-rules/meeting_speaker_identification.md`: the
+    /// microphone is the local user, system audio is everyone else. The recorder
+    /// already measures both values per chunk; persisting them here is what makes
+    /// speaker attribution possible at all without diarization. Both default to
+    /// `false` so transcripts written before this field existed deserialize
+    /// unchanged, correctly reading as "channel unknown" rather than as silence.
+    #[serde(default)]
+    pub mic_had_audio: bool,
+    #[serde(default)]
+    pub sys_had_audio: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

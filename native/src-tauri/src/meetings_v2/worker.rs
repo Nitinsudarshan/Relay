@@ -125,6 +125,11 @@ impl TranscriptionWorker {
                     text: text.clone(),
                     created_at: chrono::Utc::now().to_rfc3339(),
                     status,
+                    // Already measured on the chunk; carrying it onto the segment
+                    // is what lets the processing pipeline attribute speakers by
+                    // channel without any extra work or a second audio pass.
+                    mic_had_audio: chunk.mic_had_audio,
+                    sys_had_audio: chunk.sys_had_audio,
                 };
 
                 if let Err(e) = store.append_transcript_segment(&session_id, &segment) {

@@ -1,5 +1,54 @@
 # Relay — Changelog
 
+## [0.13.0] - 2026-08-27
+
+### Meetings: Transcript Separation, Normalization Pipeline, Structured Extraction, Speakers, Extensions & Meeting → Scribble
+
+**Type**: minor — `native/` only (`native/src-tauri/src/meetings_v2/processing/*` (new), `native/src-tauri/src/meetings_v2/{mod,types,worker}.rs`, `native/src-tauri/src/pipeline/{mod,enrichment}.rs`, `native/src-tauri/src/settings/mod.rs`, `native/src-tauri/src/vault/scribble.rs`, `native/src-tauri/src/{commands,lib}.rs`, `native/src/components/meetings_v2/*`, `native/src/components/settings/{MeetingsSettings.tsx,ProviderSettings.tsx}`, `native/src/types/index.ts`, `Meeting-rules/*.md`, `docs/meetings/MEETINGS_INTELLIGENCE_AUDIT.md` (new)).
+
+Turns the meeting feature into a pipeline with a hard boundary between source and
+derived data. Recording, the durable 30-second WAV chunking, live STT, crash
+recovery, voice notes, and dictation are unchanged.
+
+#### Features
+
+- **Raw / derived separation (`meetings_v2/processing/store.rs`, `model.rs`)**:
+  - Derived meeting data now lives in a new `processing.json` beside the recorder's artifacts; `session.json`, `transcript.jsonl`, and `audio/` are opened read-only by the pipeline and never written.
+  - `transcript.jsonl` is the immutable raw transcript. Normalization, summarization, a speaker rename, regeneration, and an extension change all leave it byte-identical — asserted by hashing the file across a full pipeline run.
+  - Derived data is always recomputable: a corrupt or stale `processing.json` reads as "unprocessed" rather than making a meeting unopenable.
+- **Deterministic normalization stage (`processing/normalize.rs`)**: ASR-tag stripping, whitespace collapsing, repeated-word and repeated-phrase (decoder loop) collapsing, isolated-filler removal, glossary correction from the user's dictionary (exact plus one-edit for long terms), and sentence-boundary repair. Every rule is meaning-preserving, records itself per segment for debugging, and runs before any model is invoked.
+- **Structured extraction, then prose (`processing/extract.rs`, `summarize.rs`)**: replaces the single LLM call that did comprehension, extraction, and writing at once. Stage A emits a canonical `MeetingFacts` (title, meeting type, topics, key points, decisions, action items, open questions, entities) as JSON; Stage B writes Markdown from those facts and is never shown the transcript. A cue-based deterministic extractor and a deterministic Markdown renderer produce the same shapes when no model is reachable, so a meeting always has structured output and a summary.
+- **Summary modes and extensions (`processing/modes.rs`)**: Concise / Standard / Detailed, plus four shipped extensions (Default, Executive Brief, Project Update, Decision Log) and user-defined extensions from settings. Both are presentation layers over the same facts, so changing either re-runs prose generation only — not extraction.
+- **First-class action items (`processing/model.rs`)**: structured objects with owner type, owner speaker id, optional ISO deadline, status, confidence, and the transcript segment ids they came from. Checked state is persisted rather than lost on unmount. An owner only resolves to a speaker present in the meeting's registry; a deadline is kept only when a cited segment contains a real temporal expression.
+- **Speaker attribution and renaming (`processing/speakers.rs`, `conversation.rs`)**: rung 1 of `Meeting-rules/meeting_speaker_identification.md` — microphone is the local user, system audio is everyone else, and an ambiguous chunk stays unattributed rather than guessed. Ids (`speaker_me`, `speaker_1`) are stable and separate from display names, so renaming updates the conversation and every action-item owner without regenerating anything or touching the raw transcript. Renames survive regeneration.
+- **Conversation transcript**: a chronological, speaker-labelled, sentence-grouped projection of the normalized transcript. Turns store speaker ids; names resolve at render time.
+- **Validators wired into the pipeline (`processing/validate.rs`)**: summary emptiness and length caps per mode, JSON leakage, transcript copying (six-word overlap, per the rules file), duplicate bullets, invented participants, unsupported decisions, and invented deadlines; action-item owner/description/deadline/duplicate checks; speaker id and identity-merge checks. Model prose that fails with an error is discarded and re-rendered deterministically from the same facts, so the user is never shown a plausible-but-wrong summary.
+- **Meeting classification and related meetings (`processing/related.rs`)**: `meeting_type` from a small closed set, plus relational scoring over shared topics, entities, participants, and type. Title similarity alone cannot produce a match — two unrelated "Daily Standup" meetings are correctly not related. No graph infrastructure added.
+- **Meeting → Scribble (`vault/scribble.rs`, `commands.rs`)**: `Scribble::from_meeting` mirrors `from_voice_note` and reuses the existing Scribble type, vault, and saved event. The Scribble references the meeting (`source_type = "meeting"`, `source_id`) instead of duplicating it, carries the meeting's already-extracted topics and entities, and the meeting records the Scribble it produced.
+- **Per-stage observability (`processing/store.rs`, `mod.rs`)**: an append-only `processing_log.jsonl` per meeting recording stage, status, duration, provider, model, input/output sizes, validator verdict, issue codes, `processing_version`, and `rules_version`. Transcript text and audio are never logged.
+- **Settings › Meetings (`settings/mod.rs`, `MeetingsSettings.tsx`)**: Show raw transcript, Generate conversation transcript, Summarize automatically, Default summary mode, Speaker identification, and extension management. Six controls, not one per pipeline stage. Hiding the raw transcript affects visibility only and never deletes it.
+
+#### Improvements
+
+- **Meeting UI opens to Summary (`MeetingsV2View.tsx`)**: three tabs — Summary, Conversation, Raw Transcript — with Summary as the default. "Transcripts" is renamed Raw Transcript and presented as the diagnostic view it is, showing segment ids and per-chunk channel provenance.
+- **Honest partial states (`MeetingProcessingStatus.tsx`)**: per-stage outcomes with a targeted retry instead of a generic failure. A meeting whose summary failed still shows its transcript and conversation, and a summary written without a model says so. A skipped stage is distinguished from a failed one.
+- **Non-blocking post-recording processing (`commands.rs`)**: the deterministic stages, and optionally a summary, are spawned after a recording is safely persisted. The meeting is openable immediately; nothing in the pipeline can affect the recording clock, live STT, or the chunk queue.
+- **Extracted titles surfaced without mutating the source (`commands.rs`, `MeetingsV2View.tsx`)**: the meetings list and detail header prefer the extracted title, with meeting type and open action-item counts, via a single index call. The recorder's own `session.title` is never overwritten.
+- **Channel provenance persisted (`meetings_v2/types.rs`, `worker.rs`)**: `TranscriptSegment` gains `mic_had_audio` / `sys_had_audio`, copied from the `AudioChunk` the recorder already measures them on. Additive and `serde(default)`, so existing transcripts deserialize unchanged and read correctly as "channel unknown". No change to the WAV format, chunk duration, or recording clock.
+- **Rules files annotated (`Meeting-rules/*.md`)**: resolved the JSON-only vs Markdown-only conflict by documenting where each rule runs — structured JSON between stages, Markdown at the presentation boundary — and recorded which rungs of the speaker-identification ladder are actually implemented.
+- **Architecture audit (`docs/meetings/MEETINGS_INTELLIGENCE_AUDIT.md`)**: end-to-end trace of the meeting implementation as it stood, with current/intended/gap per stage, the target architecture, and three documented out-of-scope issues (coarse channel provenance in `capture.rs`, `LLMClient::complete` masking provider failures, no frontend test runner) left unfixed by design.
+
+#### Fixes
+
+- **Retired the single-call meeting summary path (`pipeline/enrichment.rs`, `pipeline/mod.rs`)**: removed `summarize_meeting` and its helpers, which wrote derived `summary` and `action_items` into the source `session.json` and shipped with a failing test (`test_meeting_enrichment_and_title_synthesis` — the prompt contained the word "topics", so `LLMClient`'s heuristic fallback returned scribble-shaped JSON and no meeting summary was produced). `summarize_meeting_v2` now routes to the canonical pipeline. The legacy `session.summary` / `action_items` fields are read-only, so meetings summarized before this change remain readable.
+- **Deterministic extraction no longer loses a commitment to a decision**: a sentence carrying both ("we decided to ship Friday and I'll write the changelog") now yields both, rather than whichever cue matched first. Key points are deduplicated so a long meeting with repeated stretches does not fill its summary with one repeated line.
+
+#### Tests
+
+- 141 tests covering the pipeline, including the ten transcript fixtures called for by the spec (clear decisions, ambiguous ownership, repeated STT fragments, poor punctuation, multiple topics, no action items, no decisions, unknown speakers, a long meeting, an obvious meeting type).
+- Raw immutability asserted by hashing `transcript.jsonl` before and after normalization, summarization, a speaker rename, regeneration in each mode, and an extension change — and `session.json` compared byte-for-byte across the same run.
+- Failure paths driven by a scripted model stand-in: provider unavailable, unparseable JSON, empty prose, mid-pipeline failure, empty transcript, validator rejection, and retry-after-failure.
+
 ## [0.12.3] - 2026-08-27
 
 ### Settings: Streamlined Navigation, OpenWhispr Clipboard, Startup, Microphone & Dictionary/Snippets Engine

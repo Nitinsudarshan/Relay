@@ -1,0 +1,712 @@
+//! The meeting processing pipeline.
+//!
+//! One pipeline, one canonical representation, many projections:
+//!
+//! ```text
+//! transcript.jsonl (raw, immutable)
+//!         ↓  normalize        deterministic, no model
+//! NormalizedTranscript        the canonical human-readable transcript
+//!         ↓  attribute        channel-based speaker ids
+//!         ↓  converse         speaker-grouped turns
+//!         ↓  extract          Stage A → MeetingFacts (JSON)
+//!         ↓  summarize        Stage B → Markdown (mode + extension)
+//!         ↓  validate         discard and re-render rather than show bad prose
+//!    processing.json
+//!         ↓
+//! Summary · Conversation · Action items · Topics · Entities · Type
+//!         · Related meetings · Scribble
+//! ```
+//!
+//! Summary, action items, topics, and the Scribble are **not** separate
+//! pipelines. Each is a projection of the same `MeetingFacts`, which is why two
+//! of them can never disagree about what the meeting decided.
+//!
+//! Three properties this module is responsible for holding:
+//!
+//! * **The raw transcript is never written.** `SessionStore` is used read-only
+//!   and derived data goes to `processing.json`. Normalization, summarization,
+//!   a speaker rename, and regeneration all leave `transcript.jsonl` byte-identical.
+//! * **The meeting survives failure.** Every stage records its own outcome; a
+//!   failed stage leaves the ones before it intact and retryable.
+//! * **Nothing here blocks recording.** The pipeline runs after finalization,
+//!   holds no capture resources, and shares no state with either audio clock.
+
+pub mod conversation;
+pub mod extract;
+pub mod llm;
+pub mod model;
+pub mod modes;
+pub mod normalize;
+pub mod related;
+pub mod speakers;
+pub mod store;
+pub mod summarize;
+pub mod validate;
+
+use super::session_store::SessionStore;
+use super::types::TranscriptSegmentStatus;
+use llm::MeetingLlm;
+pub use model::MeetingProcessing;
+use model::{
+    ActionItemStatus, MeetingExtension, ProcessingLogEntry, ProcessingStatus, ScribbleRef,
+    StageState, StageStatus, SummaryArtifact, SummaryMode, ValidationReport, PROCESSING_VERSION,
+    RULES_VERSION,
+};
+use normalize::RawSegmentInput;
+use related::{find_related, MeetingIndexEntry, RelatedMeeting};
+use speakers::SpeakerIdentificationMode;
+use std::sync::Arc;
+use std::time::Instant;
+use store::ProcessingStore;
+
+/// Settings that shape one processing run. Assembled by the command layer from
+/// `AppSettings` so this module never reads configuration itself.
+#[derive(Debug, Clone)]
+pub struct ProcessingOptions {
+    /// Canonical spellings for normalization, from the user's dictionary.
+    pub glossary: Vec<String>,
+    pub generate_conversation: bool,
+    pub speaker_identification: SpeakerIdentificationMode,
+    pub summary_mode: SummaryMode,
+    pub extension_id: String,
+    pub user_extensions: Vec<MeetingExtension>,
+}
+
+impl Default for ProcessingOptions {
+    fn default() -> Self {
+        Self {
+            glossary: Vec::new(),
+            generate_conversation: true,
+            speaker_identification: SpeakerIdentificationMode::Automatic,
+            summary_mode: SummaryMode::Standard,
+            extension_id: modes::DEFAULT_EXTENSION_ID.to_string(),
+            user_extensions: Vec::new(),
+        }
+    }
+}
+
+pub struct MeetingProcessor {
+    /// Read-only. The pipeline calls no mutating method on this.
+    sessions: Arc<SessionStore>,
+    store: ProcessingStore,
+}
+
+impl MeetingProcessor {
+    pub fn new(sessions: Arc<SessionStore>) -> Self {
+        let store = ProcessingStore::new(sessions.meetings_dir().to_path_buf());
+        Self { sessions, store }
+    }
+
+    pub fn get(&self, meeting_id: &str) -> Option<MeetingProcessing> {
+        self.store.load(meeting_id)
+    }
+
+    pub fn log(&self, meeting_id: &str) -> Vec<ProcessingLogEntry> {
+        self.store.read_log(meeting_id)
+    }
+
+    /// Runs the deterministic stages: normalize, attribute speakers, build the
+    /// conversation.
+    ///
+    /// No model, no network, no meaningful cost — which is why this is what runs
+    /// automatically once a recording is finalized, leaving the expensive stages
+    /// to an explicit request. Idempotent.
+    pub fn prepare(
+        &self,
+        meeting_id: &str,
+        options: &ProcessingOptions,
+    ) -> Result<MeetingProcessing, String> {
+        let raw = self.read_raw_segments(meeting_id)?;
+        let existing_speakers = self
+            .store
+            .load(meeting_id)
+            .map(|p| p.speakers)
+            .unwrap_or_default();
+
+        let started = Instant::now();
+        let mut normalized = normalize::normalize_transcript(&raw, &options.glossary);
+        let normalize_ms = started.elapsed().as_millis() as u64;
+
+        let speaker_started = Instant::now();
+        let roster = speakers::attribute_speakers(
+            &mut normalized.segments,
+            &existing_speakers,
+            options.speaker_identification,
+        );
+        let speaker_report = validate::validate_speakers(&roster);
+        let speaker_ms = speaker_started.elapsed().as_millis() as u64;
+
+        let conversation_started = Instant::now();
+        let conversation = options
+            .generate_conversation
+            .then(|| conversation::build_conversation(&normalized.segments));
+        let conversation_ms = conversation_started.elapsed().as_millis() as u64;
+
+        let source_chars = normalized.source_char_count;
+        let output_chars = normalized.output_char_count;
+        let segment_count = normalized.segments.len();
+        let turn_count = conversation.as_ref().map(|c| c.turns.len()).unwrap_or(0);
+        let roster_len = roster.len();
+
+        let updated = self.store.update(meeting_id, |processing| {
+            processing.processing_version = PROCESSING_VERSION;
+            processing.rules_version = RULES_VERSION.to_string();
+
+            processing.stages.normalization = StageState {
+                status: if segment_count > 0 {
+                    StageStatus::Success
+                } else {
+                    StageStatus::Failed
+                },
+                started_at: Some(chrono::Utc::now().to_rfc3339()),
+                finished_at: Some(chrono::Utc::now().to_rfc3339()),
+                duration_ms: Some(normalize_ms),
+                error: (segment_count == 0)
+                    .then(|| "no transcribed speech to normalize".to_string()),
+                provider: None,
+                model: None,
+                input_chars: Some(source_chars),
+                output_chars: Some(output_chars),
+                validation: None,
+            };
+
+            processing.stages.speakers = StageState {
+                status: match options.speaker_identification {
+                    SpeakerIdentificationMode::Off => StageStatus::Skipped,
+                    SpeakerIdentificationMode::Automatic => StageStatus::Success,
+                },
+                started_at: Some(chrono::Utc::now().to_rfc3339()),
+                finished_at: Some(chrono::Utc::now().to_rfc3339()),
+                duration_ms: Some(speaker_ms),
+                error: match options.speaker_identification {
+                    SpeakerIdentificationMode::Off => {
+                        Some("speaker identification is off in settings".to_string())
+                    }
+                    SpeakerIdentificationMode::Automatic => None,
+                },
+                provider: None,
+                model: None,
+                input_chars: None,
+                output_chars: None,
+                validation: Some(speaker_report.clone()),
+            };
+
+            processing.stages.conversation = match &conversation {
+                Some(_) => StageState {
+                    status: StageStatus::Success,
+                    started_at: Some(chrono::Utc::now().to_rfc3339()),
+                    finished_at: Some(chrono::Utc::now().to_rfc3339()),
+                    duration_ms: Some(conversation_ms),
+                    error: None,
+                    provider: None,
+                    model: None,
+                    input_chars: Some(output_chars),
+                    output_chars: None,
+                    validation: None,
+                },
+                None => StageState::skipped("conversation transcript is off in settings"),
+            };
+
+            processing.normalized = Some(normalized.clone());
+            // Compared before the roster is replaced: existing prose is only
+            // stale if the labels it was written against have actually changed.
+            // Flagging it on every prepare would put a "regenerate" banner on
+            // meetings where nothing moved.
+            let labels_changed = {
+                let before: Vec<&str> = processing
+                    .speakers
+                    .iter()
+                    .map(|s| s.label())
+                    .collect();
+                let after: Vec<&str> = roster.iter().map(|s| s.label()).collect();
+                before != after
+            };
+
+            processing.speakers = roster.clone();
+            processing.conversation = conversation.clone();
+
+            if labels_changed {
+                if let Some(summary) = processing.summary.as_mut() {
+                    summary.speaker_names_stale = true;
+                }
+            }
+        })?;
+
+        self.record(meeting_id, "normalization", &updated.stages.normalization);
+        self.record(meeting_id, "speakers", &updated.stages.speakers);
+        self.record(meeting_id, "conversation", &updated.stages.conversation);
+
+        tracing::info!(
+            meeting_id = %meeting_id,
+            stage = "prepare",
+            segments = segment_count,
+            speakers = roster_len,
+            turns = turn_count,
+            duration_ms = normalize_ms + speaker_ms + conversation_ms,
+            "meeting_processing: deterministic stages complete"
+        );
+
+        Ok(updated)
+    }
+
+    /// The full canonical pipeline behind "Generate Summary".
+    ///
+    /// Follows the required sequence: confirm the raw transcript exists, ensure a
+    /// normalized transcript (creating it if absent), confirm speaker data, build
+    /// the canonical representation, run the mode, apply the extension, validate,
+    /// persist, and return the updated model for the UI.
+    ///
+    /// `force_extraction` re-runs Stage A even when usable facts already exist.
+    /// Without it, changing only the mode or extension re-runs Stage B alone —
+    /// the whole point of having a canonical intermediate.
+    pub async fn generate_summary(
+        &self,
+        meeting_id: &str,
+        llm: &dyn MeetingLlm,
+        options: &ProcessingOptions,
+        force_extraction: bool,
+    ) -> Result<MeetingProcessing, String> {
+        // Step 1 — the raw transcript is the precondition for everything.
+        let session = self
+            .sessions
+            .get_session(meeting_id)
+            .map_err(|e| format!("Meeting not found: {}", e))?;
+
+        // Step 2 — a normalized transcript must exist. Re-preparing is cheap and
+        // guarantees the glossary and speaker settings in force now are applied.
+        let processing = self.prepare(meeting_id, options)?;
+
+        let normalized = processing
+            .normalized
+            .clone()
+            .filter(|n| !n.segments.is_empty())
+            .ok_or_else(|| {
+                "This meeting has no transcribed speech to summarize. The raw transcript and \
+audio are unaffected."
+                    .to_string()
+            })?;
+
+        // Step 3 — speaker data, however incomplete. An empty roster is valid.
+        let roster = processing.speakers.clone();
+
+        // Step 4 — the canonical structured representation.
+        let meeting_date = session
+            .started_at
+            .as_deref()
+            .or(Some(session.created_at.as_str()))
+            .and_then(|d| d.split('T').next())
+            .unwrap_or("")
+            .to_string();
+
+        let reuse_facts = !force_extraction
+            && processing.facts.as_ref().is_some_and(|f| !f.deterministic)
+            && processing.stages.extraction.status == StageStatus::Success;
+
+        let facts = if reuse_facts {
+            tracing::info!(
+                meeting_id = %meeting_id,
+                stage = "extraction",
+                "meeting_processing: reusing existing facts; only prose is regenerated"
+            );
+            processing
+                .facts
+                .clone()
+                .expect("reuse_facts implies facts are present")
+        } else {
+            let started = Instant::now();
+            let output = extract::extract_facts(
+                llm,
+                &normalized.segments,
+                &roster,
+                &meeting_date,
+                &session.title,
+            )
+            .await;
+            let duration_ms = started.elapsed().as_millis() as u64;
+
+            let mut facts = output.facts;
+            let mut action_report = validate::validate_action_items(&facts.action_items, &roster);
+            let dropped = validate::drop_invalid_action_items(&mut facts.action_items, &roster);
+            if !dropped.is_empty() {
+                tracing::warn!(
+                    meeting_id = %meeting_id,
+                    stage = "extraction",
+                    dropped = dropped.len(),
+                    "meeting_processing: dropped action items that failed validation"
+                );
+                // Re-report against what survived, keeping the removals visible.
+                action_report = ValidationReport::from_issues(
+                    validate::validate_action_items(&facts.action_items, &roster)
+                        .issues
+                        .into_iter()
+                        .chain(dropped)
+                        .collect(),
+                );
+            }
+
+            let extraction_stage = StageState {
+                // Extraction succeeds whenever it produced facts. The
+                // deterministic path is a degraded success, not a failure — the
+                // meeting is still usable — and `llm_error` records why.
+                status: StageStatus::Success,
+                started_at: Some(chrono::Utc::now().to_rfc3339()),
+                finished_at: Some(chrono::Utc::now().to_rfc3339()),
+                duration_ms: Some(duration_ms),
+                error: output.llm_error.clone(),
+                provider: output.provider.clone(),
+                model: output.model.clone(),
+                input_chars: Some(output.input_chars),
+                output_chars: serde_json::to_string(&facts).ok().map(|s| s.len()),
+                validation: Some(action_report),
+            };
+
+            self.store.update(meeting_id, |p| {
+                p.facts = Some(facts.clone());
+                p.stages.extraction = extraction_stage.clone();
+            })?;
+            self.record(meeting_id, "extraction", &extraction_stage);
+            facts
+        };
+
+        // Steps 5 and 6 — mode, then extension, over the same facts.
+        let extension = modes::find_extension(&options.user_extensions, &options.extension_id);
+
+        let started = Instant::now();
+        let summary_output =
+            summarize::generate_summary(llm, &facts, &roster, options.summary_mode, &extension)
+                .await;
+        let mut markdown = summary_output.markdown;
+        let mut deterministic = summary_output.deterministic;
+        let mut llm_error = summary_output.llm_error;
+
+        // Step 7 — validate, and act on the verdict.
+        let transcript_text = normalized.plain_text();
+        let mut validation = validate::validate_summary(
+            &markdown,
+            &facts,
+            &roster,
+            options.summary_mode,
+            &transcript_text,
+        );
+
+        if validation.has_errors() && !deterministic {
+            // Model prose that fails validation is not shown. The same facts are
+            // rendered deterministically instead, which cannot hallucinate and so
+            // cannot fail these checks.
+            let codes: Vec<&str> = validation.issues.iter().map(|i| i.code.as_str()).collect();
+            tracing::warn!(
+                meeting_id = %meeting_id,
+                stage = "summary",
+                issues = ?codes,
+                "meeting_processing: model prose failed validation; rendering deterministically"
+            );
+            let previous_issues = validation.issues.clone();
+            markdown = summarize::render_markdown(&facts, &roster, options.summary_mode);
+            deterministic = true;
+            llm_error = Some(format!(
+                "model output rejected by validation ({})",
+                codes.join(", ")
+            ));
+            validation = validate::validate_summary(
+                &markdown,
+                &facts,
+                &roster,
+                options.summary_mode,
+                &transcript_text,
+            );
+            // Keep the rejected output's issues on the record; they are the
+            // evidence for why this summary reads as it does.
+            validation.issues.extend(previous_issues);
+            validation.passed = !validation.has_errors();
+        }
+
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let artifact = SummaryArtifact {
+            markdown,
+            mode: options.summary_mode,
+            extension_id: extension.id.clone(),
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            provider: summary_output.provider.clone(),
+            model: summary_output.model.clone(),
+            processing_version: PROCESSING_VERSION,
+            rules_version: RULES_VERSION.to_string(),
+            deterministic,
+            speaker_names_stale: false,
+            validation: validation.clone(),
+        };
+
+        let summary_stage = StageState {
+            status: if validation.has_errors() {
+                StageStatus::Failed
+            } else {
+                StageStatus::Success
+            },
+            started_at: Some(chrono::Utc::now().to_rfc3339()),
+            finished_at: Some(chrono::Utc::now().to_rfc3339()),
+            duration_ms: Some(duration_ms),
+            error: llm_error,
+            provider: Some(summary_output.provider),
+            model: Some(summary_output.model),
+            input_chars: Some(summary_output.input_chars),
+            output_chars: Some(artifact.markdown.len()),
+            validation: Some(validation),
+        };
+
+        // Step 8 — persist. Only derived state is written.
+        let title = facts.title.clone();
+        let updated = self.store.update(meeting_id, |p| {
+            p.facts = Some(facts.clone());
+            p.summary = Some(artifact.clone());
+            p.stages.summary = summary_stage.clone();
+        })?;
+
+        self.record(meeting_id, "summary", &summary_stage);
+        tracing::info!(
+            meeting_id = %meeting_id,
+            stage = "summary",
+            mode = options.summary_mode.label(),
+            extension = %extension.id,
+            deterministic,
+            title = %title,
+            duration_ms,
+            "meeting_processing: summary generated"
+        );
+
+        // Step 9 — the caller emits the UI event.
+        Ok(updated)
+    }
+
+    /// Renames a speaker.
+    ///
+    /// Touches the registry only. The conversation and action items reference
+    /// speaker ids and resolve names at read time, so they update immediately;
+    /// existing prose still carries the old label and is marked stale rather than
+    /// silently rewritten or regenerated behind the user's back.
+    pub fn rename_speaker(
+        &self,
+        meeting_id: &str,
+        speaker_id: &str,
+        display_name: Option<&str>,
+    ) -> Result<MeetingProcessing, String> {
+        let mut rename_error = None;
+        let updated =
+            self.store.update(meeting_id, |processing| {
+                match speakers::rename_speaker(&mut processing.speakers, speaker_id, display_name) {
+                    Ok(()) => {
+                        if let Some(summary) = processing.summary.as_mut() {
+                            summary.speaker_names_stale = true;
+                        }
+                        let report = validate::validate_speakers(&processing.speakers);
+                        processing.stages.speakers.validation = Some(report);
+                    }
+                    Err(e) => rename_error = Some(e),
+                }
+            })?;
+
+        if let Some(e) = rename_error {
+            return Err(e);
+        }
+
+        tracing::info!(
+            meeting_id = %meeting_id,
+            speaker_id = %speaker_id,
+            named = display_name.is_some(),
+            "meeting_processing: speaker renamed"
+        );
+        Ok(updated)
+    }
+
+    /// Persists an action item's checked state.
+    ///
+    /// Action items are first-class objects, so ticking one off is durable rather
+    /// than component state lost on unmount.
+    pub fn set_action_item_status(
+        &self,
+        meeting_id: &str,
+        action_item_id: &str,
+        status: ActionItemStatus,
+    ) -> Result<MeetingProcessing, String> {
+        let mut found = false;
+        let updated = self.store.update(meeting_id, |processing| {
+            if let Some(facts) = processing.facts.as_mut() {
+                if let Some(item) = facts
+                    .action_items
+                    .iter_mut()
+                    .find(|i| i.id == action_item_id)
+                {
+                    item.status = status;
+                    found = true;
+                }
+            }
+        })?;
+
+        if !found {
+            return Err(format!("Unknown action item {}", action_item_id));
+        }
+        Ok(updated)
+    }
+
+    /// Records that this meeting has been exported as a Scribble.
+    pub fn record_scribble(
+        &self,
+        meeting_id: &str,
+        scribble: ScribbleRef,
+    ) -> Result<MeetingProcessing, String> {
+        self.store.update(meeting_id, |processing| {
+            processing.scribble_ref = Some(scribble.clone());
+        })
+    }
+
+    /// Finds meetings related to this one, from extracted metadata.
+    pub fn related(&self, meeting_id: &str, limit: usize) -> Result<Vec<RelatedMeeting>, String> {
+        let subject = self
+            .index_entry(meeting_id)
+            .ok_or_else(|| "This meeting has not been processed yet".to_string())?;
+
+        let candidates: Vec<MeetingIndexEntry> = self
+            .store
+            .list_processed_ids()
+            .into_iter()
+            .filter(|id| id != meeting_id)
+            .filter_map(|id| self.index_entry(&id))
+            .collect();
+
+        Ok(find_related(&subject, &candidates, limit))
+    }
+
+    fn index_entry(&self, meeting_id: &str) -> Option<MeetingIndexEntry> {
+        let processing = self.store.load(meeting_id)?;
+        let facts = processing.facts.as_ref()?;
+        let session = self.sessions.get_session(meeting_id).ok()?;
+        let labels = processing
+            .speakers
+            .iter()
+            // Only named speakers are useful across meetings: "Speaker 1" in two
+            // different meetings is not the same person.
+            .filter(|s| s.display_name.is_some() || s.is_local_user)
+            .map(|s| s.label().to_string())
+            .collect();
+
+        Some(MeetingIndexEntry::from_facts(
+            meeting_id,
+            &facts.title,
+            &session.created_at,
+            facts,
+            labels,
+        ))
+    }
+
+    /// Reads the raw transcript. The only source-artifact access the pipeline
+    /// makes, and it is read-only.
+    fn read_raw_segments(&self, meeting_id: &str) -> Result<Vec<RawSegmentInput>, String> {
+        let segments = self
+            .sessions
+            .get_transcript_segments(meeting_id)
+            .map_err(|e| format!("Failed to read the raw transcript: {}", e))?;
+
+        Ok(segments
+            .into_iter()
+            .filter(|s| s.status == TranscriptSegmentStatus::Success)
+            .filter(|s| !s.text.trim().is_empty())
+            .map(|s| RawSegmentInput {
+                chunk_index: s.chunk_index,
+                start_time_s: s.start_time_s,
+                end_time_s: s.end_time_s,
+                text: s.text,
+                mic_had_audio: s.mic_had_audio,
+                sys_had_audio: s.sys_had_audio,
+            })
+            .collect())
+    }
+
+    /// Writes one stage record to the processing log. Sizes and outcomes only —
+    /// never transcript content.
+    fn record(&self, meeting_id: &str, stage: &str, state: &StageState) {
+        let validation = state.validation.as_ref();
+        self.store.append_log(&ProcessingLogEntry {
+            meeting_id: meeting_id.to_string(),
+            stage: stage.to_string(),
+            status: format!("{:?}", state.status).to_lowercase(),
+            at: chrono::Utc::now().to_rfc3339(),
+            duration_ms: state.duration_ms,
+            provider: state.provider.clone(),
+            model: state.model.clone(),
+            input_chars: state.input_chars,
+            output_chars: state.output_chars,
+            validator_passed: validation.map(|v| v.passed),
+            validator_issue_codes: validation
+                .map(|v| v.issues.iter().map(|i| i.code.clone()).collect())
+                .unwrap_or_default(),
+            error: state.error.clone(),
+            processing_version: PROCESSING_VERSION,
+            rules_version: RULES_VERSION.to_string(),
+        });
+    }
+}
+
+/// Renders a processed meeting as Markdown for a Scribble.
+///
+/// Composed from the same derived artifacts the UI shows, so the exported
+/// Scribble cannot say something the meeting view does not.
+pub fn render_scribble_markdown(
+    processing: &MeetingProcessing,
+    meeting_title: &str,
+    include_conversation: bool,
+) -> String {
+    let mut out = String::new();
+
+    if let Some(facts) = processing.facts.as_ref() {
+        out.push_str(&format!("# {}\n\n", facts.title));
+        out.push_str(&format!(
+            "**Meeting type:** {}\n",
+            facts.meeting_type.label()
+        ));
+        if !processing.speakers.is_empty() {
+            let labels: Vec<&str> = processing.speakers.iter().map(|s| s.label()).collect();
+            out.push_str(&format!("**Participants:** {}\n", labels.join(", ")));
+        }
+        out.push('\n');
+    } else {
+        out.push_str(&format!("# {}\n\n", meeting_title));
+    }
+
+    match processing.summary.as_ref() {
+        Some(summary) => {
+            out.push_str(&summary.markdown);
+            out.push('\n');
+        }
+        None => out.push_str("_No summary has been generated for this meeting yet._\n"),
+    }
+
+    if include_conversation {
+        if let Some(conv) = processing.conversation.as_ref() {
+            if !conv.turns.is_empty() {
+                out.push_str("\n## Conversation\n\n");
+                out.push_str(&conversation::render_conversation_markdown(
+                    conv,
+                    &processing.speakers,
+                ));
+                out.push('\n');
+            }
+        }
+    }
+
+    out.trim_end().to_string()
+}
+
+/// A short, user-facing description of where processing stands.
+///
+/// Deliberately does not expose every internal stage: the user needs to know
+/// whether the meeting is usable and what to retry, not the pipeline's topology.
+pub fn processing_headline(processing: Option<&MeetingProcessing>) -> &'static str {
+    match processing.map(|p| p.status) {
+        None | Some(ProcessingStatus::NotStarted) => "Not processed yet",
+        Some(ProcessingStatus::Running) => "Processing meeting…",
+        Some(ProcessingStatus::Ready) => "Ready",
+        Some(ProcessingStatus::Partial) => "Partly processed",
+        Some(ProcessingStatus::Failed) => "Processing failed",
+    }
+}
+
+#[cfg(test)]
+mod tests;

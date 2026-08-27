@@ -8,10 +8,9 @@ pub use chat::process_chat;
 
 mod enrichment;
 pub use enrichment::{
-    enrich_scribble, extract_deterministic_entities,
-    extract_deterministic_knowledge, extract_deterministic_questions,
-    extract_deterministic_title, extract_deterministic_topics, summarize_scribble,
-    summarize_meeting, AiEnrichmentResponse, MeetingEnrichmentResponse,
+    enrich_scribble, extract_deterministic_entities, extract_deterministic_knowledge,
+    extract_deterministic_questions, extract_deterministic_title,
+    extract_deterministic_topics, summarize_scribble, AiEnrichmentResponse,
 };
 
 #[derive(Error, Debug)]

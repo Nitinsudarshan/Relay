@@ -110,6 +110,8 @@ pub fn run() {
         }
     }
 
+    let meeting_processor = Arc::new(meetings_v2::MeetingProcessor::new(meetings_v2.store()));
+
     let state = AppState {
         recorder: AudioRecorder::new(),
         vault: VaultManager::new(vault_dir),
@@ -119,6 +121,7 @@ pub fn run() {
         stt,
         last_stt_diagnostics: Mutex::new(None),
         meetings_v2,
+        meeting_processor,
     };
 
     tauri::Builder::default()
@@ -243,6 +246,16 @@ pub fn run() {
             commands::get_meeting_v2_diagnostics,
             commands::delete_meeting_v2,
             commands::summarize_meeting_v2,
+            commands::get_meeting_v2_processing,
+            commands::prepare_meeting_v2,
+            commands::generate_meeting_v2_summary,
+            commands::rename_meeting_v2_speaker,
+            commands::set_meeting_v2_action_item_status,
+            commands::get_meeting_v2_related,
+            commands::get_meeting_v2_processing_log,
+            commands::get_meeting_v2_extensions,
+            commands::list_meeting_v2_processing,
+            commands::promote_meeting_v2_to_scribble,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
