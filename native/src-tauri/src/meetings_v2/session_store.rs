@@ -1,4 +1,6 @@
-use super::types::{MeetingSession, MeetingState, TranscriptSegment, TranscriptSegmentStatus};
+use super::types::{
+    MeetingNotes, MeetingSession, MeetingState, TranscriptSegment, TranscriptSegmentStatus,
+};
 use hound::{WavReader, WavSpec, WavWriter};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -198,6 +200,48 @@ impl SessionStore {
             .map_err(|e| format!("Failed to finalize chunk wav: {}", e))?;
 
         Ok(path)
+    }
+
+    /// Reads the user's notes for a meeting.
+    ///
+    /// A meeting with no notes file is the normal case, not an error, and
+    /// returns empty notes so no caller has to branch on their absence.
+    pub fn get_notes(&self, session_id: &str) -> Result<MeetingNotes, String> {
+        let path = self.session_dir(session_id).join("notes.json");
+        if !path.exists() {
+            return Ok(MeetingNotes::default());
+        }
+        let content =
+            fs::read_to_string(&path).map_err(|e| format!("Failed to read notes.json: {}", e))?;
+        // Unreadable notes must never make a meeting unopenable; they are the
+        // user's text, but they are not what the meeting *is*.
+        Ok(serde_json::from_str(&content).unwrap_or_default())
+    }
+
+    /// Writes the user's notes.
+    ///
+    /// Committed by rename like `session.json`, so a crash mid-write cannot
+    /// leave a person's notes half-written. This is the only writer: the
+    /// processing pipeline reads notes and never touches this path.
+    pub fn save_notes(&self, session_id: &str, notes: &MeetingNotes) -> Result<MeetingNotes, String> {
+        let _guard = self.write_lock.lock().unwrap();
+        let dir = self.session_dir(session_id);
+        fs::create_dir_all(&dir).map_err(|e| format!("Failed to create meeting dir: {}", e))?;
+
+        let stored = MeetingNotes {
+            during: notes.during.clone(),
+            before: notes.before.clone(),
+            updated_at: Some(chrono::Utc::now().to_rfc3339()),
+        };
+        let json = serde_json::to_string_pretty(&stored)
+            .map_err(|e| format!("Failed to serialize notes: {}", e))?;
+
+        let tmp_path = dir.join("notes.json.tmp");
+        fs::write(&tmp_path, json).map_err(|e| format!("Failed to write notes.json.tmp: {}", e))?;
+        fs::rename(&tmp_path, dir.join("notes.json"))
+            .map_err(|e| format!("Failed to commit notes.json: {}", e))?;
+
+        Ok(stored)
     }
 
     pub fn append_transcript_segment(

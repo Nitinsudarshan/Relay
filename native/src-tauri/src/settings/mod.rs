@@ -440,6 +440,14 @@ pub struct MeetingSettings {
     /// available; this list only adds to them.
     #[serde(default)]
     pub extensions: Vec<MeetingExtensionSetting>,
+    /// Standing instructions for how this user's summaries should read — tone,
+    /// emphasis, what to lead with.
+    ///
+    /// Presentation only. The summary contract subordinates it to the accuracy
+    /// rules, so no instruction here can make Relay assign an owner or a
+    /// deadline the meeting did not establish.
+    #[serde(default, alias = "summaryInstructions")]
+    pub summary_instructions: String,
 }
 
 fn default_true() -> bool {
@@ -463,6 +471,7 @@ impl Default for MeetingSettings {
             default_extension_id: default_extension_id(),
             speaker_identification: SpeakerIdentification::default(),
             extensions: Vec::new(),
+            summary_instructions: String::new(),
         }
     }
 }

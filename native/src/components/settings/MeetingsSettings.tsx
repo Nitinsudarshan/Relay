@@ -23,6 +23,7 @@ export const DEFAULT_MEETING_SETTINGS: MeetingSettings = {
   default_extension_id: 'default',
   speaker_identification: 'automatic',
   extensions: [],
+  summary_instructions: '',
 };
 
 const SUMMARY_MODE_OPTIONS: {
@@ -213,6 +214,31 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="flex flex-col gap-3 p-4 rounded-xl border border-border/60 bg-card/40">
+        <div>
+          <label
+            htmlFor="summary-instructions"
+            className="text-xs font-medium text-foreground"
+          >
+            Summary instructions
+          </label>
+          <p className="text-[11px] text-muted-foreground">
+            How you want your summaries written — what to lead with, how formal
+            to be, what you always care about. These shape presentation only:
+            they cannot make Relay record a decision, an owner, or a deadline
+            your meeting did not establish.
+          </p>
+        </div>
+        <textarea
+          id="summary-instructions"
+          value={meetings.summary_instructions}
+          onChange={(e) => update({ summary_instructions: e.target.value })}
+          rows={3}
+          placeholder="e.g. Lead with anything that affects the release date. Keep it blunt."
+          className="w-full rounded-lg bg-muted/40 border border-border/60 px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary resize-y"
+        />
       </div>
 
       <div className="flex flex-col gap-3 p-4 rounded-xl border border-border/60 bg-card/40">

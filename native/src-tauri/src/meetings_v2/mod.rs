@@ -13,7 +13,7 @@ pub use engine::MeetingsV2Engine;
 pub use processing::{MeetingProcessing, MeetingProcessor, ProcessingOptions};
 pub use session_store::SessionStore;
 pub use types::{
-    AudioLevels, LiveTranscriptUpdate, MeetingDiagnostics, MeetingSession, MeetingState,
-    TranscriptSegment, TranscriptSegmentStatus,
+    AudioLevels, LiveTranscriptUpdate, MeetingDiagnostics, MeetingNotes, MeetingSession,
+    MeetingState, TranscriptSegment, TranscriptSegmentStatus,
 };
 

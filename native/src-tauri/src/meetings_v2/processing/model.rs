@@ -27,12 +27,19 @@ use std::collections::BTreeMap;
 /// attribution resolves per utterance. Facts extracted under v1 or v2 cite
 /// chunk-level segment ids and carry owners that were demoted to `Unassigned`
 /// because chunk-level channel data could not resolve them.
-pub const PROCESSING_VERSION: u32 = 3;
+///
+/// v4: facts carry the three things a summary needs in order to be a memory
+/// rather than a list — the *reason* behind a decision, the kind of claim a key
+/// point is (a proposal is not a decision), and the risks and blockers raised.
+/// Facts extracted under v1–v3 have no rationale, classify every point as plain
+/// discussion, and carry no risks, so a summary regenerated from them is thinner
+/// than one regenerated after a forced re-extraction.
+pub const PROCESSING_VERSION: u32 = 4;
 
 /// Identifies the `Meeting-rules/` revision the prompts encode. Recorded on
 /// every derived artifact so a quality change six months from now can be
 /// attributed to a rules change rather than a model change.
-pub const RULES_VERSION: &str = "meeting-rules-2026-08-quality-pass";
+pub const RULES_VERSION: &str = "meeting-rules-2026-08-meeting-memory";
 
 /// The local user's stable speaker id. Resolved from the microphone channel,
 /// which is the one attribution that needs no model and no diarization.
@@ -290,6 +297,16 @@ fn default_confidence() -> f32 {
 pub struct Decision {
     pub id: String,
     pub statement: String,
+    /// Why it was settled this way, when the meeting said so.
+    ///
+    /// The single most valuable field on a decision and the one a summary is
+    /// most likely to lose. "Move the launch to Monday" is a note; "move the
+    /// launch to Monday because the payment integration still has three
+    /// blocking bugs" is a memory — six weeks later it is the reason, not the
+    /// date, that someone needs. `None` when the meeting stated no reason;
+    /// never filled in with a plausible one.
+    #[serde(default)]
+    pub rationale: Option<String>,
     /// Speaker id of whoever decided, when that is known.
     #[serde(default)]
     pub decided_by_speaker_id: Option<String>,
@@ -329,6 +346,59 @@ pub struct Entity {
     pub segment_ids: Vec<String>,
 }
 
+/// What kind of exposure a risk describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RiskKind {
+    /// Something that could go wrong.
+    #[default]
+    Risk,
+    /// Something already stopping work.
+    Blocker,
+    /// Progress waits on someone or something outside the room.
+    Dependency,
+    /// A constraint the meeting has to work inside.
+    Constraint,
+}
+
+impl RiskKind {
+    pub fn parse(raw: &str) -> Self {
+        match raw.trim().to_lowercase().replace(['_', '-', ' '], "").as_str() {
+            "blocker" | "blocked" | "blocking" => Self::Blocker,
+            "dependency" | "dependent" => Self::Dependency,
+            "constraint" | "limitation" => Self::Constraint,
+            _ => Self::Risk,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Risk => "Risk",
+            Self::Blocker => "Blocker",
+            Self::Dependency => "Dependency",
+            Self::Constraint => "Constraint",
+        }
+    }
+}
+
+/// A risk, blocker, dependency, or constraint the meeting actually raised.
+///
+/// Deliberately a separate collection rather than a flavour of key point: a
+/// blocker is the thing a reader scans for first, and burying it in prose is
+/// how it gets missed. Never inferred — a discussion that merely sounds
+/// serious is not a risk.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Risk {
+    pub id: String,
+    pub statement: String,
+    pub kind: RiskKind,
+    /// Who raised it, when the transcript makes that clear.
+    #[serde(default)]
+    pub raised_by_speaker_id: Option<String>,
+    #[serde(default)]
+    pub source_segment_ids: Vec<String>,
+}
+
 /// Something raised and left unresolved.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OpenQuestion {
@@ -338,12 +408,62 @@ pub struct OpenQuestion {
     pub source_segment_ids: Vec<String>,
 }
 
+/// What kind of claim a key point is.
+///
+/// The distinction exists to keep the four categories from collapsing into each
+/// other. "We could launch Friday" and "let's launch Monday" are different
+/// facts about a meeting, and a schema with only one slot for both is an
+/// invitation to file the first as the second. Giving a proposal somewhere
+/// honest to live is what stops it being promoted into `decisions`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum KeyPointKind {
+    /// Something explained, reported, or established. The default.
+    #[default]
+    Discussion,
+    /// Floated but not settled — "we could", "what if we".
+    Proposal,
+    /// Advocated by someone, but not adopted by the meeting.
+    Recommendation,
+    /// A material difference of position that affected the outcome.
+    Disagreement,
+    /// A cost knowingly accepted in exchange for something else.
+    Tradeoff,
+}
+
+impl KeyPointKind {
+    pub fn parse(raw: &str) -> Self {
+        match raw.trim().to_lowercase().replace(['_', '-', ' '], "").as_str() {
+            "proposal" | "proposed" | "suggestion" => Self::Proposal,
+            "recommendation" | "recommended" => Self::Recommendation,
+            "disagreement" | "disagreed" | "conflict" => Self::Disagreement,
+            "tradeoff" => Self::Tradeoff,
+            _ => Self::Discussion,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Discussion => "discussion",
+            Self::Proposal => "proposal",
+            Self::Recommendation => "recommendation",
+            Self::Disagreement => "disagreement",
+            Self::Tradeoff => "tradeoff",
+        }
+    }
+}
+
 /// A substantive discussion point — what a reader who missed the meeting needs
 /// in order to follow it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KeyPoint {
     pub id: String,
     pub text: String,
+    /// Discussion unless the meeting made it something more specific. Carried
+    /// into Stage B so the prose can say "was proposed" where the meeting only
+    /// proposed, and "was agreed" only where it agreed.
+    #[serde(default)]
+    pub kind: KeyPointKind,
     #[serde(default)]
     pub topic_id: Option<String>,
     #[serde(default)]
@@ -417,6 +537,9 @@ pub struct MeetingFacts {
     pub action_items: Vec<ActionItem>,
     #[serde(default)]
     pub open_questions: Vec<OpenQuestion>,
+    /// Risks, blockers, dependencies, and constraints the meeting raised.
+    #[serde(default)]
+    pub risks: Vec<Risk>,
     #[serde(default)]
     pub entities: Vec<Entity>,
     /// Speaker ids that actually contributed, for the related-meetings signal.
@@ -455,13 +578,19 @@ impl SummaryMode {
         }
     }
 
-    /// Upper bound on the prose body, enforced by the validator. Prevents a
-    /// "summary" that is really a transcript.
+    /// The ceiling this mode allows a summary of *any* meeting.
+    ///
+    /// A ceiling, not a target. What a given meeting is actually allowed is
+    /// computed by `processing::length` from that meeting's own transcript, and
+    /// only ever binds below this. The distinction matters: as a fixed cap these
+    /// numbers rejected legitimate summaries of long meetings and left short
+    /// ones room to pad, because the same number cannot be right for a
+    /// four-minute call and a two-hour planning session.
     pub fn max_words(self) -> usize {
         match self {
-            Self::Concise => 220,
-            Self::Standard => 550,
-            Self::Detailed => 1100,
+            Self::Concise => 280,
+            Self::Standard => 650,
+            Self::Detailed => 1_200,
         }
     }
 }
@@ -615,6 +744,16 @@ pub struct SummaryArtifact {
     /// transcript. `deterministic` alone cannot tell those apart.
     #[serde(default)]
     pub source: SummarySource,
+    /// True when the first draft failed validation and a corrected one was
+    /// requested. Recorded because "the model needed a second try" and "the
+    /// model could not do it" are different quality signals, and the rate of the
+    /// first is what says whether the contract is clear enough.
+    #[serde(default)]
+    pub repair_attempted: bool,
+    /// The word ceiling this meeting's own length allowed, so a summary that
+    /// looks short or long can be judged against what it was asked for.
+    #[serde(default)]
+    pub length_budget_words: Option<usize>,
     /// What became of the model's draft, independently of whether this summary
     /// stage succeeded.
     #[serde(default)]

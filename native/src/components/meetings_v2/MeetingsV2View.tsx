@@ -24,6 +24,7 @@ import {
   AppSettings,
   LiveTranscriptUpdate,
   MeetingExtension,
+  MeetingNotes,
   MeetingProcessing,
   MeetingProcessingIndexEntry,
   MeetingSession,
@@ -38,6 +39,7 @@ import {
   MeetingRawTranscriptTab,
   RawTranscriptHidden,
 } from './MeetingRawTranscriptTab';
+import { MeetingNotesTab } from './MeetingNotesTab';
 import { MeetingSummaryTab } from './MeetingSummaryTab';
 import { meetingTitle, meetingTypeLabel } from './meetingProcessing';
 
@@ -48,7 +50,7 @@ const ACTIVE_STATES = ['STARTING', 'RECORDING', 'PAUSED', 'STOPPING', 'FINALIZIN
 const RECONCILE_INTERVAL_MS = 1000;
 const TIMER_TICK_MS = 250;
 
-type MeetingTab = 'summary' | 'conversation' | 'raw';
+type MeetingTab = 'summary' | 'notes' | 'conversation' | 'raw';
 
 /** The subset of meeting settings this view needs to render. */
 interface MeetingsUiSettings {
@@ -63,6 +65,9 @@ const DEFAULT_MEETING_UI_SETTINGS: MeetingsUiSettings = {
 
 const TABS: { key: MeetingTab; label: string; icon: typeof Sparkles }[] = [
   { key: 'summary', label: 'Summary', icon: Sparkles },
+  // Second, not last: notes are written *during* a meeting, and a tab buried
+  // behind the transcript is a tab nobody reaches while one is running.
+  { key: 'notes', label: 'Notes', icon: NotebookPen },
   { key: 'conversation', label: 'Conversation', icon: MessageSquare },
   { key: 'raw', label: 'Raw Transcript', icon: Terminal },
 ];
@@ -84,6 +89,8 @@ export const MeetingsV2View: React.FC = () => {
   // meeting experience.
   const [activeMeetingTab, setActiveMeetingTab] = useState<MeetingTab>('summary');
   const [processing, setProcessing] = useState<MeetingProcessing | null>(null);
+  /** The user's own notes for the selected meeting. Source data, never derived. */
+  const [notes, setNotes] = useState<MeetingNotes | null>(null);
   const [extensions, setExtensions] = useState<MeetingExtension[]>([]);
   /** Per-meeting derived info for the list, keyed by meeting id. */
   const [processingIndex, setProcessingIndex] = useState<
@@ -312,11 +319,32 @@ export const MeetingsV2View: React.FC = () => {
     if (!selectedSessionId) {
       setProcessing(null);
       setRelated([]);
+      setNotes(null);
       return;
     }
     const isActive = activeSession?.id === selectedSessionId;
     loadProcessing(selectedSessionId, isActive);
   }, [selectedSessionId, activeSession?.id, loadProcessing]);
+
+  // Notes load separately from the processing pipeline, because they are source
+  // data: they exist for a meeting that has never been processed, and they must
+  // stay readable when processing has failed.
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    let cancelled = false;
+    setNotes(null);
+    invoke<MeetingNotes>('get_meeting_v2_notes', { sessionId: selectedSessionId })
+      .then((loaded) => {
+        if (!cancelled) setNotes(loaded);
+      })
+      .catch((err) => {
+        console.error('Failed to load meeting notes:', err);
+        if (!cancelled) setNotes({ during: '', before: '' });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSessionId]);
 
   // The backend emits this whenever derived data changes — including from the
   // automatic run after a recording stops — so the view stays current without
@@ -545,6 +573,29 @@ export const MeetingsV2View: React.FC = () => {
       console.error('Failed to turn this meeting into a Scribble:', err);
     } finally {
       setIsPromoting(false);
+    }
+  };
+
+  /**
+   * Saves the user's notes.
+   *
+   * Writes `notes.json` and nothing else: no summary is regenerated and no facts
+   * are invalidated, which is what makes it safe to type into this while a
+   * meeting is being recorded.
+   */
+  const handleSaveNotes = async (
+    sessionId: string,
+    next: { during?: string; before?: string },
+  ) => {
+    try {
+      const saved = await invoke<MeetingNotes>('save_meeting_v2_notes', {
+        sessionId,
+        during: next.during,
+        before: next.before,
+      });
+      setNotes(saved);
+    } catch (err) {
+      console.error('Failed to save meeting notes:', err);
     }
   };
 
@@ -1006,6 +1057,14 @@ export const MeetingsV2View: React.FC = () => {
                   busyActionItemId={busyActionItemId}
                   isAddingAllTasks={isAddingAllTasks}
                   onSelectRelated={handleSelectSession}
+                />
+              )}
+
+              {activeMeetingTab === 'notes' && (
+                <MeetingNotesTab
+                  notes={notes}
+                  isLoaded={notes !== null}
+                  onSave={(next) => handleSaveNotes(selectedSession.id, next)}
                 />
               )}
 

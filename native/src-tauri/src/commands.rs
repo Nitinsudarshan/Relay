@@ -1891,6 +1891,8 @@ fn meeting_processing_options(
                 builtin: false,
             })
             .collect(),
+        user_instructions: Some(settings.meetings.summary_instructions.clone())
+            .filter(|i| !i.trim().is_empty()),
     }
 }
 
@@ -1977,6 +1979,57 @@ pub async fn summarize_meeting_v2(
     state: State<'_, AppState>,
 ) -> Result<crate::meetings_v2::MeetingProcessing, CommandError> {
     generate_meeting_v2_summary(app, session_id, None, None, None, state).await
+}
+
+/// Reads a meeting's user-written notes.
+///
+/// A meeting with no notes returns empty ones rather than an error: not having
+/// written any is the normal case, and the UI should show an empty editor, not a
+/// failure.
+#[tauri::command]
+pub async fn get_meeting_v2_notes(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingNotes, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+    state
+        .meetings_v2
+        .store()
+        .get_notes(&session_id)
+        .map_err(|e| CommandError::new("READ_MEETING_NOTES_FAILED", &e))
+}
+
+/// Saves a meeting's user-written notes.
+///
+/// Notes are a **source** artifact. Saving them writes `notes.json` beside
+/// `session.json` and touches nothing derived: no summary is regenerated, no
+/// facts are invalidated, and the next summary the user asks for reads them.
+/// That separation is what makes it safe to type into this field during a
+/// meeting.
+#[tauri::command]
+pub async fn save_meeting_v2_notes(
+    session_id: String,
+    during: Option<String>,
+    before: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingNotes, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+
+    let sessions = state.meetings_v2.store();
+    let existing = sessions.get_notes(&session_id).unwrap_or_default();
+    let notes = crate::meetings_v2::MeetingNotes {
+        during: during.unwrap_or(existing.during),
+        before: before.unwrap_or(existing.before),
+        updated_at: None,
+    };
+
+    sessions
+        .save_notes(&session_id, &notes)
+        .map_err(|e| CommandError::new("SAVE_MEETING_NOTES_FAILED", &e))
 }
 
 /// Renames a speaker. Updates the registry only — the raw transcript is

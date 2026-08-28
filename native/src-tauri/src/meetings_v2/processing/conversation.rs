@@ -74,9 +74,10 @@ pub fn build_conversation(segments: &[NormalizedSegment]) -> Conversation {
 
 /// Renders the conversation as Markdown, resolving speaker names at render time.
 ///
-/// Used for the Scribble export and for the transcript block handed to the
-/// extraction stage. The UI renders from the structured turns instead, so a
-/// rename is reflected without calling this again.
+/// Used for the Scribble export. The UI renders from the structured turns
+/// instead, so a rename is reflected without calling this again, and the
+/// transcript a model reads is assembled by `context::MeetingContext` — which
+/// is the only place that decides what a model is shown.
 pub fn render_conversation_markdown(conversation: &Conversation, speakers: &[Speaker]) -> String {
     let mut out = String::new();
     for turn in &conversation.turns {
@@ -89,24 +90,6 @@ pub fn render_conversation_markdown(conversation: &Conversation, speakers: &[Spe
         ));
     }
     out.trim_end().to_string()
-}
-
-/// Renders the transcript for a model prompt: speaker label, timestamp, and the
-/// segment id, so the model can cite the segment an item came from and
-/// provenance survives into the structured facts.
-pub fn render_for_extraction(segments: &[NormalizedSegment], speakers: &[Speaker]) -> String {
-    let mut out = String::new();
-    for segment in segments {
-        let label = resolve_label(speakers, segment.speaker_id.as_deref());
-        out.push_str(&format!(
-            "[{}] {} ({}): {}\n",
-            segment.id,
-            label,
-            format_timestamp(segment.start_time_s),
-            segment.text
-        ));
-    }
-    out
 }
 
 /// `mm:ss`, or `h:mm:ss` past an hour.
@@ -225,14 +208,6 @@ mod tests {
         assert!(
             render_conversation_markdown(&conversation, &speakers).contains("**Unknown speaker**")
         );
-    }
-
-    #[test]
-    fn extraction_rendering_carries_segment_ids_for_provenance() {
-        let (segments, speakers) = attributed();
-        let rendered = render_for_extraction(&segments, &speakers);
-        assert!(rendered.contains("[seg_00000] Me (0:00):"));
-        assert!(rendered.contains("[seg_00002] Speaker 1 (1:00):"));
     }
 
     #[test]

@@ -25,18 +25,19 @@ pub fn builtin_extensions() -> Vec<MeetingExtension> {
             id: "executive_brief".to_string(),
             name: "Executive Brief".to_string(),
             instructions: "Write for someone who was not in the meeting and has two minutes. \
-Lead with the outcome, not the process. Keep the Summary to at most three sentences. \
-Include only decisions and action items that change what someone does next; omit \
-procedural detail entirely."
+Lead with the outcome, not the process. Keep the Overview to at most three sentences \
+and collapse the Discussion to the few points that change what someone does next. \
+Decisions, action items, risks, and open questions still appear in full — brevity \
+comes out of the explanation, never out of the outcomes."
                 .to_string(),
             builtin: true,
         },
         MeetingExtension {
             id: "project_update".to_string(),
             name: "Project Update".to_string(),
-            instructions: "Write as a status update to a project channel. Organize the Summary \
-around what moved, what is blocked, and what is next. Name the projects and \
-components involved wherever the facts identify them. Keep risks and blockers \
+            instructions: "Write as a status update to a project channel. Organize the \
+Discussion around what moved, what is blocked, and what is next. Name the projects \
+and components involved wherever the facts identify them. Keep risks and blockers \
 prominent rather than buried."
                 .to_string(),
             builtin: true,
@@ -44,10 +45,10 @@ prominent rather than buried."
         MeetingExtension {
             id: "decision_log".to_string(),
             name: "Decision Log".to_string(),
-            instructions: "Write as a decision record. Lead with the Decisions section; for each \
-decision state what was settled and, where the facts say so, who settled it. Keep \
-the Summary to a single short paragraph of context. Do not restate discussion that \
-did not produce a decision."
+            instructions: "Write as a decision record. Put Decisions immediately after the \
+Overview; for each decision state what was settled, the reason where the facts give \
+one, and who settled it where the facts say. Keep the Overview to a single short \
+paragraph of context. Do not restate discussion that did not produce a decision."
                 .to_string(),
             builtin: true,
         },
@@ -87,25 +88,35 @@ pub fn find_extension(user_defined: &[MeetingExtension], id: &str) -> MeetingExt
     })
 }
 
-/// The shape instruction for a mode. Concise by default in spirit: even
-/// `Detailed` is told it is not a transcript.
+/// How much depth a mode asks for.
+///
+/// Depth, not size. The size budget is computed per meeting by
+/// `processing::length` and stated to the model separately, because a mode that
+/// carries its own absolute length is wrong on almost every meeting: it padded
+/// short ones and truncated long ones. What is left here is the only thing a
+/// mode should decide — how much of the *reasoning* survives.
+///
+/// Every mode is bound by the same floor: a decision, a commitment, an owner, a
+/// deadline, or an unresolved question is never dropped to save room. Concise
+/// means less explanation, never fewer outcomes.
 pub fn mode_instructions(mode: SummaryMode) -> &'static str {
     match mode {
         SummaryMode::Concise => {
-            "Length: 3 to 5 strong bullets in the Summary section, no paragraphs. \
-Only what someone must know. No procedural narration. Omit any section that \
-would be empty."
+            "Written to be scanned. Keep every decision, commitment, owner, deadline, \
+risk, and open question, and cut everything else hard: one line per point, no \
+secondary discussion, no examples, and reasoning only where a decision would be \
+unreadable without it. Merge closely related topics rather than dropping one."
         }
         SummaryMode::Standard => {
-            "Length: 2 to 4 short paragraphs, or 4 to 8 strong bullets, in the Summary \
-section. Cover the key discussion points, the reasoning behind decisions, and \
-important context. Omit any section that would be empty."
+            "The default record. Cover the substantive discussion, the reasoning behind \
+each decision, and the context needed to act on it. Leave out repetition, \
+tangents, and minor examples. One or two sentences per point."
         }
         SummaryMode::Detailed => {
-            "Length: up to 6 short paragraphs in the Summary section, organized by topic. \
-Include the reasoning and the alternatives considered. This is still a summary, \
-not a transcript: never narrate the meeting turn by turn, and never approach the \
-length of the source."
+            "The full record, organized by topic. Keep the reasoning, the alternatives \
+that were considered and rejected, the trade-offs, and the disagreements. Retain \
+useful secondary discussion. This is still a summary and not a transcript: never \
+narrate the meeting turn by turn, and never approach the length of the source."
         }
     }
 }
@@ -178,6 +189,40 @@ mod tests {
         assert!(SummaryMode::Concise.max_words() < SummaryMode::Standard.max_words());
         assert!(SummaryMode::Standard.max_words() < SummaryMode::Detailed.max_words());
         assert!(mode_instructions(SummaryMode::Detailed).contains("not a transcript"));
+    }
+
+    #[test]
+    fn no_mode_may_buy_brevity_by_dropping_an_outcome() {
+        // The failure this pins: "make it shorter" turning into "drop the
+        // action items", which is the one trade a summary may never make.
+        let concise = mode_instructions(SummaryMode::Concise).to_lowercase();
+        assert!(concise.contains("keep every decision"));
+        for word in ["commitment", "owner", "deadline", "open question"] {
+            assert!(
+                concise.contains(word),
+                "concise mode must protect {}",
+                word
+            );
+        }
+    }
+
+    #[test]
+    fn a_mode_decides_depth_and_never_an_absolute_length() {
+        // Absolute sizes belong to `processing::length`, which derives them from
+        // the meeting. A mode that names its own word count is wrong on every
+        // meeting that is not the size it assumed.
+        for mode in [
+            SummaryMode::Concise,
+            SummaryMode::Standard,
+            SummaryMode::Detailed,
+        ] {
+            let text = mode_instructions(mode).to_lowercase();
+            assert!(
+                !text.contains("length:") && !text.contains(" words"),
+                "{:?} states a size instead of a depth",
+                mode
+            );
+        }
     }
 
     #[test]

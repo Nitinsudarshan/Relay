@@ -303,6 +303,7 @@ follow up with the finance folks about the invoice that was raised last quarter"
             topics: Vec::new(),
             decisions: Vec::new(),
             action_items: Vec::new(),
+            risks: Vec::new(),
             open_questions: Vec::new(),
             entities: Vec::new(),
             speaker_ids: Vec::new(),
