@@ -53,7 +53,7 @@ This document tracks deferred features, rejected/postponed UI patterns, and arch
 > below. The per-source-track work is now the gating item — see item 4.
 - **Area**: Native App (`native/src-tauri/src/meetings_v2/*`, `native/src-tauri/src/vault/scribble.rs`, `native/src/components/meetings_v2/*`)
 - **Original Context**:
-  - `meetings_implementation.md` planned a detection and reminder architecture (§4.1, §4.2) that the V2 rebuild does not implement: there is no calendar-proximity, meeting-process, or sustained-audio trigger, and no auto-end. A meeting today is started and stopped by hand.
+  - The pre-V2 meetings plan (removed once V2 shipped; see CHANGELOG v0.14.0) specified a detection and reminder architecture that the V2 rebuild does not implement: there is no calendar-proximity, meeting-process, or sustained-audio trigger, and no auto-end. A meeting today is started and stopped by hand.
   - `vault/scribble.rs` already defines `SOURCE_TYPE_MEETING` and handles `meeting_id` / `meeting_title` source metadata in the knowledge graph, but nothing ever produces it — meetings live in `vault/meetings_v2/<id>/`, outside the notes/scribbles/trash model, so they are unsearchable, un-enriched, and cannot be promoted to a Scribble.
   - Microphone and system audio are soft-mixed to one mono track before anything is persisted, so no per-source track exists and diarization is not expressible.
 - **Concept & Implementation Blueprint**:

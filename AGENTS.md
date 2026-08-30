@@ -1,58 +1,86 @@
 # Relay AI Agent Guidelines
 
-This is a **Rust (Axum-style backend) + Tauri/React native app for Windows,
-plus a Next.js + Shadcn + Supabase web dashboard for hybrid mode** project
-(Relay). You **must follow** all rules in the `Rules/` directory for any
-code change in this repo.
+Relay is a **Rust + Tauri/React desktop app for Windows**, plus a **Next.js +
+shadcn/ui + Supabase web dashboard** for the (still deferred) hybrid mode. You
+**must follow** all rules in the `rules/` directory for any code change here.
 
-This file, `Rules/`, and `.agents/` were adapted from
-[NGConnect's AGENTS.md](https://github.com/Nitinsudarshan/NGConnect/blob/main/AGENTS.md)
-and its `rules/`/`.agents/` — a Next.js + Supabase + shadcn/ui project — for
-Relay's genuinely different, three-surface architecture (see
-`Relay - Decision Log.md`, decisions 1–3 and 12). Read `Relay - IDE Build Prompt.md`
-first for full product/architecture context; this file and `Rules/` are the
-coding-convention layer underneath it.
+Start with `docs/README.md` for the map of what documentation exists and what
+each file is for. `rules/` is the coding-convention layer underneath it.
+
+## Surfaces
+
+| Path | What it is |
+|---|---|
+| `native/src-tauri/` | Rust backend: capture, STT, the meetings pipeline, vault, triggers, MCP wiring. ~35k lines, 400+ tests. |
+| `native/src/` | React frontend rendered inside the Tauri window. ~18k lines. |
+| `web/` | Next.js hybrid-mode dashboard. Deferred — see `docs/decisions.md` Decision 32. No build or runtime coupling to `native/` in either direction. |
 
 ## Rule Index
 
-- [global.md](Rules/global.md): Master index, per-surface applicability, and precedence rules.
-- [project-structure.md](Rules/project-structure.md): Repo layout — where new files go across all three surfaces.
-- [rust-backend.md](Rules/rust-backend.md): Error handling, module layout, async, Tauri command exposure (native/src-tauri only).
-- [code-standards-frontend.md](Rules/code-standards-frontend.md): TypeScript/React conventions, shared by both frontends.
-- [component-architecture.md](Rules/component-architecture.md): Component organization and splitting.
-- [design-system.md](Rules/design-system.md): Design tokens (colors, spacing, radius, typography).
-- [ui-components.md](Rules/ui-components.md): shadcn/ui usage and styling conventions, including charts.
-- [charts.md](Rules/charts.md): Charts, graphs, and data visualizations.
-- [responsive-design.md](Rules/responsive-design.md): Mobile-first rules — web/ dashboard only.
-- [accessibility.md](Rules/accessibility.md): Accessibility requirements for UI.
-- [documentation.md](Rules/documentation.md): Code commenting format (TypeScript and Rust).
-- [data-access.md](Rules/data-access.md): Local vault/LanceDB access vs. Supabase cloud access.
-- [security.md](Rules/security.md): Secrets, environment variables, hybrid-mode auth.
-- [server-client-boundary.md](Rules/server-client-boundary.md): Server vs Client Component usage — web/ only.
-- [forms-and-validation.md](Rules/forms-and-validation.md): Standard form pattern (shadcn Form + react-hook-form + zod).
-- [testing.md](Rules/testing.md): What to test, frameworks, and file placement across all three surfaces.
-- [api-conventions.md](Rules/api-conventions.md): Tauri command response shape; web route handler shape.
-- [performance.md](Rules/performance.md): Async/non-blocking rules, bundle size, memoization.
-- [rbac-settings.md](Rules/rbac-settings.md): Why RBAC is intentionally not built yet.
-- [version-and-changelog.md](Rules/version-and-changelog.md): Versioning and changelog maintenance requirement.
-- [readme.md](Rules/readme.md): Machine-readable rules for generating, auditing, or rewriting README.md.
-- [maybe-later.md](Rules/maybe-later.md): Policy and format for logging deferred/postponed features to `maybe_later.md`.
+All paths are relative to `rules/`.
 
-Not carried over from NGConnect: `data-import.md` (Excel/CSV import safety —
-no Relay feature to attach to) and `greetings.md` (documented a specific
-NGConnect dashboard component with no Relay analog). Don't recreate either
-speculatively.
+- [global.md](rules/global.md): Master index, per-surface applicability, and precedence rules.
+- [project-structure.md](rules/project-structure.md): Repo layout — where new files go across all surfaces.
+- [rust-backend.md](rules/rust-backend.md): Error handling, module layout, async, Tauri command exposure (`native/src-tauri` only).
+- [code-standards-frontend.md](rules/code-standards-frontend.md): TypeScript/React conventions, shared by both frontends.
+- [component-architecture.md](rules/component-architecture.md): Component organization and splitting.
+- [design-system.md](rules/design-system.md): Design tokens (colors, spacing, radius, typography).
+- [ui-components.md](rules/ui-components.md): shadcn/ui usage, styling conventions, and the "no fake controls" rule.
+- [charts.md](rules/charts.md): Charts, graphs, and data visualizations.
+- [responsive-design.md](rules/responsive-design.md): Mobile-first rules — `web/` dashboard only.
+- [accessibility.md](rules/accessibility.md): Accessibility requirements for UI.
+- [documentation.md](rules/documentation.md): Code commenting format (TypeScript and Rust).
+- [data-access.md](rules/data-access.md): Local vault access vs. Supabase cloud access.
+- [security.md](rules/security.md): Secrets, environment variables, hybrid-mode auth.
+- [server-client-boundary.md](rules/server-client-boundary.md): Server vs Client Component usage — `web/` only.
+- [forms-and-validation.md](rules/forms-and-validation.md): Standard form pattern (shadcn Form + react-hook-form + zod).
+- [testing.md](rules/testing.md): What to test, frameworks, and file placement across all surfaces.
+- [api-conventions.md](rules/api-conventions.md): Tauri command response shape; web route handler shape.
+- [performance.md](rules/performance.md): Async/non-blocking rules, bundle size, memoization.
+- [rbac-settings.md](rules/rbac-settings.md): Why RBAC is intentionally not built yet.
+- [version-and-changelog.md](rules/version-and-changelog.md): Versioning and changelog maintenance requirement.
+- [readme.md](rules/readme.md): Machine-readable rules for generating, auditing, or rewriting `README.md`.
+- [maybe-later.md](rules/maybe-later.md): Policy and format for logging deferred features to `maybe_later.md`.
+
+`Meeting-rules/` is a separate, load-bearing set of behavioural specs for the
+meeting pipeline's prompts and extraction stages. It is cited directly from
+Rust doc comments in `meetings_v2/processing/*` — treat those files as the
+specification those modules implement, and update both together.
+
+## Verifying a change
+
+CI runs these on every push and pull request (`.github/workflows/ci.yml`);
+run them locally before pushing:
+
+```bash
+# Rust backend
+cd native/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
+
+# Native frontend
+cd native && npm ci && npx tsc --noEmit && npm test
+
+# Web dashboard
+cd web && npm ci && npx tsc --noEmit
+```
+
+Building the Rust crate needs a C/C++ toolchain and CMake for whisper.cpp. On
+Linux it additionally needs the GTK/WebKit and ALSA development headers — see
+the `system dependencies` step in the CI workflow for the exact package list.
+
+`cargo fmt --check` is deliberately **not** in CI yet: the crate predates any
+formatting pass and currently differs from rustfmt in 45 files. Running
+`cargo fmt` once, as its own commit, is what unblocks adding that gate.
 
 ## Knowledge Graph
 
-This project has a graphify knowledge graph at `graphify-out/` (see `.agents/rules/graphify.md`).
+This project can generate a graphify knowledge graph into `graphify-out/` (see
+`.agents/rules/graphify.md`). The directory is generated output and is **not**
+checked in — run `graphify update .` to create or refresh it.
 
-- Use `graphify query "<question>"` (CLI) for codebase/architecture questions when `graphify-out/graph.json` exists.
-- Use `graphify path "<A>" "<B>"` to trace relationships between files/symbols.
-- Use `graphify explain "<concept>"` for focused concept lookups.
-- Read `graphify-out/GRAPH_REPORT.md` for a broad architecture overview.
-- After modifying source files (Rust or TypeScript), run `graphify update .` to keep the graph current.
-- The `/graphify` slash command re-runs the full graph pipeline.
+- `graphify query "<question>"` for codebase/architecture questions.
+- `graphify path "<A>" "<B>"` to trace relationships between files/symbols.
+- `graphify explain "<concept>"` for focused concept lookups.
+- `graphify-out/<date>/GRAPH_REPORT.md` for a broad architecture overview, once generated.
 
 ## Precedence
 
@@ -65,17 +93,28 @@ If two rules conflict, resolve in this order (most specific wins):
 6. `design-system.md` / `ui-components.md` / `charts.md` / `responsive-design.md` / `accessibility.md`.
 7. `documentation.md` / `readme.md` / `version-and-changelog.md`.
 
-## Starting State
+## Working in an established codebase
 
-Unlike NGConnect, this is a **from-scratch repo** — there is no existing
-implementation and no "known drift to clean up" yet. All 12 architecture and
-scope decisions referenced throughout `Rules/` are already made; see
-`Relay - Decision Log.md` for the full context/reason/alternatives/impact
-behind each one, and `Relay - IDE Build Prompt.md` for the build order.
+This repo is well past its from-scratch phase — it is at v0.16.0 with a
+shipped capture pipeline, meetings v2, scribbles, and a vault. Two habits
+matter more here than they did at the start:
+
+- **Read the code before the prose.** Where a document and the source
+  disagree, the source is right and the document is a bug. Fix it or delete
+  it in the same change rather than working around it.
+- **Leave the marker where the gap is.** If you knowingly leave something
+  incomplete, put a `TODO(context):` comment next to the code it affects.
+  Do not open a new root-level markdown file to hold it — that is how the
+  documentation pile grew in the first place. Deferred *features* go in
+  `maybe_later.md` per `rules/maybe-later.md`; deferred *code* gets a
+  comment.
 
 ## Safety & Automated Maintenance Requirements
 
 - **Never** hardcode secrets or credentials in source code.
+- **Never** hardcode machine-specific absolute paths in committed build
+  configuration (`.cargo/config.toml`, scripts, CI). They break every other
+  machine, including CI.
 - **Never** bypass RLS assumptions once hybrid mode's cloud storage is in
   place; queries missing matching policies should fail closed.
 - **Never** expose the Supabase service-role key to `native/src/`, `web/`
@@ -83,11 +122,9 @@ behind each one, and `Relay - IDE Build Prompt.md` for the build order.
 - **Always** confirm with the user before running any command that mutates
   cloud-stored user data.
 - **Local-only mode needs no auth** — don't build login/session logic that
-  only ever runs there. **Hybrid mode requires real login** (password/
-  token) against the cloud backend — not LAN-only or tunnel-based access to
-  the Windows machine, a framing already considered and rejected (decision
-  12).
-- **Mandatory Commit & Push Execution**: After every task, before committing or pushing changes:
-  1. Inspect changes and update `VERSION` and `CHANGELOG.md` per `Rules/version-and-changelog.md`.
-  2. Audit `README.md` per `Rules/readme.md` whenever scripts, commands, dependencies, or features are modified.
-
+  only ever runs there. **Hybrid mode requires real login** against the cloud
+  backend — not LAN-only or tunnel-based access to the Windows machine, a
+  framing already considered and rejected (`docs/decisions.md`, Decision 12).
+- **Mandatory Commit & Push Execution**: After every task, before committing:
+  1. Inspect changes and update `VERSION` and `CHANGELOG.md` per `rules/version-and-changelog.md`.
+  2. Audit `README.md` per `rules/readme.md` whenever scripts, commands, dependencies, or features are modified.
