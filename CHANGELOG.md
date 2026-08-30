@@ -1,5 +1,51 @@
 # Relay — Changelog
 
+## [0.19.1] - 2026-08-30
+
+### The Voice Installer Was Pointed at a Python Package
+
+**Type**: patch — native backend and release tooling (`native/src-tauri/resources/voice-manifest.json`, `native/src-tauri/src/tts/manifest.rs`, `native/src-tauri/src/tts/installer.rs`, `native/src-tauri/Cargo.toml`, `scripts/build-voice-manifest.mjs`, `scripts/lib/archive-index.mjs (new)`, `scripts/lib/fake-archives.mjs (new)`, `scripts/build-voice-manifest.test.mjs (new)`, `package.json`, `.github/workflows/ci.yml`, `docs/talkback/{ARCHITECTURE,RESEARCH}.md`, `docs/decisions.md`).
+
+v0.19.0 shipped one-click voice setup with the manifest deliberately
+unprovisioned, to be filled in by a release step on a networked machine.
+Run on Windows, that step failed:
+
+```text
+✗ Release v1.7.0 has no asset for piper-windows-x86_64. Assets:
+piper_tts-1.7.0-cp39-abi3-win_amd64.whl  …
+```
+
+It reads like a naming drift. It was not. `OHF-Voice/piper1-gpl` publishes
+Python wheels and an sdist and nothing else — its release workflow uploads
+`dist/*`, in every release from v1.3.0 to v1.7.0 — and Relay's installer
+downloads an archive and spawns an executable out of it. The catalogue had
+been pointing at a project that could not satisfy the architecture since
+the day it was written. Nobody found out, because the manifest was never
+provisioned.
+
+The dangerous fix was one line away. `piper_tts-1.7.0-cp39-abi3-win_amd64.whl`
+is a zip: it downloads, it hashes, it extracts. Relaxing the asset matcher
+would have pinned it, shipped it, and surfaced as *"the voice installed but
+couldn't speak"* on a user's machine after a 34 MB download.
+
+#### Fixes
+
+- **The engine is pinned to `rhasspy/piper` `2023.11.14-2`**, the last upstream release that publishes standalone binaries — `piper_windows_amd64.zip` containing `piper/piper.exe`, `piper_linux_x86_64.tar.gz` containing `piper/piper`, both with onnxruntime and espeak-ng beside them, MIT-licensed. Verified by downloading both, listing their contents, installing through the real installer and synthesizing through the production `PiperProvider`. Upstream is archived; that is a real cost, and the alternative was not a newer engine but no engine. See `docs/decisions.md` Decision 56 and `docs/talkback/RESEARCH.md` §B.1.
+- **Linux could never have installed either (`native/src-tauri/src/tts/installer.rs`)**: upstream ships every non-Windows platform as a `.tar.gz`, and `ArchiveKind` knew only `zip` and `raw`, so the manifest's Linux entry claimed a packaging its artifact does not use. `tar_gz` is now a first-class archive kind. Its reader is hand-rolled rather than a library's `unpack()`: entry paths are checked lexically against the target (`..`, absolute and drive-letter paths refused), symlinks are validated for containment and created after the regular files — Piper's Unix build loads its libraries through `libonnxruntime.so → libonnxruntime.so.1.14.1`, and both dropping those links and letting one point outside the folder are real failures — tar modes are masked to the ownership bits so setuid cannot survive extraction, and the whole expansion is capped. Zip extraction gained the same cap: a pinned checksum proves what the bytes are and says nothing about what they unfold into.
+- **The generator no longer guesses which asset it wants (`scripts/build-voice-manifest.mjs`)**: each runtime names its provenance — `release: { repo, tag, asset }` — and the script resolves that exact name. It then **opens the artifact and asserts the executable the manifest promises is really inside it**, non-empty and (for a tarball) marked runnable, using a dependency-free reader of the zip central directory and of tar headers (`scripts/lib/archive-index.mjs`). A release that publishes only Python distributions is now diagnosed in those words, with an explicit instruction not to rename the expected asset to match it.
+- **A wheel can no longer reach the catalogue (`native/src-tauri/src/tts/manifest.rs`)**: `validate()` refuses a `.whl` runtime asset outright, refuses any asset whose extension disagrees with its declared `archive`, refuses an `executable_path` that could escape the engine folder, and re-derives the download URL from the release pin so the artifact, the manifest and the generator cannot disagree. Provenance is therefore checked twice — once at release time, once at load time on the user's machine. The schema is bumped to **2**, so a version-1 file (whose Linux entry claims `zip` and points at a tarball) fails loudly instead of half-working.
+- **The generator no longer crashes while reporting a failure (`scripts/build-voice-manifest.mjs`)**: the Windows run also printed `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 94`. That was ours — `fail()` called `process.exit()` from inside the async flow, tearing the event loop down while `fetch` still held handles. Failures now unwind to a single handler that sets `process.exitCode` and lets the process end on its own; error paths cancel any response body they are not going to read; and a half-written progress line is closed before the message. Same shell result, after the message has actually been written.
+
+#### Improvements
+
+- **The release step is tested (`scripts/build-voice-manifest.test.mjs`, `npm run test:scripts`, CI)**: 27 cases over hand-built zip and tar fixtures — including a wheel-shaped archive — covering what the generator accepts, what it refuses, and whether the refusal explains itself. No network required. Wired into the repository-rules job, because a script that decides what Relay is willing to download and execute should not be the untested part of the repository.
+- **A network-gated install-and-speak test (`native/src-tauri/src/tts/installer.rs`)**: `cargo test -- --ignored the_pinned_engine_installs_and_speaks` installs the catalogue's own pinned engine into a temporary root and synthesizes through `PiperProvider`. Every other test proves a property of the machinery against a fixture; this one proves the artifact is a real speech engine. It skips, rather than fails, while the manifest is unprovisioned.
+
+#### Unchanged
+
+- **The user experience**: still one button, *Make Relay speak*. No new setting, no new prompt, no mention of Piper, wheels or tarballs anywhere in the flow.
+- **The security model**: HTTPS-only, pinned SHA-256, expected size, safe extraction, atomic installation, self-test through the production `PiperProvider`, cancellation and rollback. Nothing was relaxed to make the release step pass; the checks above were added to it. **The shipped manifest remains unprovisioned** — `huggingface.co`, which hosts the voice models, is blocked at this environment's egress gateway — so `node scripts/build-voice-manifest.mjs` must still be run once on a networked machine before setup is available in a build. The engine half of that run was executed here against the real GitHub artifacts and both digests verified.
+
 ## [0.19.0] - 2026-08-30
 
 ### One-Click Local Voice — Relay Installs Its Own Speech Engine

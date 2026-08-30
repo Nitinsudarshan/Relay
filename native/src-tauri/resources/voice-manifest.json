@@ -15,10 +15,23 @@
     "",
     "To provision:  node scripts/build-voice-manifest.mjs",
     "",
-    "URLs below are the upstream project's own release/distribution URLs and are",
+    "Each runtime names the exact upstream release it comes from — repo, tag",
+    "and asset filename. The generator resolves that asset by name and nothing",
+    "else, and validate() re-derives the download URL from those three fields,",
+    "so an artifact cannot be swapped for a different one without the change",
+    "being visible in this file.",
+    "",
+    "WHY rhasspy/piper AND NOT OHF-Voice/piper1-gpl: the successor project",
+    "publishes Python wheels (piper_tts-*.whl) and an sdist, and nothing else —",
+    "its release workflow uploads dist/* only. A wheel is a Python package, not",
+    "a program: it needs a CPython 3.9+ interpreter and onnxruntime to run.",
+    "Relay installs a standalone executable and spawns it, so the last upstream",
+    "release that publishes one is what it pins. See docs/talkback/RESEARCH.md.",
+    "",
+    "URLs below are the upstream projects' own release/distribution URLs and are",
     "verified by the generator, which fails if one does not resolve."
   ],
-  "schema_version": 1,
+  "schema_version": 2,
   "runtimes": [
     {
       "id": "piper-windows-x86_64",
@@ -28,13 +41,18 @@
       "arch": "x86_64",
       "archive": "zip",
       "executable_path": "piper/piper.exe",
+      "release": {
+        "repo": "rhasspy/piper",
+        "tag": "2023.11.14-2",
+        "asset": "piper_windows_amd64.zip"
+      },
       "artifact": {
         "url": "",
         "sha256": "",
         "size_bytes": 0
       },
-      "license": "GPL-3.0-only",
-      "source": "https://github.com/OHF-Voice/piper1-gpl"
+      "license": "MIT",
+      "source": "https://github.com/rhasspy/piper"
     },
     {
       "id": "piper-linux-x86_64",
@@ -42,15 +60,20 @@
       "version": "",
       "platform": "linux",
       "arch": "x86_64",
-      "archive": "zip",
+      "archive": "tar_gz",
       "executable_path": "piper/piper",
+      "release": {
+        "repo": "rhasspy/piper",
+        "tag": "2023.11.14-2",
+        "asset": "piper_linux_x86_64.tar.gz"
+      },
       "artifact": {
         "url": "",
         "sha256": "",
         "size_bytes": 0
       },
-      "license": "GPL-3.0-only",
-      "source": "https://github.com/OHF-Voice/piper1-gpl"
+      "license": "MIT",
+      "source": "https://github.com/rhasspy/piper"
     }
   ],
   "voices": [
