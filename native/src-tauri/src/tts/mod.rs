@@ -26,9 +26,13 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 pub mod discovery;
+pub mod installer;
+pub mod manifest;
 mod piper;
 
 pub use discovery::{PiperOrigin, PiperVoice, TtsProblem};
+pub use installer::{InstallError, InstallProgress, InstallStage};
+pub use manifest::{VoiceEntry, VoiceManifest};
 pub use piper::PiperProvider;
 
 #[derive(Error, Debug)]
@@ -241,6 +245,40 @@ pub struct TtsStatus {
     /// The executable filename to look for, so the instructions can name
     /// it exactly on the platform the user is on.
     pub executable_name: String,
+    /// Whether Relay can install a voice for this machine on its own.
+    /// False on an unsupported platform, or in a build whose catalogue
+    /// was never provisioned with checksums.
+    pub can_install: bool,
+    /// Why not, when `can_install` is false — already phrased for display.
+    #[serde(default)]
+    pub install_blocked_reason: Option<String>,
+    /// The voice first-run setup would install, so the pre-setup screen
+    /// can name it without the user choosing.
+    #[serde(default)]
+    pub recommended_voice: Option<CatalogueVoice>,
+    /// Every voice Relay offers, once setup has run.
+    #[serde(default)]
+    pub catalogue: Vec<CatalogueVoice>,
+    /// Approximate bytes a first-time setup would download.
+    #[serde(default)]
+    pub download_bytes: u64,
+    /// Installed engine version, for the Advanced panel.
+    #[serde(default)]
+    pub engine_version: Option<String>,
+}
+
+/// A voice as the picker shows it — no URLs, no checksums, no paths.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogueVoice {
+    pub id: String,
+    pub display_name: String,
+    pub language_label: String,
+    pub description: String,
+    pub recommended: bool,
+    /// True when this voice's files are already on disk.
+    pub installed: bool,
+    pub download_bytes: u64,
 }
 
 /// Resolves the effective Piper paths: settings first, discovery second.
@@ -324,6 +362,66 @@ pub fn status(
 
     let voice_meta = voice.as_deref().and_then(discovery::voice_from_path);
 
+    // The catalogue drives the one-click flow. A build whose manifest was
+    // never provisioned reports that plainly rather than offering a
+    // button that cannot work.
+    let catalogue = manifest::VoiceManifest::load();
+    let voices_dir = discovery::managed_voices_dir(tts_root);
+    let (can_install, install_blocked_reason, recommended, catalogue_voices, download_bytes, engine_version) =
+        match &catalogue {
+            Ok(manifest) => match manifest.runtime_for_host() {
+                Ok(runtime) => {
+                    let installed_engine = discovery::managed_piper_dir(tts_root)
+                        .join(discovery::piper_executable_name());
+                    let engine_bytes = if discovery::is_executable_file(&installed_engine) {
+                        0
+                    } else {
+                        runtime.artifact.size_bytes
+                    };
+                    let entries: Vec<CatalogueVoice> = manifest
+                        .voices
+                        .iter()
+                        .map(|v| CatalogueVoice {
+                            id: v.id.clone(),
+                            display_name: v.display_name.clone(),
+                            language_label: v.language_label.clone(),
+                            description: v.description.clone(),
+                            recommended: v.recommended,
+                            installed: voices_dir.join(v.model_filename()).is_file()
+                                && voices_dir.join(v.config_filename()).is_file(),
+                            download_bytes: v.total_bytes(),
+                        })
+                        .collect();
+                    let recommended = entries.iter().find(|v| v.recommended).cloned();
+                    let first_run_bytes =
+                        engine_bytes + recommended.as_ref().map_or(0, |v| v.download_bytes);
+                    (
+                        true,
+                        None,
+                        recommended,
+                        entries,
+                        first_run_bytes,
+                        Some(runtime.version.clone()),
+                    )
+                }
+                Err(e) => (false, Some(e.to_string()), None, Vec::new(), 0, None),
+            },
+            Err(e) => {
+                tracing::warn!("tts: voice catalogue unusable: {}", e);
+                (
+                    false,
+                    Some(
+                        "Automatic voice setup isn't available in this build of Relay."
+                            .to_string(),
+                    ),
+                    None,
+                    Vec::new(),
+                    0,
+                    None,
+                )
+            }
+        };
+
     TtsStatus {
         engine: if ready { "piper".to_string() } else { "none".to_string() },
         ready,
@@ -344,6 +442,12 @@ pub fn status(
             .to_string_lossy()
             .to_string(),
         executable_name: discovery::piper_executable_name().to_string(),
+        can_install,
+        install_blocked_reason,
+        recommended_voice: recommended,
+        catalogue: catalogue_voices,
+        download_bytes,
+        engine_version,
     }
 }
 
@@ -416,11 +520,16 @@ mod tests {
     }
 
     #[test]
-    fn status_always_tells_the_user_where_to_put_files() {
+    fn status_reports_the_managed_locations_for_advanced_details() {
+        // These are no longer instructions — nobody is asked to put a file
+        // anywhere. They back the Advanced disclosure and the installer's
+        // own destination, so they must still be populated and absolute.
         let temp = TempDir::new();
         let status = status(&TtsSettings::default(), temp.path(), None);
         assert!(status.install_dir.contains("piper"));
         assert!(status.voices_dir.contains("voices"));
+        assert!(Path::new(&status.install_dir).is_absolute());
+        assert!(Path::new(&status.voices_dir).is_absolute());
         assert_eq!(status.executable_name, discovery::piper_executable_name());
     }
 

@@ -107,6 +107,50 @@ pub struct AppState {
     /// `config_dir` is process-relative and a packaged Windows app cannot
     /// rely on it (see `tts::discovery::default_tts_root`).
     pub tts_root: PathBuf,
+    /// Set while a voice install is running; cleared when it ends.
+    /// Cancellation flips it, which every download and every stage polls.
+    pub voice_install: Arc<VoiceInstall>,
+}
+
+/// The state of an in-flight voice setup.
+///
+/// One at a time: two concurrent installs would race over the same
+/// staging root and the same destination files.
+#[derive(Default)]
+pub struct VoiceInstall {
+    running: std::sync::atomic::AtomicBool,
+    cancelled: std::sync::atomic::AtomicBool,
+}
+
+impl VoiceInstall {
+    /// Claims the install slot, or reports that one is already running.
+    fn begin(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        if self.running.swap(true, Ordering::SeqCst) {
+            return false;
+        }
+        self.cancelled.store(false, Ordering::SeqCst);
+        true
+    }
+
+    fn end(&self) {
+        use std::sync::atomic::Ordering;
+        self.running.store(false, Ordering::SeqCst);
+        self.cancelled.store(false, Ordering::SeqCst);
+    }
+
+    pub fn cancel(&self) {
+        use std::sync::atomic::Ordering;
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.running.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 impl AppState {
@@ -2779,4 +2823,196 @@ pub async fn prepare_tts_folders(state: State<'_, AppState>) -> Result<String, C
             .map_err(|e| CommandError::new("TTS_FOLDER_FAILED", &e.to_string()))?;
     }
     Ok(voices.to_string_lossy().to_string())
+}
+
+/// Progress from an in-flight voice setup.
+pub const VOICE_INSTALL_PROGRESS_EVENT: &str = "voice-install-progress";
+
+/// Downloads and installs a local voice, end to end.
+///
+/// `voice_id` names an entry in Relay's own catalogue
+/// (`tts::manifest`) — never a URL. The frontend cannot ask Relay to
+/// download something the catalogue does not list, which is the point.
+///
+/// Runs on a blocking task: it streams downloads, hashes them, unpacks an
+/// archive and spawns a process, none of which belongs on the async
+/// runtime. Progress arrives as `voice-install-progress` events.
+#[tauri::command]
+pub async fn install_local_voice(
+    app: AppHandle,
+    voice_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::tts::TtsStatus, CommandError> {
+    if !state.voice_install.begin() {
+        return Err(CommandError::new(
+            "INSTALL_IN_PROGRESS",
+            "Voice setup is already running.",
+        ));
+    }
+
+    let manifest = match crate::tts::manifest::VoiceManifest::load() {
+        Ok(manifest) => manifest,
+        Err(e) => {
+            state.voice_install.end();
+            tracing::error!("tts: voice catalogue unusable: {}", e);
+            return Err(CommandError::new(
+                "NOT_PROVISIONED",
+                "Automatic voice setup isn't available in this build of Relay.",
+            ));
+        }
+    };
+
+    // Default to the recommended voice, so first-run setup never makes
+    // the user choose one.
+    let voice_id = match voice_id.filter(|v| !v.trim().is_empty()) {
+        Some(id) => id,
+        None => match manifest.recommended_voice() {
+            Some(voice) => voice.id.clone(),
+            None => {
+                state.voice_install.end();
+                return Err(CommandError::new(
+                    "NOT_PROVISIONED",
+                    "Relay has no recommended voice to install.",
+                ));
+            }
+        },
+    };
+
+    let tts_root = state.tts_root.clone();
+    let install_state = state.voice_install.clone();
+    let progress_app = app.clone();
+
+    let outcome = tauri::async_runtime::spawn_blocking({
+        let install_state = install_state.clone();
+        let voice_id = voice_id.clone();
+        move || {
+            crate::tts::installer::install(crate::tts::installer::InstallRequest {
+                manifest: &manifest,
+                voice_id: &voice_id,
+                tts_root: &tts_root,
+                platform: crate::tts::manifest::current_platform(),
+                arch: crate::tts::manifest::current_arch(),
+                on_progress: &move |progress| {
+                    let _ = progress_app.emit(VOICE_INSTALL_PROGRESS_EVENT, &progress);
+                },
+                is_cancelled: &move || install_state.is_cancelled(),
+            })
+        }
+    })
+    .await;
+
+    state.voice_install.end();
+
+    let outcome = match outcome {
+        Ok(Ok(outcome)) => outcome,
+        Ok(Err(e)) => {
+            // The detail goes to the log; the user gets the sentence.
+            tracing::warn!("tts: voice setup failed ({}): {}", e.code(), e.detail());
+            return Err(CommandError::new(e.code(), &e.to_string()));
+        }
+        Err(e) => {
+            tracing::error!("tts: voice setup task failed: {}", e);
+            return Err(CommandError::new(
+                "IO",
+                "Voice setup couldn't be completed. Please try again.",
+            ));
+        }
+    };
+
+    // Persist what was installed, so the provider resolves it on the very
+    // next turn without a restart.
+    let settings_path = state.settings_path();
+    let updated = {
+        let mut settings = state.settings.lock_or_recover();
+        settings.tts.piper_binary_path =
+            Some(outcome.binary_path.to_string_lossy().to_string());
+        settings.tts.piper_voice_path = Some(outcome.voice_path.to_string_lossy().to_string());
+        settings
+            .save(&settings_path)
+            .map_err(|e| CommandError::new("SETTINGS_SAVE_FAILED", &e.to_string()))?;
+        settings.clone()
+    };
+    let _ = app.emit("settings-changed", &updated);
+
+    tracing::info!(
+        voice = %outcome.voice_id,
+        engine_version = %outcome.runtime_version,
+        reused_engine = outcome.reused_runtime,
+        "tts: local voice installed"
+    );
+
+    Ok(crate::tts::status(
+        &updated.tts,
+        &state.tts_root,
+        resource_dir(&app).as_deref(),
+    ))
+}
+
+/// Abandons an in-flight voice setup.
+///
+/// The install polls this between chunks, so cancelling stops mid-download
+/// rather than at the end of a file, and staging is removed on the way out.
+#[tauri::command]
+pub async fn cancel_voice_install(state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.voice_install.cancel();
+    Ok(())
+}
+
+#[cfg(test)]
+mod voice_install_tests {
+    use super::VoiceInstall;
+    use std::sync::Arc;
+
+    #[test]
+    fn only_one_install_can_hold_the_slot() {
+        let install = VoiceInstall::default();
+        assert!(install.begin(), "the first caller takes the slot");
+        assert!(!install.begin(), "a second click must not start a second download");
+        install.end();
+        assert!(install.begin(), "the slot is free again once the first ends");
+    }
+
+    #[test]
+    fn a_cancel_does_not_poison_the_next_attempt() {
+        let install = VoiceInstall::default();
+        assert!(install.begin());
+        install.cancel();
+        assert!(install.is_cancelled());
+        install.end();
+
+        // Retrying after a cancelled setup is the common case, and it must
+        // not be cancelled before it starts.
+        assert!(install.begin());
+        assert!(!install.is_cancelled());
+    }
+
+    #[test]
+    fn a_cancel_arriving_with_nothing_running_is_cleared_by_the_next_begin() {
+        // The UI can fire Cancel as the install is finishing; the flag must
+        // not survive into the next run.
+        let install = VoiceInstall::default();
+        install.cancel();
+        assert!(install.begin());
+        assert!(!install.is_cancelled());
+    }
+
+    #[test]
+    fn cancellation_is_visible_from_the_worker_thread() {
+        let install = Arc::new(VoiceInstall::default());
+        assert!(install.begin());
+
+        let worker = install.clone();
+        let handle = std::thread::spawn(move || {
+            while !worker.is_cancelled() {
+                std::thread::yield_now();
+            }
+            true
+        });
+
+        install.cancel();
+        assert!(handle.join().unwrap());
+        assert!(install.is_running(), "cancelling does not release the slot");
+        install.end();
+        assert!(!install.is_running());
+    }
 }

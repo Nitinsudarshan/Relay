@@ -218,12 +218,55 @@ export interface TtsStatus {
   voiceLanguage?: string | null;
   availableVoices: PiperVoice[];
   problems: string[];
-  /** Where to put a Piper executable so Relay finds it automatically. */
+  /** Advanced only — where a manual install would go. */
   installDir: string;
-  /** Where to put voice models so Relay finds them automatically. */
+  /** Advanced only — where voice models live. */
   voicesDir: string;
   /** `piper.exe` on Windows, `piper` elsewhere. */
   executableName: string;
+  /** Whether Relay can set the voice up itself on this machine. */
+  canInstall: boolean;
+  /** Why not, already phrased for display. */
+  installBlockedReason?: string | null;
+  /** What first-run setup installs, so the user need not choose. */
+  recommendedVoice?: CatalogueVoice | null;
+  /** Every voice Relay offers. */
+  catalogue: CatalogueVoice[];
+  /** Approximate bytes a first-time setup downloads. */
+  downloadBytes: number;
+  engineVersion?: string | null;
+}
+
+/** A voice as the picker shows it — no URLs, no checksums, no paths. */
+export interface CatalogueVoice {
+  id: string;
+  displayName: string;
+  languageLabel: string;
+  description: string;
+  recommended: boolean;
+  installed: boolean;
+  downloadBytes: number;
+}
+
+/** Which part of setup is running. Mirrors `tts::InstallStage`. */
+export type InstallStage =
+  | 'preparing'
+  | 'downloading_engine'
+  | 'downloading_voice'
+  | 'installing'
+  | 'validating'
+  | 'testing'
+  | 'done';
+
+/** A progress report from an in-flight voice setup. */
+export interface InstallProgress {
+  stage: InstallStage;
+  label: string;
+  item?: string | null;
+  receivedBytes: number;
+  totalBytes?: number | null;
+  /** Whole-setup progress, 0–1. */
+  overall: number;
 }
 
 export interface HotkeySettings {

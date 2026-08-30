@@ -1,0 +1,118 @@
+{
+  "_comment": [
+    "Relay's catalogue of voice runtimes and voices. Compiled into the binary",
+    "by src/tts/manifest.rs — the UI never constructs a download URL.",
+    "",
+    "The sha256 and size_bytes fields are PROVISIONED AT RELEASE TIME by",
+    "scripts/build-voice-manifest.mjs, which downloads each artifact and hashes",
+    "it. They are empty here because a checksum cannot be written by hand: an",
+    "invented one makes every install fail verification, and a copied one that",
+    "nobody checked is worse than none.",
+    "",
+    "While they are empty, VoiceManifest::validate() rejects this file and the",
+    "installer reports that automatic setup is unavailable in this build. That",
+    "is deliberate: Relay refuses to download an artifact it cannot verify.",
+    "",
+    "To provision:  node scripts/build-voice-manifest.mjs",
+    "",
+    "urlS below are the upstream project's own release/distribution URLs and are",
+    "verified by the generator, which fails if one does not resolve."
+  ],
+  "schema_version": 1,
+  "runtimes": [
+    {
+      "id": "piper-windows-x86_64",
+      "engine": "piper",
+      "version": "",
+      "platform": "windows",
+      "arch": "x86_64",
+      "archive": "zip",
+      "executable_path": "piper/piper.exe",
+      "artifact": {
+        "url": "",
+        "sha256": "",
+        "size_bytes": 0
+      },
+      "license": "GPL-3.0-only",
+      "source": "https://github.com/OHF-Voice/piper1-gpl"
+    },
+    {
+      "id": "piper-linux-x86_64",
+      "engine": "piper",
+      "version": "",
+      "platform": "linux",
+      "arch": "x86_64",
+      "archive": "zip",
+      "executable_path": "piper/piper",
+      "artifact": {
+        "url": "",
+        "sha256": "",
+        "size_bytes": 0
+      },
+      "license": "GPL-3.0-only",
+      "source": "https://github.com/OHF-Voice/piper1-gpl"
+    }
+  ],
+  "voices": [
+    {
+      "id": "en_US-amy-medium",
+      "display_name": "English (US) — Amy",
+      "language": "en_US",
+      "language_label": "English (US)",
+      "description": "Clear and neutral. Recommended.",
+      "recommended": true,
+      "model": {
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx",
+        "sha256": "",
+        "size_bytes": 0
+      },
+      "config": {
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json",
+        "sha256": "",
+        "size_bytes": 0
+      },
+      "license": "MIT",
+      "source": "https://huggingface.co/rhasspy/piper-voices"
+    },
+    {
+      "id": "en_GB-alba-medium",
+      "display_name": "English (UK) — Alba",
+      "language": "en_GB",
+      "language_label": "English (UK)",
+      "description": "Scottish English.",
+      "recommended": false,
+      "model": {
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alba/medium/en_GB-alba-medium.onnx",
+        "sha256": "",
+        "size_bytes": 0
+      },
+      "config": {
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alba/medium/en_GB-alba-medium.onnx.json",
+        "sha256": "",
+        "size_bytes": 0
+      },
+      "license": "MIT",
+      "source": "https://huggingface.co/rhasspy/piper-voices"
+    },
+    {
+      "id": "hi_IN-pratham-medium",
+      "display_name": "हिन्दी — Pratham",
+      "language": "hi_IN",
+      "language_label": "Hindi",
+      "description": "For Hindi and mixed English-Hindi speech.",
+      "recommended": false,
+      "model": {
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/hi/hi_IN/pratham/medium/hi_IN-pratham-medium.onnx",
+        "sha256": "",
+        "size_bytes": 0
+      },
+      "config": {
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/hi/hi_IN/pratham/medium/hi_IN-pratham-medium.onnx.json",
+        "sha256": "",
+        "size_bytes": 0
+      },
+      "license": "MIT",
+      "source": "https://huggingface.co/rhasspy/piper-voices"
+    }
+  ]
+}

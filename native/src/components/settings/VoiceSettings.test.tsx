@@ -2,12 +2,34 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { VoiceSettings } from './VoiceSettings';
-import type { TtsStatus } from '../../types';
+import type { CatalogueVoice, InstallProgress, TtsStatus } from '../../types';
 
 const mockedInvoke = vi.mocked(invoke);
+const mockedListen = vi.mocked(listen);
 
-const NOT_CONFIGURED: TtsStatus = {
+const amy: CatalogueVoice = {
+  id: 'en_US-amy-medium',
+  displayName: 'English (US) — Amy',
+  languageLabel: 'English (US)',
+  description: 'Clear and neutral. Recommended.',
+  recommended: true,
+  installed: false,
+  downloadBytes: 63_000_000,
+};
+
+const pratham: CatalogueVoice = {
+  id: 'hi_IN-pratham-medium',
+  displayName: 'हिन्दी — Pratham',
+  languageLabel: 'Hindi',
+  description: 'For Hindi and mixed English-Hindi speech.',
+  recommended: false,
+  installed: false,
+  downloadBytes: 61_000_000,
+};
+
+const NOT_INSTALLED: TtsStatus = {
   engine: 'none',
   ready: false,
   binaryPath: null,
@@ -16,41 +38,38 @@ const NOT_CONFIGURED: TtsStatus = {
   voiceLabel: null,
   voiceLanguage: null,
   availableVoices: [],
-  problems: [
-    "No Piper executable found. Add one to Relay's voice folder or browse for it.",
-    'No voice model selected. Add a Piper .onnx voice to Relay voice folder.',
-  ],
-  installDir: 'C:\\Users\\nitin\\.relay\\config\\tts\\piper',
-  voicesDir: 'C:\\Users\\nitin\\.relay\\config\\tts\\voices',
+  problems: ['No Piper executable found.'],
+  installDir: 'C:\\Users\\nitin\\AppData\\Roaming\\Relay\\tts\\piper',
+  voicesDir: 'C:\\Users\\nitin\\AppData\\Roaming\\Relay\\tts\\voices',
   executableName: 'piper.exe',
+  canInstall: true,
+  installBlockedReason: null,
+  recommendedVoice: amy,
+  catalogue: [amy, pratham],
+  downloadBytes: 84_000_000,
+  engineVersion: '1.6.0',
 };
 
 const READY: TtsStatus = {
+  ...NOT_INSTALLED,
   engine: 'piper',
   ready: true,
-  binaryPath: 'C:\\Users\\nitin\\.relay\\config\\tts\\piper\\piper.exe',
+  binaryPath: 'C:\\Users\\nitin\\AppData\\Roaming\\Relay\\tts\\piper\\piper.exe',
   binaryOrigin: 'managed',
-  voicePath: 'C:\\voices\\en_US-amy-medium.onnx',
+  voicePath: 'C:\\Users\\nitin\\AppData\\Roaming\\Relay\\tts\\voices\\en_US-amy-medium.onnx',
   voiceLabel: 'en_US-amy-medium',
   voiceLanguage: 'en_US',
-  availableVoices: [
-    {
-      path: 'C:\\voices\\en_US-amy-medium.onnx',
-      label: 'en_US-amy-medium',
-      language: 'en_US',
-      has_config: true,
-    },
-    {
-      path: 'C:\\voices\\hi_IN-pratham-medium.onnx',
-      label: 'hi_IN-pratham-medium',
-      language: 'hi_IN',
-      has_config: true,
-    },
-  ],
   problems: [],
-  installDir: 'C:\\Users\\nitin\\.relay\\config\\tts\\piper',
-  voicesDir: 'C:\\Users\\nitin\\.relay\\config\\tts\\voices',
-  executableName: 'piper.exe',
+  catalogue: [{ ...amy, installed: true }, pratham],
+  downloadBytes: 0,
+};
+
+const UNSUPPORTED: TtsStatus = {
+  ...NOT_INSTALLED,
+  canInstall: false,
+  installBlockedReason: "Automatic voice setup isn't available for aarch64 processors yet",
+  recommendedVoice: null,
+  catalogue: [],
 };
 
 const withStatus = (status: TtsStatus, overrides: Record<string, unknown> = {}) => {
@@ -61,156 +80,216 @@ const withStatus = (status: TtsStatus, overrides: Record<string, unknown> = {}) 
       return value;
     }
     if (command === 'get_tts_status') return status;
-    if (command === 'set_tts_configuration') return status;
-    if (command === 'prepare_tts_folders') return status.voicesDir;
+    if (command === 'install_local_voice') return { ...status, ready: true };
     return undefined;
   });
 };
 
 beforeEach(() => {
   mockedInvoke.mockReset();
-  // jsdom cannot decode or play audio.
+  mockedListen.mockReset();
+  mockedListen.mockResolvedValue(() => {});
   vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockResolvedValue();
   vi.spyOn(window.HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
 });
 
-describe('VoiceSettings', () => {
-  it('says plainly when local voice is not set up', async () => {
-    withStatus(NOT_CONFIGURED);
+describe('VoiceSettings — before setup', () => {
+  it('offers one button and names no filesystem path', async () => {
+    withStatus(NOT_INSTALLED);
     render(<VoiceSettings />);
 
-    expect(await screen.findByText('Not configured')).toBeInTheDocument();
+    expect(await screen.findByText('Make Relay speak')).toBeInTheDocument();
     expect(
-      screen.getByText(/talkback will answer in text only/i),
+      screen.getByRole('button', { name: /download & set up/i }),
     ).toBeInTheDocument();
-  });
 
-  it('surfaces every problem in the backend’s own words', async () => {
-    withStatus(NOT_CONFIGURED);
-    render(<VoiceSettings />);
-
-    for (const problem of NOT_CONFIGURED.problems) {
-      expect(await screen.findByText(problem)).toBeInTheDocument();
+    // The whole point of this change: nothing about GitHub, ONNX, AppData
+    // or file placement in the default experience.
+    const body = document.body.textContent ?? '';
+    for (const leak of ['piper.exe', 'AppData', '.onnx', 'GitHub', 'github.com']) {
+      expect(body).not.toContain(leak);
     }
   });
 
-  it('tells the user exactly where to put Piper and its voices', async () => {
-    withStatus(NOT_CONFIGURED);
+  it('explains that the voice is local and private', async () => {
+    withStatus(NOT_INSTALLED);
     render(<VoiceSettings />);
 
-    // The whole point of the setup flow: no unexplained filesystem paths.
-    expect(await screen.findByText(NOT_CONFIGURED.installDir)).toBeInTheDocument();
-    expect(screen.getByText(NOT_CONFIGURED.voicesDir)).toBeInTheDocument();
-    expect(screen.getAllByText('piper.exe').length).toBeGreaterThan(0);
-    expect(screen.getByText(/\.onnx\.json/)).toBeInTheDocument();
+    expect(await screen.findByText(/entirely\s+on this computer/i)).toBeInTheDocument();
+    expect(screen.getByText(/does not send the text it speaks/i)).toBeInTheDocument();
+    expect(screen.getByText(/one-time setup/i)).toBeInTheDocument();
   });
 
-  it('cannot test a voice that is not configured', async () => {
-    withStatus(NOT_CONFIGURED);
+  it('shows the recommended voice without asking the user to choose', async () => {
+    withStatus(NOT_INSTALLED);
     render(<VoiceSettings />);
 
-    expect(await screen.findByRole('button', { name: /test voice/i })).toBeDisabled();
+    expect(await screen.findByText('Recommended voice')).toBeInTheDocument();
+    expect(screen.getByText('English (US) — Amy')).toBeInTheDocument();
+    expect(screen.getByText(/80 MB to download/i)).toBeInTheDocument();
+    // No picker before setup — choosing is a later, optional step.
+    expect(screen.queryByLabelText(/^voice$/i)).not.toBeInTheDocument();
   });
 
-  it('shows readiness, the engine and where the program came from', async () => {
-    withStatus(READY);
+  it('starts setup with no voice id, letting the backend pick', async () => {
+    const user = userEvent.setup();
+    withStatus(NOT_INSTALLED);
     render(<VoiceSettings />);
 
-    expect(await screen.findByText('Ready')).toBeInTheDocument();
-    expect(screen.getByText('Local Piper')).toBeInTheDocument();
-    expect(screen.getByText(/found in relay's voice folder/i)).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /download & set up/i }));
+
+    await waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith('install_local_voice', { voiceId: null });
+    });
   });
 
-  it('hides the setup instructions once it works', async () => {
-    withStatus(READY);
+  it('says so plainly when Relay cannot install on this machine', async () => {
+    withStatus(UNSUPPORTED);
     render(<VoiceSettings />);
 
-    await screen.findByText('Ready');
-    expect(screen.queryByText(/setting up a local voice/i)).not.toBeInTheDocument();
-  });
-
-  it('offers the discovered voices, including a Hindi one', async () => {
-    withStatus(READY);
-    render(<VoiceSettings />);
-
-    const picker = await screen.findByLabelText(/voice model/i);
-    expect(picker).toHaveValue(READY.voicePath);
+    expect(await screen.findByText(/automatic setup unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/aarch64 processors/i)).toBeInTheDocument();
+    expect(screen.getByText(/still answers in text/i)).toBeInTheDocument();
     expect(
-      screen.getByRole('option', { name: /hi_IN-pratham-medium/ }),
+      screen.queryByRole('button', { name: /download & set up/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe('VoiceSettings — during setup', () => {
+  /** Captures the progress listener so a test can drive it. */
+  const captureProgress = () => {
+    let emit: ((progress: InstallProgress) => void) | null = null;
+    mockedListen.mockImplementation(async (event: string, handler: unknown) => {
+      if (event === 'voice-install-progress') {
+        emit = (progress) =>
+          (handler as (e: { payload: InstallProgress }) => void)({ payload: progress });
+      }
+      return () => {};
+    });
+    return () => emit;
+  };
+
+  it('shows the current item and both progress bars', async () => {
+    const user = userEvent.setup();
+    const getEmit = captureProgress();
+    // An install that never resolves, so the progress UI stays up.
+    withStatus(NOT_INSTALLED, {
+      install_local_voice: new Promise(() => {}) as unknown,
+    });
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === 'get_tts_status') return NOT_INSTALLED;
+      if (command === 'install_local_voice') return new Promise(() => {});
+      return undefined;
+    });
+
+    render(<VoiceSettings />);
+    await user.click(await screen.findByRole('button', { name: /download & set up/i }));
+
+    expect(await screen.findByTestId('voice-installing')).toBeInTheDocument();
+
+    getEmit()?.({
+      stage: 'downloading_voice',
+      label: 'Downloading voice',
+      item: 'English (US) — Amy',
+      receivedBytes: 41,
+      totalBytes: 100,
+      overall: 0.62,
+    });
+
+    expect(await screen.findByText('English (US) — Amy')).toBeInTheDocument();
+    expect(await screen.findByText('41%')).toBeInTheDocument();
+    expect(screen.getByText('62%')).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', { name: /overall setup progress/i }),
+    ).toHaveAttribute('aria-valuenow', '62');
+  });
+
+  it('can be cancelled mid-download', async () => {
+    const user = userEvent.setup();
+    captureProgress();
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === 'get_tts_status') return NOT_INSTALLED;
+      if (command === 'install_local_voice') return new Promise(() => {});
+      return undefined;
+    });
+
+    render(<VoiceSettings />);
+    await user.click(await screen.findByRole('button', { name: /download & set up/i }));
+    await user.click(await screen.findByRole('button', { name: /^cancel$/i }));
+
+    await waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith('cancel_voice_install');
+    });
+  });
+
+  it('hides Advanced while installing', async () => {
+    const user = userEvent.setup();
+    captureProgress();
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === 'get_tts_status') return NOT_INSTALLED;
+      if (command === 'install_local_voice') return new Promise(() => {});
+      return undefined;
+    });
+
+    render(<VoiceSettings />);
+    await user.click(await screen.findByRole('button', { name: /download & set up/i }));
+
+    await screen.findByTestId('voice-installing');
+    expect(screen.queryByText('Advanced')).not.toBeInTheDocument();
+  });
+});
+
+describe('VoiceSettings — after setup', () => {
+  it('confirms readiness and names the voice', async () => {
+    withStatus(READY);
+    render(<VoiceSettings />);
+
+    const banner = await screen.findByText('Local voice ready');
+    // The header names the active voice; the picker below lists all of
+    // them, so scope the assertion to the header.
+    expect(banner.parentElement).toHaveTextContent('English (US) — Amy — Recommended');
+  });
+
+  it('offers a voice picker of validated voices only', async () => {
+    withStatus(READY);
+    render(<VoiceSettings />);
+
+    const picker = await screen.findByLabelText(/^voice$/i);
+    expect(picker).toBeInTheDocument();
+    // Exactly the catalogue — not every voice in the upstream repository.
+    expect(screen.getAllByRole('option')).toHaveLength(READY.catalogue.length);
+    expect(
+      screen.getByRole('option', { name: /हिन्दी — Pratham/ }),
     ).toBeInTheDocument();
   });
 
-  it('persists a voice change through the backend', async () => {
+  it('shows a download size for a voice that is not installed yet', async () => {
+    withStatus(READY);
+    render(<VoiceSettings />);
+
+    const option = await screen.findByRole('option', { name: /Pratham/ });
+    expect(option.textContent).toMatch(/58 MB download/);
+  });
+
+  it('installs the chosen voice through the same setup path', async () => {
     const user = userEvent.setup();
     withStatus(READY);
     render(<VoiceSettings />);
 
-    const picker = await screen.findByLabelText(/voice model/i);
-    await user.selectOptions(picker, 'C:\\voices\\hi_IN-pratham-medium.onnx');
-
-    await waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith('set_tts_configuration', {
-        binaryPath: null,
-        voicePath: 'C:\\voices\\hi_IN-pratham-medium.onnx',
-      });
-    });
-  });
-
-  it('flags a voice missing its sidecar rather than silently offering it', async () => {
-    withStatus({
-      ...READY,
-      availableVoices: [
-        {
-          path: 'C:\\voices\\broken.onnx',
-          label: 'broken',
-          language: null,
-          has_config: false,
-        },
-      ],
-    });
-    render(<VoiceSettings />);
-
-    expect(
-      await screen.findByRole('option', { name: /missing \.onnx\.json/ }),
-    ).toBeInTheDocument();
-  });
-
-  it('browses for a program and saves what was picked', async () => {
-    const user = userEvent.setup();
-    withStatus(READY, { browse_for_piper_binary: 'D:\\tools\\piper\\piper.exe' });
-    render(<VoiceSettings />);
-
-    await screen.findByText('Ready');
-    const [programBrowse] = await screen.findAllByRole('button', { name: /browse/i });
-    await user.click(programBrowse);
-
-    await waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith('set_tts_configuration', {
-        binaryPath: 'D:\\tools\\piper\\piper.exe',
-        voicePath: null,
-      });
-    });
-  });
-
-  it('saves nothing when the file picker is cancelled', async () => {
-    const user = userEvent.setup();
-    withStatus(READY, { browse_for_piper_binary: null });
-    render(<VoiceSettings />);
-
-    await screen.findByText('Ready');
-    const [programBrowse] = await screen.findAllByRole('button', { name: /browse/i });
-    await user.click(programBrowse);
-
-    await waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith('browse_for_piper_binary');
-    });
-    expect(mockedInvoke).not.toHaveBeenCalledWith(
-      'set_tts_configuration',
-      expect.anything(),
+    await user.selectOptions(
+      await screen.findByLabelText(/^voice$/i),
+      'hi_IN-pratham-medium',
     );
+
+    await waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith('install_local_voice', {
+        voiceId: 'hi_IN-pratham-medium',
+      });
+    });
   });
 
-  it('speaks a test sentence through the real provider', async () => {
+  it('speaks a test sentence through the production path', async () => {
     const user = userEvent.setup();
     withStatus(READY, { test_tts_voice: 'UklGRgABBBB' });
     render(<VoiceSettings />);
@@ -220,50 +299,72 @@ describe('VoiceSettings', () => {
     await waitFor(() => {
       expect(mockedInvoke).toHaveBeenCalledWith('test_tts_voice');
     });
-    // Playback started, so a stop control replaces the test button.
     expect(await screen.findByRole('button', { name: /stop/i })).toBeInTheDocument();
   });
 
-  it('shows an actionable message when the test fails', async () => {
+  it('keeps the privacy wording accurate about the LLM', async () => {
+    withStatus(READY);
+    render(<VoiceSettings />);
+
+    // Local *voice* — not a claim that the whole conversation is offline.
+    expect(
+      await screen.findByText(/generated on this computer/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/whichever\s+AI provider you have configured/i)).toBeInTheDocument();
+  });
+
+  it('keeps paths and versions under Advanced', async () => {
     const user = userEvent.setup();
-    withStatus(READY, {
-      test_tts_voice: Object.assign(new Error('x'), {
-        message: 'Piper reported success but wrote no audio.',
+    withStatus(READY);
+    render(<VoiceSettings />);
+
+    await screen.findByText('Local voice ready');
+    expect(screen.queryByText(/piper\.exe/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByText('Advanced'));
+    expect(screen.getByText(/piper\.exe/)).toBeInTheDocument();
+    expect(screen.getByText('1.6.0')).toBeInTheDocument();
+  });
+});
+
+describe('VoiceSettings — failure', () => {
+  it('shows a plain message and keeps the retry button', async () => {
+    const user = userEvent.setup();
+    withStatus(NOT_INSTALLED, {
+      install_local_voice: Object.assign(new Error('x'), {
+        code: 'CHECKSUM',
+        message:
+          "A downloaded file didn't match what Relay expected and was discarded. This usually means the download was interrupted — try again.",
       }),
     });
     render(<VoiceSettings />);
 
-    await user.click(await screen.findByRole('button', { name: /test voice/i }));
+    await user.click(await screen.findByRole('button', { name: /download & set up/i }));
 
+    expect(await screen.findByText(/didn't match what Relay expected/i)).toBeInTheDocument();
+    // Recoverable: the primary action is still there to press again.
     expect(
-      await screen.findByText(/wrote no audio/i),
+      screen.getByRole('button', { name: /download & set up/i }),
     ).toBeInTheDocument();
   });
 
-  it('creates the managed folders on request', async () => {
+  it('never shows a Rust error, a path or a URL', async () => {
     const user = userEvent.setup();
-    withStatus(NOT_CONFIGURED);
-    render(<VoiceSettings />);
-
-    await user.click(
-      await screen.findByRole('button', { name: /create voice folder/i }),
-    );
-
-    await waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith('prepare_tts_folders');
+    withStatus(NOT_INSTALLED, {
+      install_local_voice: Object.assign(new Error('x'), {
+        code: 'NETWORK',
+        message: 'The download couldn’t be completed. Check your connection and try again.',
+      }),
     });
-  });
-
-  it('re-checks on demand without a restart', async () => {
-    const user = userEvent.setup();
-    withStatus(NOT_CONFIGURED);
     render(<VoiceSettings />);
 
-    await screen.findByText('Not configured');
-    withStatus(READY);
-    await user.click(screen.getByRole('button', { name: /re-check voice setup/i }));
+    await user.click(await screen.findByRole('button', { name: /download & set up/i }));
+    await screen.findByText(/check your connection/i);
 
-    expect(await screen.findByText('Ready')).toBeInTheDocument();
+    const body = document.body.textContent ?? '';
+    expect(body).not.toContain('https://');
+    expect(body).not.toContain('.rs:');
+    expect(body).not.toContain('Err(');
   });
 
   it('survives a backend that cannot answer', async () => {

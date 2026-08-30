@@ -25,6 +25,9 @@ const readyVoice = {
   installDir: 'C:\\piper',
   voicesDir: 'C:\\voices',
   executableName: 'piper.exe',
+  canInstall: true,
+  catalogue: [],
+  downloadBytes: 0,
 };
 
 const unconfiguredVoice = {
@@ -111,8 +114,10 @@ describe('TalkbackPage', () => {
     // The whole failure mode this replaces: Talkback silently not
     // speaking, with nothing on screen explaining why.
     expect(await screen.findByTestId('voice-unavailable')).toBeInTheDocument();
-    expect(screen.getByText(/no piper executable found/i)).toBeInTheDocument();
+    // Offers the one-click path rather than naming an executable.
+    expect(screen.getByText(/set up a voice that runs on this computer/i)).toBeInTheDocument();
     expect(screen.getByText(/still answers in text/i)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('piper.exe');
     expect(
       screen.getByRole('button', { name: /set up local voice/i }),
     ).toBeInTheDocument();

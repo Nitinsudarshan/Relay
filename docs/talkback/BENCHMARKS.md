@@ -1,6 +1,6 @@
 # Talkback — measurements
 
-Written against **v0.18.1**. Everything below is either a number this
+Written against **v0.19.0**. Everything below is either a number this
 machine actually produced or an explicit statement that it was **not
 measured**. Nothing here is estimated and presented as measured.
 

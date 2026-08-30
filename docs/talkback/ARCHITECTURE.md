@@ -1,7 +1,7 @@
 # Talkback — architecture
 
 The conversational layer over everything Relay has already captured.
-Written against **v0.18.1**. This is a *living specification*: if it and the
+Written against **v0.19.0**. This is a *living specification*: if it and the
 code disagree, the code is right and this file is a bug.
 
 The research behind these choices is in [`RESEARCH.md`](RESEARCH.md).
@@ -85,6 +85,8 @@ STT → retrieval → streaming LLM → phrase buffer → TTS.
 | `talkback/audio.rs` | Talkback-only mic worker (cpal) | No — device I/O |
 | `talkback/engine.rs` | Orchestration, cancellation, event emission | Partly |
 | `tts/mod.rs` | `TtsProvider` trait, capabilities, status | Yes |
+| `tts/manifest.rs` | The catalogue of what Relay will download | Yes |
+| `tts/installer.rs` | Download, verify, install, self-test | Yes — against a loopback HTTP server |
 | `tts/discovery.rs` | Finding and validating a Piper install | Yes |
 | `tts/piper.rs` | Piper provider (subprocess) | Partly — a shell stub drives the lifecycle |
 
@@ -204,35 +206,86 @@ not to ask a model to avoid it.
   on every exit from a turn — success, error, or panic — because THINKING
   with no way out is the one failure that forces an application restart.
 
-## 9. Local voice: distribution and setup
+## 9. Local voice: one-click setup
 
-Piper is **not bundled**. The binary plus one voice is 40–100 MB, the
-release artifacts are per-platform and per-architecture, and Relay cannot
-verify a download it never performed. What ships is a *managed location*
-Relay owns and discovers without being told:
+The user-facing flow is one button:
+
+```text
+Settings → Talkback → "Make Relay speak" → Download & Set Up → ✓ Ready
+```
+
+No GitHub, no `.onnx`, no AppData, no file copying. Those words appear
+nowhere in the default experience — a test asserts it.
+
+### The layering
+
+Download logic is a **separate lifecycle layer**, not part of the
+provider. `Talkback → TtsProvider → PiperProvider` is untouched; the
+installer only puts files where `discovery` already looks.
+
+```text
+tts/
+  mod.rs         TtsProvider trait, TtsStatus
+  piper.rs       PiperProvider — synthesis only, no networking
+  discovery.rs   finding and validating what is installed
+  manifest.rs    the catalogue: what Relay will download, and its hashes
+  installer.rs   download → verify → extract → atomic move → speak
+```
+
+### The manifest is the only source of URLs
+
+`resources/voice-manifest.json` is compiled into the binary with
+`include_str!`. The UI names a **voice id**; it cannot construct a URL,
+because an interface that can build download URLs is one that can be
+talked into downloading something else. The catalogue carries, per entry:
+version, platform, arch, URL, SHA-256, expected size, the executable's
+path inside the archive, licence and upstream source.
+
+Checksums cannot be written by hand. `scripts/build-voice-manifest.mjs`
+downloads each artifact, hashes it, and rewrites the file — a release
+step. Until it has run, `validate()` rejects the manifest and Relay
+reports *"automatic voice setup isn't available in this build"* rather
+than fetching something it cannot verify. **A catalogue that cannot be
+trusted is treated as no catalogue at all.**
+
+### What "installed" has to mean
+
+```text
+download (streamed, cancellable) → SHA-256 → extract → atomic move
+                                                          ↓
+                              ✓ Ready ← real synthesis ← pair check
+```
+
+Files existing is not installed. Relay speaks a sentence through the
+**production** `PiperProvider` before reporting Ready, so a voice that
+downloads perfectly and cannot load is caught during setup rather than
+mid-conversation. The pair check additionally catches a model and config
+that both pass their own checksums but do not belong together.
+
+### Never break a working installation
+
+Downloads land in `<root>/.staging` and are moved into place only after
+verification; `rename` within one filesystem is atomic. A failed or
+cancelled run deletes its staging directory and leaves whatever was
+installed untouched, so a user retrying a flaky download does not lose
+the voice they had. A crash cannot run `Drop`, so staging is also cleared
+at startup. An already-installed engine is reused rather than re-fetched.
+
+### Storage root
 
 ```text
 <app-data>/Relay/tts/piper/piper.exe    the executable
 <app-data>/Relay/tts/voices/*.onnx      voices (+ .onnx.json sidecars)
 ```
 
-`tts::discovery::discover` looks there first, then beside Relay's own
-executable, then in Tauri's resource directory — so *bundling* Piper later
-is a packaging change, not a code change — and finally on `PATH`. An
-explicit setting always wins, and a stale one is reported rather than
-silently replaced by a discovered binary.
+Anchored to the **OS application-data directory**, not to `config_dir`.
+`config_dir` is process-relative (`current_dir()/.relay/config`), which is
+fine beside a checkout and wrong for a packaged Windows app: launched from
+a Start Menu shortcut, `current_dir()` is typically `C:\Windows\System32`.
 
-The root is anchored to the **OS application-data directory**, not to
-Relay's `config_dir`. `config_dir` is process-relative
-(`current_dir()/.relay/config`), which is fine beside a checkout and wrong
-for a packaged Windows app: launched from a Start Menu shortcut,
-`current_dir()` is typically `C:\Windows\System32`. Telling a user to put
-a file somewhere only works if that somewhere is stable and writable.
-
-Settings › Talkback shows readiness, the resolved program and how it was
-found, a voice picker, the exact folders to use, and a **Test voice**
-button that drives the real provider — so a configuration that passes
-there cannot fail differently in conversation.
+`discovery::discover` still finds a manually-placed install, and an
+explicit setting still wins over discovery — a developer who wants their
+own Piper build is not overridden by the installer.
 
 ## 10. Activation
 
