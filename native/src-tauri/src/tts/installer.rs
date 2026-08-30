@@ -363,6 +363,9 @@ pub fn install(request: InstallRequest<'_>) -> Result<InstallOutcome, InstallErr
     // its config is a voice that looks installed and cannot load.
     let final_config = voices_dir.join(voice.config_filename());
     let final_model = voices_dir.join(voice.model_filename());
+    // Whether this voice was already on disk decides what a failed self-test
+    // is allowed to clean up: files this run created, and nothing else.
+    let voice_was_present = final_model.exists() && final_config.exists();
     move_into_place(&staged_config, &final_config)?;
     move_into_place(&staged_model, &final_model)?;
 
@@ -372,8 +375,21 @@ pub fn install(request: InstallRequest<'_>) -> Result<InstallOutcome, InstallErr
     // The one check that makes "Ready" mean something: speak, for real,
     // through the production provider.
     report(InstallStage::Testing, None, 0, None, 0.97);
-    check_cancelled(request.is_cancelled)?;
-    self_test(&binary_path, &final_model, request.tts_root)?;
+    if let Err(e) = check_cancelled(request.is_cancelled)
+        .and_then(|()| self_test(&binary_path, &final_model, request.tts_root))
+    {
+        // A voice that cannot speak must not be left looking installed:
+        // discovery decides readiness from what is on disk, so leaving the
+        // files behind would turn a caught failure into a silent one. Only
+        // remove what this run put there — a voice that was already working
+        // is never taken away by a failed reinstall.
+        if !voice_was_present {
+            let _ = std::fs::remove_file(&final_model);
+            let _ = std::fs::remove_file(&final_config);
+            tracing::warn!("tts: removed a voice that failed its self-test");
+        }
+        return Err(e);
+    }
 
     report(InstallStage::Done, None, 0, None, 1.0);
 
@@ -1541,6 +1557,115 @@ mod tests {
             "the engine was re-downloaded despite already being installed"
         );
         assert!(seen.contains(&InstallStage::DownloadingVoice));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_voice_that_fails_its_self_test_is_not_left_looking_installed() {
+        // Both files download and verify; the engine refuses to speak. If
+        // the files stayed, `discovery` would report Ready for a voice that
+        // cannot load — turning a failure caught during setup into one the
+        // user meets mid-conversation.
+        use std::os::unix::fs::PermissionsExt;
+        let temp = TempDir::new();
+
+        let piper_dir = discovery::managed_piper_dir(temp.path());
+        std::fs::create_dir_all(&piper_dir).unwrap();
+        let binary = piper_dir.join(discovery::piper_executable_name());
+        std::fs::write(&binary, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let model_bytes = b"onnx bytes".to_vec();
+        let config_bytes = br#"{"audio":{"sample_rate":22050},"dataset":"amy"}"#.to_vec();
+        let server = TestServer::start(vec![
+            ("/m".to_string(), model_bytes.clone()),
+            ("/c".to_string(), config_bytes.clone()),
+        ]);
+
+        let mut manifest =
+            provisioned_manifest("https://x.invalid/e", &server.url("/m"), &server.url("/c"));
+        manifest.voices[0].model.sha256 = sha256_of(&model_bytes);
+        manifest.voices[0].model.size_bytes = model_bytes.len() as u64;
+        manifest.voices[0].config.sha256 = sha256_of(&config_bytes);
+        manifest.voices[0].config.size_bytes = config_bytes.len() as u64;
+
+        let error = install(InstallRequest {
+            manifest: &manifest,
+            voice_id: "en_US-amy-medium",
+            tts_root: temp.path(),
+            // The manifest's only runtime; the engine is already installed
+            // so nothing is downloaded, and the binary path comes from the
+            // host's own executable name either way.
+            platform: "windows",
+            arch: "x86_64",
+            on_progress: &|_| {},
+            is_cancelled: &|| false,
+        })
+        .unwrap_err();
+
+        assert!(matches!(error, InstallError::SelfTestFailed(_)), "{error:?}");
+        let voices = discovery::managed_voices_dir(temp.path());
+        assert!(
+            !voices.join("en_US-amy-medium.onnx").exists(),
+            "a voice that cannot speak was left on disk"
+        );
+        assert!(!voices.join("en_US-amy-medium.onnx.json").exists());
+        assert!(!temp.path().join(".staging").exists());
+        // The engine is untouched: it is shared, and reinstalling a
+        // different voice must not have to fetch it again.
+        assert!(binary.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_reinstall_does_not_delete_the_voice_that_was_already_there() {
+        // The mirror of the test above. If the voice was on disk before this
+        // run, a self-test failure is the engine's problem, not the file's —
+        // removing it would cost the user a voice that worked yesterday.
+        use std::os::unix::fs::PermissionsExt;
+        let temp = TempDir::new();
+
+        let piper_dir = discovery::managed_piper_dir(temp.path());
+        std::fs::create_dir_all(&piper_dir).unwrap();
+        let binary = piper_dir.join(discovery::piper_executable_name());
+        std::fs::write(&binary, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let model_bytes = b"onnx bytes".to_vec();
+        let config_bytes = br#"{"audio":{"sample_rate":22050},"dataset":"amy"}"#.to_vec();
+        let voices = discovery::managed_voices_dir(temp.path());
+        std::fs::create_dir_all(&voices).unwrap();
+        std::fs::write(voices.join("en_US-amy-medium.onnx"), &model_bytes).unwrap();
+        std::fs::write(voices.join("en_US-amy-medium.onnx.json"), &config_bytes).unwrap();
+
+        let server = TestServer::start(vec![
+            ("/m".to_string(), model_bytes.clone()),
+            ("/c".to_string(), config_bytes.clone()),
+        ]);
+        let mut manifest =
+            provisioned_manifest("https://x.invalid/e", &server.url("/m"), &server.url("/c"));
+        manifest.voices[0].model.sha256 = sha256_of(&model_bytes);
+        manifest.voices[0].model.size_bytes = model_bytes.len() as u64;
+        manifest.voices[0].config.sha256 = sha256_of(&config_bytes);
+        manifest.voices[0].config.size_bytes = config_bytes.len() as u64;
+
+        let error = install(InstallRequest {
+            manifest: &manifest,
+            voice_id: "en_US-amy-medium",
+            tts_root: temp.path(),
+            // The manifest's only runtime; the engine is already installed
+            // so nothing is downloaded, and the binary path comes from the
+            // host's own executable name either way.
+            platform: "windows",
+            arch: "x86_64",
+            on_progress: &|_| {},
+            is_cancelled: &|| false,
+        })
+        .unwrap_err();
+
+        assert!(matches!(error, InstallError::SelfTestFailed(_)), "{error:?}");
+        assert!(voices.join("en_US-amy-medium.onnx").exists());
+        assert!(voices.join("en_US-amy-medium.onnx.json").exists());
     }
 
     #[test]

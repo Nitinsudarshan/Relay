@@ -15,7 +15,7 @@
     "",
     "To provision:  node scripts/build-voice-manifest.mjs",
     "",
-    "urlS below are the upstream project's own release/distribution URLs and are",
+    "URLs below are the upstream project's own release/distribution URLs and are",
     "verified by the generator, which fails if one does not resolve."
   ],
   "schema_version": 1,
