@@ -1,5 +1,17 @@
 # Relay — Changelog
 
+## [0.16.1] - 2026-08-30
+
+### Native Sidebar Navigation Cleanup
+
+**Type**: patch — `native/` only (`native/src/components/common/NativeSidebar.tsx`).
+
+Clean up unused Quick Vault shortcut buttons and unused icon imports from the native sidebar.
+
+#### Improvements
+
+- **Sidebar cleanup (`native/src/components/common/NativeSidebar.tsx`)**: Removed deprecated "Quick Vault" section (voice capture and knowledge graph shortcuts) and unused Lucide icon imports (`Radio`, `FileText`, `Bell`).
+
 ## [0.16.0] - 2026-08-27
 
 ### Meeting Summaries as Memory: Canonical Context, a Real Summary Contract, Per-Meeting Length, Targeted Repair & an Evaluation Set

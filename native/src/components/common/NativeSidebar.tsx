@@ -7,14 +7,10 @@ import {
   ShieldCheck,
   Activity,
   ChevronsUpDown,
-  Radio,
-  FileText,
   Database,
   Cloud,
   Sparkle,
   Sliders,
-  Bell,
-
 } from 'lucide-react';
 import { RelayLogo } from '@/components/common/RelayLogo';
 import { Badge } from '@/components/ui/badge';
@@ -265,38 +261,6 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
               return button;
             })}
           </nav>
-
-          {/* Quick Access Section (Expanded Only) */}
-          {isOpen && (
-            <div className="w-full mt-4 pt-3 border-t border-sidebar-border shrink-0">
-              <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground/80 tracking-wider uppercase">
-                Quick Vault
-              </div>
-              <div className="mt-1 space-y-0.5">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('capture')}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/40 transition-colors text-left cursor-pointer overflow-hidden whitespace-nowrap"
-                >
-                  <Radio className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                  <span className="truncate">Instant Voice Capture</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('scribble')}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/40 transition-colors text-left cursor-pointer overflow-hidden whitespace-nowrap"
-                >
-                  <FileText className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                  <span className="truncate">Active Knowledge Graph</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Collapsed Divider */}
-          {!isOpen && (
-            <div className="w-5 h-px bg-sidebar-border mx-auto my-2.5 shrink-0" />
-          )}
         </div>
 
         {/* User Footer Card & Popover Menu (sidebar-07 NavUser Pattern) */}
