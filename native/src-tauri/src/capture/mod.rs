@@ -1,6 +1,7 @@
 pub mod evaluation;
 pub mod stt;
 
+use crate::sync::MutexExt;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -152,7 +153,7 @@ impl AudioRecorder {
     }
 
     pub fn is_active(&self) -> bool {
-        self.active_session.lock().unwrap().is_some()
+        self.active_session.lock_or_recover().is_some()
     }
 
     /// The `mode` of the in-progress session, if any — lets callers tell a
@@ -160,8 +161,7 @@ impl AudioRecorder {
     /// ("meeting"/"scribble"/"chat") without a separate ownership field.
     pub fn active_mode(&self) -> Option<String> {
         self.active_session
-            .lock()
-            .unwrap()
+            .lock_or_recover()
             .as_ref()
             .map(|s| s.mode.clone())
     }
@@ -172,7 +172,7 @@ impl AudioRecorder {
         output_dir: &Path,
         app: Option<AppHandle>,
     ) -> Result<String, CaptureError> {
-        let mut session = self.active_session.lock().unwrap();
+        let mut session = self.active_session.lock_or_recover();
         if session.is_some() {
             return Err(CaptureError::SessionAlreadyActive);
         }
@@ -208,7 +208,7 @@ impl AudioRecorder {
         let t_stop_start = std::time::Instant::now();
 
         let session = {
-            let mut guard = self.active_session.lock().unwrap();
+            let mut guard = self.active_session.lock_or_recover();
             guard.take().ok_or(CaptureError::NoActiveSession)?
         };
 
@@ -390,14 +390,14 @@ fn spawn_capture_thread(
             let _ = stop_rx.recv();
             drop(stream);
 
-            let final_samples = samples.lock().unwrap().clone();
+            let final_samples = samples.lock_or_recover().clone();
             // Sustained (not momentary) energy above the *measured* ambient
             // floor — not a fixed absolute threshold — is what counts as
             // speech. See AudioDetectionState and the constants above for
             // why: a fixed threshold can't tell a noisy-but-silent room
             // apart from someone actually talking, and a single loud
             // callback isn't proof of speech either.
-            let final_state = detection.lock().unwrap();
+            let final_state = detection.lock_or_recover();
             let min_frames_above =
                 (sample_rate as u64 * AUDIO_DETECTED_MIN_DURATION_MS / 1000) as u32;
             let audio_detected = final_state.frames_above_threshold >= min_frames_above;
@@ -464,20 +464,20 @@ fn push_mono_with_level<T: Copy>(
     update_audio_detection(detection, raw_level, chunk.len() as u32, sample_rate);
 
     let smoothed = {
-        let mut level_guard = smoothed_level.lock().unwrap();
+        let mut level_guard = smoothed_level.lock_or_recover();
         *level_guard += (raw_level - *level_guard) * LEVEL_SMOOTHING_ALPHA;
         *level_guard
     };
 
     if let Some(ref a) = app {
-        let mut last_guard = last_emit.lock().unwrap();
+        let mut last_guard = last_emit.lock_or_recover();
         if last_guard.elapsed() >= Duration::from_millis(40) {
             *last_guard = std::time::Instant::now();
             let _ = a.emit("capture-level", serde_json::json!({ "level": smoothed }));
         }
     }
 
-    let mut guard = buf.lock().unwrap();
+    let mut guard = buf.lock_or_recover();
     guard.extend(chunk);
 }
 
@@ -493,7 +493,7 @@ fn update_audio_detection(
     frame_count: u32,
     sample_rate: u32,
 ) {
-    let mut state = detection.lock().unwrap();
+    let mut state = detection.lock_or_recover();
 
     if !state.calibration_done {
         state.calibration_level_duration_sum += raw_level as f64 * frame_count as f64;
@@ -1010,7 +1010,7 @@ mod tests {
         let resampled = resample_to_16k_mono(&samples, 16000);
         for &s in &resampled {
             assert!(s.is_finite());
-            assert!(s >= -1.0 && s <= 1.0);
+            assert!((-1.0..=1.0).contains(&s));
         }
     }
 

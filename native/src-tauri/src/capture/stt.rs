@@ -1,3 +1,4 @@
+use crate::sync::MutexExt;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "whisper-local")]
 use std::sync::{Arc, Mutex};
@@ -496,7 +497,7 @@ impl SttEngine {
             // TEMP: whisper internal latency diagnostics
             let t_whisper_start = std::time::Instant::now();
 
-            let mut guard = self.loaded.lock().unwrap();
+            let mut guard = self.loaded.lock_or_recover();
             let needs_reload = match guard.as_ref() {
                 Some((loaded_path, _)) => loaded_path != model_path,
                 None => true,
@@ -1078,7 +1079,7 @@ mod tests {
         // 1. Default (no override) clamps within [1, 12]
         let cfg_default = WhisperDecodingConfig::for_dictation(&settings);
         let threads = cfg_default.n_threads.unwrap();
-        assert!(threads >= 1 && threads <= 12);
+        assert!((1..=12).contains(&threads));
 
         // 2. Safe user override
         settings.dictation_threads = Some(8);

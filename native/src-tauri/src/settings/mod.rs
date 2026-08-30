@@ -108,19 +108,13 @@ pub enum PillPosition {
 
 /// General UI/window behavior that isn't tied to a specific capture engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct UiSettings {
     /// Which edge of the screen the floating pill anchors to.
     #[serde(default)]
     pub pill_position: PillPosition,
 }
 
-impl Default for UiSettings {
-    fn default() -> Self {
-        Self {
-            pill_position: PillPosition::default(),
-        }
-    }
-}
 
 /// Where Relay's local Vault (notes, Kanban cards, Voice Notes) lives on
 /// disk. `directory` is `None` until the user explicitly chooses or
@@ -743,12 +737,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("relay_test_settings_{}", uuid::Uuid::new_v4()));
         let settings_path = dir.join("settings.json");
 
-        let mut app_settings = AppSettings::default();
-        app_settings.language = LanguageSettings {
-            primary_dictation_language: "hi".to_string(),
-            spoken_languages: vec!["hi".to_string(), "en".to_string()],
-            notes_language: "en".to_string(),
-            output_script: "latin".to_string(),
+        let app_settings = AppSettings {
+            language: LanguageSettings {
+                primary_dictation_language: "hi".to_string(),
+                spoken_languages: vec!["hi".to_string(), "en".to_string()],
+                notes_language: "en".to_string(),
+                output_script: "latin".to_string(),
+            },
+            ..Default::default()
         };
 
         app_settings.save(&settings_path).expect("failed to save settings file");

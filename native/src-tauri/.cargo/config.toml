@@ -1,15 +1,18 @@
-# Without this, building whisper-rs-sys invokes `bindgen`, which needs
-# libclang (clang.dll on Windows) installed and discoverable at build time —
-# most Windows dev machines don't have LLVM installed, so `cargo build`
-# panics before it ever gets to compiling whisper.cpp itself. Setting this
-# tells whisper-rs-sys to use its committed pre-generated bindings instead,
-# so the only real requirement left is a C/C++ toolchain (which rustup's
-# windows-msvc target already needs for anything else in this workspace).
+# Build configuration for the whisper-rs-sys native dependency.
+#
+# `WHISPER_DONT_GENERATE_BINDINGS` tells whisper-rs-sys to use its committed
+# pre-generated bindings instead of running `bindgen` at build time. Without
+# it, bindgen needs libclang (`clang.dll` on Windows, `libclang.so` on Linux)
+# installed and discoverable, which most Windows dev machines don't have — so
+# `cargo build` panicked before it ever reached compiling whisper.cpp itself.
+# The only real requirement left is a C/C++ toolchain and CMake.
+#
+# Deliberately no absolute paths here. Cargo's `[env]` is global — it has no
+# per-platform form — so a hardcoded `C:\Program Files\...` path for CMAKE or
+# LIBCLANG_PATH applies on Linux and macOS too, where it fails the build with
+# "No such file or directory". That is what kept this crate from compiling
+# anywhere except one specific Windows install, CI included. Cargo does not
+# override variables already present in the environment, so a developer whose
+# CMake is not on PATH can still export `CMAKE` themselves.
 [env]
-CMAKE = "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe"
-LIBCLANG_PATH = "C:\\Program Files\\LLVM\\bin"
-
-
-
-
-
+WHISPER_DONT_GENERATE_BINDINGS = "1"

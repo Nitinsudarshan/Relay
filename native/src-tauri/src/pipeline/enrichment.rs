@@ -300,7 +300,7 @@ pub fn extract_deterministic_questions(content: &str, title: &str, topics: &[Str
         questions.push(format!("What are the critical implementation risks or edge cases for '{}'?", title));
     }
     if questions.len() < 3 {
-        questions.push(format!("What concrete next steps or decisions should follow from this thought?"));
+        questions.push("What concrete next steps or decisions should follow from this thought?".to_string());
     }
 
     questions.truncate(4);

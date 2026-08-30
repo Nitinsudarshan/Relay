@@ -185,6 +185,10 @@ pub struct SttDiagnosticSnapshot {
 }
 
 /// Helper to build a complete SttDiagnosticSnapshot from a completed or failed capture/transcription run.
+// The snapshot is a record of one run's full context; every parameter is a
+// distinct fact about that run with no natural grouping, and bundling them
+// into a struct would only move the same list one level out.
+#[allow(clippy::too_many_arguments)]
 pub fn build_diagnostic_snapshot(
     session_mode: &str,
     audio_file: Option<String>,
@@ -735,6 +739,7 @@ pub struct BenchmarkReport {
 
 /// Executes an automated comparative evaluation matrix over an in-memory test audio buffer
 /// across all 5 STT configurations.
+#[allow(clippy::too_many_arguments)] // One evaluation run's inputs; see `build_diagnostic_snapshot`.
 pub fn run_benchmark_matrix_on_sample(
     sample_id: &str,
     filename: &str,
@@ -857,11 +862,11 @@ fn compute_alignment_ops<T: PartialEq>(ref_seq: &[T], hyp_seq: &[T]) -> (usize, 
 
     let mut d = vec![vec![0usize; n + 1]; m + 1];
 
-    for i in 0..=m {
-        d[i][0] = i;
+    for (i, row) in d.iter_mut().enumerate() {
+        row[0] = i;
     }
-    for j in 0..=n {
-        d[0][j] = j;
+    for (j, cell) in d[0].iter_mut().enumerate() {
+        *cell = j;
     }
 
     for i in 1..=m {
@@ -929,6 +934,7 @@ fn is_devanagari(c: char) -> bool {
 }
 
 /// Evaluates a given audio sample buffer or WAV file against a specific decoding configuration.
+#[allow(clippy::too_many_arguments)] // One evaluation run's inputs; see `build_diagnostic_snapshot`.
 pub fn evaluate_audio_buffer(
     test_id: &str,
     audio_file_label: &str,
@@ -1434,7 +1440,7 @@ pub mod tests {
         assert_eq!(prod_baseline.temperature, 0.0);
         assert_eq!(prod_baseline.temperature_inc, 0.2);
         assert_eq!(prod_baseline.initial_prompt, None);
-        assert_eq!(prod_baseline.suppress_blank, true);
+        assert!(prod_baseline.suppress_blank);
         assert_eq!(prod_baseline.no_speech_thold, 0.6);
         assert_eq!(prod_baseline.entropy_thold, 2.4);
         assert_eq!(prod_baseline.logprob_thold, -1.0);
@@ -1452,9 +1458,11 @@ pub mod tests {
 
     #[test]
     fn test_whisper_decoding_config_from_settings_prompt_enabled() {
-        let mut stt_settings = crate::settings::SttSettings::default();
-        stt_settings.enable_initial_prompt = true;
-        stt_settings.custom_initial_prompt = Some("Tauri, Rust, Relay".to_string());
+        let stt_settings = crate::settings::SttSettings {
+            enable_initial_prompt: true,
+            custom_initial_prompt: Some("Tauri, Rust, Relay".to_string()),
+            ..Default::default()
+        };
 
         let cfg = WhisperDecodingConfig::from_settings(&stt_settings);
         assert_eq!(cfg.initial_prompt, Some("Tauri, Rust, Relay".to_string()));
@@ -1639,12 +1647,12 @@ pub mod tests {
         assert_eq!(baseline.temperature, 0.0);
         assert_eq!(baseline.temperature_inc, 0.2);
         assert_eq!(baseline.initial_prompt, None);
-        assert_eq!(baseline.suppress_blank, true);
+        assert!(baseline.suppress_blank);
         assert_eq!(baseline.no_speech_thold, 0.6);
         assert_eq!(baseline.entropy_thold, 2.4);
         assert_eq!(baseline.logprob_thold, -1.0);
-        assert_eq!(baseline.print_special, false);
-        assert_eq!(baseline.print_timestamps, false);
+        assert!(!(baseline.print_special));
+        assert!(!(baseline.print_timestamps));
     }
 
     #[test]
@@ -1658,7 +1666,7 @@ pub mod tests {
         };
         let cfg_en = SttLanguageConfig::from_settings(&lang_en);
         assert_eq!(cfg_en.whisper_language, Some("en".to_string()));
-        assert_eq!(cfg_en.translate, false);
+        assert!(!(cfg_en.translate));
 
         // 2. Hindi
         let lang_hi = LanguageSettings {
@@ -1669,7 +1677,7 @@ pub mod tests {
         };
         let cfg_hi = SttLanguageConfig::from_settings(&lang_hi);
         assert_eq!(cfg_hi.whisper_language, Some("hi".to_string()));
-        assert_eq!(cfg_hi.translate, false);
+        assert!(!(cfg_hi.translate));
 
         // 3. Spanish
         let lang_es = LanguageSettings {
@@ -1680,7 +1688,7 @@ pub mod tests {
         };
         let cfg_es = SttLanguageConfig::from_settings(&lang_es);
         assert_eq!(cfg_es.whisper_language, Some("es".to_string()));
-        assert_eq!(cfg_es.translate, false);
+        assert!(!(cfg_es.translate));
 
         // 4. Hinglish (Multilingual profile)
         let lang_hinglish = LanguageSettings {
@@ -1691,7 +1699,7 @@ pub mod tests {
         };
         let cfg_hinglish = SttLanguageConfig::from_settings(&lang_hinglish);
         assert_eq!(cfg_hinglish.whisper_language, None);
-        assert_eq!(cfg_hinglish.translate, false);
+        assert!(!(cfg_hinglish.translate));
 
         // 5. Auto
         let lang_auto = LanguageSettings {
@@ -1702,7 +1710,7 @@ pub mod tests {
         };
         let cfg_auto = SttLanguageConfig::from_settings(&lang_auto);
         assert_eq!(cfg_auto.whisper_language, None);
-        assert_eq!(cfg_auto.translate, false);
+        assert!(!(cfg_auto.translate));
     }
 
     #[test]
@@ -1715,9 +1723,11 @@ pub mod tests {
         assert_eq!(cfg_default.temperature, 0.0);
 
         // B. Enabled with custom prompt
-        let mut custom_stt = crate::settings::SttSettings::default();
-        custom_stt.enable_initial_prompt = true;
-        custom_stt.custom_initial_prompt = Some("Tauri, Rust, Relay".to_string());
+        let mut custom_stt = crate::settings::SttSettings {
+            enable_initial_prompt: true,
+            custom_initial_prompt: Some("Tauri, Rust, Relay".to_string()),
+            ..Default::default()
+        };
         let cfg_custom = WhisperDecodingConfig::from_settings(&custom_stt);
         assert_eq!(cfg_custom.initial_prompt, Some("Tauri, Rust, Relay".to_string()));
         // Ensure other parameters are untouched
@@ -1726,9 +1736,11 @@ pub mod tests {
         assert_eq!(cfg_custom.no_speech_thold, 0.6);
 
         // C. Enabled with empty/whitespace prompt -> None
-        let mut empty_stt = crate::settings::SttSettings::default();
-        empty_stt.enable_initial_prompt = true;
-        empty_stt.custom_initial_prompt = Some("   ".to_string());
+        let empty_stt = crate::settings::SttSettings {
+            enable_initial_prompt: true,
+            custom_initial_prompt: Some("   ".to_string()),
+            ..Default::default()
+        };
         let cfg_empty = WhisperDecodingConfig::from_settings(&empty_stt);
         assert_eq!(cfg_empty.initial_prompt, None);
 
@@ -1750,8 +1762,9 @@ pub mod tests {
 
         // 2. Micro-tap under 300ms
         let mut tap_samples = vec![0.002_f32; 16000];
-        for i in 2000..2500 {
-            tap_samples[i] = 0.08; // 500 samples = ~31ms burst
+        // 500 samples = ~31ms burst
+        for sample in &mut tap_samples[2000..2500] {
+            *sample = 0.08;
         }
         let (tap_trimmed, tap_res) = vad.process(&tap_samples, 16000);
         assert!(!tap_res.speech_detected);
@@ -1759,8 +1772,9 @@ pub mod tests {
 
         // 3. Legitimate speech burst (600ms above threshold)
         let mut speech_samples = vec![0.002_f32; 16000];
-        for i in 2000..12000 {
-            speech_samples[i] = 0.05 * ((i as f32) * 0.1).sin();
+        for (offset, sample) in speech_samples[2000..12000].iter_mut().enumerate() {
+            let i = 2000 + offset;
+            *sample = 0.05 * ((i as f32) * 0.1).sin();
         }
         let (speech_trimmed, speech_res) = vad.process(&speech_samples, 16000);
         assert!(speech_res.speech_detected);
@@ -1820,8 +1834,9 @@ pub mod tests {
             let samples: Vec<f32> = if is_speech {
                 // Generate a speech-like sine wave burst (600ms)
                 let mut s = vec![0.002_f32; 16000];
-                for j in 2000..12000 {
-                    s[j] = 0.04 * ((j as f32) * 0.05).sin();
+                for (offset, sample) in s[2000..12000].iter_mut().enumerate() {
+                    let j = 2000 + offset;
+                    *sample = 0.04 * ((j as f32) * 0.05).sin();
                 }
                 s
             } else {

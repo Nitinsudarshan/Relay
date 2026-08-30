@@ -4,6 +4,7 @@ use super::session_store::SessionStore;
 use super::types::{MeetingDiagnostics, MeetingSession, MeetingState};
 use super::worker::TranscriptionWorker;
 use crate::capture::stt::{SttEngine, SttLanguageConfig, WhisperDecodingConfig};
+use crate::sync::MutexExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
@@ -85,8 +86,8 @@ impl MeetingsV2Engine {
     }
 
     pub fn is_recording(&self) -> bool {
-        let guard = self.active_session.lock().unwrap();
-        guard.as_ref().map_or(false, |ctx| {
+        let guard = self.active_session.lock_or_recover();
+        guard.as_ref().is_some_and(|ctx| {
             matches!(
                 ctx.session.state,
                 MeetingState::Recording | MeetingState::Paused
@@ -97,10 +98,10 @@ impl MeetingsV2Engine {
     /// The session the UI should be showing, whether it is recording, paused,
     /// or still finalizing after a stop.
     pub fn get_active_session(&self) -> Option<MeetingSession> {
-        if let Some(ctx) = self.active_session.lock().unwrap().as_ref() {
+        if let Some(ctx) = self.active_session.lock_or_recover().as_ref() {
             return Some(ctx.snapshot());
         }
-        self.finalizing_session.lock().unwrap().clone()
+        self.finalizing_session.lock_or_recover().clone()
     }
 
     pub fn start_session(
@@ -112,11 +113,11 @@ impl MeetingsV2Engine {
         decoding_config: WhisperDecodingConfig,
         app: Option<AppHandle>,
     ) -> Result<MeetingSession, String> {
-        let mut guard = self.active_session.lock().unwrap();
+        let mut guard = self.active_session.lock_or_recover();
         if guard.is_some() {
             return Err("A meeting recording session is already active".to_string());
         }
-        if self.finalizing_session.lock().unwrap().is_some() {
+        if self.finalizing_session.lock_or_recover().is_some() {
             return Err("The previous meeting is still finalizing — try again in a moment".to_string());
         }
 
@@ -230,7 +231,7 @@ impl MeetingsV2Engine {
         session_id: Option<String>,
         app: Option<AppHandle>,
     ) -> Result<MeetingSession, String> {
-        let mut guard = self.active_session.lock().unwrap();
+        let mut guard = self.active_session.lock_or_recover();
         let ctx = guard
             .as_mut()
             .ok_or_else(|| "No active meeting recording session to pause".to_string())?;
@@ -260,7 +261,7 @@ impl MeetingsV2Engine {
         session_id: Option<String>,
         app: Option<AppHandle>,
     ) -> Result<MeetingSession, String> {
-        let mut guard = self.active_session.lock().unwrap();
+        let mut guard = self.active_session.lock_or_recover();
         let ctx = guard
             .as_mut()
             .ok_or_else(|| "No active meeting recording session to resume".to_string())?;
@@ -298,7 +299,7 @@ impl MeetingsV2Engine {
         app: Option<AppHandle>,
     ) -> Result<MeetingSession, String> {
         let ctx = {
-            let mut guard = self.active_session.lock().unwrap();
+            let mut guard = self.active_session.lock_or_recover();
             match guard.take() {
                 Some(ctx) => {
                     if let Err(e) = fence(&ctx.session.id, session_id.as_deref()) {
@@ -310,7 +311,7 @@ impl MeetingsV2Engine {
                 None => {
                     // A stop is already in flight: report its state instead of
                     // surfacing a spurious "nothing to stop" error.
-                    if let Some(finalizing) = self.finalizing_session.lock().unwrap().clone() {
+                    if let Some(finalizing) = self.finalizing_session.lock_or_recover().clone() {
                         return Ok(finalizing);
                     }
                     return Err("No active meeting recording session to stop".to_string());
@@ -332,7 +333,7 @@ impl MeetingsV2Engine {
                 s.paused_seconds = paused_seconds;
             })
             .unwrap_or_else(|_| ctx.session.clone());
-        *self.finalizing_session.lock().unwrap() = Some(stopping.clone());
+        *self.finalizing_session.lock_or_recover() = Some(stopping.clone());
         emit_state(&app, &stopping);
 
         tracing::info!(
@@ -364,7 +365,7 @@ impl MeetingsV2Engine {
             .store
             .update_session(&session_id, |s| s.state = MeetingState::Finalizing)
             .unwrap_or_else(|_| stopping.clone());
-        *self.finalizing_session.lock().unwrap() = Some(finalizing.clone());
+        *self.finalizing_session.lock_or_recover() = Some(finalizing.clone());
         emit_state(&app, &finalizing);
 
         let store = self.store.clone();
@@ -396,7 +397,7 @@ impl MeetingsV2Engine {
         .await
         .map_err(|e| format!("Finalization task failed: {}", e))?;
 
-        *self.finalizing_session.lock().unwrap() = None;
+        *self.finalizing_session.lock_or_recover() = None;
 
         match final_session {
             Ok(final_session) => {

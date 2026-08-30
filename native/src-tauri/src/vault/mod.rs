@@ -1,3 +1,4 @@
+use crate::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -109,14 +110,14 @@ impl VaultManager {
     }
 
     pub fn vault_dir(&self) -> PathBuf {
-        self.vault_dir.lock().unwrap().clone()
+        self.vault_dir.lock_or_recover().clone()
     }
 
     /// Repoints this vault at a new root directory. Existing notes at the
     /// old location are left in place untouched — nothing is moved,
     /// migrated, or deleted (see docs/decisions.md).
     pub fn set_vault_dir(&self, new_dir: PathBuf) {
-        *self.vault_dir.lock().unwrap() = new_dir;
+        *self.vault_dir.lock_or_recover() = new_dir;
     }
 
     pub fn init(&self) -> Result<(), VaultError> {
@@ -374,7 +375,7 @@ impl VaultManager {
         for entry in fs::read_dir(kanban_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "md") {
+            if path.extension().is_some_and(|ext| ext == "md") {
                 if let Ok(content) = fs::read_to_string(&path) {
                     if let Some(card) = Self::parse_kanban_card_md(&content) {
                         cards.push(card);
@@ -404,44 +405,34 @@ impl VaultManager {
         let mut created_at = String::new();
         let mut source_note_id = None;
 
+        /// Frontmatter values are quoted; the value is what's left after the
+        /// key, unquoted and trimmed.
+        fn value_of(line: &str, key: &str) -> Option<String> {
+            line.strip_prefix(key)
+                .map(|rest| rest.trim().trim_matches('"').to_string())
+        }
+
         for line in frontmatter.lines() {
             let line = line.trim();
-            if line.starts_with("id:") {
-                id = line["id:".len()..].trim().trim_matches('"').to_string();
-            } else if line.starts_with("title:") {
-                title = line["title:".len()..].trim().trim_matches('"').to_string();
-            } else if line.starts_with("assignee:") {
-                assignee = line["assignee:".len()..]
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
-            } else if line.starts_with("status:") {
-                status = line["status:".len()..].trim().trim_matches('"').to_string();
-            } else if line.starts_with("priority:") {
-                priority = line["priority:".len()..]
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
-            } else if line.starts_with("due_date:") {
-                let d = line["due_date:".len()..]
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
-                if !d.is_empty() {
-                    due_date = Some(d);
+            if let Some(v) = value_of(line, "id:") {
+                id = v;
+            } else if let Some(v) = value_of(line, "title:") {
+                title = v;
+            } else if let Some(v) = value_of(line, "assignee:") {
+                assignee = v;
+            } else if let Some(v) = value_of(line, "status:") {
+                status = v;
+            } else if let Some(v) = value_of(line, "priority:") {
+                priority = v;
+            } else if let Some(v) = value_of(line, "due_date:") {
+                if !v.is_empty() {
+                    due_date = Some(v);
                 }
-            } else if line.starts_with("created_at:") {
-                created_at = line["created_at:".len()..]
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
-            } else if line.starts_with("source_note_id:") {
-                let s = line["source_note_id:".len()..]
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
-                if !s.is_empty() {
-                    source_note_id = Some(s);
+            } else if let Some(v) = value_of(line, "created_at:") {
+                created_at = v;
+            } else if let Some(v) = value_of(line, "source_note_id:") {
+                if !v.is_empty() {
+                    source_note_id = Some(v);
                 }
             }
         }
@@ -1441,7 +1432,7 @@ mod tests {
         let updated_scribble = manager.get_scribble(&scribble_a.id).unwrap();
         assert!(updated_scribble.content.contains("Voice Note A"));
         assert!(updated_scribble.content.contains("Voice Note B"));
-        assert_eq!(updated_scribble.source_metadata.get("is_merged").unwrap().as_bool().unwrap(), true);
+        assert!(updated_scribble.source_metadata.get("is_merged").unwrap().as_bool().unwrap());
         let vn_ids = updated_scribble.source_metadata.get("source_voice_note_ids").unwrap().as_array().unwrap();
         assert!(vn_ids.iter().any(|v| v.as_str().unwrap() == note_a.id));
         assert!(vn_ids.iter().any(|v| v.as_str().unwrap() == note_b.id));

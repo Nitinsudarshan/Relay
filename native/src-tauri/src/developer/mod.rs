@@ -10,17 +10,14 @@ fn get_dev_settings_path(config_dir: &Path) -> PathBuf {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum NotificationSurfaceMode {
     System,
     Tauri,
+    #[default]
     Both,
 }
 
-impl Default for NotificationSurfaceMode {
-    fn default() -> Self {
-        Self::Both
-    }
-}
 
 /// Developer-only settings (testing & debugging overrides).
 ///

@@ -122,6 +122,9 @@ pub struct TranscriptionWorker {
 }
 
 impl TranscriptionWorker {
+    // The worker's collaborators, handed over once at spawn. A config struct
+    // here would be a struct with one construction site and one read site.
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         session_id: String,
         chunk_rx: std_mpsc::Receiver<AudioChunk>,

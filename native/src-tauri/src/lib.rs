@@ -11,6 +11,7 @@ pub mod overlay;
 pub mod pipeline;
 pub mod providers;
 pub mod settings;
+pub mod sync;
 pub mod triggers;
 pub mod tts;
 pub mod updates;

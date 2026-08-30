@@ -445,8 +445,8 @@ mod tests {
 
         let mut covered = vec![false; segs.len()];
         for window in &windows {
-            for i in window.start..window.end {
-                covered[i] = true;
+            for slot in &mut covered[window.start..window.end] {
+                *slot = true;
             }
         }
         assert!(

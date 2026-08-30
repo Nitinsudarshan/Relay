@@ -1,5 +1,6 @@
 pub mod injection;
 
+use crate::sync::MutexExt;
 use crate::commands::{emit_capture_state, emit_capture_status_event, AppState};
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
@@ -185,7 +186,7 @@ fn on_dictation_pressed_with_mode(app: &AppHandle, dictation_state: &SharedDicta
     tracing::debug!("[Hotkey] {} received (pressed)", mode);
 
     let (is_repeat, session_active) = {
-        let mut guard = dictation_state.lock().unwrap();
+        let mut guard = dictation_state.lock_or_recover();
         let is_repeat = guard.key_down;
         guard.key_down = true;
         (is_repeat, guard.active)
@@ -197,7 +198,7 @@ fn on_dictation_pressed_with_mode(app: &AppHandle, dictation_state: &SharedDicta
     }
 
     let state = app.state::<AppState>();
-    let toggle_to_talk = state.settings.lock().unwrap().hotkeys.toggle_to_talk;
+    let toggle_to_talk = state.settings.lock_or_recover().hotkeys.toggle_to_talk;
 
     if session_active {
         // Only reachable in toggle-to-talk mode — a hold-to-talk session is
@@ -212,7 +213,7 @@ fn on_dictation_pressed_with_mode(app: &AppHandle, dictation_state: &SharedDicta
     }
 
     let generation = {
-        let mut guard = dictation_state.lock().unwrap();
+        let mut guard = dictation_state.lock_or_recover();
         guard.active = true;
         guard.generation += 1;
         guard.generation
@@ -237,7 +238,7 @@ fn on_dictation_pressed_with_mode(app: &AppHandle, dictation_state: &SharedDicta
             // Most commonly: the in-app Click-to-dictate button already
             // owns the microphone. Back off quietly rather than erroring
             tracing::info!("Dictation hotkey could not start capture: {}", e);
-            dictation_state.lock().unwrap().active = false;
+            dictation_state.lock_or_recover().active = false;
         }
     }
 }
@@ -252,12 +253,12 @@ fn on_dictation_released(app: &AppHandle, dictation_state: &SharedDictationState
     let t_key_release = std::time::Instant::now();
 
     {
-        let mut guard = dictation_state.lock().unwrap();
+        let mut guard = dictation_state.lock_or_recover();
         guard.key_down = false;
     }
 
     let state = app.state::<AppState>();
-    let toggle_to_talk = state.settings.lock().unwrap().hotkeys.toggle_to_talk;
+    let toggle_to_talk = state.settings.lock_or_recover().hotkeys.toggle_to_talk;
     if toggle_to_talk {
         return;
     }
@@ -280,7 +281,7 @@ fn stop_dictation_session(
     let t_release = t_key_release.unwrap_or_else(std::time::Instant::now);
 
     {
-        let mut guard = dictation_state.lock().unwrap();
+        let mut guard = dictation_state.lock_or_recover();
         if !guard.active {
             return;
         }
@@ -334,12 +335,12 @@ fn stop_dictation_session(
         );
 
         let models_dir = state.config_dir.join("models");
-        let language_settings = state.settings.lock().unwrap().language.clone();
-        let stt_settings = state.settings.lock().unwrap().stt.clone();
+        let language_settings = state.settings.lock_or_recover().language.clone();
+        let stt_settings = state.settings.lock_or_recover().stt.clone();
         let model_path = crate::capture::stt::resolve_dictation_model_path(&models_dir, &stt_settings).await;
         let language_config = crate::capture::SttLanguageConfig::from_settings(&language_settings);
         let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::for_dictation(&stt_settings);
-        if let Some(prompt) = state.settings.lock().unwrap().build_stt_prompt() {
+        if let Some(prompt) = state.settings.lock_or_recover().build_stt_prompt() {
             decoding_config.initial_prompt = Some(prompt);
         }
 
@@ -401,7 +402,7 @@ fn stop_dictation_session(
 
         if !text_res.trim().is_empty() {
             // Apply snippets expansion if trigger words were dictated
-            let expanded_text = state.settings.lock().unwrap().expand_snippets(&text_res);
+            let expanded_text = state.settings.lock_or_recover().expand_snippets(&text_res);
             let final_text = if !expanded_text.trim().is_empty() { expanded_text } else { text_res };
 
             // TEMP: dictation latency instrumentation (T8: snippet_expansion_complete)
@@ -416,7 +417,7 @@ fn stop_dictation_session(
             let t_vault_complete = std::time::Instant::now();
 
             let (auto_paste, copy_to_clipboard) = {
-                let s = state.settings.lock().unwrap();
+                let s = state.settings.lock_or_recover();
                 (s.clipboard.auto_paste, s.clipboard.copy_to_clipboard)
             };
 
@@ -522,7 +523,7 @@ fn spawn_release_watchdog(
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(timeout).await;
         let still_pending = {
-            let guard = dictation_state.lock().unwrap();
+            let guard = dictation_state.lock_or_recover();
             guard.active && guard.generation == generation
         };
         if still_pending {
