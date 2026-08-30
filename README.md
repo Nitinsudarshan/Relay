@@ -20,8 +20,8 @@ Relay processes speech locally using Whisper and structured pipelines to instant
 - **Universal Dictation** — Transcribes push-to-talk audio and injects text directly into whatever Windows app or field has active focus.
 - **Meeting Intelligence** — Records mic and system audio into durable 30-second chunks with live transcription, then derives a summary, decisions and the reasoning behind them, owned action items, risks, open questions, topics, and speakers from the transcript. Your own notes, typed during or after the meeting, are read as an extra source and never rewritten. Summary length adapts to the meeting rather than a fixed cap, and generated prose is validated before it is shown. The raw speech-to-text output is kept immutable as the diagnostic source, and any meeting can become a Scribble that references it.
 - **Scribble Pipeline** — Parses rough voice scribbles into structured Kanban task cards and vault notes.
-- **Local Vault Storage** — Saves audio recordings, transcripts, and structured entities locally in Markdown files and LanceDB vector store.
-- **Ground-in-Vault Voice Chat** — Answers user questions in real-time, strictly grounded in your local markdown vault notes.
+- **Talkback** — A conversational agent over everything Relay has captured. Ask out loud what you decided, what you said, or what happened in a meeting; answers about your own history come only from your Voice Notes, Scribbles and Meetings, with the sources shown. Speak over it to interrupt, and turn a conversation into a Voice Note or a Scribble by saying so.
+- **Local Vault Storage** — Saves audio recordings, transcripts, and structured entities locally as Markdown files with YAML frontmatter.
 - **Hybrid Cloud Sync** — Optional Next.js + Supabase web dashboard for cross-device visibility and team synchronization when enabled.
 
 ## Requirements
@@ -71,17 +71,18 @@ flowchart TD
     B --> C{Pipeline Dispatcher}
     C -->|Dictation| D[Windows Active Focus Injection]
     C -->|Scribble / Meeting| E[Kanban & Note Structuring]
-    E --> F[(Local Markdown Vault & LanceDB)]
+    E --> F[(Local Markdown Vault)]
+    F --> H[Talkback: retrieval → LLM → speech]
     F -.->|Optional Hybrid Sync| G[Supabase Cloud Backend]
 ```
 
 ## Tests
 
 ```bash
-# Rust backend — 411 tests
+# Rust backend — 581 tests (+2 ignored benchmarks)
 cd native/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 
-# Native frontend — 71 tests
+# Native frontend — 96 tests
 cd native && npm test && npm run typecheck
 
 # Web dashboard — typecheck and build

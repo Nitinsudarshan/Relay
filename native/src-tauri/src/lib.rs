@@ -12,6 +12,7 @@ pub mod pipeline;
 pub mod providers;
 pub mod settings;
 pub mod sync;
+pub mod talkback;
 pub mod triggers;
 pub mod tts;
 pub mod updates;
@@ -123,6 +124,7 @@ pub fn run() {
         last_stt_diagnostics: Mutex::new(None),
         meetings_v2,
         meeting_processor,
+        talkback: Arc::new(talkback::TalkbackEngine::new()),
     };
 
     tauri::Builder::default()
@@ -262,6 +264,13 @@ pub fn run() {
             commands::promote_meeting_v2_to_scribble,
             commands::push_meeting_v2_action_items_to_kanban,
             commands::set_meeting_overlay_expanded,
+            commands::start_talkback,
+            commands::stop_talkback,
+            commands::get_talkback_state,
+            commands::get_talkback_session,
+            commands::submit_talkback_turn,
+            commands::interrupt_talkback,
+            commands::search_talkback_context,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Mic,
   Calendar,
+  MessageCircle,
   Sparkles,
   Settings,
   ShieldCheck,
@@ -35,6 +36,7 @@ export type TabType =
   | 'capture'
   | 'meetings'
   | 'scribble'
+  | 'talkback'
   | 'settings';
 
 interface NativeSidebarProps {
@@ -94,6 +96,13 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       label: 'Scribbles',
       icon: Sparkles,
       color: 'text-amber-500',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+    {
+      id: 'talkback' as TabType,
+      label: 'Talkback',
+      icon: MessageCircle,
+      color: 'text-emerald-400',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {

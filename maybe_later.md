@@ -102,3 +102,56 @@ This document tracks deferred features, rejected/postponed UI patterns, and arch
   - Add Vitest + RTL + `jsdom` to `native/` as a standalone change, so the dependency addition is reviewable on its own rather than buried in a feature diff.
   - First targets, per `rules/testing.md`'s priority order: `native/src/components/meetings_v2/meetingProcessing.ts` (speaker-name and owner resolution — pure functions, already isolated for this), then the trigger-phrase config form's validation logic.
   - Do not retrofit tests onto presentational components with no branching logic.
+
+### 7. Semantic Retrieval for Talkback (Embeddings + Hybrid Scoring)
+
+- **Status**: Deferred (V2) — the seam exists, the dependency does not
+- **Area**: Native backend (`native/src-tauri/src/talkback/retrieval.rs::score_candidate`)
+- **Original Context**:
+  - `docs/decisions.md` Decision 6 committed Relay to embedded LanceDB vector search in 2024. It was never built: there is no LanceDB dependency in `Cargo.toml` and no embedding code anywhere in the repository. The README claimed it until v0.18.0.
+  - Talkback ships lexical retrieval instead — IDF-weighted scoring with source weighting, recency decay and one-hop expansion — which is honest and, measured at 2.66 ms per query over 1,000 documents, not the latency bottleneck. What it cannot do is match "what did we decide about cost" against a note that only ever says "pricing".
+- **Why it is deferred rather than done**:
+  - `fastembed`/`ort` is the natural Rust path, but `ort` has an unresolved Windows packaging risk: Windows ships an older `onnxruntime.dll` in System32 that shadows the crate's, and the documented `copy-dylibs` workaround targets **binary** Cargo targets while Relay's crate is `staticlib`/`cdylib`/`rlib`. That has to be proven on a real Windows build before it gates a shipped feature.
+  - Ollama's `/api/embed` needs no new native dependency at all and is the cheaper first experiment — but it needs an embedding model pulled and an index that is invalidated whenever any of four capture surfaces writes.
+- **Concept & Implementation Blueprint**:
+  - Replace the body of `retrieval::score_candidate` with `alpha * lexical + beta * cosine(embedding)`. Nothing else in the pipeline changes — `rank`, expansion, dedup and budgeting all operate on the score.
+  - Start with Ollama `/api/embed` behind a feature flag so the Windows ONNX question does not block the experiment. Persist vectors beside the notes rather than in a new store, per the "no second knowledge base" rule.
+  - Judge it with `search_talkback_context`, which already returns retrieval results with no model involved — that command exists precisely so retrieval quality can be measured rather than guessed.
+
+### 8. Neural Turn Detection and Wake Word for Talkback
+
+- **Status**: Deferred (V2) — architecture ready, models not shipped
+- **Area**: Native backend (`native/src-tauri/src/talkback/turn.rs::TurnDetector::push`, `talkback::ActivationMode`)
+- **Original Context**:
+  - Talkback V1 detects turns with energy plus an adaptive noise floor and a 700 ms hangover. It works, and it is the same shape as the meeting live clock's speech flag, but it cannot tell a thinking pause from the end of a thought — so the hangover is a compromise between cutting people off and feeling sluggish.
+  - `ActivationMode::WakeWord` is a real settings value that the engine refuses with a clear message. No always-on listener ships, deliberately.
+- **Concept & Implementation Blueprint**:
+  - **Silero VAD** (MIT, code and weights; ONNX; ~1 ms per 30 ms frame on one CPU thread; mature Rust ports in `silero-vad-rs` and `voice_activity_detector`) replaces the energy gate for speech/non-speech.
+  - **Pipecat Smart Turn v3** (open weights, open training data, ~8M parameters, <60 ms CPU) answers the harder question — has this person *finished* — from the waveform rather than the transcript. That is what removes the hangover tradeoff.
+  - **openWakeWord** / **microWakeWord** (both Apache-2.0) for `wake_word` activation. Both are Python/MCU-targeted today, so the realistic path is their ONNX exports, not the frameworks.
+  - All three land through the same seam: `TurnDetector::push` takes a frame and returns a `TurnEvent`. Same signature, better decision.
+- **Blocked on**: the same `ort`-on-Windows proof as item 7. One packaging spike unblocks both.
+
+### 9. A Second Local TTS Provider for Talkback (Kokoro)
+
+- **Status**: Deferred (V2) — trait shipped, provider not
+- **Area**: Native backend (`native/src-tauri/src/tts/`)
+- **Original Context**:
+  - `tts::TtsProvider` exists with Piper behind it, so a second engine is an addition rather than a refactor. What has *not* happened is the benchmark: Piper, Kokoro and Chatterbox were researched but not measured, because measuring them in a Linux CI container says nothing about a Windows laptop (`docs/talkback/BENCHMARKS.md`).
+  - Piper also needs attention independently: `rhasspy/piper` was archived read-only in October 2025 and active work moved to `OHF-Voice/piper1-gpl` (GPL-3.0 — compatible with Relay's AGPL-3.0, and irrelevant anyway since Relay shells out to a separate process). The settings copy and doc comments should point at the maintained binary.
+- **Concept & Implementation Blueprint**:
+  - **Kokoro-82M** is the leading candidate: Apache-2.0 for both code *and* weights (so it is redistributable with a desktop installer), ~350 MB, 8 languages including Hindi, and several Rust ONNX ports (`Kokoros`, `kokoroxide`, `kokoro-en`, `tts-rs`) with chunked streaming.
+  - **Chatterbox is not a candidate** despite being MIT and sounding better: it needs a PyTorch runtime, which disqualifies it as a Tauri dependency regardless of quality.
+  - Benchmark on real Windows hardware before adopting: time-to-first-audio, total synthesis, CPU, RAM, English, Hindi, mixed-language speech, startup time, packaging size, and interruptibility. Piper stays the default until a measurement says otherwise — being newer is not evidence.
+
+### 10. Acoustic Echo Cancellation for Talkback Barge-In
+
+- **Status**: Deferred — mitigated, not solved
+- **Area**: Native backend (`native/src-tauri/src/talkback/turn.rs`)
+- **Original Context**:
+  - Talkback plays its answer through the speakers while its microphone is open, so on a laptop without headphones the microphone hears the agent and can interrupt it with its own voice.
+  - The current mitigation is an echo guard: while the agent speaks, the speech threshold is multiplied (2.5×), so a barge-in must be clearly louder than the agent. This works well enough at normal volumes and is honest about its limits — the Settings copy recommends headphones.
+- **Concept & Implementation Blueprint**:
+  - Real AEC needs the playback signal as a reference, which means playback would have to move into Rust — currently blocked by the `rodio`/`cpal 0.17` conflict recorded in `docs/decisions.md` Decision 49.
+  - `webrtc-audio-processing` bindings are the usual answer, at the cost of a C++ dependency and a Windows build story.
+  - A cheaper intermediate step: have the frontend report playback amplitude back to the engine so the echo guard scales with actual output level rather than using a fixed multiplier.

@@ -1,5 +1,60 @@
 # Relay — Changelog
 
+## [0.18.0] - 2026-08-30
+
+### Talkback — the Conversational Layer over Everything Relay Has Captured
+
+**Type**: minor — both surfaces (`native/src-tauri/src/talkback/** (new)`, `native/src-tauri/src/tts/**`, `native/src-tauri/src/providers/mod.rs`, `native/src-tauri/src/{lib,commands}.rs`, `native/src-tauri/src/settings/mod.rs`, `native/src-tauri/src/pipeline/**`, `native/src-tauri/.cargo/config.toml`, `native/src/components/talkback/** (new)`, `native/src/components/settings/TalkbackSettingsView.tsx (new)`, `native/src/components/settings/ProviderSettings.tsx`, `native/src/components/common/NativeSidebar.tsx`, `native/src/App.tsx`, `native/src/types/index.ts`, `docs/talkback/** (new)`, `docs/{README,decisions}.md`, `README.md`, `maybe_later.md`).
+
+Relay captured, understood, and remembered. It could not converse. Talkback is
+that fourth layer, and the thing it deliberately is **not** is another AI stack:
+it owns no database, no note type, and no memory of its own. Voice Notes,
+Scribbles, Meetings and MeetingFacts *are* the memory.
+
+Ask what you decided and the answer comes from your own capture, with the
+sources shown. Ask something Relay has no record of and it says so — without
+calling a model at all, because the cheapest way never to invent a memory is
+not to give a model the chance. Talk over it and it stops mid-sentence.
+
+#### Features
+
+- **Talkback surface (`native/src/components/talkback/`, `native/src-tauri/src/talkback/`)**: A first-class navigation surface with an animated conversational agent, a live transcript, per-answer source chips, an explicit ON/OFF toggle, and a text box. Voice and text enter the *same* engine — the text box is not a fallback chatbot, it is the same turn without a microphone. **No new global hotkey**: Relay has two and a third would be one too many.
+- **Unified context retriever (`talkback/retrieval.rs`, `talkback/sources.rs`)**: One canonical way to ask what Relay knows, across Voice Notes, Scribbles, meeting summaries and MeetingFacts. IDF-weighted lexical scoring with title/tag boosts, exact-phrase bonus, per-source weighting (derived meeting intelligence outranks raw dictation), recency decay, one-hop expansion along Scribble relationships and shared topics, deduplication (a meeting and its facts collapse to one item), and a character budget derived from the provider's configured context window rather than a fixed constant. Every retrieved item keeps `source_type`, `source_id`, `title`, `timestamp` and `relevance` — so "where did you get that?" has a real answer, produced deterministically rather than by the model.
+- **Personal-memory policy (`talkback/engine.rs::plan_turn`)**: A recall question ("what did we decide", "do you remember", "what happened in") with no retrieved evidence is answered *"I couldn't find that in your Relay data."* without an LLM call. A recall question *with* evidence gets a prompt that forbids answering from general knowledge.
+- **Streaming responses (`providers::LLMClient::complete_streaming`, `talkback/chunk.rs`)**: The LLM streams; a phrase buffer releases whole sentences; each sentence is synthesized and played while the next is still being written. Time-to-first-audio becomes the cost of the *first sentence*, not the whole answer — which is what makes a batch engine like Piper behave like a streaming one. The buffer knows decimals, ellipses, abbreviations, closing quotes, and the Devanagari danda.
+- **Barge-in (`talkback/turn.rs`, `talkbackAudioQueue.ts`)**: Speaking over Relay cancels the in-flight generation, abandons pending synthesis, clears the audio queue, and starts a new turn — one cancellation token threaded through all three, so audio synthesized for a superseded turn can never play late.
+- **Voice Note and Scribble creation by voice (`talkback/tools.rs`)**: "Start recording this as a voice note" opens a capture that swallows turns until "stop voice note", then persists through `VaultNote::new_voice_note` — the same constructor the dictation hotkey uses, storing the transcript verbatim. "Turn this into a Scribble" saves the conversation through `Scribble::new_text` with `source_metadata.source = "talkback"`, so the existing enrichment, graph and merge pipelines pick it up unchanged. No new schema for either. No destructive or outbound tools ship.
+- **TTS provider abstraction (`tts::TtsProvider`)**: Piper moves behind a trait with declared capabilities, so a second local engine can be added and measured without touching a call site. `resolve_provider` is the single place a future provider is registered.
+- **Backend-owned state machine (`talkback/state.rs`)**: `OFF → STARTING → LISTENING ⇄ USER_SPEAKING → TRANSCRIBING → THINKING → SPEAKING → LISTENING`, plus `INTERRUPTED` and `ERROR`. A total function over an event enum, so an illegal transition is a failing test rather than a UI that claims to be listening with the microphone closed. The frontend renders it and never invents it.
+- **Talkback settings (`Settings › Talkback`)**: Speak-aloud, allow-interruption, end-of-turn pause, and which memory sources may be read. The activation-mode seam accepts `wake_word` and the engine refuses it with a clear message — the architecture is ready, no always-on listener ships.
+- **Per-turn observability (`TurnMetrics`)**: STT, retrieval, LLM first-token, LLM total, TTS first-audio and total latency, plus interruption and provider, emitted per turn and shown in the Talkback sidebar. Ids, counts and durations only — never transcript text, retrieved content, or audio.
+
+#### Improvements
+
+- **Streaming for every provider (`native/src-tauri/src/providers/mod.rs`)**: `complete_streaming` handles Ollama's NDJSON and OpenAI/Anthropic/Gemini server-sent events through one pure `parse_stream_line`, so all four are unit-tested against captured frames without a network. Uses `Response::chunk` rather than `bytes_stream`, so streaming costs zero new crates. Chunk boundaries are decoded from bytes, not per-chunk strings, so a boundary falling inside a multi-byte character cannot corrupt Devanagari mid-word.
+- **Microphone arbitration (`commands.rs`)**: Dictation and Talkback share one device and now refuse each other with specific error codes instead of racing for it. Talkback's stream is created on enable and *dropped* on disable — "off" means the OS-level capture does not exist.
+- **README corrected (`README.md`)**: The Features list and architecture diagram claimed a LanceDB vector store. There is no LanceDB dependency in `Cargo.toml` and no embedding code in the repository; the claim is removed rather than left to mislead the next reader. `docs/decisions.md` Decision 48 records why retrieval is lexical and where embeddings plug in.
+
+#### Fixes
+
+- **Linux and CI builds restored (`native/src-tauri/.cargo/config.toml`)**: v0.17.3 replaced `WHISPER_DONT_GENERATE_BINDINGS` with hardcoded `C:\Program Files\...` paths for `CMAKE` and `LIBCLANG_PATH`. Cargo's `[env]` is global with no per-platform form, so those paths applied on Linux and macOS too and broke every non-Windows build including CI — the exact regression the file's own comment and `AGENTS.md` forbid. Restored the binding-skip flag, which removes the need for libclang on *any* platform; a developer whose CMake is off PATH can still export `CMAKE` themselves, as the comment already documented.
+
+#### Removals
+
+- **Dead voice-chat path deleted (`native/src-tauri/src/pipeline/chat.rs`)**: `process_chat` had no reachable caller — `ChatPanel.tsx` was deleted under Decision 34 and no command exposed it. Talkback replaces it rather than sitting beside it, so it is removed instead of left to rot next to its successor.
+
+#### Tests
+
+- **169 new Rust tests** (412 → 581), covering the state machine's legal and illegal transitions, intent routing across memory/action/provenance phrasings, retrieval ranking (source weighting, recency-versus-relevance, IDF, expansion, budget, determinism), excerpt selection, the phrase buffer under character-by-character streaming, turn detection (mid-sentence pauses, keystroke rejection, echo guard, runaway caps), the Voice Note and Scribble tools against a real vault, provider stream parsing for all four providers, and the no-evidence guarantee.
+- **25 new frontend tests** (71 → 96), covering audio-queue ordering, interruption, late audio from a superseded turn, decode failure, the agent's state mapping, and that typing never silently opens the microphone.
+- **Two benchmarks**, `#[ignore]`d so CI has no timing tests: retrieval scaling and phrase-buffer throughput. Results and — explicitly — what was *not* measured are in `docs/talkback/BENCHMARKS.md`.
+
+#### Documentation
+
+- **`docs/talkback/RESEARCH.md`**: The research pass. Competitive matrix (ChatGPT Voice, Claude voice, Gemini Live, Perplexity, Granola, Limitless, Mem, Notion AI — all reference-only), open-source technology matrix with licences verified upstream, and the architectures rejected with reasons. Notable findings: Piper was archived in October 2025 and its maintained successor is GPL-3.0; Parakeet has no Hindi, which disqualifies it for Relay; `rodio` requires `cpal ^0.17` against Relay's `0.15`.
+- **`docs/talkback/ARCHITECTURE.md`**: The pipeline, state machine, retrieval stages, privacy contract, and what Talkback deliberately does not do.
+- **`docs/decisions.md` Decisions 47–49**: Why native rather than Pipecat, why not speech-to-speech, why retrieval is lexical, why playback lives in the WebView, and why turn detection is Talkback's own.
+
 ## [0.17.3] - 2026-08-30
 
 ### Whisper MSVC Build Environment & Toolchain Path Resolution

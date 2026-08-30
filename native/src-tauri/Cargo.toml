@@ -1,6 +1,6 @@
 [package]
 name = "relay-native-backend"
-version = "0.17.3"
+version = "0.18.0"
 description = "Relay AI Voice and Memory Assistant Rust Backend"
 authors = ["Relay Team"]
 license = "AGPL-3.0-only"

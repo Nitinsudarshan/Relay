@@ -3,9 +3,6 @@ use crate::vault::{VaultManager, VaultNote};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-mod chat;
-pub use chat::process_chat;
-
 mod enrichment;
 pub use enrichment::{
     enrich_scribble, extract_deterministic_entities, extract_deterministic_knowledge,
@@ -32,7 +29,11 @@ pub struct ProcessedPipelineResult {
     pub note_id: Option<String>,
     pub kanban_cards_created: usize,
     pub output_markdown: String,
-    /// Vault note titles used as grounding context (populated for chat mode).
+    /// Vault note titles used as grounding context.
+    ///
+    /// Retained for the frontend's `ProcessedPipelineResult` contract;
+    /// grounded answers now come from Talkback, which carries full
+    /// provenance (`talkback::ContextItem`) rather than bare titles.
     #[serde(default)]
     pub sources: Vec<String>,
     /// Base64 WAV of the answer spoken aloud, if a local TTS engine is configured.

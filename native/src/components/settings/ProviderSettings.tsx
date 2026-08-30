@@ -33,6 +33,7 @@ import {
   Layers,
   Power,
   Clipboard,
+  MessageCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,6 +46,7 @@ import { AccountSettings } from './AccountSettings';
 import { DeveloperSettingsView } from './DeveloperSettingsView';
 import { DictionarySnippetsSettings } from './DictionarySnippetsSettings';
 import { MeetingsSettings } from './MeetingsSettings';
+import { TalkbackSettingsView, DEFAULT_TALKBACK_SETTINGS } from './TalkbackSettingsView';
 
 export type SettingsSection =
   | 'account'
@@ -52,6 +54,7 @@ export type SettingsSection =
   | 'dictation'
   | 'dictionary'
   | 'meetings'
+  | 'talkback'
   | 'languages'
   | 'advanced'
   | 'privacy'
@@ -130,6 +133,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     keep_microphone_warm: 'off',
     auto_learn_words: true,
   },
+  talkback: DEFAULT_TALKBACK_SETTINGS,
   dictionary: ['Relay', 'Whisper', 'Tauri', 'Rust', 'Supabase', 'LanceDB', 'Ollama'],
   snippets: [],
 };
@@ -486,7 +490,21 @@ export const ProviderSettings: React.FC = () => {
           <span>Meetings</span>
         </button>
 
-        {/* 5. Languages & Script */}
+        {/* 5. Talkback */}
+        <button
+          type="button"
+          onClick={() => setActiveSection('talkback')}
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
+            activeSection === 'talkback'
+              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          }`}
+        >
+          <MessageCircle className="w-4 h-4 text-primary" />
+          <span>Talkback</span>
+        </button>
+
+        {/* 6. Languages & Script */}
         <button
           type="button"
           onClick={() => setActiveSection('languages')}
@@ -1859,6 +1877,20 @@ export const ProviderSettings: React.FC = () => {
                 await invoke('save_settings', { settings: next });
               } catch (err) {
                 console.error('Failed to save meeting settings', err);
+              }
+            }}
+          />
+        )}
+
+        {activeSection === 'talkback' && (
+          <TalkbackSettingsView
+            settings={settings}
+            onChange={async (next) => {
+              setSettings(next);
+              try {
+                await invoke('save_settings', { settings: next });
+              } catch (err) {
+                console.error('Failed to save Talkback settings', err);
               }
             }}
           />

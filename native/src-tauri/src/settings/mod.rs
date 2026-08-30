@@ -1,3 +1,4 @@
+use crate::talkback::TalkbackSettings;
 use crate::providers::ProviderConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -512,6 +513,8 @@ pub struct AppSettings {
     pub audio_input: AudioInputSettings,
     #[serde(default)]
     pub meetings: MeetingSettings,
+    #[serde(default)]
+    pub talkback: TalkbackSettings,
     #[serde(default = "default_dictionary_words")]
     pub dictionary: Vec<String>,
     #[serde(default = "default_snippets")]
@@ -536,6 +539,7 @@ impl Default for AppSettings {
             startup: StartupSettings::default(),
             audio_input: AudioInputSettings::default(),
             meetings: MeetingSettings::default(),
+            talkback: TalkbackSettings::default(),
             dictionary: default_dictionary_words(),
             snippets: default_snippets(),
         }

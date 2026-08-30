@@ -568,6 +568,285 @@ impl LLMClient {
         self.config.context_tokens.max(2_048)
     }
 
+    /// The active provider, so callers can report which service answered.
+    pub fn provider_type(&self) -> &ProviderType {
+        &self.config.active_provider
+    }
+
+    /// The model that will actually be asked, for observability.
+    pub fn model_name(&self) -> String {
+        match self.config.active_provider {
+            ProviderType::Ollama => self.config.ollama_model.clone(),
+            ref provider => self
+                .config
+                .cloud_model
+                .clone()
+                .filter(|m| !m.trim().is_empty())
+                .unwrap_or_else(|| Self::default_cloud_model(provider).to_string()),
+        }
+    }
+
+    /// Streams a completion, calling `on_delta` with each fragment as it
+    /// arrives.
+    ///
+    /// This exists for Talkback, where waiting for a whole answer before
+    /// speaking any of it is the difference between a conversation and a
+    /// form submission. Everything else in Relay is batch work — a
+    /// meeting summary has nobody waiting on its first sentence — and
+    /// keeps using [`complete_with`](Self::complete_with).
+    ///
+    /// `on_delta` returns `false` to abandon the stream, which is how
+    /// barge-in stops a generation the user has already talked over. A
+    /// cancelled stream returns whatever had accumulated so far rather
+    /// than an error: the partial answer was really said, and the caller
+    /// still needs it for the transcript.
+    pub async fn complete_streaming<F>(
+        &self,
+        prompt: &str,
+        system_prompt: Option<&str>,
+        options: CompletionOptions,
+        mut on_delta: F,
+    ) -> Result<LLMResponse, ProviderError>
+    where
+        F: FnMut(&str) -> bool,
+    {
+        let provider = self.config.active_provider.clone();
+        let model = self.model_name();
+
+        let (url, body, headers) = self.streaming_request(&model, prompt, system_prompt, options)?;
+
+        let mut request = self
+            .client
+            .post(&url)
+            .timeout(std::time::Duration::from_secs(options.timeout_secs));
+        for (name, value) in &headers {
+            request = request.header(name, value);
+        }
+
+        let mut response = request.json(&body).send().await.map_err(|e| match provider {
+            ProviderType::Ollama => ProviderError::OllamaUnavailable {
+                host: self.config.ollama_host.clone(),
+                message: e.to_string(),
+            },
+            _ => ProviderError::Network(e),
+        })?;
+
+        if !response.status().is_success() {
+            let code = response.status().as_u16().to_string();
+            let message = response.text().await.unwrap_or_default();
+            return match provider {
+                ProviderType::Ollama => Err(ProviderError::OllamaUnavailable {
+                    host: self.config.ollama_host.clone(),
+                    message: format!("HTTP {code}: {message}"),
+                }),
+                _ => Err(ProviderError::CloudError { code, message }),
+            };
+        }
+
+        let mut text = String::new();
+        // Bytes, not a String: a chunk boundary can fall inside a
+        // multi-byte character, and decoding each chunk on its own would
+        // corrupt Devanagari mid-word.
+        let mut pending: Vec<u8> = Vec::new();
+        let mut finished = false;
+
+        // `Response::chunk` rather than `bytes_stream` deliberately: it
+        // needs no `stream` feature on reqwest and no futures-util
+        // dependency, so streaming costs Relay zero new crates.
+        while let Some(chunk) = response.chunk().await? {
+            pending.extend_from_slice(&chunk);
+            while let Some(newline) = pending.iter().position(|b| *b == b'\n') {
+                let line: Vec<u8> = pending.drain(..=newline).collect();
+                let line = String::from_utf8_lossy(&line);
+                match parse_stream_line(&provider, line.trim_end_matches(['\r', '\n'])) {
+                    StreamEvent::Delta(delta) => {
+                        text.push_str(&delta);
+                        if !on_delta(&delta) {
+                            return Ok(LLMResponse {
+                                text,
+                                model,
+                                prompt_tokens: None,
+                                completion_tokens: None,
+                            });
+                        }
+                    }
+                    StreamEvent::Done => finished = true,
+                    StreamEvent::Ignore => {}
+                }
+            }
+            if finished {
+                break;
+            }
+        }
+
+        // A final line with no trailing newline still carries a delta.
+        if !pending.is_empty() {
+            let line = String::from_utf8_lossy(&pending);
+            if let StreamEvent::Delta(delta) =
+                parse_stream_line(&provider, line.trim_end_matches(['\r', '\n']))
+            {
+                text.push_str(&delta);
+                on_delta(&delta);
+            }
+        }
+
+        Ok(LLMResponse {
+            text,
+            model,
+            prompt_tokens: None,
+            completion_tokens: None,
+        })
+    }
+
+    /// URL, body and headers for a streaming request.
+    fn streaming_request(
+        &self,
+        model: &str,
+        prompt: &str,
+        system_prompt: Option<&str>,
+        options: CompletionOptions,
+    ) -> Result<StreamingRequest, ProviderError> {
+        match self.config.active_provider {
+            ProviderType::Ollama => {
+                let mut body =
+                    Self::ollama_request_body(model, prompt, system_prompt, options);
+                body["stream"] = serde_json::Value::Bool(true);
+                Ok((
+                    format!("{}/api/generate", self.config.ollama_host),
+                    body,
+                    Vec::new(),
+                ))
+            }
+            ref provider => {
+                let api_key = self
+                    .config
+                    .cloud_api_key
+                    .as_ref()
+                    .filter(|k| !k.trim().is_empty())
+                    .ok_or_else(|| {
+                        ProviderError::ConfigError("Cloud API key is missing".to_string())
+                    })?;
+                let route = Self::cloud_route(provider, model, api_key)?;
+
+                let mut body = match provider {
+                    ProviderType::CloudAnthropic => {
+                        Self::anthropic_request_body(model, prompt, system_prompt, options)
+                    }
+                    ProviderType::CloudGemini => {
+                        Self::gemini_request_body(prompt, system_prompt, options)
+                    }
+                    _ => Self::openai_request_body(model, prompt, system_prompt, options),
+                };
+
+                // Gemini signals streaming in the URL, everyone else in
+                // the body.
+                let url = if matches!(provider, ProviderType::CloudGemini) {
+                    format!(
+                        "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
+                    )
+                } else {
+                    body["stream"] = serde_json::Value::Bool(true);
+                    route.url.clone()
+                };
+
+                let mut headers = vec![route.auth_header.clone()];
+                headers.extend(route.extra_headers.clone());
+                Ok((url, body, headers))
+            }
+        }
+    }
+}
+
+/// A streaming request: where to post, what to post, and the headers it
+/// needs. Named because the four providers disagree on all three.
+type StreamingRequest = (String, serde_json::Value, Vec<(String, String)>);
+
+/// One parsed line of a provider's response stream.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StreamEvent {
+    /// Text to append and speak.
+    Delta(String),
+    /// The provider said the generation is complete.
+    Done,
+    /// Keep-alive, metadata, or a line this provider does not use.
+    Ignore,
+}
+
+/// Parses one line of a provider's stream.
+///
+/// Pure, and public, because the four providers disagree about everything
+/// — NDJSON versus SSE, where the text lives, how completion is signalled
+/// — and the only way to be sure Relay reads all four correctly without a
+/// network is to test this function directly.
+pub fn parse_stream_line(provider: &ProviderType, line: &str) -> StreamEvent {
+    let line = line.trim();
+    if line.is_empty() {
+        return StreamEvent::Ignore;
+    }
+
+    match provider {
+        // Ollama streams newline-delimited JSON with no `data:` prefix.
+        ProviderType::Ollama => {
+            let Ok(json) = serde_json::from_str::<serde_json::Value>(line) else {
+                return StreamEvent::Ignore;
+            };
+            if let Some(text) = json["response"].as_str() {
+                if !text.is_empty() {
+                    return StreamEvent::Delta(text.to_string());
+                }
+            }
+            if json["done"].as_bool().unwrap_or(false) {
+                return StreamEvent::Done;
+            }
+            StreamEvent::Ignore
+        }
+        // The rest are server-sent events.
+        provider => {
+            // SSE carries `event:` and comment lines too; only `data:`
+            // frames hold content.
+            let Some(payload) = line.strip_prefix("data:") else {
+                return StreamEvent::Ignore;
+            };
+            let payload = payload.trim();
+            if payload == "[DONE]" {
+                return StreamEvent::Done;
+            }
+            let Ok(json) = serde_json::from_str::<serde_json::Value>(payload) else {
+                return StreamEvent::Ignore;
+            };
+
+            match provider {
+                ProviderType::CloudAnthropic => {
+                    match json["type"].as_str() {
+                        Some("content_block_delta") => json["delta"]["text"]
+                            .as_str()
+                            .filter(|t| !t.is_empty())
+                            .map(|t| StreamEvent::Delta(t.to_string()))
+                            .unwrap_or(StreamEvent::Ignore),
+                        Some("message_stop") => StreamEvent::Done,
+                        _ => StreamEvent::Ignore,
+                    }
+                }
+                ProviderType::CloudGemini => json["candidates"][0]["content"]["parts"]
+                    .as_array()
+                    .map(|parts| {
+                        parts
+                            .iter()
+                            .filter_map(|p| p["text"].as_str())
+                            .collect::<String>()
+                    })
+                    .filter(|t| !t.is_empty())
+                    .map(StreamEvent::Delta)
+                    .unwrap_or(StreamEvent::Ignore),
+                // OpenAI and anything else OpenAI-shaped.
+                _ => json["choices"][0]["delta"]["content"]
+                    .as_str()
+                    .filter(|t| !t.is_empty())
+                    .map(|t| StreamEvent::Delta(t.to_string()))
+                    .unwrap_or(StreamEvent::Ignore),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -710,5 +989,197 @@ mod tests {
             honest.is_err(),
             "a summary must never be written from canned filler presented as a model's work"
         );
+    }
+
+    #[test]
+    fn ollama_ndjson_deltas_are_parsed() {
+        let event = parse_stream_line(
+            &ProviderType::Ollama,
+            r#"{"model":"llama3.2","response":"Flat ","done":false}"#,
+        );
+        assert_eq!(event, StreamEvent::Delta("Flat ".to_string()));
+    }
+
+    #[test]
+    fn ollama_signals_completion_with_done() {
+        assert_eq!(
+            parse_stream_line(&ProviderType::Ollama, r#"{"response":"","done":true}"#),
+            StreamEvent::Done
+        );
+    }
+
+    #[test]
+    fn openai_sse_deltas_are_parsed() {
+        let event = parse_stream_line(
+            &ProviderType::CloudOpenAI,
+            r#"data: {"choices":[{"delta":{"content":"seat "}}]}"#,
+        );
+        assert_eq!(event, StreamEvent::Delta("seat ".to_string()));
+        assert_eq!(
+            parse_stream_line(&ProviderType::CloudOpenAI, "data: [DONE]"),
+            StreamEvent::Done
+        );
+    }
+
+    #[test]
+    fn openai_role_only_frames_are_ignored() {
+        assert_eq!(
+            parse_stream_line(
+                &ProviderType::CloudOpenAI,
+                r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#
+            ),
+            StreamEvent::Ignore
+        );
+    }
+
+    #[test]
+    fn anthropic_content_block_deltas_are_parsed() {
+        let event = parse_stream_line(
+            &ProviderType::CloudAnthropic,
+            r#"data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"licence"}}"#,
+        );
+        assert_eq!(event, StreamEvent::Delta("licence".to_string()));
+        assert_eq!(
+            parse_stream_line(
+                &ProviderType::CloudAnthropic,
+                r#"data: {"type":"message_stop"}"#
+            ),
+            StreamEvent::Done
+        );
+        assert_eq!(
+            parse_stream_line(
+                &ProviderType::CloudAnthropic,
+                r#"data: {"type":"ping"}"#
+            ),
+            StreamEvent::Ignore
+        );
+    }
+
+    #[test]
+    fn gemini_sse_deltas_are_parsed() {
+        let event = parse_stream_line(
+            &ProviderType::CloudGemini,
+            r#"data: {"candidates":[{"content":{"parts":[{"text":"We shipped"}]}}]}"#,
+        );
+        assert_eq!(event, StreamEvent::Delta("We shipped".to_string()));
+    }
+
+    #[test]
+    fn sse_comments_and_event_lines_are_ignored() {
+        for provider in [
+            ProviderType::CloudOpenAI,
+            ProviderType::CloudAnthropic,
+            ProviderType::CloudGemini,
+        ] {
+            assert_eq!(parse_stream_line(&provider, ": keep-alive"), StreamEvent::Ignore);
+            assert_eq!(
+                parse_stream_line(&provider, "event: content_block_delta"),
+                StreamEvent::Ignore
+            );
+            assert_eq!(parse_stream_line(&provider, ""), StreamEvent::Ignore);
+        }
+    }
+
+    #[test]
+    fn malformed_json_is_skipped_rather_than_fatal() {
+        // A truncated frame must not abort a generation the user is
+        // already listening to.
+        assert_eq!(
+            parse_stream_line(&ProviderType::Ollama, r#"{"response":"half"#),
+            StreamEvent::Ignore
+        );
+        assert_eq!(
+            parse_stream_line(&ProviderType::CloudOpenAI, "data: {not json"),
+            StreamEvent::Ignore
+        );
+    }
+
+    #[test]
+    fn the_streaming_ollama_body_sets_stream_true_and_keeps_the_window() {
+        let client = LLMClient::new(ProviderConfig::default());
+        let (url, body, headers) = client
+            .streaming_request("llama3.2", "question", Some("rules"), options())
+            .unwrap();
+        assert!(url.ends_with("/api/generate"));
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["options"]["num_ctx"], 16_384);
+        assert_eq!(body["system"], "rules");
+        assert!(headers.is_empty());
+    }
+
+    #[test]
+    fn the_streaming_gemini_request_uses_the_sse_endpoint() {
+        let client = LLMClient::new(ProviderConfig {
+            active_provider: ProviderType::CloudGemini,
+            cloud_api_key: Some("key".to_string()),
+            cloud_model: Some("gemini-2.0-flash".to_string()),
+            ..Default::default()
+        });
+        let (url, body, headers) = client
+            .streaming_request("gemini-2.0-flash", "q", None, options())
+            .unwrap();
+        assert!(url.contains(":streamGenerateContent?alt=sse"), "{url}");
+        assert!(
+            body.get("stream").is_none(),
+            "Gemini signals streaming in the URL, not the body"
+        );
+        assert!(headers.iter().any(|(k, _)| k == "x-goog-api-key"));
+    }
+
+    #[test]
+    fn the_streaming_anthropic_request_carries_the_version_header() {
+        let client = LLMClient::new(ProviderConfig {
+            active_provider: ProviderType::CloudAnthropic,
+            cloud_api_key: Some("key".to_string()),
+            ..Default::default()
+        });
+        let (url, body, headers) = client
+            .streaming_request("claude-sonnet-4-5", "q", Some("sys"), options())
+            .unwrap();
+        assert_eq!(url, "https://api.anthropic.com/v1/messages");
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["system"], "sys");
+        assert!(headers.iter().any(|(k, v)| k == "anthropic-version" && v == "2023-06-01"));
+    }
+
+    #[test]
+    fn a_cloud_stream_without_a_key_fails_before_the_request() {
+        let client = LLMClient::new(ProviderConfig {
+            active_provider: ProviderType::CloudOpenAI,
+            cloud_api_key: None,
+            ..Default::default()
+        });
+        assert!(matches!(
+            client.streaming_request("gpt-4o-mini", "q", None, options()),
+            Err(ProviderError::ConfigError(_))
+        ));
+    }
+
+    #[test]
+    fn the_model_name_falls_back_to_the_provider_default() {
+        let ollama = LLMClient::new(ProviderConfig::default());
+        assert_eq!(ollama.model_name(), "llama3.2:latest");
+
+        let anthropic = LLMClient::new(ProviderConfig {
+            active_provider: ProviderType::CloudAnthropic,
+            cloud_model: Some("  ".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(anthropic.model_name(), "claude-sonnet-4-5");
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_provider_fails_the_stream_rather_than_hanging() {
+        let client = LLMClient::new(ProviderConfig {
+            ollama_host: "http://127.0.0.1:1".to_string(),
+            ..Default::default()
+        });
+        let result = client
+            .complete_streaming("q", None, CompletionOptions::default(), |_| true)
+            .await;
+        assert!(matches!(
+            result,
+            Err(ProviderError::OllamaUnavailable { .. })
+        ));
     }
 }
