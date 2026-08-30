@@ -1,8 +1,8 @@
 # Relay — Roadmap & Competitive Gap Backlog
 
 This tracks what's real vs. stubbed today, and what competitive research
-(`MindME/App Ideas/Relay/Relay - Competitive Research.md`) suggests should
-come next. It exists so "not implemented yet" is written down explicitly
+suggests should come next — the meeting-notetaker teardown that informs it is
+`Meeting-rules/meeting_notes_competitive_teardown.md`. It exists so "not implemented yet" is written down explicitly
 instead of silently implied by absence — see `rules/version-and-changelog.md`'s
 spirit of keeping the living spec honest.
 

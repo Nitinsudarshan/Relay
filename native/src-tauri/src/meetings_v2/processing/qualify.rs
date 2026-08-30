@@ -617,13 +617,10 @@ pub fn qualify_action_items(
             diagnostic.owner = owner_key(&item);
         }
 
-        match gate(&item, &evidence) {
-            Err(reason) => {
-                diagnostic.rejection_reason = Some(reason);
-                report.diagnostics.push(diagnostic);
-                continue;
-            }
-            Ok(()) => {}
+        if let Err(reason) = gate(&item, &evidence) {
+            diagnostic.rejection_reason = Some(reason);
+            report.diagnostics.push(diagnostic);
+            continue;
         }
 
         let confidence = score(&item, &evidence, &closing_ids);

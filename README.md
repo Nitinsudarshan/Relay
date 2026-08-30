@@ -2,6 +2,7 @@
 
 > Hybrid (local-first + cloud) AI voice and memory assistant for Windows — turns push-to-talk speech into structured Kanban cards, markdown notes, and direct dictation without cloud lock-in.
 
+[![CI](https://github.com/Nitinsudarshan/Relay/actions/workflows/ci.yml/badge.svg)](https://github.com/Nitinsudarshan/Relay/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL--v3-blue.svg)](LICENSE)
 
 > [!NOTE]
@@ -74,9 +75,30 @@ flowchart TD
     F -.->|Optional Hybrid Sync| G[Supabase Cloud Backend]
 ```
 
+## Tests
+
+```bash
+# Rust backend — 411 tests
+cd native/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
+
+# Native frontend — 71 tests
+cd native && npm test && npm run typecheck
+
+# Web dashboard — typecheck and build
+cd web && npx tsc --noEmit && npm run build
+```
+
+CI runs all of these on every push and pull request
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). See
+[`docs/testing.md`](docs/testing.md) for what is covered and what is not.
+
+Building the Rust crate needs a C/C++ toolchain and CMake for whisper.cpp. On
+Linux it also needs the GTK/WebKit and ALSA development headers — the CI
+workflow's `system dependencies` step is the authoritative list.
+
 ## Contributing
 
-Contributions are welcome — please read [`AGENTS.md`](AGENTS.md) for coding conventions and repository rules before opening a pull request.
+Contributions are welcome — please read [`AGENTS.md`](AGENTS.md) for coding conventions and repository rules before opening a pull request, and [`docs/README.md`](docs/README.md) for the documentation map.
 
 ## License
 

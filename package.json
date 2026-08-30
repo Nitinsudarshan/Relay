@@ -1,6 +1,6 @@
 {
   "name": "relay-workspace",
-  "version": "0.17.1",
+  "version": "0.17.2",
   "license": "AGPL-3.0-only",
   "private": true,
   "scripts": {
@@ -11,6 +11,8 @@
     "dev:native": "npm --prefix native run tauri dev",
     "build:native": "npm --prefix native run tauri build",
     "install:all": "npm --prefix native install && npm --prefix web install",
-    "verify:rules": "node scripts/verify-commit-rules.js"
+    "verify:rules": "node scripts/verify-commit-rules.js",
+    "test": "npm --prefix native test",
+    "typecheck": "npm --prefix native run typecheck && npm --prefix web exec tsc -- --noEmit"
   }
 }

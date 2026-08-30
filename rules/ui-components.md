@@ -40,7 +40,28 @@ equivalent exists.
   and even then it must still use design tokens from `design-system.md`,
   not raw hardcoded styling.
 
-This is a from-scratch repo, so there's no NGConnect-style "known drift to
-clean up" section here yet — if a future change introduces a raw `recharts`
-import bypassing the shadcn wrapper, add that drift note here rather than
-letting it go undocumented.
+## No fake controls
+
+A control must never present functionality that isn't actually wired up.
+This was originally the push-to-talk pill's rule (Decision 25/PTT-008) and
+applies to every surface: a toggle that looks live but changes nothing is
+worse than no toggle, because the user cannot tell the difference between
+"off" and "broken".
+
+When the backing capability isn't available, pick one and make it visible:
+
+- **Warn** — `⚠ Ollama not configured` alongside the control.
+- **Disable** — render it disabled with the reason (`Unavailable — configure an LLM`).
+- **Prompt setup** — replace it with a `[Configure]` call to action.
+
+The check applies at review time too: if a setting exists in the settings
+schema and in the UI, something in the code must read it. A persisted
+setting no code path consumes is a fake control that happens to survive a
+restart.
+
+## Known drift
+
+- `PillSettingsPopover.tsx` and `MarkdownView.tsx` still carry most of the
+  repo's remaining hardcoded hex colors and ad hoc `dark:` overrides. New
+  work in those files should use design tokens (`design-system.md`) rather
+  than extending the existing exceptions.

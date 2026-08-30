@@ -1,4 +1,5 @@
 use super::types::AudioLevels;
+use crate::sync::MutexExt;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -656,8 +657,8 @@ fn run_dual_capture_loop(
 
         // --- Drain both FIFOs in lockstep and mix ---
         let (drained, mic_block_sq, sys_block_sq) = {
-            let mut mic_guard = mic_fifo.lock().unwrap();
-            let mut sys_guard = sys_fifo.lock().unwrap();
+            let mut mic_guard = mic_fifo.lock_or_recover();
+            let mut sys_guard = sys_fifo.lock_or_recover();
             let count = plan_drain(mic_guard.len(), sys_guard.len(), has_mic, has_sys);
 
             let mut mic_sq = 0.0_f32;
@@ -754,8 +755,8 @@ fn run_dual_capture_loop(
     // Final drain: mix and persist whatever is still buffered so the tail of the
     // meeting is not lost.
     {
-        let mut mic_guard = mic_fifo.lock().unwrap();
-        let mut sys_guard = sys_fifo.lock().unwrap();
+        let mut mic_guard = mic_fifo.lock_or_recover();
+        let mut sys_guard = sys_fifo.lock_or_recover();
         let remaining = mic_guard.len().max(sys_guard.len());
         for _ in 0..remaining {
             let m = mic_guard.pop_front().unwrap_or(0.0);
@@ -1168,7 +1169,14 @@ mod tests {
     #[test]
     fn microphone_bleed_from_the_speakers_is_not_a_second_speaker() {
         let t = track(&[(BLEED, LOUD), (BLEED, LOUD)]);
-        assert!(BLEED > AUDIBLE_RMS_THRESHOLD, "bleed must clear the gate");
+        // The premise of this test: bleed is loud enough to pass the audible
+        // gate, so what follows is about channel attribution, not loudness.
+        // (Both operands are consts, so clippy sees the comparison as
+        // constant — it is, deliberately, and it guards the fixture values.)
+        #[allow(clippy::assertions_on_constants)]
+        {
+            assert!(BLEED > AUDIBLE_RMS_THRESHOLD, "bleed must clear the gate");
+        }
         assert_eq!(resolve_utterance_channel(&t, 0.0, 2.0), (false, true));
     }
 

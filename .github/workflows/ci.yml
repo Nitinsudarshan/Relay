@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  repo-rules:
+    name: Repository rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # scripts/verify-commit-rules.js already existed and enforces
+      # rules/version-and-changelog.md and rules/readme.md — VERSION agrees
+      # with all four manifests, CHANGELOG.md has an entry for it, README
+      # structure holds. Nothing ran it until now.
+      - name: Verify version, changelog, and README
+        run: npm run verify:rules
+
+  rust:
+    name: Rust backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      # Relay targets Windows, but the crate is platform-portable and Linux
+      # runners are faster and cheaper. What Linux needs that Windows does not:
+      # GTK/WebKit for Tauri, ALSA for cpal, and a C/C++ toolchain plus CMake
+      # for whisper.cpp. libxdo is enigo's X11 text-injection backend.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libasound2-dev \
+            libxdo-dev \
+            build-essential \
+            cmake
+
+      # No toolchain pinned here on purpose: rust-toolchain.toml is the single
+      # source of truth, so a local run and this job use the same compiler and
+      # therefore the same lint set. rustup installs it on the first cargo call.
+      - name: Show toolchain
+        run: rustc --version && cargo clippy --version
+
+      # Includes the whisper.cpp build, which dominates a cold run.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/src-tauri
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test
+
+  native-frontend:
+    name: Native frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
+
+      # Catches what tsc alone does not: a broken import graph, a missing
+      # asset, a Vite config that no longer resolves.
+      - name: Build
+        run: npm run build
+
+  web-dashboard:
+    name: Web dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # No test suite yet — the dashboard is deferred (docs/decisions.md,
+      # Decision 32). See docs/testing.md §3.
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"

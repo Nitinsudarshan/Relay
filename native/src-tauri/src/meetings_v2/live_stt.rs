@@ -173,15 +173,11 @@ fn run_live_loop(
     let mut utterance = Utterance::new(0);
     let mut latest_capture = std::time::Instant::now();
 
-    loop {
-        // Block for the next frame, then take everything else already queued.
-        // Catching up in one decode is what keeps latency equal to a single
-        // inference instead of growing with the queue depth.
-        let first = match live_rx.recv() {
-            Ok(frame) => frame,
-            Err(_) => break, // capture stopped and dropped the sender
-        };
-
+    // Block for the next frame, then take everything else already queued.
+    // Catching up in one decode is what keeps latency equal to a single
+    // inference instead of growing with the queue depth. The loop ends when
+    // capture stops and drops the sender.
+    while let Ok(first) = live_rx.recv() {
         let mut frames = vec![first];
         while let Ok(frame) = live_rx.try_recv() {
             frames.push(frame);
@@ -364,7 +360,7 @@ mod tests {
     #[test]
     fn live_decoding_leaves_cpu_for_the_durable_clock() {
         let threads = live_thread_count();
-        assert!(threads >= 1 && threads <= 4);
+        assert!((1..=4).contains(&threads));
     }
 
     #[test]

@@ -5,10 +5,10 @@ description: Folder structure — where new files should be created
 
 # Project Folder Structure
 
-Relay is a from-scratch, three-surface repo (decisions 1–3 in
-`Relay - Decision Log.md`) — there is no existing NGConnect-style single
-`src/` tree to follow. This is the target layout; create it as you scaffold
-rather than expecting it to already exist.
+Relay is a three-surface repo (decisions 1–3 in `docs/decisions.md`) — there
+is no NGConnect-style single `src/` tree to follow. The layout below is what
+exists today; put new files where it says rather than starting a parallel
+tree.
 
 ```
 relay/
@@ -37,8 +37,7 @@ relay/
       lib/
         supabase/               Supabase client setup (hybrid mode only)
       types/
-  docs/                      Living spec — product.md, decisions.md, etc.
-                               (seeded from Relay - IDE Build Prompt.md section 6)
+  docs/                      Living spec — see docs/README.md for the index
 ```
 
 ## Rules
@@ -69,5 +68,6 @@ relay/
   the Rust backend does, in hybrid mode (see `security.md`).
 - Shared TypeScript types go in `<surface>/types` (or `packages/shared` once
   it exists); don't redefine the same shape in both frontends.
-- `docs/` is the living spec required by `Relay - IDE Build Prompt.md`
-  section 6 — keep it current, it's not optional documentation.
+- `docs/` is the living spec — keep it current, it's not optional
+  documentation. `docs/README.md` says what each file is for and what does
+  not warrant a new one.

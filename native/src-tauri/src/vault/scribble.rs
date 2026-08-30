@@ -589,7 +589,7 @@ impl KnowledgeGraphData {
                     if !q_lower.is_empty() {
                         final_nodes.retain(|n| {
                             n.label.to_lowercase().contains(&q_lower)
-                                || n.summary.as_ref().map_or(false, |s| s.to_lowercase().contains(&q_lower))
+                                || n.summary.as_ref().is_some_and(|s| s.to_lowercase().contains(&q_lower))
                         });
                     }
                 }

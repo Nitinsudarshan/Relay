@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 /// Authoritative state of a Meeting recording session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[derive(Default)]
 pub enum MeetingState {
+    #[default]
     Idle,
     Starting,
     Recording,
@@ -16,11 +18,6 @@ pub enum MeetingState {
     Error,
 }
 
-impl Default for MeetingState {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
 
 /// Metadata representation of a Meeting V2 recording session.
 #[derive(Debug, Clone, Serialize, Deserialize)]

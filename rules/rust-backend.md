@@ -6,9 +6,9 @@ globs: "native/src-tauri/**/*.rs"
 
 # Rust Backend Rules
 
-This file has no NGConnect equivalent — decision 2 in `Relay - Decision Log.md`
-chose a from-scratch Rust backend, which the original agent/rule set never
-covered. Treat this as the primary reference for `native/src-tauri/`.
+This file has no NGConnect equivalent — decision 2 in `docs/decisions.md`
+chose a Rust backend, which the original agent/rule set never covered. Treat
+this as the primary reference for `native/src-tauri/`.
 
 ## Rules
 

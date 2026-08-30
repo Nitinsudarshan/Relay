@@ -2,6 +2,7 @@ use super::types::{
     MeetingNotes, MeetingSession, MeetingState, TranscriptSegment, TranscriptSegmentStatus,
 };
 use hound::{WavReader, WavSpec, WavWriter};
+use crate::sync::MutexExt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -224,7 +225,7 @@ impl SessionStore {
     /// leave a person's notes half-written. This is the only writer: the
     /// processing pipeline reads notes and never touches this path.
     pub fn save_notes(&self, session_id: &str, notes: &MeetingNotes) -> Result<MeetingNotes, String> {
-        let _guard = self.write_lock.lock().unwrap();
+        let _guard = self.write_lock.lock_or_recover();
         let dir = self.session_dir(session_id);
         fs::create_dir_all(&dir).map_err(|e| format!("Failed to create meeting dir: {}", e))?;
 
@@ -347,10 +348,8 @@ impl SessionStore {
 
         for chunk_path in chunks {
             if let Ok(mut reader) = WavReader::open(&chunk_path) {
-                for sample in reader.samples::<i16>() {
-                    if let Ok(s) = sample {
-                        let _ = writer.write_sample(s);
-                    }
+                for s in reader.samples::<i16>().flatten() {
+                    let _ = writer.write_sample(s);
                 }
             }
         }

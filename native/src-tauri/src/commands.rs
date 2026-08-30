@@ -1,3 +1,4 @@
+use crate::sync::MutexExt;
 use crate::capture::{AudioRecorder, SttEngine};
 use crate::hotkeys;
 use crate::pipeline::{PipelineEngine, ProcessedPipelineResult};
@@ -101,7 +102,7 @@ pub fn record_stt_diagnostics(
     state: &AppState,
     snapshot: crate::capture::SttDiagnosticSnapshot,
 ) {
-    let mut guard = state.last_stt_diagnostics.lock().unwrap();
+    let mut guard = state.last_stt_diagnostics.lock_or_recover();
     *guard = Some(snapshot.clone());
     let _ = app.emit(STT_DIAGNOSTICS_EVENT, &snapshot);
 }
@@ -110,7 +111,7 @@ pub fn record_stt_diagnostics(
 pub async fn get_last_stt_diagnostics(
     state: State<'_, AppState>,
 ) -> Result<Option<crate::capture::SttDiagnosticSnapshot>, CommandError> {
-    let guard = state.last_stt_diagnostics.lock().unwrap();
+    let guard = state.last_stt_diagnostics.lock_or_recover();
     Ok(guard.clone())
 }
 
@@ -140,7 +141,7 @@ pub async fn update_hotkeys(
     )
     .map_err(|e| CommandError::new("HOTKEY_REGISTER_FAILED", &e))?;
 
-    let mut settings = state.settings.lock().unwrap();
+    let mut settings = state.settings.lock_or_recover();
     settings.hotkeys = hotkeys;
     settings
         .save(&state.settings_path())
@@ -156,7 +157,7 @@ pub async fn set_pill_position(
     position: PillPosition,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    let mut settings = state.settings.lock().unwrap();
+    let mut settings = state.settings.lock_or_recover();
     settings.ui.pill_position = position;
     settings
         .save(&state.settings_path())
@@ -180,7 +181,7 @@ pub async fn set_pill_expanded(
     expanded: bool,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    let position = state.settings.lock().unwrap().ui.pill_position;
+    let position = state.settings.lock_or_recover().ui.pill_position;
     crate::overlay::set_expanded(&app, expanded, position);
     Ok(())
 }
@@ -191,7 +192,7 @@ pub async fn set_pill_window_mode(
     mode: String,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    let position = state.settings.lock().unwrap().ui.pill_position;
+    let position = state.settings.lock_or_recover().ui.pill_position;
     crate::overlay::set_pill_window_geometry(&app, &mode, position);
     Ok(())
 }
@@ -234,7 +235,7 @@ pub async fn start_capture(
         // time transcription runs, a local Ollama that needed starting (or
         // a default Whisper model that needed downloading) has had real
         // time to come up.
-        let provider = state.settings.lock().unwrap().provider.clone();
+        let provider = state.settings.lock_or_recover().provider.clone();
         if matches!(provider.active_provider, ProviderType::Ollama) {
             tauri::async_runtime::spawn(async move {
                 crate::providers::ensure_ollama_ready(&provider.ollama_host, &provider.ollama_model).await;
@@ -243,8 +244,7 @@ pub async fn start_capture(
 
         let has_model = state
             .settings
-            .lock()
-            .unwrap()
+            .lock_or_recover()
             .stt
             .whisper_model_path
             .as_ref()
@@ -344,7 +344,7 @@ async fn process_captured_audio(
     state: &State<'_, AppState>,
     captured: crate::capture::CapturedAudio,
 ) -> Result<Option<ProcessedPipelineResult>, CommandError> {
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     let stt = state.stt.clone();
     let samples = captured.samples.clone();
 
@@ -556,7 +556,7 @@ pub fn spawn_scribble_enrichment(
     state: &AppState,
     scribble_id: String,
 ) {
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     let llm = LLMClient::new(settings.provider);
     let vault_dir = state.vault.vault_dir();
 
@@ -589,6 +589,9 @@ pub async fn get_scribble(id: String, state: State<'_, AppState>) -> Result<Scri
         .map_err(|e| CommandError::new("VAULT_READ_FAILED", &e.to_string()))
 }
 
+// A Tauri command's parameters are the IPC payload's fields — they are flat by
+// construction, and grouping them would change the frontend-facing contract.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn create_scribble(
     app: AppHandle,
@@ -811,7 +814,7 @@ pub async fn trigger_enrich_scribble(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<Scribble, CommandError> {
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     let llm = LLMClient::new(settings.provider);
 
     let enriched = crate::pipeline::enrich_scribble(&llm, &state.vault, &id)
@@ -829,7 +832,7 @@ pub async fn summarize_scribble(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<Scribble, CommandError> {
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     let llm = LLMClient::new(settings.provider);
 
     let updated = crate::pipeline::summarize_scribble(&llm, &state.vault, &id)
@@ -863,7 +866,7 @@ pub struct VaultLocationInfo {
 pub async fn get_vault_location(
     state: State<'_, AppState>,
 ) -> Result<VaultLocationInfo, CommandError> {
-    let configured = state.settings.lock().unwrap().vault.directory.is_some();
+    let configured = state.settings.lock_or_recover().vault.directory.is_some();
     let path = state.vault.vault_dir();
     // Reuses `VaultManager::init` (already called by every read/write path)
     // as the accessibility probe, rather than duplicating filesystem-
@@ -914,7 +917,7 @@ pub async fn set_vault_location(
     // Persist before repointing the live vault — if the settings write
     // fails, the running app must keep using the old (still-working)
     // location rather than silently diverging from what's on disk.
-    let mut settings = state.settings.lock().unwrap();
+    let mut settings = state.settings.lock_or_recover();
     settings.vault.directory = Some(path.clone());
     settings
         .save(&state.settings_path())
@@ -964,8 +967,7 @@ pub async fn ensure_stt_model_ready(state: State<'_, AppState>) -> Result<SttMod
     let models_dir = state.config_dir.join("models");
     let configured = state
         .settings
-        .lock()
-        .unwrap()
+        .lock_or_recover()
         .stt
         .whisper_model_path
         .clone()
@@ -995,7 +997,7 @@ pub async fn ensure_stt_model_ready(state: State<'_, AppState>) -> Result<SttMod
     match crate::capture::stt::ensure_default_model(&models_dir).await {
         Ok(path) => {
             let path_str = path.to_string_lossy().to_string();
-            let mut settings = state.settings.lock().unwrap();
+            let mut settings = state.settings.lock_or_recover();
             settings.stt.whisper_model_path = Some(path_str.clone());
             let _ = settings.save(&state.settings_path());
             Ok(SttModelStatus::Ready { path: path_str })
@@ -1011,7 +1013,7 @@ pub async fn ensure_stt_model_ready(state: State<'_, AppState>) -> Result<SttMod
 /// Cloud API path, which is unaffected.
 #[tauri::command]
 pub async fn ensure_local_llm_ready(state: State<'_, AppState>) -> Result<OllamaStatus, CommandError> {
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     if !matches!(settings.provider.active_provider, ProviderType::Ollama) {
         return Ok(OllamaStatus::Running);
     }
@@ -1020,7 +1022,7 @@ pub async fn ensure_local_llm_ready(state: State<'_, AppState>) -> Result<Ollama
 
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, CommandError> {
-    Ok(state.settings.lock().unwrap().clone())
+    Ok(state.settings.lock_or_recover().clone())
 }
 
 #[tauri::command]
@@ -1032,7 +1034,7 @@ pub async fn save_settings(
     settings
         .save(&state.settings_path())
         .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
-    *state.settings.lock().unwrap() = settings.clone();
+    *state.settings.lock_or_recover() = settings.clone();
 
     // Re-register hotkeys dynamically with the OS immediately
     let _ = hotkeys::apply_hotkeys(
@@ -1093,7 +1095,7 @@ fn parse_changelog_markdown(md: &str) -> Vec<ChangelogEntry> {
     for line in md.lines() {
         let trimmed = line.trim();
 
-        if trimmed.starts_with("## [") {
+        if let Some(rest) = trimmed.strip_prefix("## [") {
             if let Some(mut item) = current_item.take() {
                 if let Some(entry) = current_entry.as_mut() {
                     item.text = item.text.trim().to_string();
@@ -1106,7 +1108,6 @@ fn parse_changelog_markdown(md: &str) -> Vec<ChangelogEntry> {
                 entries.push(entry);
             }
 
-            let rest = &trimmed[4..];
             let (ver, date) = if let Some(close_idx) = rest.find(']') {
                 let v = &rest[..close_idx];
                 let d = if let Some(dash_idx) = rest.find(" - ") {
@@ -1139,10 +1140,10 @@ fn parse_changelog_markdown(md: &str) -> Vec<ChangelogEntry> {
             continue;
         }
 
-        if trimmed.starts_with("### ") {
+        if let Some(heading) = trimmed.strip_prefix("### ") {
             if let Some(entry) = current_entry.as_mut() {
                 if entry.title.is_empty() {
-                    entry.title = trimmed[4..].trim().to_string();
+                    entry.title = heading.trim().to_string();
                 }
             }
             continue;
@@ -1202,10 +1203,10 @@ fn parse_changelog_markdown(md: &str) -> Vec<ChangelogEntry> {
 }
 
 fn parse_bullet_line(content: &str) -> (String, String, String) {
-    if content.starts_with("**") {
-        if let Some(end_bold) = content[2..].find("**") {
-            let bold_text = &content[2..2 + end_bold];
-            let after_bold = &content[2 + end_bold + 2..];
+    if let Some(after_open) = content.strip_prefix("**") {
+        if let Some(end_bold) = after_open.find("**") {
+            let bold_text = &after_open[..end_bold];
+            let after_bold = &after_open[end_bold + 2..];
             let text = after_bold.trim_start_matches(':').trim().to_string();
 
             if let Some(open_p) = bold_text.find('(') {
@@ -1213,7 +1214,7 @@ fn parse_bullet_line(content: &str) -> (String, String, String) {
                     let cat = bold_text[..open_p].trim().to_string();
                     let dom_raw = bold_text[open_p + 1..close_p].trim().trim_matches('`');
                     let dom = if dom_raw.contains('/') || dom_raw.contains('\\') {
-                        dom_raw.rsplit_once(|c| c == '/' || c == '\\').map(|(_, f)| f).unwrap_or(dom_raw)
+                        dom_raw.rsplit_once(['/', '\\']).map(|(_, f)| f).unwrap_or(dom_raw)
                     } else {
                         dom_raw
                     };
@@ -1247,7 +1248,7 @@ pub async fn diagnose_stt_variants(
     custom_model_path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<SttDiagnosticResult, CommandError> {
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     let stt = state.stt.clone();
     let model_path = custom_model_path
         .filter(|p| !p.trim().is_empty())
@@ -1273,7 +1274,7 @@ pub async fn diagnose_stt_variants(
 
     let model_label = model_path
         .as_deref()
-        .map(|p| p.split(['/', '\\']).last().unwrap_or(p))
+        .map(|p| p.split(['/', '\\']).next_back().unwrap_or(p))
         .unwrap_or("default")
         .to_string();
 
@@ -1343,7 +1344,7 @@ pub async fn run_stt_evaluation(
     custom_model_path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<crate::capture::EvaluationResult, CommandError> {
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     let stt = state.stt.clone();
     let model_path = custom_model_path
         .filter(|p| !p.trim().is_empty())
@@ -1483,7 +1484,7 @@ pub async fn start_google_sign_in(
     custom_client_secret: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<crate::identity::RelayAccount, CommandError> {
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     let supabase_url = settings.cloud.supabase_url;
     let supabase_anon = settings.cloud.supabase_anon_key;
 
@@ -1500,7 +1501,7 @@ pub async fn start_google_sign_in(
     let _ = app.emit("account-changed", &account);
 
     // Report diagnostics event if enabled
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     let inst = crate::identity::get_or_create_installation_info(
         &state.config_dir,
         env!("CARGO_PKG_VERSION"),
@@ -1527,7 +1528,7 @@ pub async fn sign_out_account(
 
     let _ = app.emit("account-changed", &account);
 
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     let inst = crate::identity::get_or_create_installation_info(
         &state.config_dir,
         env!("CARGO_PKG_VERSION"),
@@ -1555,7 +1556,7 @@ pub async fn delete_relay_account(
 
     let _ = app.emit("account-changed", &account);
 
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     let inst = crate::identity::get_or_create_installation_info(
         &state.config_dir,
         env!("CARGO_PKG_VERSION"),
@@ -1595,7 +1596,7 @@ pub async fn set_diagnostics_consent(
     enabled: bool,
     state: State<'_, AppState>,
 ) -> Result<AppSettings, CommandError> {
-    let mut settings = state.settings.lock().unwrap();
+    let mut settings = state.settings.lock_or_recover();
     settings.diagnostics.allow_anonymous_diagnostics = enabled;
     settings
         .save(&state.config_dir.join("settings.json"))
@@ -1607,7 +1608,7 @@ pub async fn set_diagnostics_consent(
 pub async fn complete_first_run(
     state: State<'_, AppState>,
 ) -> Result<AppSettings, CommandError> {
-    let mut settings = state.settings.lock().unwrap();
+    let mut settings = state.settings.lock_or_recover();
     settings.diagnostics.first_run_completed = true;
     settings
         .save(&state.config_dir.join("settings.json"))
@@ -1625,7 +1626,7 @@ pub async fn start_meeting_v2(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
     let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
 
@@ -1705,7 +1706,7 @@ pub async fn stop_meeting_v2(
 /// transcript are already durable, and none of them depends on this succeeding.
 pub fn spawn_meeting_processing(app: AppHandle, state: &AppState, meeting_id: String) {
     let (options, provider, auto_summary) = {
-        let settings = state.settings.lock().unwrap();
+        let settings = state.settings.lock_or_recover();
         (
             meeting_processing_options(&settings, None, None),
             settings.provider.clone(),
@@ -1920,7 +1921,7 @@ pub async fn prepare_meeting_v2(
         return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
     }
     let options = {
-        let settings = state.settings.lock().unwrap();
+        let settings = state.settings.lock_or_recover();
         meeting_processing_options(&settings, None, None)
     };
 
@@ -1952,7 +1953,7 @@ pub async fn generate_meeting_v2_summary(
     }
 
     let (options, provider) = {
-        let settings = state.settings.lock().unwrap();
+        let settings = state.settings.lock_or_recover();
         (
             meeting_processing_options(&settings, mode.as_deref(), extension_id),
             settings.provider.clone(),
@@ -2128,7 +2129,7 @@ pub async fn get_meeting_v2_extensions(
 ) -> Result<Vec<crate::meetings_v2::processing::model::MeetingExtension>, CommandError> {
     use crate::meetings_v2::processing::model::MeetingExtension;
 
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = state.settings.lock_or_recover().clone();
     let user_defined: Vec<MeetingExtension> = settings
         .meetings
         .extensions

@@ -42,11 +42,15 @@ import {
 import { MeetingNotesTab } from './MeetingNotesTab';
 import { MeetingSummaryTab } from './MeetingSummaryTab';
 import { meetingTitle, meetingTypeLabel } from './meetingProcessing';
+import {
+  activeWordCount,
+  countWords,
+  formatDuration,
+  isActiveState,
+  resolveSelectedSession,
+} from './meetingsViewState';
 import { EmptyState } from '../common/EmptyState';
 import { Badge } from '@/components/ui/badge';
-
-/** States in which a session still owns the recorder. */
-const ACTIVE_STATES = ['STARTING', 'RECORDING', 'PAUSED', 'STOPPING', 'FINALIZING'];
 
 /** See the recording pill: events alone cannot keep a long-lived view honest. */
 const RECONCILE_INTERVAL_MS = 1000;
@@ -119,7 +123,7 @@ export const MeetingsV2View: React.FC = () => {
   const durationAnchor = useRef<{ seconds: number; at: number } | null>(null);
 
   const applyActiveSession = useCallback((next: MeetingSession | null) => {
-    if (!next || !ACTIVE_STATES.includes(next.state)) {
+    if (!next || !isActiveState(next.state)) {
       durationAnchor.current = null;
       setActiveSession(null);
       setActiveElapsedSec(0);
@@ -179,7 +183,7 @@ export const MeetingsV2View: React.FC = () => {
     const unlistenState = listen<MeetingSession>('meeting-session-state-changed', (event) => {
       const updated = event.payload;
       applyActiveSession(updated);
-      if (ACTIVE_STATES.includes(updated.state)) {
+      if (isActiveState(updated.state)) {
         setSelectedSessionId(updated.id);
       } else {
         setLiveUpdates([]);
@@ -610,10 +614,7 @@ export const MeetingsV2View: React.FC = () => {
   };
 
   const selectedSession = useMemo(
-    () =>
-      (activeSession?.id === selectedSessionId ? activeSession : undefined) ||
-      sessions.find((s) => s.id === selectedSessionId) ||
-      activeSession,
+    () => resolveSelectedSession(sessions, selectedSessionId, activeSession),
     [sessions, selectedSessionId, activeSession]
   );
 
@@ -622,42 +623,17 @@ export const MeetingsV2View: React.FC = () => {
   const isFinalizing =
     activeSession?.state === 'STOPPING' || activeSession?.state === 'FINALIZING';
 
-  const formatDuration = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}m ${s}s`;
-  };
+  const activeSessionWords = useMemo(
+    () => activeWordCount(transcriptSegments, liveUpdates, activeSession?.word_count),
+    [transcriptSegments, liveUpdates, activeSession?.word_count]
+  );
 
-  // Helper for computing word count from durable segments
-  const countWords = useCallback((segments: TranscriptSegment[]) => {
-    return segments.reduce((acc, seg) => {
-      if (seg.status === 'SUCCESS' && seg.text) {
-        return acc + seg.text.trim().split(/\s+/).filter(Boolean).length;
-      }
-      return acc;
-    }, 0);
-  }, []);
-
-  // Word count for the active recording session
-  const activeSessionWords = useMemo(() => {
-    const durableWords = countWords(transcriptSegments);
-    const liveWords = liveUpdates.reduce((acc, update) => {
-      if (update.text) {
-        return acc + update.text.trim().split(/\s+/).filter(Boolean).length;
-      }
-      return acc;
-    }, 0);
-    return Math.max(durableWords, liveWords, activeSession?.word_count ?? 0);
-  }, [countWords, transcriptSegments, liveUpdates, activeSession?.word_count]);
-
-  // Word count for the currently selected session in the details view
   const selectedSessionWords = useMemo(() => {
     if (isSelectedActive) {
       return activeSessionWords;
     }
-    const fromSegments = countWords(transcriptSegments);
-    return Math.max(fromSegments, selectedSession?.word_count ?? 0);
-  }, [isSelectedActive, activeSessionWords, countWords, transcriptSegments, selectedSession?.word_count]);
+    return Math.max(countWords(transcriptSegments), selectedSession?.word_count ?? 0);
+  }, [isSelectedActive, activeSessionWords, transcriptSegments, selectedSession?.word_count]);
 
   const pendingDeleteSession = sessions.find((s) => s.id === pendingDeleteId);
   const latestLatency = liveUpdates.length

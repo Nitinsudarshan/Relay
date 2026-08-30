@@ -283,8 +283,7 @@ pub mod test_support {
                 request.user_prompt.to_string(),
             ));
             self.requests
-                .lock()
-                .unwrap()
+                .lock().unwrap()
                 .push((request.temperature, request.max_output_tokens));
 
             let next = self.responses.lock().unwrap().pop();
