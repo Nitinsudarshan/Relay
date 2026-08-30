@@ -20,7 +20,7 @@ Relay processes speech locally using Whisper and structured pipelines to instant
 - **Universal Dictation** — Transcribes push-to-talk audio and injects text directly into whatever Windows app or field has active focus.
 - **Meeting Intelligence** — Records mic and system audio into durable 30-second chunks with live transcription, then derives a summary, decisions and the reasoning behind them, owned action items, risks, open questions, topics, and speakers from the transcript. Your own notes, typed during or after the meeting, are read as an extra source and never rewritten. Summary length adapts to the meeting rather than a fixed cap, and generated prose is validated before it is shown. The raw speech-to-text output is kept immutable as the diagnostic source, and any meeting can become a Scribble that references it.
 - **Scribble Pipeline** — Parses rough voice scribbles into structured Kanban task cards and vault notes.
-- **Talkback** — A conversational agent over everything Relay has captured. Ask out loud what you decided, what you said, or what happened in a meeting; answers about your own history come only from your Voice Notes, Scribbles and Meetings, with the sources shown. Speak over it to interrupt, and turn a conversation into a Voice Note or a Scribble by saying so.
+- **Talkback** — A conversational agent over everything Relay has captured. Ask out loud what you decided, what you said, or what happened in a meeting; answers about your own history come only from your Voice Notes, Scribbles and Meetings, with the sources shown. Speak over it to interrupt, and turn a conversation into a Voice Note or a Scribble by saying so. Its voice runs locally: `Settings › Talkback › Make Relay speak` downloads, verifies and self-tests the speech engine in one click.
 - **Local Vault Storage** — Saves audio recordings, transcripts, and structured entities locally as Markdown files with YAML frontmatter.
 - **Hybrid Cloud Sync** — Optional Next.js + Supabase web dashboard for cross-device visibility and team synchronization when enabled.
 
@@ -79,10 +79,10 @@ flowchart TD
 ## Tests
 
 ```bash
-# Rust backend — 654 tests (+3 ignored benchmarks)
+# Rust backend — 714 tests (+3 ignored benchmarks)
 cd native/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 
-# Native frontend — 115 tests
+# Native frontend — 117 tests
 cd native && npm test && npm run typecheck
 
 # Web dashboard — typecheck and build

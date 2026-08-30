@@ -1,42 +1,48 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import {
   CheckCircle2,
   AlertTriangle,
-  FolderOpen,
+  Download,
   Play,
-  RefreshCw,
   Square,
+  Volume2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import type { PiperOrigin, TtsStatus } from '../../types';
+import type { InstallProgress, PiperOrigin, TtsStatus } from '../../types';
 
-/** How Relay found the executable, in words rather than a path. */
+/** How Relay found the engine, in words rather than a path. Advanced only. */
 const ORIGIN_LABEL: Record<PiperOrigin, string> = {
-  configured: 'You chose this',
-  managed: "Found in Relay's voice folder",
+  configured: 'Set up by Relay',
+  managed: "In Relay's voice folder",
   bundled: 'Shipped with Relay',
   system_path: 'Found on your system PATH',
 };
 
+/** "24 MB". Sizes are approximate and shown to set expectations, not to audit. */
+const formatSize = (bytes: number): string => {
+  if (!bytes) return '';
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+};
+
 interface VoiceSettingsProps {
-  /** Rendered above the card; omit inside a section that already has one. */
   heading?: string;
-  /** Called whenever readiness changes, so a parent can react. */
   onStatusChange?: (status: TtsStatus) => void;
 }
 
 /**
- * Local voice configuration — the answer to "how do I make Talkback speak?".
+ * Local voice setup — one button, no filesystem.
  *
- * A single reusable card rather than fields scattered through Settings:
- * every question a user has about spoken answers (is it on, which engine,
- * which voice, what is wrong, how do I fix it, does it sound right) is
- * answered in one place, backed by one `get_tts_status` call.
+ * The product question this answers is "make Relay speak", not "where did
+ * you put piper.exe". Downloading the engine, fetching a voice, verifying
+ * checksums and proving it can actually speak are Relay's job; the user
+ * presses one button and waits.
  *
- * Deliberately exposes no pipeline internals. Phrase length, queue depth
- * and synthesis timeouts are decisions with reasons recorded in
- * `docs/talkback/ARCHITECTURE.md`, not preferences.
+ * Paths, versions and engine names live under Advanced, because they are
+ * implementation details that happen to be occasionally useful — not part
+ * of the setup experience.
  */
 export const VoiceSettings: React.FC<VoiceSettingsProps> = ({
   heading,
@@ -44,10 +50,14 @@ export const VoiceSettings: React.FC<VoiceSettingsProps> = ({
 }) => {
   const [status, setStatus] = useState<TtsStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState<InstallProgress | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [testError, setTestError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const installing = progress !== null;
 
   const refresh = useCallback(async () => {
     try {
@@ -63,64 +73,15 @@ export const VoiceSettings: React.FC<VoiceSettingsProps> = ({
 
   useEffect(() => {
     void refresh();
-    // Stop any test playback if the user navigates away mid-sentence.
+    const unlisten = listen<InstallProgress>('voice-install-progress', (event) => {
+      if (event.payload) setProgress(event.payload);
+    });
     return () => {
+      void unlisten.then((stop) => stop());
       audioRef.current?.pause();
       audioRef.current = null;
     };
   }, [refresh]);
-
-  const apply = async (
-    label: string,
-    patch: { binaryPath?: string; voicePath?: string },
-  ) => {
-    setBusy(label);
-    setTestError(null);
-    try {
-      const next = await invoke<TtsStatus>('set_tts_configuration', {
-        binaryPath: patch.binaryPath ?? null,
-        voicePath: patch.voicePath ?? null,
-      });
-      setStatus(next);
-      onStatusChange?.(next);
-    } catch (err) {
-      setTestError(errorText(err));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const browse = async (which: 'binary' | 'voice') => {
-    setBusy(which);
-    try {
-      const command =
-        which === 'binary' ? 'browse_for_piper_binary' : 'browse_for_piper_voice';
-      const picked = await invoke<string | null>(command);
-      if (!picked) return;
-      await apply(
-        which,
-        which === 'binary' ? { binaryPath: picked } : { voicePath: picked },
-      );
-    } catch (err) {
-      setTestError(errorText(err));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const openFolder = async () => {
-    setBusy('folder');
-    try {
-      // Creates the folders as a side effect, so "put files here" points
-      // at somewhere that exists.
-      await invoke<string>('prepare_tts_folders');
-      await refresh();
-    } catch (err) {
-      setTestError(errorText(err));
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const stopTest = () => {
     audioRef.current?.pause();
@@ -128,10 +89,41 @@ export const VoiceSettings: React.FC<VoiceSettingsProps> = ({
     setPlaying(false);
   };
 
+  const setup = async (voiceId?: string) => {
+    stopTest();
+    setError(null);
+    setProgress({
+      stage: 'preparing',
+      label: 'Preparing…',
+      receivedBytes: 0,
+      overall: 0,
+    });
+    try {
+      const next = await invoke<TtsStatus>('install_local_voice', {
+        voiceId: voiceId ?? null,
+      });
+      setStatus(next);
+      onStatusChange?.(next);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setProgress(null);
+      void refresh();
+    }
+  };
+
+  const cancel = async () => {
+    try {
+      await invoke('cancel_voice_install');
+    } catch (err) {
+      console.warn('Could not cancel voice setup', err);
+    }
+  };
+
   const testVoice = async () => {
     stopTest();
     setBusy('test');
-    setTestError(null);
+    setError(null);
     try {
       const wav = await invoke<string>('test_tts_voice');
       const audio = new Audio(`data:audio/wav;base64,${wav}`);
@@ -139,12 +131,12 @@ export const VoiceSettings: React.FC<VoiceSettingsProps> = ({
       audio.onended = () => setPlaying(false);
       audio.onerror = () => {
         setPlaying(false);
-        setTestError('The voice synthesized but the audio could not be played.');
+        setError('The voice was generated but could not be played.');
       };
       setPlaying(true);
       await audio.play();
     } catch (err) {
-      setTestError(errorText(err));
+      setError(errorText(err));
       setPlaying(false);
     } finally {
       setBusy(null);
@@ -169,212 +161,300 @@ export const VoiceSettings: React.FC<VoiceSettingsProps> = ({
 
   return (
     <section className="space-y-3" data-testid="voice-settings">
-      {heading && (
-        <h3 className="text-sm font-semibold text-foreground">{heading}</h3>
-      )}
+      {heading && <h3 className="text-sm font-semibold text-foreground">{heading}</h3>}
 
       <div className="rounded-xl border border-border overflow-hidden">
-        {/* Status header — the one line that answers "can it speak?". */}
-        <div className="flex items-center justify-between gap-3 px-4 py-3 bg-muted/40 border-b border-border">
-          <div className="flex items-center gap-2.5 min-w-0">
-            {status.ready ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-            ) : (
-              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-            )}
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-foreground">
-                {status.ready ? 'Ready' : 'Not configured'}
-              </p>
-              <p className="text-[11px] text-muted-foreground truncate">
-                {status.ready
-                  ? 'Talkback can speak its answers.'
-                  : 'Talkback will answer in text only.'}
-              </p>
-            </div>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => void refresh()}
-            aria-label="Re-check voice setup"
-            className="h-8 w-8 shrink-0"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-          </Button>
-        </div>
-
-        <dl className="divide-y divide-border">
-          <Row label="Voice engine">
-            <span className="text-xs text-foreground">
-              {status.ready ? 'Local Piper' : 'None'}
-            </span>
-          </Row>
-
-          <Row label="Program">
-            {status.binaryPath ? (
-              <div className="min-w-0">
-                <p className="text-xs text-foreground truncate" title={status.binaryPath}>
-                  {status.binaryPath}
-                </p>
-                {status.binaryOrigin && (
-                  <p className="text-[10px] text-muted-foreground">
-                    {ORIGIN_LABEL[status.binaryOrigin]}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <span className="text-xs text-muted-foreground">Not found</span>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-[11px] shrink-0"
-              disabled={busy !== null}
-              onClick={() => void browse('binary')}
-            >
-              Browse…
-            </Button>
-          </Row>
-
-          <Row label="Voice">
-            {status.availableVoices.length > 0 ? (
-              <select
-                value={status.voicePath ?? ''}
-                onChange={(event) =>
-                  void apply('voice', { voicePath: event.target.value })
-                }
-                aria-label="Voice model"
-                disabled={busy !== null}
-                className="flex-1 min-w-0 bg-background border border-input rounded-md px-2 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="">Choose a voice…</option>
-                {status.availableVoices.map((voice) => (
-                  <option key={voice.path} value={voice.path}>
-                    {voice.label}
-                    {voice.has_config ? '' : ' — missing .onnx.json'}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                No voices found
-              </span>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-[11px] shrink-0"
-              disabled={busy !== null}
-              onClick={() => void browse('voice')}
-            >
-              Browse…
-            </Button>
-          </Row>
-        </dl>
-
-        {/* Problems, in the backend's words — each one names its own fix. */}
-        {status.problems.length > 0 && (
-          <ul className="px-4 py-3 space-y-1.5 bg-amber-500/5 border-t border-amber-500/20">
-            {status.problems.map((problem) => (
-              <li
-                key={problem}
-                className="flex items-start gap-2 text-[11px] text-amber-700 dark:text-amber-400"
-              >
-                <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
-                <span>{problem}</span>
-              </li>
-            ))}
-          </ul>
+        {installing ? (
+          <InstallingPanel progress={progress} onCancel={() => void cancel()} />
+        ) : status.ready ? (
+          <ReadyPanel
+            status={status}
+            playing={playing}
+            busy={busy}
+            onTest={() => void testVoice()}
+            onStopTest={stopTest}
+            onChangeVoice={(id) => void setup(id)}
+          />
+        ) : (
+          <SetupPanel status={status} onSetup={() => void setup()} />
         )}
 
-        {testError && (
-          <p className="px-4 py-2 text-[11px] text-destructive bg-destructive/10 border-t border-destructive/20">
-            {testError}
+        {error && (
+          <p className="px-4 py-2.5 text-[11px] text-destructive bg-destructive/10 border-t border-destructive/20">
+            {error}
           </p>
         )}
-
-        <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-t border-border">
-          {playing ? (
-            <Button variant="secondary" size="sm" className="h-7 gap-1.5 text-[11px]" onClick={stopTest}>
-              <Square className="w-3 h-3" />
-              Stop
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              className="h-7 gap-1.5 text-[11px]"
-              disabled={!status.ready || busy !== null}
-              onClick={() => void testVoice()}
-            >
-              <Play className="w-3 h-3" />
-              {busy === 'test' ? 'Speaking…' : 'Test voice'}
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 text-[11px]"
-            disabled={busy !== null}
-            onClick={() => void openFolder()}
-          >
-            <FolderOpen className="w-3 h-3" />
-            Create voice folder
-          </Button>
-        </div>
       </div>
 
-      {/* Setup instructions. Shown until it works, because that is exactly
-          when they are needed and never afterwards. */}
-      {!status.ready && (
-        <details className="rounded-lg border border-border bg-muted/30 px-3 py-2.5" open>
-          <summary className="text-xs font-medium text-foreground cursor-pointer">
-            Setting up a local voice
+      {/* Implementation detail, on request only. */}
+      {!installing && (
+        <details
+          className="rounded-lg border border-border bg-muted/30 px-3 py-2"
+          open={showAdvanced}
+          onToggle={(event) => setShowAdvanced(event.currentTarget.open)}
+        >
+          <summary className="text-[11px] font-medium text-muted-foreground cursor-pointer">
+            Advanced
           </summary>
-          <ol className="mt-2 space-y-2 text-[11px] text-muted-foreground list-decimal list-inside leading-relaxed">
-            <li>
-              Download Piper from{' '}
-              <span className="font-mono text-foreground">
-                github.com/OHF-Voice/piper1-gpl
-              </span>{' '}
-              and put <span className="font-mono text-foreground">{status.executableName}</span>{' '}
-              in:
-              <code className="mt-1 block break-all rounded bg-background border border-border px-2 py-1 font-mono text-[10px] text-foreground">
-                {status.installDir}
-              </code>
-            </li>
-            <li>
-              Download a voice — both the{' '}
-              <span className="font-mono text-foreground">.onnx</span> model and its{' '}
-              <span className="font-mono text-foreground">.onnx.json</span> file, which
-              Piper needs together — and put them in:
-              <code className="mt-1 block break-all rounded bg-background border border-border px-2 py-1 font-mono text-[10px] text-foreground">
-                {status.voicesDir}
-              </code>
-            </li>
-            <li>
-              Press <span className="text-foreground">Test voice</span>. Relay finds both
-              automatically — nothing else to configure.
-            </li>
-          </ol>
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            Everything stays on your machine. Relay never uploads what it speaks.
-          </p>
+          {/* Rendered only once opened. A collapsed <details> still puts its
+              content in the DOM, where find-in-page and screen readers reach
+              it — so "not part of the default experience" has to mean not
+              present, not merely not visible. */}
+          {showAdvanced && (
+          <dl className="mt-2 space-y-1.5 text-[10px] font-mono">
+            <AdvancedRow label="Engine" value={status.ready ? 'Piper' : 'None'} />
+            {status.engineVersion && (
+              <AdvancedRow label="Version" value={status.engineVersion} />
+            )}
+            {status.binaryOrigin && (
+              <AdvancedRow label="Source" value={ORIGIN_LABEL[status.binaryOrigin]} />
+            )}
+            {status.binaryPath && (
+              <AdvancedRow label="Program" value={status.binaryPath} wrap />
+            )}
+            {status.voicePath && (
+              <AdvancedRow label="Voice file" value={status.voicePath} wrap />
+            )}
+            <AdvancedRow label="Folder" value={status.voicesDir} wrap />
+          </dl>
+          )}
         </details>
       )}
     </section>
   );
 };
 
-const Row: React.FC<{ label: string; children: React.ReactNode }> = ({
+/** Before setup: what this is, and one button. */
+const SetupPanel: React.FC<{ status: TtsStatus; onSetup: () => void }> = ({
+  status,
+  onSetup,
+}) => {
+  const recommended = status.recommendedVoice;
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="flex items-start gap-3">
+        <Volume2 className="w-5 h-5 mt-0.5 shrink-0 text-muted-foreground" />
+        <div className="space-y-1">
+          <p className="text-sm font-semibold text-foreground">Make Relay speak</p>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Talkback can read its answers aloud using a voice that runs entirely
+            on this computer. Relay does not send the text it speaks to any
+            service. One-time setup, then it works offline.
+          </p>
+        </div>
+      </div>
+
+      {status.canInstall && recommended ? (
+        <>
+          <div className="rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              Recommended voice
+            </p>
+            <p className="mt-0.5 text-xs font-medium text-foreground">
+              {recommended.displayName}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {recommended.description}
+              {status.downloadBytes > 0 &&
+                ` · about ${formatSize(status.downloadBytes)} to download`}
+            </p>
+          </div>
+
+          <Button className="w-full gap-2" onClick={onSetup}>
+            <Download className="w-4 h-4" />
+            Download &amp; Set Up
+          </Button>
+          <p className="text-[10px] text-center text-muted-foreground">
+            You can change the voice afterwards.
+          </p>
+        </>
+      ) : (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            Automatic setup unavailable
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+            {status.installBlockedReason ??
+              "Relay can't set up a voice on this computer."}{' '}
+            Talkback still answers in text.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** During setup: what is happening, how far along, and a way out. */
+const InstallingPanel: React.FC<{
+  progress: InstallProgress;
+  onCancel: () => void;
+}> = ({ progress, onCancel }) => {
+  const itemFraction =
+    progress.totalBytes && progress.totalBytes > 0
+      ? progress.receivedBytes / progress.totalBytes
+      : null;
+  const isDownload =
+    progress.stage === 'downloading_engine' || progress.stage === 'downloading_voice';
+
+  return (
+    <div className="p-4 space-y-3" data-testid="voice-installing">
+      <p className="text-sm font-semibold text-foreground">Setting up local voice</p>
+
+      <div className="space-y-1.5">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-[11px] text-foreground">
+            {progress.item ?? progress.label}
+          </span>
+          {isDownload && itemFraction !== null && (
+            <span className="text-[10px] font-mono text-muted-foreground">
+              {Math.round(itemFraction * 100)}%
+            </span>
+          )}
+        </div>
+        <Meter
+          fraction={isDownload ? (itemFraction ?? 0) : 1}
+          indeterminate={!isDownload}
+          label={progress.label}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            Overall
+          </span>
+          <span className="text-[10px] font-mono text-muted-foreground">
+            {Math.round(progress.overall * 100)}%
+          </span>
+        </div>
+        <Meter fraction={progress.overall} label="Overall setup progress" />
+      </div>
+
+      <Button variant="outline" size="sm" className="w-full h-7 text-[11px]" onClick={onCancel}>
+        Cancel
+      </Button>
+    </div>
+  );
+};
+
+/** After setup: it works, here is how it sounds, here is how to change it. */
+const ReadyPanel: React.FC<{
+  status: TtsStatus;
+  playing: boolean;
+  busy: string | null;
+  onTest: () => void;
+  onStopTest: () => void;
+  onChangeVoice: (id: string) => void;
+}> = ({ status, playing, busy, onTest, onStopTest, onChangeVoice }) => {
+  const current =
+    status.catalogue.find((v) => v.installed && v.id === selectedId(status)) ??
+    status.catalogue.find((v) => v.id === selectedId(status));
+
+  return (
+    <div>
+      <div className="flex items-center gap-2.5 px-4 py-3 bg-emerald-500/10 border-b border-emerald-500/20">
+        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-foreground">Local voice ready</p>
+          <p className="text-[11px] text-muted-foreground truncate">
+            {current?.displayName ?? status.voiceLabel ?? 'Installed'}
+            {current?.recommended ? ' — Recommended' : ''}
+          </p>
+        </div>
+      </div>
+
+      <div className="p-4 space-y-3">
+        {status.catalogue.length > 1 && (
+          <label className="block space-y-1">
+            <span className="text-[11px] font-medium text-muted-foreground">Voice</span>
+            <select
+              value={selectedId(status) ?? ''}
+              aria-label="Voice"
+              onChange={(event) => onChangeVoice(event.target.value)}
+              className="w-full bg-background border border-input rounded-md px-2 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {status.catalogue.map((voice) => (
+                <option key={voice.id} value={voice.id}>
+                  {voice.displayName}
+                  {voice.recommended ? ' — Recommended' : ''}
+                  {voice.installed ? '' : ` (${formatSize(voice.downloadBytes)} download)`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <div className="flex gap-2">
+          {playing ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="flex-1 h-7 gap-1.5 text-[11px]"
+              onClick={onStopTest}
+            >
+              <Square className="w-3 h-3" />
+              Stop
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="flex-1 h-7 gap-1.5 text-[11px]"
+              disabled={busy !== null}
+              onClick={onTest}
+            >
+              <Play className="w-3 h-3" />
+              {busy === 'test' ? 'Speaking…' : 'Test voice'}
+            </Button>
+          )}
+        </div>
+
+        <p className="text-[10px] leading-relaxed text-muted-foreground">
+          Your voice is generated on this computer. Relay does not upload the text
+          it speaks to a speech service. (Answers themselves come from whichever
+          AI provider you have configured.)
+        </p>
+      </div>
+    </div>
+  );
+};
+
+/** Which catalogue voice the installed file corresponds to. */
+const selectedId = (status: TtsStatus): string | undefined =>
+  status.catalogue.find((v) => status.voiceLabel === v.id)?.id ??
+  status.catalogue.find((v) => v.installed)?.id;
+
+const Meter: React.FC<{
+  fraction: number;
+  label: string;
+  indeterminate?: boolean;
+}> = ({ fraction, label, indeterminate }) => (
+  <div
+    className="h-1.5 w-full rounded-full bg-muted overflow-hidden"
+    role="progressbar"
+    aria-label={label}
+    aria-valuenow={indeterminate ? undefined : Math.round(fraction * 100)}
+    aria-valuemin={0}
+    aria-valuemax={100}
+  >
+    <div
+      className={`h-full rounded-full bg-primary transition-[width] duration-300 ${
+        indeterminate ? 'animate-pulse' : ''
+      }`}
+      style={{ width: `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%` }}
+    />
+  </div>
+);
+
+const AdvancedRow: React.FC<{ label: string; value: string; wrap?: boolean }> = ({
   label,
-  children,
+  value,
+  wrap,
 }) => (
-  <div className="flex items-center gap-3 px-4 py-2.5">
-    <dt className="w-24 shrink-0 text-[11px] font-medium text-muted-foreground">
-      {label}
-    </dt>
-    <dd className="flex flex-1 items-center gap-2 min-w-0">{children}</dd>
+  <div className="flex gap-2">
+    <dt className="w-20 shrink-0 text-muted-foreground">{label}</dt>
+    <dd className={`text-foreground ${wrap ? 'break-all' : 'truncate'}`}>{value}</dd>
   </div>
 );
 

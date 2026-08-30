@@ -154,17 +154,22 @@ export const TalkbackPage: React.FC = () => {
                 Voice unavailable
               </p>
               <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                {voice.problems[0] ?? 'Local Piper is not configured.'} Talkback
-                still answers in text.
+                {voice.canInstall
+                  ? 'Relay can set up a voice that runs on this computer.'
+                  : (voice.installBlockedReason ??
+                    'A local voice is not set up.')}{' '}
+                Talkback still answers in text.
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-2 h-7 w-full text-[11px]"
-                onClick={() => void invoke('open_settings_window')}
-              >
-                Set up local voice
-              </Button>
+              {voice.canInstall && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 h-7 w-full text-[11px]"
+                  onClick={() => void invoke('open_settings_window')}
+                >
+                  Set up local voice
+                </Button>
+              )}
             </div>
           )}
 

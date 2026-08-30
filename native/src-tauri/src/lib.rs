@@ -100,6 +100,10 @@ pub fn run() {
     // ever remove it. One phrase per sentence makes that worth doing.
     let tts_root = tts::discovery::default_tts_root(&config_dir);
     tts::discovery::clear_scratch(&tts_root);
+    // A process killed mid-download cannot run its own cleanup, and a
+    // half-extracted engine left in staging would be mistaken for a
+    // finished one by the next run.
+    tts::installer::clear_staging(&tts_root);
 
     let stt = SttEngine::new();
     let meetings_v2 = Arc::new(meetings_v2::MeetingsV2Engine::new(
@@ -131,6 +135,7 @@ pub fn run() {
         meeting_processor,
         talkback: Arc::new(talkback::TalkbackEngine::new()),
         tts_root,
+        voice_install: Arc::new(commands::VoiceInstall::default()),
     };
 
     tauri::Builder::default()
@@ -283,6 +288,8 @@ pub fn run() {
             commands::set_tts_configuration,
             commands::test_tts_voice,
             commands::prepare_tts_folders,
+            commands::install_local_voice,
+            commands::cancel_voice_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

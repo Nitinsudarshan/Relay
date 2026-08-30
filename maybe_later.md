@@ -171,3 +171,15 @@ This document tracks deferred features, rejected/postponed UI patterns, and arch
   - Resolve `base_dir` from the OS application-data directory, as `tts::discovery::default_tts_root` already does.
   - On startup, if the new location is empty and a process-relative `.relay` exists beside the executable, offer to move it — explicitly, with the old copy left in place, matching the "never move, migrate or delete" promise the Vault Directory Location setting already makes (`docs/decisions.md` Decision 38).
   - The configurable Vault Directory Location setting already overrides this for the vault, so the migration mainly concerns `config/` — settings, models, and the STT cache.
+
+### 12. Offline and ARM64 Voice Installation
+
+- **Status**: Deferred — a packaging decision, not missing code
+- **Area**: Native backend (`native/src-tauri/src/tts/{manifest,installer}.rs`, `native/src-tauri/resources/voice-manifest.json`)
+- **Original Context**:
+  - v0.19.0 installs the local voice by downloading it. Two users are therefore still stuck: one on a machine with no internet access, and one on Windows on ARM, for which the manifest carries no runtime and the installer reports "Automatic voice setup isn't available for aarch64 yet" instead of guessing.
+  - Both are deliberate. The engine and a voice are roughly 80–100 MB per architecture; bundling them into the installer for every user so that a minority never has to download would triple the download for everyone, and shipping an x86-64 binary to an ARM machine would fail *after* setup claimed success rather than before it started.
+- **Concept & Implementation Blueprint**:
+  - **ARM64** is the smaller job: add a `piper-windows-aarch64` entry to the manifest once an upstream release asset exists for it. `runtime_for()` already distinguishes an unsupported architecture from an unsupported platform, and nothing else changes — the manifest is the only place a runtime is named.
+  - **Offline** is a packaging change, not a code change: `discovery` already looks in Tauri's resource directory (the `Bundled` origin) before falling back to `PATH`, so an offline or enterprise build can ship the engine and the recommended voice as bundled resources and the installer will find them already present and skip the download. What is missing is the build variant and the release pipeline that produces it, not the lookup.
+  - A third option, worth considering before either: let the user point setup at a folder they copied from another machine, verified against the same manifest checksums. Cheap, and it covers the air-gapped case without a second build.

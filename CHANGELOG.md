@@ -1,5 +1,49 @@
 # Relay — Changelog
 
+## [0.19.0] - 2026-08-30
+
+### One-Click Local Voice — Relay Installs Its Own Speech Engine
+
+**Type**: minor — both surfaces (`native/src-tauri/src/tts/manifest.rs (new)`, `native/src-tauri/src/tts/installer.rs (new)`, `native/src-tauri/resources/voice-manifest.json (new)`, `native/src-tauri/src/tts/mod.rs`, `native/src-tauri/src/{lib,commands}.rs`, `native/src-tauri/Cargo.toml`, `native/src/components/settings/VoiceSettings.tsx`, `native/src/components/talkback/TalkbackPage.tsx`, `native/src/types/index.ts`, `scripts/build-voice-manifest.mjs (new)`, `docs/talkback/{ARCHITECTURE,RESEARCH,BENCHMARKS}.md`, `docs/decisions.md`, `README.md`, `maybe_later.md`).
+
+v0.18.1 gave Talkback a voice setup screen. What that screen actually asked
+of a user was: find the Piper project on GitHub, work out which of its
+release archives matches your CPU, unzip it into a folder under `AppData`
+whose path we print for you, then go to a different site, download an
+`.onnx` file *and* its `.onnx.json` sidecar, and put those somewhere else.
+Six manual steps, three of which are a coin flip if you don't already know
+what ONNX is.
+
+That is an implementation detail wearing a product's clothes. This release
+deletes it. `Settings › Talkback` now shows one button — **Make Relay
+speak** — and Relay does the rest: picks the build for your machine,
+downloads it, verifies it against a checksum it shipped with, installs it,
+loads the voice, and speaks a sentence to prove it works before it says
+Ready.
+
+#### Features
+
+- **One-click voice setup (`native/src/components/settings/VoiceSettings.tsx`)**: Not installed → Downloading → Installing → Validating → Testing → Ready, with a live per-file and overall progress bar, an accurate byte count, and a Cancel that actually stops the transfer. A recommended voice is chosen for you and named, so setup never blocks on a decision the user has no basis to make; the full voice list appears only *after* Relay can speak, and only lists voices from its own catalogue. Words like Piper, ONNX, GitHub and AppData appear nowhere in the default flow — a test asserts it, and the paths and engine version live behind an `Advanced` disclosure that renders nothing until it is opened.
+- **A Relay-owned voice catalogue (`native/src-tauri/src/tts/manifest.rs`, `native/src-tauri/resources/voice-manifest.json`)**: compiled into the binary with `include_str!` and the single source of every download URL. The UI names a *voice id* and can no more construct a URL than it can choose a directory to write to. Each entry carries its version, platform, architecture, SHA-256, expected size, the executable's path inside the archive, its licence and its upstream project — so what Relay will fetch is reviewable in a diff.
+- **A download/install lifecycle layer (`native/src-tauri/src/tts/installer.rs`)**: streamed to disk in 64 KB chunks with progress and cancellation between each, hashed as it reads rather than re-read afterwards, extracted with zip-slip protection, and moved into the live location by an atomic `rename` from a staging directory on the same filesystem. `install_local_voice` and `cancel_voice_install` are single-flight; a second click cannot start a second download.
+
+#### Improvements
+
+- **Installed now means "it speaks"**: before reporting Ready, Relay synthesizes a sentence through the **production** `PiperProvider` — not a demo path — and additionally cross-checks each `.onnx` against its `.onnx.json` sidecar (sample rate present, dataset matching the voice id), which catches a model and config that each pass their own checksum but do not belong together. A voice that downloads perfectly and cannot load is now caught during setup rather than three sentences into a conversation. A voice that fails that test is removed again — readiness is decided from what is on disk, so leaving it there would turn a caught failure into a silent one — unless it was already installed and working before the attempt, in which case it stays.
+- **A failed install cannot cost you a working one**: everything lands in `<app-data>/Relay/tts/.staging` first, and the config file is moved before the model so a torn install never leaves a model without its sidecar. A failure, a cancellation or a crash leaves the previous installation exactly as it was; staging is also swept at startup, because a crash cannot run `Drop`.
+- **`TtsProvider`, `PiperProvider` and `NullProvider` are unchanged.** Networking lives in a layer beside the provider, not inside it — the installer only puts files where `discovery` already looks, and an explicit setting still overrides both, so a developer pointing Relay at their own Piper build is not overridden by the installer.
+- **Errors are told, not dumped**: `InstallError` carries a stable code, a retryable flag and a plain-English message. "The download was interrupted. Check your connection and try again." is what a user sees; the URL, the path and the Rust error go to the log. A test asserts that no user-facing string contains `http`, a drive letter or a `\`.
+
+#### Fixes
+
+- **The manual setup instructions are gone from the product**, along with the folder paths they printed. They survive only in `docs/talkback/ARCHITECTURE.md`, where an implementation detail belongs.
+- **An unverifiable catalogue is treated as no catalogue**: checksums cannot be written by hand, so `scripts/build-voice-manifest.mjs` downloads each artifact, hashes it and rewrites the manifest as a release step. Until it has run, `validate()` rejects the shipped file and Relay reports *"automatic voice setup isn't available in this build"* rather than downloading something it cannot verify. **The manifest in this commit is unprovisioned** — the environment this was built in blocks the artifact hosts at its egress gateway — so the flow is complete in code and inert until that one command runs on a networked machine. See `docs/decisions.md` Decision 54.
+
+#### Tests
+
+- **60 new Rust tests** (654 → 714 passing, plus the 3 `#[ignore]`d benchmarks). Manifest validation (23) rejects duplicate ids, unpinned or non-HTTPS artifacts, a zip with no executable path, zero sizes, and anything other than exactly one recommended voice; it also asserts the *shipped* manifest is HTTPS-only and that a lookalike host like `http://127.0.0.1.evil.example` does not pass the loopback carve-out. The installer (31) covers a refusal to contact the server at all for an unpinned artifact, a corrupt download deleting its temp file and leaving an existing install untouched, cancellation mid-stream, an oversized artifact, zip-slip entries, sidecar/dataset mismatch, staging cleanup on drop and at startup, and that no error message leaks a path or a URL. Four more cover the single-flight guard, so a second click cannot start a second download and a cancel never poisons the retry, and a pair covers the self-test rollback in both directions: a voice that downloads cleanly and cannot speak is removed rather than left looking installed, while a *reinstall* that fails its self-test leaves the voice that was already working exactly where it was.
+- **2 new frontend tests** (115 → 117), with the `VoiceSettings` suite rewritten around the new flow: one button and no filesystem path before setup, the recommended voice shown without a prompt to choose, both progress bars and a working cancel during setup, a picker of validated voices only afterwards, and a failure that stays retryable without exposing internals.
+
 ## [0.18.1] - 2026-08-30
 
 ### Talkback Production Readiness — Real Streaming Speech, a Local Voice Setup Flow, and No Dead Ends
