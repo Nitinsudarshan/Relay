@@ -1,5 +1,56 @@
 # Relay — Changelog
 
+## [0.17.0] - 2026-08-30
+
+### Continuous Integration, a Frontend Test Suite, Poison-Tolerant Locking & a Repo That Builds Off One Machine
+
+**Type**: minor — both surfaces (`.github/workflows/ci.yml (new)`, `native/src-tauri/.cargo/config.toml`, `native/src-tauri/src/sync.rs (new)`, `native/src-tauri/src/{lib,commands}.rs`, `native/src-tauri/src/{capture,hotkeys,meetings_v2,settings,vault,pipeline,developer}/**`, `native/src/components/meetings_v2/{meetingsViewState.ts (new),MeetingsV2View.tsx}`, `native/src/test/** (new)`, `native/vite.config.ts`, `web/src/app/(dashboard)/layout.tsx`, `AGENTS.md`, `README.md`, `docs/**`, `rules/ui-components.md`).
+
+Nothing in this release changes what the app does. It changes what the repo can
+prove about itself: 482 tests now run automatically, the Rust crate compiles on
+a machine other than its author's, and one panicking thread no longer takes the
+whole app with it.
+
+#### Fixes
+
+- **The crate could not build anywhere but one Windows install (`native/src-tauri/.cargo/config.toml`)**: `CMAKE` and `LIBCLANG_PATH` were pinned to absolute paths inside a specific Visual Studio and LLVM installation. Cargo's `[env]` is global — it has no per-platform form — so those applied on Linux and macOS too, where the build failed at `cmake::fail` with "No such file or directory". This is why 407 existing tests had never run in CI: they could not be built there. Replaced with `WHISPER_DONT_GENERATE_BINDINGS=1`, which is what actually achieves the file's stated goal (use whisper-rs-sys's committed bindings and skip bindgen/libclang entirely) and does so on every platform. A developer whose CMake is off `PATH` can still export `CMAKE` themselves, since Cargo does not override an already-set variable.
+- **One panicking thread killed the whole app (`native/src-tauri/src/sync.rs (new)`, 10 modules)**: all 83 non-test lock sites used `lock().unwrap()`. `std::sync::Mutex` poisons on a panic-while-held, and every later `unwrap()` on that mutex then panics too — so a single recoverable fault on a capture thread took down settings reads, the pill, and the in-progress recording with it. In a long-running recorder that is a lost meeting, mid-meeting. `MutexExt::lock_or_recover()` takes the guard through the poison and logs each recovery at `warn` with the caller's file and line, so it stays diagnosable rather than silent. The trade is stated at the module: recovering means reading a value that may be mid-update, which is right for what these mutexes hold — settings replaced wholesale, an `Option<Session>` handle, sample buffers, cached diagnostics — and wrong for anything holding an invariant across fields.
+- **A `FAILED` transcript chunk's partial text counted toward the word count (`native/src/components/meetings_v2/meetingsViewState.ts (new)`)**: found while extracting the logic to test it. The counter now takes only `SUCCESS` segments, so the UI stops reporting progress the user does not have.
+- **A dead `auth()` stub reported every visitor as an Admin (`web/src/lib/auth.ts`)**: a "dummy auth" module returned hardcoded `Admin` session claims. Nothing consumed it except `lib/roles.ts`, itself unreferenced; the dashboard layout awaited `currentUser()` and discarded the result while hardcoding a user beside it. All removed. The layout now names its placeholder identity instead of appearing to resolve one.
+
+#### Features
+
+- **Continuous integration (`.github/workflows/ci.yml (new)`)**: four jobs on every push and pull request — repository rules, Rust backend, native frontend, web dashboard. Runs `cargo clippy --all-targets -- -D warnings`, `cargo test`, `tsc --noEmit`, `vitest run`, and a production build of both frontends. The Rust job installs the exact system dependencies the crate needs on Linux (GTK/WebKit for Tauri, ALSA for cpal, `libxdo` for enigo, a C/C++ toolchain and CMake for whisper.cpp) and caches the build, which is dominated by whisper.cpp on a cold run.
+- **`scripts/verify-commit-rules.js` finally runs (`.github/workflows/ci.yml`)**: the script already existed and enforces `rules/version-and-changelog.md` and `rules/readme.md` — `VERSION` agreeing with all four manifests, a changelog entry for it, README structure. It is a CI job now instead of a command nobody invoked.
+- **A frontend test suite (`native/src/test/** (new)`, `native/vite.config.ts`)**: Vitest + React Testing Library + jsdom, the stack `rules/testing.md` already specified, with 71 tests where there had been none across 18k lines. `src/test/setup.ts` stubs the Tauri API modules globally, since they only resolve inside a Tauri webview; `src/test/factories.ts` builds complete typed domain objects so a test states only what it is about. Scripts: `npm test`, `test:watch`, `test:coverage`, `typecheck`.
+
+#### Improvements
+
+- **`MeetingsV2View`'s derived state is testable (`native/src/components/meetings_v2/meetingsViewState.ts (new)`)**: active-state classification, word counting across the durable and live streams, selected-session resolution, and duration formatting were inline in a 1,124-line component and unreachable without mounting it and its whole Tauri surface. Extracted unchanged in behaviour, covered by 22 tests, and the component is shorter for it.
+- **Clippy is clean at `-D warnings` (11 modules)**: 52 pre-existing findings fixed — `manual_strip`, `is_some_and`, `needless_range_loop`, `bool_assert_comparison`, `derivable_impls`, `field_reassign_with_default`, `manual_range_contains`, `useless_format`, `while_let_loop`, `single_match`, `iter_last`. The five `too_many_arguments` sites get a scoped allow with a reason each, rather than a crate-level allow that would also silence future code.
+- **"No fake controls" is a repository rule (`rules/ui-components.md`)**: previously stated only in a push-to-talk spec that has since been deleted. It now binds every surface, with the review-time form added: a setting that exists in the schema and the UI but that no code path reads is a fake control that happens to survive a restart.
+- **`AGENTS.md` describes this repository (`AGENTS.md`)**: all 22 of its rule links pointed at `Rules/` rather than `rules/`, so none resolved on a case-sensitive filesystem; it cited two files that have never existed here; and it told readers the repo was from-scratch with no implementation, at v0.16.0 with 35k lines of Rust. Rewritten with a surface table, working links, the commands CI runs, and where to leave a marker for a known gap.
+
+#### Removals
+
+- **1,160 lines of dead code**: `PTTWidget.tsx` (an 8-line component whose body was `return null`), `ChatPanel.tsx`, `KanbanBoard.tsx`, `ScribbleComposer.tsx`, `ui/popover.tsx`, and the `stageSucceeded` helper in `native/`; `Input.tsx`, `mini-loader.tsx`, `nav-secondary.tsx`, `search-form.tsx`, `ui/field.tsx`, `lib/roles.ts`, and `lib/auth.ts` in `web/`. All verified zero-reference by import search across both frontends and the Rust command surface.
+- **1.6MB of generated output untracked**: `graphify-out/` was committed despite `.gitignore` already declaring it regenerated-per-run, and the snapshot was ten days stale.
+- **Six stale documents**: `meetings_implementation.md` and `Relay_STT_Implementation_Plan.md` (plans for work shipped versions ago, the former still asserting "no source has been changed yet"), `docs/ptt-redesign-spec.md` (an agent task prompt), `docs/inspect/push-to-talk-pill.md` (a pre-work file map), `update.md` (a v0.4.1 task report), and `unused-components.md` (an audit of the components removed above). Plus `rules/code-standards.md`, an unindexed duplicate. Root markdown went from 9 files to 4. What was load-bearing was kept: `remove_prompt.md` moved to `docs/archive/prompt-mode.md`, and `docs/README.md` is now the index of what exists and what does not warrant a new file.
+
+#### Tests
+
+- 482 total: 411 Rust (407 existing, plus 4 covering mutex poison recovery — including one that pins the failure mode the change exists to prevent, and one asserting the partial write is visible after recovery so the caveat is demonstrated rather than only documented) and 71 native frontend.
+- Frontend coverage: label resolution and title preference (23), view-derived state (22), `MeetingsV2View` behaviour driven entirely through `invoke` responses (6), knowledge-graph layout invariants including that coincident nodes separate instead of turning every coordinate into `NaN` (8), and the dictation sound effects that are the only code path behind the `dictation_sounds` setting (12).
+- `docs/testing.md` rewritten: it listed `PTTWidget` and the Kanban board as coverage targets — both now deleted as dead code — and a `web` test script that does not exist. It now records what is covered and names what is not.
+
+#### Known gaps
+
+`cargo fmt --check` is deliberately not a CI gate. The crate predates any
+formatting pass and differs from rustfmt in 45 files; running `cargo fmt` once,
+as its own commit, is what unblocks adding it. `ProviderSettings.tsx` (1,874
+lines) and `DictationPill.tsx` remain untested, and no end-to-end test drives a
+real recording through capture, STT, and processing.
+
 ## [0.16.0] - 2026-08-27
 
 ### Meeting Summaries as Memory: Canonical Context, a Real Summary Contract, Per-Meeting Length, Targeted Repair & an Evaluation Set
