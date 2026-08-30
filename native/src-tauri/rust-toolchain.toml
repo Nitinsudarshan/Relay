@@ -1,0 +1,12 @@
+# Pins the toolchain so a local check and CI agree.
+#
+# CI runs `cargo clippy -- -D warnings`. With a floating `stable`, every Rust
+# release can add a lint and turn CI red on code nobody touched — and a
+# contributor on an older toolchain cannot reproduce it. That happened: two
+# `unnecessary_sort_by` sites passed locally on 1.94 and failed CI on 1.98.
+#
+# Bump this deliberately, in its own commit, fixing whatever new lints the
+# newer clippy finds. rustup installs this automatically on first `cargo` run.
+[toolchain]
+channel = "1.98.0"
+components = ["clippy", "rustfmt"]

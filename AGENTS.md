@@ -67,6 +67,12 @@ Building the Rust crate needs a C/C++ toolchain and CMake for whisper.cpp. On
 Linux it additionally needs the GTK/WebKit and ALSA development headers — see
 the `system dependencies` step in the CI workflow for the exact package list.
 
+The Rust toolchain is pinned in `native/src-tauri/rust-toolchain.toml`, and
+rustup installs it automatically on your first `cargo` call. Do not work around
+it: CI runs `clippy -D warnings`, so a different compiler means a different
+lint set, and "passes locally, fails CI" follows immediately. Bump the pin
+deliberately, in its own commit, fixing whatever the newer clippy finds.
+
 `cargo fmt --check` is deliberately **not** in CI yet: the crate predates any
 formatting pass and currently differs from rustfmt in 45 files. Running
 `cargo fmt` once, as its own commit, is what unblocks adding that gate.

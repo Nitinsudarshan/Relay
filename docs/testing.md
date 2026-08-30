@@ -19,6 +19,11 @@ Building needs a C/C++ toolchain and CMake for whisper.cpp. On Linux it also
 needs the GTK/WebKit and ALSA development headers — the CI workflow's `system
 dependencies` step is the authoritative package list.
 
+The compiler version is pinned in `native/src-tauri/rust-toolchain.toml` and
+installed by rustup on the first `cargo` call. That pin is what makes a local
+`clippy -D warnings` mean the same thing as CI's: lints are added between Rust
+releases, so a floating `stable` turns "passes locally" into a coin flip.
+
 Where the coverage sits:
 
 - `meetings_v2/processing/` — the largest concentration by far: normalization,

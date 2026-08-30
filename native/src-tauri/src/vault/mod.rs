@@ -293,7 +293,7 @@ impl VaultManager {
             .filter(|(score, _)| *score > 0)
             .collect();
 
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|a| std::cmp::Reverse(a.0));
         Ok(scored
             .into_iter()
             .take(top_k)
@@ -568,7 +568,7 @@ impl VaultManager {
             .filter(|(score, _)| *score > 0)
             .collect();
 
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|a| std::cmp::Reverse(a.0));
         Ok(scored.into_iter().take(top_k).map(|(_, s)| s).collect())
     }
 

@@ -60,9 +60,11 @@ jobs:
             build-essential \
             cmake
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      # No toolchain pinned here on purpose: rust-toolchain.toml is the single
+      # source of truth, so a local run and this job use the same compiler and
+      # therefore the same lint set. rustup installs it on the first cargo call.
+      - name: Show toolchain
+        run: rustc --version && cargo clippy --version
 
       # Includes the whisper.cpp build, which dominates a cold run.
       - uses: Swatinem/rust-cache@v2
