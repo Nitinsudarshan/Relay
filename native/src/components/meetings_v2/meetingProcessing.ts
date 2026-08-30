@@ -5,7 +5,6 @@ import type {
   MeetingSession,
   ProcessingStatus,
   Speaker,
-  StageState,
   SummaryMode,
 } from '../../types';
 
@@ -125,10 +124,6 @@ export const processingHeadline = (
       return { label: 'Not processed yet', tone: 'idle' };
   }
 };
-
-/** Whether a stage produced something usable. */
-export const stageSucceeded = (stage?: StageState | null): boolean =>
-  stage?.status === 'SUCCESS';
 
 /**
  * Whether the pipeline reached a state where a summary can be produced at all.
