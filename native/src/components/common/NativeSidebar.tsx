@@ -122,7 +122,7 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className={`flex items-center rounded-xl transition-all cursor-pointer group shadow-2xs overflow-hidden ${
+                className={`flex items-center rounded-lg transition-all cursor-pointer group shadow-2xs overflow-hidden ${
                   isOpen
                     ? 'w-full h-10 border border-sidebar-border bg-card/60 hover:bg-sidebar-accent/70 p-1.5'
                     : 'size-8 rounded-lg border border-border bg-card hover:bg-sidebar-accent text-foreground justify-center p-0 shadow-xs'
@@ -271,7 +271,7 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
                 type="button"
                 className={`flex items-center transition-all cursor-pointer group shadow-2xs overflow-hidden ${
                   isOpen
-                    ? 'w-full h-10 rounded-xl bg-card/60 hover:bg-card border border-sidebar-border p-1.5 mb-2'
+                    ? 'w-full h-10 rounded-lg bg-card/60 hover:bg-card border border-sidebar-border p-1.5 mb-2'
                     : 'size-8 rounded-full border border-border bg-card flex items-center justify-center p-0 mb-2 hover:ring-2 hover:ring-primary/40 shadow-xs'
                 }`}
                 title="Account & Session Settings"

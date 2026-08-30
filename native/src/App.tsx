@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { PageHeader } from './components/common/PageHeader';
 
 export type MainTabType =
   | 'capture'
@@ -186,65 +187,43 @@ export const App: React.FC = () => {
     switch (activeTab) {
       case 'capture':
         return (
-          <div className="relative rounded-lg border border-border/80 bg-gradient-to-br from-card via-card/95 to-emerald-500/5 p-5 md:p-6 shadow-xs overflow-hidden mb-5 shrink-0">
-            <div className="absolute -right-10 -top-10 w-40 h-40 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-            <div className="relative z-10 space-y-1.5">
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-[10px] font-mono uppercase tracking-wider text-emerald-500 border-emerald-500/30 bg-emerald-500/5 gap-1.5 py-0.5 px-2">
-                  <Mic className="w-3 h-3 text-emerald-500" />
-                  <span>Capture Surface</span>
-                </Badge>
-              </div>
-              <h1 className="text-xl md:text-2xl font-extrabold tracking-tight text-foreground">
-                Voice <span className="italic text-primary">Notes</span>
-              </h1>
-              <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
-                Everything you dictate, captured in one truthful history.
-              </p>
-            </div>
-          </div>
+          <PageHeader
+            badge={{ label: 'Capture Surface', icon: Mic, variant: 'emerald' }}
+            title="Voice"
+            highlightText="Notes"
+            description="Everything you dictate, captured in one truthful history."
+            glowColor="emerald"
+          />
         );
       case 'meetings':
-        return null; // MeetingsV2View has its own self-contained top bar
+        return (
+          <PageHeader
+            badge={{ label: 'Meeting Intelligence', icon: Mic, variant: 'purple' }}
+            title="Crash-resilient"
+            highlightText="transcripts & memory."
+            description="Dual microphone and system audio capture with 30-second incremental persistence and AI extraction."
+            glowColor="purple"
+          />
+        );
       case 'scribble':
         return (
-          <div className="relative rounded-lg border border-border/80 bg-gradient-to-br from-card via-card/95 to-primary/5 p-5 md:p-6 shadow-xs overflow-hidden mb-5 shrink-0">
-            <div className="absolute -right-10 -top-10 w-40 h-40 bg-primary/10 rounded-full blur-3xl pointer-events-none" />
-            <div className="relative z-10 space-y-1.5">
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-[10px] font-mono uppercase tracking-wider text-primary border-primary/30 bg-primary/5 gap-1.5 py-0.5 px-2">
-                  <Sparkles className="w-3 h-3 text-primary" />
-                  <span>Knowledge Layer</span>
-                </Badge>
-              </div>
-              <h1 className="text-xl md:text-2xl font-extrabold tracking-tight text-foreground">
-                Connected thoughts, <span className="italic text-primary">living</span> knowledge.
-              </h1>
-              <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
-                Capture atomic thoughts, connect related ideas, and explore your Obsidian-compatible knowledge graph.
-              </p>
-            </div>
-          </div>
+          <PageHeader
+            badge={{ label: 'Knowledge Layer', icon: Sparkles, variant: 'default' }}
+            title="Connected thoughts,"
+            highlightText="living knowledge."
+            description="Capture atomic thoughts, connect related ideas, and explore your Obsidian-compatible knowledge graph."
+            glowColor="primary"
+          />
         );
       case 'settings':
         return (
-          <div className="relative rounded-lg border border-border/80 bg-gradient-to-br from-card via-card/95 to-purple-500/5 p-5 md:p-6 shadow-xs overflow-hidden mb-5 shrink-0">
-            <div className="absolute -right-10 -top-10 w-40 h-40 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
-            <div className="relative z-10 space-y-1.5">
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-[10px] font-mono uppercase tracking-wider text-purple-500 border-purple-500/30 bg-purple-500/5 gap-1.5 py-0.5 px-2">
-                  <Settings className="w-3 h-3 text-purple-500" />
-                  <span>Preferences & Vault</span>
-                </Badge>
-              </div>
-              <h1 className="text-xl md:text-2xl font-extrabold tracking-tight text-foreground">
-                How Relay <span className="italic text-primary">behaves</span>.
-              </h1>
-              <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
-                Configure local LLMs, triggers, privacy bounds, and manage 30-day trash recovery.
-              </p>
-            </div>
-          </div>
+          <PageHeader
+            badge={{ label: 'Preferences & Vault', icon: Settings, variant: 'purple' }}
+            title="How Relay"
+            highlightText="behaves."
+            description="Configure local LLMs, triggers, privacy bounds, and manage 30-day trash recovery."
+            glowColor="purple"
+          />
         );
     }
   };

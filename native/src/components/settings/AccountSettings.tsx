@@ -235,7 +235,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       )}
 
       {/* 1. PERSONALIZATION: DISPLAY NAME */}
-      <div className="p-5 rounded-xl border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
+      <div className="p-5 rounded-lg border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
             <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
@@ -274,7 +274,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       </div>
 
       {/* 2. AUTHENTICATION & ACCOUNT CARD */}
-      <div className="p-5 rounded-xl border border-border/80 bg-card/60 backdrop-blur-xs space-y-5">
+      <div className="p-5 rounded-lg border border-border/80 bg-card/60 backdrop-blur-xs space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             {account?.authenticated && account.profile_image ? (
@@ -383,7 +383,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       </div>
 
       {/* 3. USAGE MODE */}
-      <div className="p-5 rounded-xl border border-border/80 bg-gradient-to-br from-card/80 to-primary/5 space-y-4">
+      <div className="p-5 rounded-lg border border-border/80 bg-gradient-to-br from-card/80 to-primary/5 space-y-4">
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -409,7 +409,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       {/* 4. UPDATES & VERSION AWARENESS */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* App Version & Update Card */}
-        <div className="p-5 rounded-xl border border-border/80 bg-card/60 space-y-4">
+        <div className="p-5 rounded-lg border border-border/80 bg-card/60 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Laptop className="w-4 h-4 text-primary" />
@@ -453,7 +453,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
         </div>
 
         {/* Installation Identity Card */}
-        <div className="p-5 rounded-xl border border-border/80 bg-card/60 space-y-4">
+        <div className="p-5 rounded-lg border border-border/80 bg-card/60 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-500" />
@@ -485,7 +485,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       </div>
 
       {/* 5. DIAGNOSTICS & SUPPORT */}
-      <div className="p-5 rounded-xl border border-border/80 bg-card/60 space-y-4">
+      <div className="p-5 rounded-lg border border-border/80 bg-card/60 space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -509,7 +509,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       </div>
 
       {/* 6. PRIVACY & TELEMETRY CONSENT */}
-      <div className="p-5 rounded-xl border border-border/80 bg-card/60 space-y-4">
+      <div className="p-5 rounded-lg border border-border/80 bg-card/60 space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -533,9 +533,9 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
       {/* Hybrid Mode Preview Modal */}
       {showHybridModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-xs p-4 animate-in fade-in-50">
-          <div className="w-full max-w-md bg-card border border-border rounded-2xl p-6 shadow-2xl space-y-6">
+          <div className="w-full max-w-md bg-card border border-border rounded-lg p-6 shadow-2xl space-y-6">
             <div className="text-center space-y-2">
-              <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center mx-auto mb-2">
+              <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 text-primary flex items-center justify-center mx-auto mb-2">
                 <Sparkles className="w-6 h-6" />
               </div>
               <h3 className="text-lg font-bold text-foreground">Relay Hybrid</h3>

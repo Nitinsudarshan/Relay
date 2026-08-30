@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { HardDrive, Mic, ShieldCheck, Edit3, Trash2, GitMerge, Copy, Check, X, Save, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '../common/EmptyState';
 import { AppSettings, VaultLocationInfo, VaultNote } from '../../types';
 
 
@@ -340,11 +341,13 @@ export const VoiceNotePage: React.FC = () => {
         </div>
 
         {notes.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center py-10 border border-dashed border-border rounded-lg text-muted-foreground">
-            <Mic className="w-8 h-8 mb-2 opacity-40" />
-            <p className="text-sm font-semibold">No Voice Notes yet</p>
-            <p className="text-xs mt-1">Everything you dictate with Relay will show up here.</p>
-          </div>
+          <EmptyState
+            icon={Mic}
+            title="No Voice Notes yet"
+            description="Everything you dictate with Relay will show up here."
+            minHeight="min-h-[220px]"
+            className="flex-1"
+          />
         ) : (
           <div className="flex-1 overflow-y-auto space-y-3 pr-1">
             {notes.map((note, index) => {

@@ -18,7 +18,7 @@ export const AccountExplanationModal: React.FC<AccountExplanationModalProps> = (
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/85 backdrop-blur-md p-4 animate-in fade-in-50">
-      <div className="w-full max-w-md bg-card/95 border border-border rounded-2xl p-6 md:p-7 shadow-2xl space-y-6 relative overflow-hidden">
+      <div className="w-full max-w-md bg-card/95 border border-border rounded-lg p-6 md:p-7 shadow-2xl space-y-6 relative overflow-hidden">
         {/* Glow */}
         <div className="absolute -right-12 -top-12 w-36 h-36 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
 
@@ -34,7 +34,7 @@ export const AccountExplanationModal: React.FC<AccountExplanationModalProps> = (
           </p>
         </div>
 
-        <div className="p-4 rounded-xl border border-border/70 bg-muted/40 space-y-3 text-left">
+        <div className="p-4 rounded-lg border border-border/70 bg-muted/40 space-y-3 text-left">
           <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
             <HardDrive className="w-4 h-4 text-primary" />
             <span>Your local knowledge remains on this device</span>
@@ -45,7 +45,7 @@ export const AccountExplanationModal: React.FC<AccountExplanationModalProps> = (
         </div>
 
         {showDetails && (
-          <div className="p-3.5 rounded-xl border border-primary/20 bg-primary/5 space-y-2 text-[11px] text-muted-foreground animate-in fade-in-50">
+          <div className="p-3.5 rounded-lg border border-primary/20 bg-primary/5 space-y-2 text-[11px] text-muted-foreground animate-in fade-in-50">
             <div className="font-semibold text-foreground flex items-center gap-1.5">
               <Lock className="w-3.5 h-3.5 text-primary" />
               <span>Data Boundaries & Security</span>

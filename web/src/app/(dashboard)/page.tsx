@@ -1,8 +1,10 @@
 import React from "react";
 import { getSupabaseClient } from "@/lib/supabase/client";
-import { Kanban, Cloud, ShieldCheck, CheckCircle2, Clock, AlertCircle, User, Calendar, Layers } from "lucide-react";
+import { Kanban, CheckCircle2, Clock, AlertCircle, User, Calendar, Layers } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
 
 export default async function DashboardPage() {
   const supabase = getSupabaseClient();
@@ -31,11 +33,12 @@ export default async function DashboardPage() {
 
       <div className="flex-1 overflow-y-auto space-y-3 pr-1">
         {columnCards.length === 0 ? (
-          <div className="text-center py-12 px-4 rounded-xl border border-dashed border-border bg-muted/20 flex flex-col items-center justify-center min-h-[160px]">
-            <Layers className="w-8 h-8 text-muted-foreground/30 mb-2" />
-            <p className="text-xs font-medium text-muted-foreground">No tasks in {title.toLowerCase()}</p>
-            <p className="text-[11px] text-muted-foreground/60 mt-0.5">Synced state from Relay desktop app</p>
-          </div>
+          <EmptyState
+            icon={Layers}
+            title={`No tasks in ${title.toLowerCase()}`}
+            description="Synced state from Relay desktop app"
+            minHeight="min-h-[160px]"
+          />
         ) : (
           columnCards.map((card) => (
             <Card
@@ -86,22 +89,17 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full">
-      {/* Hero Header Pattern */}
-      <div>
-        <p className="font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">
-          RELAY · KANBAN
-        </p>
-        <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">
-          Structured tasks, <span className="italic text-primary">extracted</span> live.
-        </h1>
-        <p className="text-xs text-muted-foreground mt-1">
-          {cards?.length || 0} action card{(cards?.length || 0) === 1 ? "" : "s"} synced across Windows desktop & cloud.
-        </p>
-      </div>
+      {/* Centralized Page Header */}
+      <PageHeader
+        kicker="RELAY · KANBAN"
+        title="Structured tasks,"
+        highlightText="extracted live."
+        description={`${cards?.length || 0} action card${(cards?.length || 0) === 1 ? "" : "s"} synced across Windows desktop & cloud.`}
+      />
 
       {/* Synced Kanban Cards View */}
       <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between bg-card p-3 rounded-xl border border-border">
+        <div className="flex items-center justify-between bg-card p-3 rounded-lg border border-border">
           <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
             <Kanban className="w-4 h-4 text-primary" />
             <span>Hybrid Synced Board</span>
@@ -121,3 +119,4 @@ export default async function DashboardPage() {
     </div>
   );
 }
+

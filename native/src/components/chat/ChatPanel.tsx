@@ -81,10 +81,10 @@ export const ChatPanel: React.FC = () => {
   };
 
   return (
-    <Card className="h-full flex flex-col border-slate-800">
+    <Card className="h-full flex flex-col border-border">
       <CardHeader className="flex-row items-center justify-between pb-3 space-y-0">
         <div className="flex items-center gap-2">
-          <Bot className="w-5 h-5 text-blue-400" />
+          <Bot className="w-5 h-5 text-primary" />
           <div>
             <CardTitle>Voice Chat</CardTitle>
             <CardDescription>Ask questions out loud, grounded in your own vault notes</CardDescription>
@@ -95,10 +95,10 @@ export const ChatPanel: React.FC = () => {
           disabled={isProcessing}
           className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
             isRecording
-              ? 'bg-red-500 text-white recording-pulse'
+              ? 'bg-destructive text-destructive-foreground recording-pulse'
               : isProcessing
-              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-              : 'bg-gradient-to-tr from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500'
+              ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40'
+              : 'bg-primary text-primary-foreground hover:bg-primary/90'
           }`}
         >
           {isProcessing ? (
@@ -113,10 +113,10 @@ export const ChatPanel: React.FC = () => {
       </CardHeader>
 
       <CardContent className="flex-1 overflow-y-auto space-y-4 pr-1">
-        <p className="text-xs text-slate-500 italic">{statusText}</p>
+        <p className="text-xs text-muted-foreground italic">{statusText}</p>
 
         {turns.length === 0 && (
-          <div className="text-center py-10 text-slate-500 text-xs italic">
+          <div className="text-center py-10 text-muted-foreground text-xs italic">
             No questions asked yet this session.
           </div>
         )}
@@ -124,20 +124,20 @@ export const ChatPanel: React.FC = () => {
         {turns.map((turn, i) => (
           <div key={i} className="space-y-2">
             <div className="flex items-start gap-2 justify-end">
-              <div className="bg-blue-600/20 border border-blue-500/30 rounded-lg rounded-tr-sm px-3.5 py-2.5 max-w-[85%] text-xs text-slate-100">
+              <div className="bg-primary/10 border border-primary/20 rounded-lg rounded-tr-sm px-3.5 py-2.5 max-w-[85%] text-xs text-foreground">
                 {turn.question}
               </div>
-              <User className="w-5 h-5 text-blue-400 shrink-0 mt-1" />
+              <User className="w-5 h-5 text-primary shrink-0 mt-1" />
             </div>
 
             <div className="flex items-start gap-2">
-              <Bot className="w-5 h-5 text-purple-400 shrink-0 mt-1" />
-              <div className="bg-slate-950/80 border border-slate-800 rounded-lg rounded-tl-sm px-3.5 py-2.5 max-w-[85%] space-y-2">
-                <p className="text-xs text-slate-200 whitespace-pre-wrap">{turn.answer}</p>
+              <Bot className="w-5 h-5 text-purple-500 shrink-0 mt-1" />
+              <div className="bg-muted/40 border border-border rounded-lg rounded-tl-sm px-3.5 py-2.5 max-w-[85%] space-y-2">
+                <p className="text-xs text-foreground whitespace-pre-wrap">{turn.answer}</p>
 
                 {turn.sources.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-800/80">
-                    <BookOpen className="w-3 h-3 text-slate-500" />
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border">
+                    <BookOpen className="w-3 h-3 text-muted-foreground" />
                     {turn.sources.map((s, j) => (
                       <Badge key={j} variant="secondary" className="text-[10px]">
                         {s}
@@ -147,7 +147,7 @@ export const ChatPanel: React.FC = () => {
                 )}
 
                 {turn.audioBase64 && (
-                  <div className="flex items-center gap-1.5 text-[10px] text-slate-500 pt-1">
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground pt-1">
                     <Volume2 className="w-3 h-3" />
                     Spoken aloud
                   </div>

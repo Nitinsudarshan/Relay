@@ -106,7 +106,7 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
         </p>
       </div>
 
-      <div className="flex flex-col gap-4 p-4 rounded-xl border border-border/60 bg-card/40">
+      <div className="flex flex-col gap-4 p-4 rounded-lg border border-border/60 bg-card/40">
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-xs font-medium text-foreground">Show raw transcript</p>
@@ -189,7 +189,7 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 p-4 rounded-xl border border-border/60 bg-card/40">
+      <div className="flex flex-col gap-3 p-4 rounded-lg border border-border/60 bg-card/40">
         <div>
           <p className="text-xs font-medium text-foreground">Default summary</p>
           <p className="text-[11px] text-muted-foreground">
@@ -216,7 +216,7 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 p-4 rounded-xl border border-border/60 bg-card/40">
+      <div className="flex flex-col gap-3 p-4 rounded-lg border border-border/60 bg-card/40">
         <div>
           <label
             htmlFor="summary-instructions"
@@ -241,7 +241,7 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
         />
       </div>
 
-      <div className="flex flex-col gap-3 p-4 rounded-xl border border-border/60 bg-card/40">
+      <div className="flex flex-col gap-3 p-4 rounded-lg border border-border/60 bg-card/40">
         <div>
           <p className="text-xs font-medium text-foreground">Extensions</p>
           <p className="text-[11px] text-muted-foreground">

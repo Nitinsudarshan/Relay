@@ -1,5 +1,45 @@
 # Relay — Changelog
 
+## [0.17.1] - 2026-08-30
+
+### Design Polish, Meetings Layout Separation & Universal `rounded-lg` Normalization
+
+**Type**: patch — cross-surface (`native/`, `web/`).
+
+#### Improvements & Polish
+
+- **Meetings Architecture & Banner Alignment**:
+  - `native/src/App.tsx`: Added canonical `PageHeader` hero banner to the Meetings surface with purple glow, crash-resilience highlight badge, and dual-audio description matching Voice Notes and Scribbles.
+  - `native/src/components/meetings_v2/MeetingsV2View.tsx`: Refactored layout to separate LHS (Recorded Sessions list + top recording controls) and RHS (Selected meeting detail + tabs) into distinct cards (`bg-card rounded-lg border border-border shadow-xs`) with `gap-4`, matching `ScribbleViewer.tsx`.
+- **Scribble Detail Viewer Light & Dark Mode Parity**:
+  - `native/src/components/scribble/ScribbleDetailEditor.tsx`: Resolved light-mode spacing and contrast issues by eliminating nested double-margin card boxes in `AI Summary` and `Thought Content`. Both now render single-layer crisp cards (`bg-muted/30 border border-border p-4 rounded-lg`) with aligned copy buttons and clean header toolbars.
+- **Universal `rounded-lg` Normalization**:
+  - Audited and updated all non-avatar/non-indicator containers and buttons across native and web from `rounded-xl` / `rounded-2xl` to standard `rounded-lg` (`dropdown-menu`, `MarkdownView`, `NativeSidebar`, `WelcomeModal`, `AccountExplanationModal`, `AccountSettings`, `MeetingsSettings`, `ProviderSettings`, `DictionarySnippetsSettings`, `DeveloperSettingsView`, `web/src/components/ui/{card,sidebar}`, `web/src/components/{page-header,empty-state,nav-user,login-form,changelog-dialog}`, and all dashboard pages).
+
+## [0.17.0] - 2026-08-30
+
+### Complete Repo-Wide UI/UX Audit, Correction & Design-System Consolidation
+
+**Type**: minor — cross-surface (`native/`, `web/`, `Rules/`).
+
+A comprehensive repo-wide design audit, correction, and token consolidation establishing full Light & Dark mode parity, standard roundedness (`rounded-lg` / `rounded-xl`), and centralized reusable components.
+
+#### Improvements & Consolidation
+
+- **Centralized Shared Components**:
+  - `PageHeader` (`native/src/components/common/PageHeader.tsx`, `web/src/components/page-header.tsx`): Standardized hero headers across native (Voice Notes, Scribbles, Settings) and web (Kanban Dashboard, Notes, Settings, Components Showcase) with support for kickers, semantic badges, glow accents, and responsive layout.
+  - `EmptyState` (`native/src/components/common/EmptyState.tsx`, `web/src/components/empty-state.tsx`): Canonical empty state container with dashed borders, icon wrapper, title, description, and action button slot across native sessions/notes/scribbles and web columns/notes.
+- **UI Primitives Token Normalization**:
+  - `Card` (`native/src/components/ui/card.tsx`): Replaced hardcoded `slate-` colors with semantic `bg-card`, `border-border`, `text-card-foreground`, `text-muted-foreground`.
+  - `Badge` (`native/src/components/ui/badge.tsx`): Standardized semantic variant palettes (`default`, `secondary`, `destructive`, `outline`, `amber`, `emerald`, `purple`) ensuring crisp contrast in both Light and Dark themes.
+  - `Input` (`native/src/components/ui/input.tsx`, `web/src/components/Input.tsx`): Normalized border, focus rings, and placeholder tokens; sanitized legacy web `Input.tsx` into a clean re-export of shadcn `Input`.
+- **Meetings V2 Full Token Refactor**:
+  - `MeetingsV2View.tsx`, `MeetingSummaryTab.tsx`, `MeetingActionItems.tsx`, `MeetingConversationTab.tsx`, `MeetingNotesTab.tsx`, `MeetingRawTranscriptTab.tsx`, `MeetingProcessingStatus.tsx`, `MeetingRelatedList.tsx`: Replaced hardcoded `#0a0a0c`, `zinc-*`, `lime-*`, and custom dark-only opacities with semantic design tokens (`bg-background`, `bg-card`, `border-border`, `text-foreground`, `text-muted-foreground`, `bg-accent`, `text-primary`).
+- **Voice Notes, Scribble, Chat & Web Surfaces**:
+  - `VoiceNotePage.tsx`, `ScribbleViewer.tsx`, `ChatPanel.tsx`: Integrated `EmptyState`, standardized border radius (`rounded-lg`), and replaced hardcoded slate classes.
+  - `web/src/components/loading-view.tsx` & `mini-loader.tsx`: Removed legacy template branding and replaced with sleek Relay branded loading indicators and semantic styling.
+  - `web/src/app/(dashboard)/{page,notes,settings,components}/page.tsx`: Standardized with `PageHeader`, `EmptyState`, and responsive grid layouts.
+
 ## [0.16.1] - 2026-08-30
 
 ### Native Sidebar Navigation Cleanup

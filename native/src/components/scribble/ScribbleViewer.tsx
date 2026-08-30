@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScribbleDetailEditor } from './ScribbleDetailEditor';
 import { KnowledgeGraphView } from './KnowledgeGraphView';
 import { CaptureHubPage } from '../capture/CaptureHubPage';
+import { EmptyState } from '../common/EmptyState';
 
 type ScribbleSubTab = 'workspace' | 'capture' | 'graph';
 
@@ -221,10 +222,13 @@ export const ScribbleViewer: React.FC = () => {
 
               <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
                 {filteredScribbles.length === 0 ? (
-                  <div className="text-center py-12 text-xs text-muted-foreground space-y-1.5 px-4">
-                    <p className="font-bold text-foreground">No thoughts found</p>
-                    <p className="text-[11px]">Use the Capture tab or promote a Voice Note.</p>
-                  </div>
+                  <EmptyState
+                    icon={FileText}
+                    title="No thoughts found"
+                    description="Use the Capture tab or promote a Voice Note."
+                    minHeight="min-h-[140px]"
+                    className="my-2 border-none bg-transparent"
+                  />
                 ) : (
                   filteredScribbles.map((note) => (
                     <div
@@ -282,12 +286,13 @@ export const ScribbleViewer: React.FC = () => {
                 />
               </div>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-card rounded-lg border border-border text-muted-foreground">
-                <FileText className="w-10 h-10 mb-2 opacity-30" />
-                <p className="text-sm font-semibold text-foreground">Select a scribble to inspect</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Click any thought from the list or create one from the Capture tab.
-                </p>
+              <div className="flex-1 flex items-center justify-center p-8 bg-card rounded-lg border border-border">
+                <EmptyState
+                  icon={FileText}
+                  title="Select a scribble to inspect"
+                  description="Click any thought from the list or create one from the Capture tab."
+                  minHeight="min-h-[220px]"
+                />
               </div>
             )}
           </div>

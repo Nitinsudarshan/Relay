@@ -1670,7 +1670,7 @@ export const ProviderSettings: React.FC = () => {
             {/* Modal: Delete Relay Account Double Confirmation */}
             {deleteAccountModalOpen && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4 animate-in fade-in-50">
-                <div className="w-full max-w-md bg-card border border-destructive/50 rounded-xl p-6 shadow-2xl space-y-5">
+                <div className="w-full max-w-md bg-card border border-destructive/50 rounded-lg p-6 shadow-2xl space-y-5">
                   <div className="flex items-start gap-3">
                     <div className="p-2 rounded-lg bg-destructive/10 text-destructive shrink-0">
                       <AlertTriangle className="w-5 h-5" />
@@ -1763,7 +1763,7 @@ export const ProviderSettings: React.FC = () => {
             {/* Modal: Clear Vault Double Confirmation */}
             {clearVaultModalOpen && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4 animate-in fade-in-50">
-                <div className="w-full max-w-md bg-card border border-destructive/50 rounded-xl p-6 shadow-2xl space-y-5">
+                <div className="w-full max-w-md bg-card border border-destructive/50 rounded-lg p-6 shadow-2xl space-y-5">
                   <div className="flex items-start gap-3">
                     <div className="p-2 rounded-lg bg-destructive/10 text-destructive shrink-0">
                       <AlertTriangle className="w-5 h-5" />
