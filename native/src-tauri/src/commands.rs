@@ -74,6 +74,16 @@ impl CommandError {
 
 pub const STT_DIAGNOSTICS_EVENT: &str = "stt-diagnostics-updated";
 
+/// Tauri's resource directory, when the build has one.
+///
+/// Used only to look for a bundled Piper. Nothing bundles one today; the
+/// lookup exists so that packaging one later is a packaging change rather
+/// than a code change (`tts::discovery`).
+fn resource_dir(app: &AppHandle) -> Option<PathBuf> {
+    use tauri::Manager;
+    app.path().resource_dir().ok()
+}
+
 pub struct AppState {
     pub recorder: AudioRecorder,
     pub vault: VaultManager,
@@ -92,6 +102,11 @@ pub struct AppState {
     /// The conversational surface over everything above. Owns its own
     /// microphone stream and its own ephemeral session; owns no storage.
     pub talkback: Arc<crate::talkback::TalkbackEngine>,
+    /// Where Relay keeps its local voice installation. Resolved once at
+    /// startup from the OS application-data directory, because
+    /// `config_dir` is process-relative and a packaged Windows app cannot
+    /// rely on it (see `tts::discovery::default_tts_root`).
+    pub tts_root: PathBuf,
 }
 
 impl AppState {
@@ -2549,6 +2564,8 @@ pub async fn submit_talkback_turn(
         settings: &settings,
         stt_ms: stt_ms.map(u128::from),
         typed,
+        tts_root: &state.tts_root,
+        resource_dir: resource_dir(&app),
     };
 
     crate::talkback::engine::run_turn(ctx, &text)
@@ -2565,7 +2582,10 @@ pub async fn interrupt_talkback(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::talkback::TalkbackState, CommandError> {
-    state.talkback.interrupt(&app);
+    // A manual stop has no follow-up speech, so the conversation returns
+    // to listening rather than waiting in INTERRUPTED for words that are
+    // not coming.
+    state.talkback.interrupt(&app, true);
     Ok(state.talkback.state())
 }
 
@@ -2599,4 +2619,164 @@ pub async fn search_talkback_context(
         &request,
         chrono::Utc::now(),
     ))
+}
+
+// ── Local voice (TTS) setup ─────────────────────────────────────────────
+//
+// "Configure `piper_binary_path` in settings.json" is not a product.
+// These commands back the Settings › Talkback voice card, which is the
+// answer to "I installed Relay — how do I make Talkback speak?".
+
+/// Everything the voice settings UI needs, in one filesystem pass.
+#[tauri::command]
+pub async fn get_tts_status(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::tts::TtsStatus, CommandError> {
+    let settings = state.settings.lock_or_recover().clone();
+    Ok(crate::tts::status(
+        &settings.tts,
+        &state.tts_root,
+        resource_dir(&app).as_deref(),
+    ))
+}
+
+/// Opens the OS file picker for a Piper executable.
+#[tauri::command]
+pub async fn browse_for_piper_binary(app: AppHandle) -> Result<Option<String>, CommandError> {
+    // Filtered to the executable extension on Windows; on Unix a Piper
+    // build has no extension at all, so no filter is offered there.
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app.dialog().file().set_title("Select the Piper program");
+        if cfg!(windows) {
+            dialog.add_filter("Program", &["exe"]).blocking_pick_file()
+        } else {
+            dialog.blocking_pick_file()
+        }
+    })
+    .await
+    .map_err(|e| CommandError::new("DIALOG_TASK_FAILED", &e.to_string()))?;
+
+    picked_path(picked)
+}
+
+/// Opens the OS file picker for a Piper voice model.
+#[tauri::command]
+pub async fn browse_for_piper_voice(app: AppHandle) -> Result<Option<String>, CommandError> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Select a Piper voice model")
+            .add_filter("Piper voice", &["onnx"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| CommandError::new("DIALOG_TASK_FAILED", &e.to_string()))?;
+
+    picked_path(picked)
+}
+
+fn picked_path(
+    picked: Option<tauri_plugin_dialog::FilePath>,
+) -> Result<Option<String>, CommandError> {
+    match picked {
+        Some(path) => path
+            .into_path()
+            .map(|p| Some(p.to_string_lossy().to_string()))
+            .map_err(|e| CommandError::new("DIALOG_PATH_INVALID", &e.to_string())),
+        None => Ok(None),
+    }
+}
+
+/// Persists a voice configuration and reports what it resolved to.
+///
+/// Validation happens here rather than in the UI so a hand-edited
+/// settings file gets the same treatment as a browsed one. An empty
+/// string clears the field, which is how a user returns to Relay's
+/// automatic discovery.
+#[tauri::command]
+pub async fn set_tts_configuration(
+    app: AppHandle,
+    binary_path: Option<String>,
+    voice_path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::tts::TtsStatus, CommandError> {
+    let settings_path = state.settings_path();
+    let updated = {
+        let mut settings = state.settings.lock_or_recover();
+        if let Some(binary) = binary_path {
+            settings.tts.piper_binary_path = normalize_setting(binary);
+        }
+        if let Some(voice) = voice_path {
+            settings.tts.piper_voice_path = normalize_setting(voice);
+        }
+        settings
+            .save(&settings_path)
+            .map_err(|e| CommandError::new("SETTINGS_SAVE_FAILED", &e.to_string()))?;
+        settings.clone()
+    };
+
+    // Every other settings surface listens for this, so the Talkback page
+    // learns the voice is ready without polling.
+    let _ = app.emit("settings-changed", &updated);
+
+    Ok(crate::tts::status(
+        &updated.tts,
+        &state.tts_root,
+        resource_dir(&app).as_deref(),
+    ))
+}
+
+/// A blank field means "unset", not "a path that happens to be empty".
+fn normalize_setting(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// Speaks a test sentence and returns the audio for the UI to play.
+///
+/// The one honest way to answer "will this voice work?" — it exercises
+/// the same provider, binary and model a real turn would, so a
+/// configuration that passes here cannot fail differently in conversation.
+#[tauri::command]
+pub async fn test_tts_voice(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, CommandError> {
+    let settings = state.settings.lock_or_recover().clone();
+    let tts_root = state.tts_root.clone();
+    let resources = resource_dir(&app);
+
+    // Synthesis spawns a process and waits on it; that belongs on a
+    // blocking thread, not on the async runtime.
+    let audio = tauri::async_runtime::spawn_blocking(move || {
+        let provider =
+            crate::tts::resolve_provider(&settings.tts, &tts_root, resources.as_deref());
+        provider.synthesize(crate::tts::TEST_PHRASE)
+    })
+    .await
+    .map_err(|e| CommandError::new("TTS_TASK_FAILED", &e.to_string()))?;
+
+    match audio {
+        Ok(Some(audio)) => Ok(audio.wav_base64),
+        Ok(None) => Err(CommandError::new(
+            "TTS_NOT_CONFIGURED",
+            "Local voice isn't set up yet.",
+        )),
+        Err(e) => Err(CommandError::new("TTS_TEST_FAILED", &e.to_string())),
+    }
+}
+
+/// Creates Relay's managed voice folders and returns the voices one, so
+/// the UI can tell the user exactly where to drop files — and so the
+/// folder exists when they go looking for it.
+#[tauri::command]
+pub async fn prepare_tts_folders(state: State<'_, AppState>) -> Result<String, CommandError> {
+    let voices = crate::tts::discovery::managed_voices_dir(&state.tts_root);
+    let piper = crate::tts::discovery::managed_piper_dir(&state.tts_root);
+    for dir in [&piper, &voices] {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| CommandError::new("TTS_FOLDER_FAILED", &e.to_string()))?;
+    }
+    Ok(voices.to_string_lossy().to_string())
 }

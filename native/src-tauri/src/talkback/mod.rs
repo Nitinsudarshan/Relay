@@ -35,6 +35,7 @@
 //!  sources.rs    vault/meeting projection            (the only I/O)
 //!  assemble.rs   prompts, context blocks, provenance (pure)
 //!  chunk.rs      phrase buffer for streaming TTS     (pure)
+//!  speech.rs     overlapped synthesis pipeline       (sink-tested)
 //!  session.rs    ephemeral conversation
 //!  tools.rs      Voice Note and Scribble actions
 //!  engine.rs     orchestration, cancellation, events
@@ -48,6 +49,7 @@ pub mod intent;
 pub mod retrieval;
 pub mod session;
 pub mod sources;
+pub mod speech;
 pub mod state;
 pub mod tools;
 pub mod turn;
@@ -58,4 +60,5 @@ pub use engine::{
 pub use intent::Intent;
 pub use retrieval::{ContextItem, RetrievalQuery, RetrievalResult, SourceType};
 pub use session::{Role, TalkbackSession, TalkbackTurn};
+pub use speech::{SpeechChunk, SpeechOutcome, SpeechPipeline, SpeechSink};
 pub use state::{TalkbackEvent, TalkbackState};

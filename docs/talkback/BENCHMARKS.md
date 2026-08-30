@@ -1,6 +1,6 @@
 # Talkback — measurements
 
-Written against **v0.18.0**. Everything below is either a number this
+Written against **v0.18.1**. Everything below is either a number this
 machine actually produced or an explicit statement that it was **not
 measured**. Nothing here is estimated and presented as measured.
 
@@ -13,10 +13,10 @@ of the three exists in the Linux CI container this work was built in. The
 brief asked for measurements on the real target hardware (Windows), and
 that is the one thing that cannot be done from here.
 
-What *was* measured is the code this change adds: retrieval and phrase
-chunking. Those are the parts whose cost was previously unknown, and they
-turn out to be small enough not to matter, which is itself the useful
-result.
+What *was* measured is Relay's own code: retrieval, phrase chunking, and
+the LLM→TTS overlap. The first two turn out to be small enough not to
+matter, which is itself the useful result. The third is the point of
+v0.18.1 and is measured below.
 
 ## Environment
 
@@ -42,10 +42,10 @@ documents, mixed Voice Notes and MeetingFacts, with a six-word query.
 
 | Corpus | Per query |
 |---|---|
-| 100 docs | **0.33 ms** |
-| 500 docs | **1.42 ms** |
-| 1,000 docs | **2.66 ms** |
-| 5,000 docs | **16.00 ms** |
+| 100 docs | **0.35 ms** |
+| 500 docs | **1.46 ms** |
+| 1,000 docs | **2.91 ms** |
+| 5,000 docs | **15.82 ms** |
 
 Linear in corpus size, as a full scan must be. The number that matters:
 **at 1,000 documents retrieval costs under 3 ms**, which is roughly 0.2%
@@ -59,6 +59,32 @@ every note and meeting from disk on each turn, and that cost is
 user's disk and vault size. If a real vault shows this to be the
 bottleneck, the fix is an index, not a cache in front of a linear scan.
 
+## LLM → TTS overlap
+
+The change this release exists for. Until v0.18.1 Talkback collected
+phrases during the stream and synthesized them *after* it finished, which
+is not streaming TTS — it only looked like it, because the LLM API
+streams. `talkback::speech` now feeds each completed sentence to synthesis
+while the model writes the next.
+
+**This is a simulation of the scheduling, not a Piper measurement.** The
+component timings are stand-ins — a model emitting a sentence every 300 ms
+and a synthesizer taking 250 ms. What is really measured is the pipeline's
+own behaviour under those inputs.
+
+| | Time to first audio |
+|---|---|
+| Batched (the old path) | 1,750 ms |
+| Overlapped (`SpeechPipeline`) | **600 ms** |
+
+**2.9× earlier**, and the gap widens with answer length: the batched cost
+grows with every sentence generated, while the overlapped cost is fixed at
+first-sentence + one synthesis regardless of how long the answer runs.
+
+```bash
+cargo test --release overlap_saving -- --ignored --nocapture
+```
+
 ## Phrase buffer
 
 Character-by-character streaming — the worst case a token stream can
@@ -66,10 +92,10 @@ produce — through `PhraseBuffer`.
 
 | | |
 |---|---|
-| Throughput | **0.28 µs/char** |
-| 410,000 chars | 115 ms total, 6,000 phrases released |
+| Throughput | **0.31 µs/char** |
+| 410,000 chars | 127 ms total, 6,000 phrases released |
 
-A 400-character spoken answer therefore costs about **0.11 ms** to chunk.
+A 400-character spoken answer therefore costs about **0.12 ms** to chunk.
 Against a synthesis step measured in hundreds of milliseconds, the buffer
 is free — which is the point: it exists to *reduce* time-to-first-audio,
 and would be self-defeating if it added meaningful latency.
@@ -86,10 +112,18 @@ and would be self-defeating if it added meaningful latency.
 
 The instrumentation to capture every one of these on the real machine
 **does** ship: `TurnMetrics` records `stt_ms`, `retrieval_ms`,
-`llm_first_token_ms`, `llm_total_ms`, `tts_first_audio_ms` and `total_ms`
-per turn, emits them on `talkback-metrics`, and the Talkback page renders
-the last turn's numbers in its sidebar. The first real conversation on a
-Windows machine fills this table in.
+`llm_first_token_ms`, `llm_total_ms`, `tts_first_audio_ms`,
+`tts_first_synthesis_ms`, `tts_total_synthesis_ms`, `tts_phrases` and
+`total_ms` per turn, emits them on `talkback-metrics`, and the Talkback
+page renders the last turn's numbers in its sidebar. The first real
+conversation on a Windows machine fills this table in.
+
+`tts_first_audio_ms` is anchored to the **start of the turn**, not to the
+duration of a synthesis call. Before v0.18.1 it measured the latter, which
+made it look excellent while the user waited seconds — the metric was
+measuring the wrong thing well. `tts_first_synthesis_ms` now carries the
+synthesis-only figure, so a slow voice model and a slow language model
+stay distinguishable.
 
 ## The TTS comparison the brief asked for
 
@@ -114,7 +148,7 @@ fully local CPU stack:
 
 | Measurement | Hosted-agent norm | Relay's target |
 |---|---|---|
-| Barge-in (speech → TTS flush) | < 150 ms | < 250 ms — bounded by the 100 ms frame plus one in-flight phrase |
+| Barge-in (speech → TTS flush) | < 150 ms | < 250 ms — bounded by the 100 ms detector frame plus the 15 ms cancellation poll inside synthesis. The Piper child is killed rather than waited out, so this no longer depends on how long the sentence would have taken. |
 | Turn gap (silence → first audio) | 200–450 ms | **1.5–2 s warm path** |
 | Unacceptable | > 1500 ms | > 4 s |
 

@@ -2,7 +2,7 @@
 //!
 //! One canonical way to ask "what does Relay already know about this?",
 //! across every capture surface. Talkback deliberately owns no storage of
-//! its own (`docs/talkback/ARCHITECTURE.md` §11), so this module is the
+//! its own (`docs/talkback/ARCHITECTURE.md` §12), so this module is the
 //! only place that decides *which* of the user's own words reach a model.
 //!
 //! Scoring is split from gathering on purpose: [`rank`] is a pure function

@@ -189,6 +189,43 @@ export interface TtsSettings {
   piper_voice_path?: string | null;
 }
 
+/** How Relay found the Piper executable it is using. */
+export type PiperOrigin = 'configured' | 'managed' | 'bundled' | 'system_path';
+
+/** A Piper voice model Relay can offer without the user browsing. */
+export interface PiperVoice {
+  path: string;
+  /** Display name from the filename: `en_US-amy-medium`. */
+  label: string;
+  language?: string | null;
+  /** Piper needs a `.onnx.json` beside the model; false means it's absent. */
+  has_config: boolean;
+}
+
+/**
+ * Everything the voice settings UI needs, from one backend call.
+ *
+ * Mirrors `tts::TtsStatus`. `problems` are already phrased for display —
+ * the frontend never composes an error message about TTS itself.
+ */
+export interface TtsStatus {
+  engine: string;
+  ready: boolean;
+  binaryPath?: string | null;
+  binaryOrigin?: PiperOrigin | null;
+  voicePath?: string | null;
+  voiceLabel?: string | null;
+  voiceLanguage?: string | null;
+  availableVoices: PiperVoice[];
+  problems: string[];
+  /** Where to put a Piper executable so Relay finds it automatically. */
+  installDir: string;
+  /** Where to put voice models so Relay finds them automatically. */
+  voicesDir: string;
+  /** `piper.exe` on Windows, `piper` elsewhere. */
+  executableName: string;
+}
+
 export interface HotkeySettings {
   show_hide_hotkey: string;
   dictation_hotkey: string;
@@ -1195,7 +1232,14 @@ export interface TalkbackMetrics {
   candidate_count: number;
   llm_first_token_ms?: number | null;
   llm_total_ms?: number | null;
+  /** Turn start → first audio available. What the user actually waited. */
   tts_first_audio_ms?: number | null;
+  /** How long the first synthesis call alone took. */
+  tts_first_synthesis_ms?: number | null;
+  tts_total_synthesis_ms?: number;
+  tts_phrases?: number;
+  /** Voice switched off mid-turn because the configuration is broken. */
+  tts_disabled?: boolean;
   total_ms: number;
   interrupted: boolean;
   deterministic: boolean;

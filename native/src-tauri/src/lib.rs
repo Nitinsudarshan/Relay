@@ -96,6 +96,11 @@ pub fn run() {
     #[cfg(feature = "whisper-local")]
     whisper_rs::install_logging_hooks();
 
+    // A crash mid-synthesis leaves a WAV behind and nothing else will
+    // ever remove it. One phrase per sentence makes that worth doing.
+    let tts_root = tts::discovery::default_tts_root(&config_dir);
+    tts::discovery::clear_scratch(&tts_root);
+
     let stt = SttEngine::new();
     let meetings_v2 = Arc::new(meetings_v2::MeetingsV2Engine::new(
         vault_dir.clone(),
@@ -125,6 +130,7 @@ pub fn run() {
         meetings_v2,
         meeting_processor,
         talkback: Arc::new(talkback::TalkbackEngine::new()),
+        tts_root,
     };
 
     tauri::Builder::default()
@@ -271,6 +277,12 @@ pub fn run() {
             commands::submit_talkback_turn,
             commands::interrupt_talkback,
             commands::search_talkback_context,
+            commands::get_tts_status,
+            commands::browse_for_piper_binary,
+            commands::browse_for_piper_voice,
+            commands::set_tts_configuration,
+            commands::test_tts_voice,
+            commands::prepare_tts_folders,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

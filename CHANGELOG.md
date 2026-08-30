@@ -1,5 +1,49 @@
 # Relay — Changelog
 
+## [0.18.1] - 2026-08-30
+
+### Talkback Production Readiness — Real Streaming Speech, a Local Voice Setup Flow, and No Dead Ends
+
+**Type**: patch — both surfaces (`native/src-tauri/src/talkback/speech.rs (new)`, `native/src-tauri/src/talkback/{engine,state,mod}.rs`, `native/src-tauri/src/tts/discovery.rs (new)`, `native/src-tauri/src/tts/{mod,piper}.rs`, `native/src-tauri/src/{lib,commands}.rs`, `native/src/components/settings/VoiceSettings.tsx (new)`, `native/src/components/settings/TalkbackSettingsView.tsx`, `native/src/components/talkback/TalkbackPage.tsx`, `native/src/types/index.ts`, `docs/talkback/{ARCHITECTURE,BENCHMARKS}.md`, `docs/decisions.md`, `maybe_later.md`).
+
+v0.18.0 was architecturally complete and not shippable. An audit against
+`docs/talkback/` found three gaps between what the documents claimed and what
+the code did, and each of them was the kind that only shows up in use.
+
+The headline one: Talkback did not stream speech. It collected sentences during
+generation and synthesized them all afterwards — which looks like streaming
+because the LLM API streams, and isn't. Second: there was no way to configure a
+local voice without hand-editing `settings.json`, because the only UI that ever
+wrote those keys was removed in v0.17.x. Third: several failure paths left the
+conversation in a state only an application restart could clear.
+
+#### Features
+
+- **Local voice setup (`Settings › Talkback`, `native/src/components/settings/VoiceSettings.tsx`)**: Readiness at a glance, the resolved Piper program and *how Relay found it*, a voice picker, browse buttons for both, the exact folders to drop files in, and a **Test voice** button that drives the real provider — so a configuration that passes there cannot fail differently mid-conversation. Setup instructions appear only while it isn't working. The Talkback page carries a matching "Voice unavailable" banner rather than silently not speaking.
+- **Piper discovery (`native/src-tauri/src/tts/discovery.rs`)**: Relay finds a Piper installation in a location it owns without being told — `<app-data>/Relay/tts/piper` first, then beside its own executable, then Tauri's resource directory (so bundling later is a packaging change, not a code change), then `PATH`. Voice models are enumerated with their `.onnx.json` sidecars, and a missing sidecar — the most common Piper setup mistake — is named as such instead of surfacing as an unreadable parse error.
+
+#### Improvements
+
+- **Speech now overlaps generation (`native/src-tauri/src/talkback/speech.rs`)**: A bounded producer/consumer pipeline synthesizes each sentence *while the model writes the next*. Measured on a simulated five-sentence answer: **600 ms to first audio versus 1,750 ms** for the batched path it replaces, with the gap widening as answers get longer. One consumer thread makes ordering structural, the bounded queue applies backpressure instead of growing, and synthesis no longer parks a Tokio worker on a blocking child process.
+- **`tts_first_audio_ms` measures what its name says**: turn start → audio available, rather than the duration of one synthesis call. The old metric looked excellent while the user waited seconds — it was measuring the wrong thing well. `tts_first_synthesis_ms`, `tts_total_synthesis_ms`, `tts_phrases` and `tts_disabled` were added alongside, so a slow voice model and a slow language model stay distinguishable.
+- **Cancellation reaches the process (`native/src-tauri/src/tts/piper.rs`)**: A barge-in now kills the Piper child rather than waiting for it and discarding the audio, checked every 15 ms. Cancellation is a distinct `TtsError::Cancelled` variant so talking over the agent is never reported to the user as a failure, and a synthesis that wedges is bounded by a 30-second timeout.
+- **A broken voice stops retrying**: an unloadable model previously produced one failed process spawn per sentence, for every sentence, forever. Permanent failures now latch the voice off for the turn and are reported once. A successful Piper exit that produced no audio is classified as permanent rather than as a transient I/O error.
+- **The state machine owns Talkback's state again**: the voice worker was emitting `talkback-state` events directly to the frontend, so the UI could show a state the backend did not hold. Every transition now goes through the engine.
+- **Talkback settings are self-contained**: the voice card lives in `Settings › Talkback`, so a user asking "why isn't it speaking?" doesn't have to know the answer was filed under a different section.
+
+#### Fixes
+
+- **No console window per sentence on Windows (`native/src-tauri/src/tts/piper.rs`)**: Piper is a console-subsystem program, so every spoken sentence flashed a window. Now spawned with `CREATE_NO_WINDOW`.
+- **The voice folder is somewhere that exists (`native/src-tauri/src/tts/discovery.rs`)**: the installation root is anchored to the OS application-data directory instead of `current_dir()/.relay/config`. In a packaged Windows app launched from a Start Menu shortcut, `current_dir()` is typically `C:\Windows\System32` — so "put piper.exe in this folder" was printing a path that was neither writable nor stable between launches. The vault, settings and Whisper models are deliberately **not** moved; that migration is logged in `maybe_later.md`.
+- **No dead-end conversation states**: `TRANSCRIBING` had no exit when a decode produced nothing — a cough or an unavailable model stopped the conversation until Relay was restarted. A `TurnGuard` now returns the machine to a resting state on every exit from a turn, including the error and panic paths, and "stop speaking" returns to listening rather than waiting in `INTERRUPTED` for words that are not coming.
+- **Scratch audio is always cleaned up**: an RAII guard removes each synthesized WAV on every exit path — success, failure, cancellation, panic — and orphaned files from a previous crash are cleared at startup. At one file per sentence this was a leak measured in files per conversation.
+
+#### Tests
+
+- **73 new Rust tests** (581 → 654 passing, plus a third `#[ignore]`d benchmark), covering the speech pipeline (ordering, no duplicates, no drops, backpressure, cancellation before/during/after synthesis, stale audio suppression, the permanent-failure latch, first-audio signalling, worker join on drop), Piper's process lifecycle against a shell stub (cancellation kills the child, every failure path cleans up, paths with spaces, repeated synthesis leaks nothing), discovery and validation (managed/bundled/PATH precedence, sidecar detection, non-ASCII and spaced paths), and state-machine recovery from every state.
+- **19 new frontend tests** (96 → 115), covering the voice setup card (not-configured messaging, problem surfacing, install paths, voice selection and persistence, browse and cancel, test playback and its failure, re-check) and the Talkback page's voice banner.
+- **A third benchmark**, `overlap_saving`, quantifying the streaming gain — the 600 ms vs 1,750 ms figure above is its output. `#[ignore]`d like the others so CI has no timing tests.
+
 ## [0.18.0] - 2026-08-30
 
 ### Talkback — the Conversational Layer over Everything Relay Has Captured

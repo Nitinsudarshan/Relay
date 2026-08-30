@@ -155,3 +155,19 @@ This document tracks deferred features, rejected/postponed UI patterns, and arch
   - Real AEC needs the playback signal as a reference, which means playback would have to move into Rust — currently blocked by the `rodio`/`cpal 0.17` conflict recorded in `docs/decisions.md` Decision 49.
   - `webrtc-audio-processing` bindings are the usual answer, at the cost of a C++ dependency and a Windows build story.
   - A cheaper intermediate step: have the frontend report playback amplitude back to the engine so the echo guard scales with actual output level rather than using a fixed multiplier.
+
+### 11. Move Relay's Config and Vault Root Off `current_dir()`
+
+- **Status**: Deferred — a migration, not a feature
+- **Area**: Native backend (`native/src-tauri/src/lib.rs`)
+- **Original Context**:
+  - `base_dir` is `std::env::current_dir()/.relay`, and the vault, `settings.json` and the Whisper models directory all hang off it.
+  - Beside a development checkout this is fine and convenient. In a packaged Windows app it is not: launched from a Start Menu shortcut `current_dir()` is typically `C:\Windows\System32`; launched from its install directory it is under `Program Files`. Neither is writable by a standard user, and the location changes depending on how Relay was started — so settings can silently fail to save, or save somewhere that is not found next launch.
+  - v0.18.1 fixed this for the *voice installation only* (`docs/decisions.md` Decision 52), because that subsystem prints its folder to the user as an instruction and is new state with nothing to migrate.
+- **Why it is deferred rather than done**:
+  - Changing `base_dir` relocates every existing user's vault, notes, Kanban cards, meetings and settings. Getting that wrong loses data, and getting it right means a detection-and-migration path with its own testing.
+  - It is not a Talkback problem, and bundling it into a Talkback change would hide a data migration inside a feature diff.
+- **Concept & Implementation Blueprint**:
+  - Resolve `base_dir` from the OS application-data directory, as `tts::discovery::default_tts_root` already does.
+  - On startup, if the new location is empty and a process-relative `.relay` exists beside the executable, offer to move it — explicitly, with the old copy left in place, matching the "never move, migrate or delete" promise the Vault Directory Location setting already makes (`docs/decisions.md` Decision 38).
+  - The configurable Vault Directory Location setting already overrides this for the vault, so the migration mainly concerns `config/` — settings, models, and the STT cache.

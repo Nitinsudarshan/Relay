@@ -14,6 +14,7 @@ use super::intent::{self, Intent};
 use super::retrieval::{self, ContextItem, RetrievalQuery, RetrievalResult, SourceType};
 use super::session::{TalkbackSession, HISTORY_TURNS};
 use super::sources;
+use super::speech::{SpeechChunk, SpeechPipeline, SpeechSink};
 use super::state::{TalkbackEvent, TalkbackState};
 use super::tools;
 use super::turn::{TurnDetector, TurnDetectorConfig, TurnEvent};
@@ -28,7 +29,7 @@ use crate::vault::VaultManager;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc as std_mpsc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
 /// Backend-owned state changes. The UI never sets a state itself.
@@ -44,6 +45,9 @@ pub const TALKBACK_LEVEL_EVENT: &str = "talkback-level";
 /// Per-turn latency measurements.
 pub const TALKBACK_METRICS_EVENT: &str = "talkback-metrics";
 pub const TALKBACK_ERROR_EVENT: &str = "talkback-error";
+/// A transcribed spoken turn, ready to submit. Carries text rather than
+/// audio, and never reaches disk.
+pub const TALKBACK_UTTERANCE_EVENT: &str = "talkback-utterance";
 
 /// How Talkback is switched on.
 ///
@@ -123,7 +127,7 @@ impl TalkbackSettings {
 /// `docs/talkback/BENCHMARKS.md`.
 ///
 /// Durations, counts and ids only. Never transcript text, never retrieved
-/// content, never audio (`ARCHITECTURE.md` §10).
+/// content, never audio (`ARCHITECTURE.md` §11).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TurnMetrics {
     pub session_id: String,
@@ -139,8 +143,26 @@ pub struct TurnMetrics {
     pub llm_first_token_ms: Option<u128>,
     #[serde(default)]
     pub llm_total_ms: Option<u128>,
+    /// Turn start → the first audio being available to play. This is the
+    /// number a user actually experiences as "how long before it spoke",
+    /// so it includes retrieval and generation, not just synthesis.
     #[serde(default)]
     pub tts_first_audio_ms: Option<u128>,
+    /// How long the *first* synthesis call itself took. Separated from
+    /// `tts_first_audio_ms` so a slow voice model and a slow model are
+    /// distinguishable rather than conflated.
+    #[serde(default)]
+    pub tts_first_synthesis_ms: Option<u128>,
+    /// Total time spent in synthesis across the turn.
+    #[serde(default)]
+    pub tts_total_synthesis_ms: u128,
+    /// Phrases actually spoken.
+    #[serde(default)]
+    pub tts_phrases: usize,
+    /// True when the voice was switched off mid-turn because the
+    /// configuration is broken rather than the phrase.
+    #[serde(default)]
+    pub tts_disabled: bool,
     pub total_ms: u128,
     pub interrupted: bool,
     /// True when the turn was answered without a model — the
@@ -262,6 +284,27 @@ impl TalkbackEngine {
         self.generation.fetch_add(1, Ordering::SeqCst) + 1
     }
 
+    /// A shareable cancellation predicate for one turn.
+    ///
+    /// The speech worker runs on its own thread and cannot borrow the
+    /// engine, so it carries this instead — the same generation check,
+    /// callable from anywhere.
+    pub fn stale_probe(self: &Arc<Self>, generation: u64) -> Arc<dyn Fn() -> bool + Send + Sync> {
+        let engine = Arc::downgrade(self);
+        Arc::new(move || match engine.upgrade() {
+            Some(engine) => engine.is_stale(generation),
+            // The engine is gone; nothing this turn produces can matter.
+            None => true,
+        })
+    }
+
+    /// Milliseconds from the start of a turn to now, for the first-audio
+    /// metric. Named rather than inlined so the anchor is unambiguous:
+    /// this is turn-relative, not synthesis-relative.
+    pub fn first_audio_ms(&self, turn_started: std::time::Instant) -> u128 {
+        turn_started.elapsed().as_millis()
+    }
+
     /// Applies a state event and broadcasts the result.
     ///
     /// An illegal transition is logged and the state left alone: a
@@ -353,9 +396,18 @@ impl TalkbackEngine {
     /// Bumping the generation is the whole mechanism: the in-flight LLM
     /// stream stops on its next delta, no further phrase is synthesized,
     /// and the frontend clears its audio queue on the state event.
-    pub fn interrupt(&self, app: &AppHandle) -> u64 {
+    ///
+    /// `resume_listening` distinguishes the two ways a turn gets cut off.
+    /// Detected speech is followed by the user's next words, so the state
+    /// machine waits in INTERRUPTED for them. A "stop speaking" button
+    /// press has nothing following it, and leaving the conversation in
+    /// INTERRUPTED would be a dead end — so it returns to LISTENING.
+    pub fn interrupt(&self, app: &AppHandle, resume_listening: bool) -> u64 {
         let generation = self.cancel();
         self.transition(app, TalkbackEvent::Interrupt);
+        if resume_listening {
+            self.transition(app, TalkbackEvent::ResponseComplete);
+        }
         generation
     }
 }
@@ -364,7 +416,7 @@ impl TalkbackEngine {
 /// argument rather than nine.
 pub struct TurnContext<'a> {
     pub app: &'a AppHandle,
-    pub engine: &'a TalkbackEngine,
+    pub engine: &'a Arc<TalkbackEngine>,
     pub vault: &'a VaultManager,
     pub sessions: &'a SessionStore,
     pub processor: &'a MeetingProcessor,
@@ -372,12 +424,116 @@ pub struct TurnContext<'a> {
     /// Milliseconds spent transcribing, for a spoken turn.
     pub stt_ms: Option<u128>,
     pub typed: bool,
+    /// Where Relay's local voice installation lives.
+    pub tts_root: &'a std::path::Path,
+    /// Tauri's resource directory, so a bundled Piper would be found
+    /// without a code change. Nothing bundles one today.
+    pub resource_dir: Option<std::path::PathBuf>,
+}
+
+/// The answer given when no model could be reached.
+///
+/// A fixed sentence rather than an error dialog: Talkback is a
+/// conversation, and a conversation that throws an exception at you is a
+/// worse experience than one that says it could not hear you.
+pub const LLM_UNREACHABLE_RESPONSE: &str = "I couldn't reach the model just now.";
+
+/// Bridges the speech pipeline to Tauri events and the state machine.
+///
+/// The pipeline itself knows nothing about Tauri, which is what lets its
+/// ordering and cancellation behaviour be unit-tested against a recording
+/// sink instead of a running app.
+struct TauriSpeechSink {
+    app: AppHandle,
+}
+
+impl SpeechSink for TauriSpeechSink {
+    fn emit_audio(&self, chunk: SpeechChunk) {
+        let _ = self.app.emit(
+            TALKBACK_AUDIO_EVENT,
+            serde_json::json!({
+                "turnId": chunk.turn_id,
+                "seq": chunk.seq,
+                "generation": chunk.generation,
+                "wavBase64": chunk.wav_base64,
+            }),
+        );
+    }
+
+    fn emit_error(&self, code: &str, message: &str) {
+        let _ = self.app.emit(
+            TALKBACK_ERROR_EVENT,
+            serde_json::json!({ "code": code, "message": message }),
+        );
+    }
+
+    /// SPEAKING begins when audio actually exists, not when generation
+    /// starts — otherwise the agent claims to be speaking during the
+    /// silence before the first synthesis lands.
+    fn on_first_audio(&self) {
+        use tauri::Manager;
+        if let Some(state) = self.app.try_state::<crate::commands::AppState>() {
+            state
+                .talkback
+                .transition(&self.app, TalkbackEvent::ResponseStarted);
+        }
+    }
+}
+
+/// Guarantees a turn never leaves the conversation stuck.
+///
+/// THINKING with no way out is the one failure that forces an application
+/// restart, so leaving it is not left to the happy path: this drops at
+/// the end of `run_turn` however it returns — success, error, or panic —
+/// and returns the machine to a state the user can talk from.
+struct TurnGuard<'a> {
+    app: &'a AppHandle,
+    engine: &'a TalkbackEngine,
+    /// The generation this turn owns. A superseded turn must not touch
+    /// the state machine at all: by then a newer turn owns it, and the
+    /// user is very likely already speaking into it.
+    generation: u64,
+    settled: bool,
+}
+
+impl TurnGuard<'_> {
+    /// Marks the turn as having reached a resting state on its own.
+    fn settle(&mut self) {
+        self.settled = true;
+    }
+}
+
+impl Drop for TurnGuard<'_> {
+    fn drop(&mut self) {
+        if self.settled {
+            return;
+        }
+        // A barge-in already moved the conversation on. Resetting to
+        // LISTENING here would announce "listening" while the user is
+        // mid-sentence in the turn that replaced this one.
+        if self.engine.is_stale(self.generation) {
+            return;
+        }
+        let state = self.engine.state();
+        // OFF and ERROR are already resting states a user can act on.
+        // Everything else must not be where a turn ends.
+        if matches!(state, TalkbackState::Off | TalkbackState::Error) {
+            return;
+        }
+        tracing::warn!(
+            "talkback: turn ended in {:?} without settling — returning to listening",
+            state
+        );
+        self.engine
+            .transition(self.app, TalkbackEvent::ResponseComplete);
+    }
 }
 
 /// Runs one complete turn: route → retrieve → plan → answer → speak.
 ///
 /// Returns the agent's text. Cancellation is checked between every stage,
-/// so an interruption costs at most one phrase of audio.
+/// and the speech pipeline carries it into synthesis and playback, so an
+/// interruption costs at most the tail of one in-flight phrase.
 pub async fn run_turn(ctx: TurnContext<'_>, text: &str) -> Result<String, String> {
     let started = std::time::Instant::now();
     let generation = ctx.engine.generation();
@@ -385,6 +541,13 @@ pub async fn run_turn(ctx: TurnContext<'_>, text: &str) -> Result<String, String
     if text.is_empty() {
         return Ok(String::new());
     }
+
+    let mut guard = TurnGuard {
+        app: ctx.app,
+        engine: ctx.engine,
+        generation,
+        settled: false,
+    };
 
     let talkback = &ctx.settings.talkback;
 
@@ -398,6 +561,7 @@ pub async fn run_turn(ctx: TurnContext<'_>, text: &str) -> Result<String, String
             drop(session);
             ctx.engine
                 .transition(ctx.app, TalkbackEvent::ResponseComplete);
+            guard.settle();
             return Ok(String::new());
         }
     }
@@ -457,13 +621,33 @@ pub async fn run_turn(ctx: TurnContext<'_>, text: &str) -> Result<String, String
         ..Default::default()
     };
 
-    let tts = resolve_provider(&ctx.settings.tts);
+    let tts: Arc<dyn TtsProvider> = Arc::from(resolve_provider(
+        &ctx.settings.tts,
+        ctx.tts_root,
+        ctx.resource_dir.as_deref(),
+    ));
     let speak = talkback.speak_responses && tts.is_configured();
+
+    // Started before generation so the first sentence can be synthesized
+    // while the model writes the second.
+    let mut speech = speak.then(|| {
+        let engine_generation = generation;
+        let stale_flag = ctx.engine.stale_probe(engine_generation);
+        SpeechPipeline::start(
+            turn_id.clone(),
+            generation,
+            tts.clone(),
+            Arc::new(TauriSpeechSink {
+                app: ctx.app.clone(),
+            }),
+            stale_flag,
+        )
+    });
 
     let (answer, sources) = match plan {
         TurnPlan::Action(action) => {
             metrics.deterministic = true;
-            (run_action(&ctx, action)?, Vec::new())
+            (run_action(&ctx, action), Vec::new())
         }
         TurnPlan::Immediate { text, sources } => {
             metrics.deterministic = true;
@@ -480,8 +664,7 @@ pub async fn run_turn(ctx: TurnContext<'_>, text: &str) -> Result<String, String
                 text,
                 &turn_id,
                 generation,
-                speak,
-                tts.as_ref(),
+                speech.as_mut(),
                 &mut metrics,
             )
             .await?;
@@ -489,18 +672,34 @@ pub async fn run_turn(ctx: TurnContext<'_>, text: &str) -> Result<String, String
         }
     };
 
+    // A deterministic answer has no stream to chunk, so it is queued in
+    // one piece — through the same pipeline, so cancellation and metrics
+    // work identically.
+    if metrics.deterministic && !answer.trim().is_empty() {
+        if let Some(pipeline) = speech.as_mut() {
+            pipeline.push(&answer);
+        }
+    }
+
+    // Draining respects cancellation: a barge-in skips the rest of the
+    // queue rather than synthesizing audio nobody will hear.
+    if let Some(pipeline) = speech.take() {
+        let outcome = pipeline.finish();
+        metrics.tts_phrases = outcome.spoken;
+        metrics.tts_first_synthesis_ms = outcome.first_synthesis_ms;
+        metrics.tts_total_synthesis_ms = outcome.total_synthesis_ms;
+        metrics.tts_disabled = outcome.disabled;
+        // Measured from the start of the turn — what the user actually
+        // waited — rather than the duration of one synthesis call.
+        if outcome.spoken > 0 {
+            metrics.tts_first_audio_ms = Some(ctx.engine.first_audio_ms(started));
+        }
+    }
+
     if ctx.engine.is_stale(generation) {
         metrics.interrupted = true;
         emit_metrics(ctx.app, &metrics, started);
         return Ok(answer);
-    }
-
-    // A deterministic answer still gets spoken; it just had no stream to
-    // chunk, so it is synthesized in one piece.
-    if metrics.deterministic && speak && !answer.trim().is_empty() {
-        ctx.engine
-            .transition(ctx.app, TalkbackEvent::ResponseStarted);
-        speak_phrase(&ctx, tts.as_ref(), &answer, &turn_id, 0, generation, &mut metrics);
     }
 
     let agent_turn_id = ctx
@@ -511,12 +710,20 @@ pub async fn run_turn(ctx: TurnContext<'_>, text: &str) -> Result<String, String
     emit_turn(ctx.app, ctx.engine, &agent_turn_id);
     ctx.engine
         .transition(ctx.app, TalkbackEvent::ResponseComplete);
+    guard.settle();
 
     emit_metrics(ctx.app, &metrics, started);
     Ok(answer)
 }
 
-/// Streams the model's answer, releasing it to TTS a phrase at a time.
+/// Streams the model's answer, releasing each phrase to synthesis **as it
+/// completes**, while the model is still writing the rest.
+///
+/// The distinction that matters: phrases are pushed into
+/// [`SpeechPipeline`] from inside the stream callback, not collected into
+/// a vector and synthesized afterwards. Time-to-first-audio is therefore
+/// retrieval + first-token + first-sentence + one synthesis, rather than
+/// the whole generation plus a synthesis.
 #[allow(clippy::too_many_arguments)]
 async fn generate_streaming(
     ctx: &TurnContext<'_>,
@@ -525,14 +732,13 @@ async fn generate_streaming(
     question: &str,
     turn_id: &str,
     generation: u64,
-    speak: bool,
-    tts: &dyn TtsProvider,
+    speech: Option<&mut SpeechPipeline>,
     metrics: &mut TurnMetrics,
 ) -> Result<String, String> {
     let llm_started = std::time::Instant::now();
     let first_token = Mutex::new(None::<u128>);
     let buffer = Mutex::new(PhraseBuffer::new());
-    let phrases = Mutex::new(Vec::<String>::new());
+    let speech = Mutex::new(speech);
 
     let options = CompletionOptions {
         // Spoken answers are short by design; a low ceiling also bounds
@@ -558,9 +764,17 @@ async fn generate_streaming(
                 TALKBACK_DELTA_EVENT,
                 serde_json::json!({ "turnId": turn_id, "text": delta }),
             );
+
+            // The overlap. Each completed sentence is queued for
+            // synthesis immediately; the worker picks it up on another
+            // thread while this callback returns to reading the stream.
             let ready = buffer.lock_or_recover().push(delta);
             if !ready.is_empty() {
-                phrases.lock_or_recover().extend(ready);
+                if let Some(pipeline) = speech.lock_or_recover().as_mut() {
+                    for phrase in ready {
+                        pipeline.push(&phrase);
+                    }
+                }
             }
             true
         })
@@ -576,78 +790,26 @@ async fn generate_streaming(
                 TALKBACK_ERROR_EVENT,
                 serde_json::json!({ "code": "LLM_FAILED", "message": e.to_string() }),
             );
-            return Ok("I couldn't reach the model just now.".to_string());
+            return Ok(LLM_UNREACHABLE_RESPONSE.to_string());
         }
     };
 
     metrics.llm_first_token_ms = *first_token.lock_or_recover();
     metrics.llm_total_ms = Some(llm_started.elapsed().as_millis());
 
+    // Whatever the model ended on without terminating punctuation still
+    // has to be spoken.
     if let Some(tail) = buffer.lock_or_recover().finish() {
-        phrases.lock_or_recover().push(tail);
-    }
-
-    let phrases = phrases.into_inner().unwrap_or_default();
-    if speak && !phrases.is_empty() {
-        ctx.engine
-            .transition(ctx.app, TalkbackEvent::ResponseStarted);
-        for (index, phrase) in phrases.iter().enumerate() {
-            if ctx.engine.is_stale(generation) {
-                metrics.interrupted = true;
-                break;
-            }
-            speak_phrase(ctx, tts, phrase, turn_id, index, generation, metrics);
+        if let Some(pipeline) = speech.lock_or_recover().as_mut() {
+            pipeline.push(&tail);
         }
     }
 
     Ok(response.text)
 }
 
-/// Synthesizes one phrase and hands it to the frontend's playback queue.
-///
-/// A TTS failure degrades to text: the answer is already on screen, and
-/// losing the voice is better than losing the turn.
-fn speak_phrase(
-    ctx: &TurnContext<'_>,
-    tts: &dyn TtsProvider,
-    phrase: &str,
-    turn_id: &str,
-    index: usize,
-    generation: u64,
-    metrics: &mut TurnMetrics,
-) {
-    let started = std::time::Instant::now();
-    match tts.synthesize(phrase) {
-        Ok(Some(audio)) => {
-            if ctx.engine.is_stale(generation) {
-                return;
-            }
-            if metrics.tts_first_audio_ms.is_none() {
-                metrics.tts_first_audio_ms = Some(started.elapsed().as_millis());
-            }
-            let _ = ctx.app.emit(
-                TALKBACK_AUDIO_EVENT,
-                serde_json::json!({
-                    "turnId": turn_id,
-                    "seq": index,
-                    "generation": generation,
-                    "wavBase64": audio.wav_base64,
-                }),
-            );
-        }
-        Ok(None) => {}
-        Err(e) => {
-            tracing::warn!("talkback: TTS failed, continuing text-only: {}", e);
-            let _ = ctx.app.emit(
-                TALKBACK_ERROR_EVENT,
-                serde_json::json!({ "code": "TTS_FAILED", "message": e.to_string() }),
-            );
-        }
-    }
-}
-
 /// Executes a tool and returns its spoken confirmation.
-fn run_action(ctx: &TurnContext<'_>, action: Intent) -> Result<String, String> {
+fn run_action(ctx: &TurnContext<'_>, action: Intent) -> String {
     let mut session = ctx.engine.session.lock_or_recover();
     let outcome = match action {
         Intent::StartVoiceNote => tools::start_voice_note(&mut session).map(|o| o.message),
@@ -670,7 +832,7 @@ fn run_action(ctx: &TurnContext<'_>, action: Intent) -> Result<String, String> {
 
     // A refused action is still an answer — "you're already recording" is
     // the right thing to say, not an error to surface.
-    Ok(outcome.unwrap_or_else(|e| e.to_string()))
+    outcome.unwrap_or_else(|e| e.to_string())
 }
 
 fn emit_turn(app: &AppHandle, engine: &TalkbackEngine, turn_id: &str) {
@@ -761,24 +923,42 @@ fn spawn_voice_worker(
             match event {
                 TurnEvent::SpeechStart => {
                     if speaking && settings.allow_barge_in {
-                        emit_barge_in(&app);
+                        // Barge-in: cancel the turn, then declare the new
+                        // one. `interrupt` leaves the machine in
+                        // INTERRUPTED precisely so this can follow.
+                        engine_event(&app, |engine, app| {
+                            engine.interrupt(app, false);
+                            engine.transition(app, TalkbackEvent::SpeechStarted);
+                        });
                     } else {
-                        let _ = app.emit(
-                            TALKBACK_STATE_EVENT,
-                            serde_json::json!({ "state": TalkbackState::UserSpeaking }),
-                        );
+                        // Through the state machine, never as a raw event:
+                        // the backend owns Talkback's state, and a UI told
+                        // something the engine does not believe is exactly
+                        // the drift `ARCHITECTURE.md` §5 forbids.
+                        engine_event(&app, |engine, app| {
+                            engine.transition(app, TalkbackEvent::SpeechStarted);
+                        });
                     }
                 }
                 TurnEvent::SpeechEnd | TurnEvent::MaxDurationReached => {
                     let samples = std::mem::take(&mut utterance);
+                    engine_event(&app, |engine, app| {
+                        engine.transition(app, TalkbackEvent::SpeechEnded);
+                    });
+
                     let Some(transcriber) = transcriber.as_mut() else {
+                        // No model: the turn cannot proceed, so return to
+                        // listening rather than stranding TRANSCRIBING.
+                        engine_event(&app, |engine, app| {
+                            engine.transition(app, TalkbackEvent::ResponseComplete);
+                        });
                         continue;
                     };
                     let started = std::time::Instant::now();
                     match transcriber.transcribe(&samples) {
                         Ok(text) if !text.trim().is_empty() => {
                             let _ = app.emit(
-                                "talkback-utterance",
+                                TALKBACK_UTTERANCE_EVENT,
                                 serde_json::json!({
                                     "text": text,
                                     "sttMs": started.elapsed().as_millis(),
@@ -787,8 +967,25 @@ fn spawn_voice_worker(
                         }
                         Ok(_) => {
                             tracing::debug!("talkback: utterance produced no usable text");
+                            // Silence, a cough, a door. Nothing to answer,
+                            // and the conversation must stay usable.
+                            engine_event(&app, |engine, app| {
+                                engine.transition(app, TalkbackEvent::ResponseComplete);
+                            });
                         }
-                        Err(e) => tracing::warn!("talkback: decode failed: {}", e),
+                        Err(e) => {
+                            tracing::warn!("talkback: decode failed: {}", e);
+                            let _ = app.emit(
+                                TALKBACK_ERROR_EVENT,
+                                serde_json::json!({
+                                    "code": "STT_FAILED",
+                                    "message": e.to_string(),
+                                }),
+                            );
+                            engine_event(&app, |engine, app| {
+                                engine.transition(app, TalkbackEvent::ResponseComplete);
+                            });
+                        }
                     }
                 }
                 TurnEvent::None => {}
@@ -807,10 +1004,16 @@ fn app_state_of(app: &AppHandle) -> Option<TalkbackState> {
         .map(|state| state.talkback.state())
 }
 
-fn emit_barge_in(app: &AppHandle) {
+/// Runs `action` against the managed engine, if the app still has one.
+///
+/// Every state change from the voice worker goes through here rather than
+/// emitting a `talkback-state` event directly. Emitting directly is how
+/// the UI ends up showing a state the backend does not hold — the exact
+/// split-brain the backend-owned state machine exists to prevent.
+fn engine_event(app: &AppHandle, action: impl FnOnce(&TalkbackEngine, &AppHandle)) {
     use tauri::Manager;
     if let Some(state) = app.try_state::<crate::commands::AppState>() {
-        state.talkback.interrupt(app);
+        action(&state.talkback, app);
     }
 }
 
@@ -1010,5 +1213,139 @@ mod tests {
     fn absent_talkback_settings_deserialize_to_defaults() {
         let settings: TalkbackSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings, TalkbackSettings::default());
+    }
+
+    #[test]
+    fn a_manual_stop_returns_to_listening_rather_than_stranding_interrupted() {
+        // The "stop speaking" button has no follow-up speech. Leaving the
+        // machine in INTERRUPTED would be a dead end needing a restart.
+        assert_eq!(
+            TalkbackState::Speaking
+                .apply(TalkbackEvent::Interrupt)
+                .and_then(|s| s.apply(TalkbackEvent::ResponseComplete)),
+            Ok(TalkbackState::Listening)
+        );
+    }
+
+    #[test]
+    fn a_voice_barge_in_waits_in_interrupted_for_the_new_turn() {
+        assert_eq!(
+            TalkbackState::Speaking
+                .apply(TalkbackEvent::Interrupt)
+                .and_then(|s| s.apply(TalkbackEvent::SpeechStarted)),
+            Ok(TalkbackState::UserSpeaking)
+        );
+    }
+
+    #[test]
+    fn no_active_state_is_a_dead_end() {
+        // Every state a turn can end in must have a path back to a state
+        // the user can speak from, without restarting Relay.
+        for state in [
+            TalkbackState::Starting,
+            TalkbackState::Listening,
+            TalkbackState::UserSpeaking,
+            TalkbackState::Transcribing,
+            TalkbackState::Thinking,
+            TalkbackState::Speaking,
+            TalkbackState::Interrupted,
+            TalkbackState::Error,
+        ] {
+            let recovered = state
+                .apply(TalkbackEvent::Disable)
+                .and_then(|s| s.apply(TalkbackEvent::Enable))
+                .and_then(|s| s.apply(TalkbackEvent::Ready));
+            assert_eq!(
+                recovered,
+                Ok(TalkbackState::Listening),
+                "{state:?} could not be recovered by switching Talkback off and on"
+            );
+        }
+    }
+
+    #[test]
+    fn the_turn_guard_returns_thinking_to_listening() {
+        // The exact failure the guard exists for: a turn that errors out
+        // of generation must not leave the conversation in THINKING.
+        assert_eq!(
+            TalkbackState::Thinking.apply(TalkbackEvent::ResponseComplete),
+            Ok(TalkbackState::Listening)
+        );
+        assert_eq!(
+            TalkbackState::Transcribing
+                .apply(TalkbackEvent::TranscriptReady)
+                .and_then(|s| s.apply(TalkbackEvent::ResponseComplete)),
+            Ok(TalkbackState::Listening)
+        );
+    }
+
+    #[test]
+    fn an_empty_utterance_returns_to_listening() {
+        // A cough or a door closing produces no text. The voice worker
+        // moves through TRANSCRIBING and has to put the machine back, or
+        // the next real utterance has nowhere to go.
+        assert_eq!(
+            TalkbackState::UserSpeaking
+                .apply(TalkbackEvent::SpeechEnded)
+                .and_then(|s| s.apply(TalkbackEvent::ResponseComplete)),
+            Ok(TalkbackState::Listening)
+        );
+    }
+
+    #[test]
+    fn a_superseded_turn_does_not_reset_the_state_of_the_one_that_replaced_it() {
+        // The race the guard's staleness check exists for: an abandoned
+        // turn unwinding while the user is already speaking into its
+        // replacement must not announce "listening" over them.
+        let engine = TalkbackEngine::new();
+        let generation = engine.generation();
+        engine.cancel();
+        assert!(
+            engine.is_stale(generation),
+            "the guard must be able to tell it has been superseded"
+        );
+    }
+
+    #[test]
+    fn a_user_mid_sentence_is_never_reset_to_listening() {
+        // There is deliberately no UserSpeaking → ResponseComplete arm:
+        // nothing legitimately ends a turn while the user is talking.
+        assert!(TalkbackState::UserSpeaking
+            .apply(TalkbackEvent::ResponseComplete)
+            .is_err());
+    }
+
+    #[test]
+    fn metrics_default_to_no_impossible_measurements() {
+        let metrics = TurnMetrics::default();
+        assert!(metrics.tts_first_audio_ms.is_none());
+        assert!(metrics.tts_first_synthesis_ms.is_none());
+        assert!(metrics.llm_first_token_ms.is_none());
+        assert_eq!(metrics.tts_phrases, 0);
+        assert_eq!(metrics.tts_total_synthesis_ms, 0);
+        assert!(!metrics.tts_disabled);
+    }
+
+    #[test]
+    fn metrics_serialize_with_the_first_audio_anchor_documented() {
+        let metrics = TurnMetrics {
+            tts_first_audio_ms: Some(1_800),
+            tts_first_synthesis_ms: Some(420),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&metrics).unwrap();
+        // First-audio is turn-relative and therefore always at least the
+        // synthesis it contains.
+        assert!(
+            json["tts_first_audio_ms"].as_u64().unwrap()
+                >= json["tts_first_synthesis_ms"].as_u64().unwrap(),
+            "first-audio must measure the whole wait, not one synthesis call"
+        );
+    }
+
+    #[test]
+    fn the_llm_failure_answer_is_a_sentence_not_an_error_code() {
+        assert!(LLM_UNREACHABLE_RESPONSE.ends_with('.'));
+        assert!(!LLM_UNREACHABLE_RESPONSE.to_lowercase().contains("error"));
     }
 }

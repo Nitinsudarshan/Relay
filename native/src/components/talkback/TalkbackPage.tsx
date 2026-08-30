@@ -1,10 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Mic, MicOff, Send, Square, AlertTriangle } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { Mic, MicOff, Send, Square, AlertTriangle, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { TalkbackAgent } from './TalkbackAgent';
 import { useTalkback, sourceLabel } from './useTalkback';
-import type { TalkbackContextItem, TalkbackTurn } from '../../types';
+import type { TalkbackContextItem, TalkbackTurn, TtsStatus } from '../../types';
 
 /** Source chips: where the answer actually came from, per turn. */
 const SourceChips: React.FC<{ sources: TalkbackContextItem[] }> = ({ sources }) => {
@@ -70,10 +72,32 @@ export const TalkbackPage: React.FC = () => {
     send,
   } = useTalkback();
   const [draft, setDraft] = useState('');
+  const [voice, setVoice] = useState<TtsStatus | null>(null);
   const transcriptEnd = useRef<HTMLDivElement>(null);
 
   const isOn = state !== 'OFF';
   const isSpeaking = state === 'SPEAKING';
+
+  const refreshVoice = useCallback(async () => {
+    try {
+      setVoice(await invoke<TtsStatus>('get_tts_status'));
+    } catch {
+      // A voice-status failure must never break the conversation; the
+      // banner simply does not appear.
+      setVoice(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshVoice();
+    // Settings changes come from the settings window, so the banner
+    // clears itself the moment a voice is configured — no restart, no
+    // navigating back and forth.
+    const unlisten = listen('settings-changed', () => void refreshVoice());
+    return () => {
+      void unlisten.then((stop) => stop());
+    };
+  }, [refreshVoice]);
 
   useEffect(() => {
     transcriptEnd.current?.scrollIntoView({ behavior: 'smooth' });
@@ -120,6 +144,30 @@ export const TalkbackPage: React.FC = () => {
             )}
           </div>
 
+          {voice && !voice.ready && (
+            <div
+              className="w-full rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5"
+              data-testid="voice-unavailable"
+            >
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                <VolumeX className="w-3.5 h-3.5 shrink-0" />
+                Voice unavailable
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                {voice.problems[0] ?? 'Local Piper is not configured.'} Talkback
+                still answers in text.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 h-7 w-full text-[11px]"
+                onClick={() => void invoke('open_settings_window')}
+              >
+                Set up local voice
+              </Button>
+            </div>
+          )}
+
           <p className="text-[11px] leading-relaxed text-muted-foreground text-center">
             {isOn
               ? 'Your microphone is active. Talk over Relay any time to interrupt it.'
@@ -143,8 +191,19 @@ export const TalkbackPage: React.FC = () => {
               )}
               {lastMetrics.tts_first_audio_ms != null && (
                 <div className="flex justify-between">
-                  <dt>first audio</dt>
+                  <dt title="From the start of the turn to audio being ready">
+                    first audio
+                  </dt>
                   <dd>{lastMetrics.tts_first_audio_ms}ms</dd>
+                </div>
+              )}
+              {lastMetrics.tts_first_synthesis_ms != null && (
+                <div className="flex justify-between">
+                  <dt title="The first synthesis call on its own">synthesis</dt>
+                  <dd>
+                    {lastMetrics.tts_first_synthesis_ms}ms ·{' '}
+                    {lastMetrics.tts_phrases ?? 0} phr
+                  </dd>
                 </div>
               )}
               <div className="flex justify-between">
