@@ -63,6 +63,7 @@ export const TalkbackPage: React.FC = () => {
     turns,
     streamingText,
     level,
+    outputLevel,
     lastMetrics,
     error,
     busy,
@@ -119,7 +120,7 @@ export const TalkbackPage: React.FC = () => {
       <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0">
         {/* Agent + controls */}
         <aside className="lg:w-72 shrink-0 flex flex-col items-center gap-5 bg-card border border-border rounded-xl p-6">
-          <TalkbackAgent state={state} level={level} />
+          <TalkbackAgent state={state} level={level} outputLevel={outputLevel} />
 
           <div className="w-full flex flex-col gap-2">
             <Button
@@ -165,7 +166,14 @@ export const TalkbackPage: React.FC = () => {
                   variant="outline"
                   size="sm"
                   className="mt-2 h-7 w-full text-[11px]"
-                  onClick={() => void invoke('open_settings_window')}
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent('relay-navigate-tab', {
+                        detail: { tab: 'settings', section: 'talkback' },
+                      }),
+                    );
+                    void invoke('open_settings_window', { section: 'talkback' });
+                  }}
                 >
                   Set up local voice
                 </Button>

@@ -33,6 +33,8 @@ export interface UseTalkback {
   streamingText: string;
   /** Microphone amplitude, 0–1, for the agent animation. */
   level: number;
+  /** Spoken output audio amplitude, 0–1, for speaking animation. */
+  outputLevel: number;
   lastMetrics: TalkbackMetrics | null;
   error: string | null;
   busy: boolean;
@@ -55,11 +57,15 @@ export const useTalkback = (): UseTalkback => {
   const [turns, setTurns] = useState<TalkbackTurn[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [level, setLevel] = useState(0);
+  const [outputLevel, setOutputLevel] = useState(0);
   const [lastMetrics, setLastMetrics] = useState<TalkbackMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const queue = useMemo(() => new TalkbackAudioQueue(createElementSink()), []);
+  const queue = useMemo(
+    () => new TalkbackAudioQueue(createElementSink((lvl) => setOutputLevel(lvl))),
+    [],
+  );
   // Read inside event callbacks, which capture their first render's
   // closure; a ref keeps them looking at the live value.
   const stateRef = useRef<TalkbackStateName>('OFF');
@@ -77,6 +83,7 @@ export const useTalkback = (): UseTalkback => {
         if (next === 'INTERRUPTED' || next === 'OFF') {
           queue.interrupt();
           setStreamingText('');
+          setOutputLevel(0);
         }
       }),
 
@@ -160,6 +167,7 @@ export const useTalkback = (): UseTalkback => {
       setState(next);
       setStreamingText('');
       setLevel(0);
+      setOutputLevel(0);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -169,6 +177,7 @@ export const useTalkback = (): UseTalkback => {
 
   const interrupt = useCallback(async () => {
     queue.interrupt();
+    setOutputLevel(0);
     try {
       const next = await invoke<TalkbackStateName>('interrupt_talkback');
       setState(next);
@@ -192,6 +201,7 @@ export const useTalkback = (): UseTalkback => {
     turns,
     streamingText,
     level,
+    outputLevel,
     lastMetrics,
     error,
     busy,

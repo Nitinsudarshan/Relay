@@ -4,7 +4,7 @@ import { ScribbleViewer } from './components/scribble/ScribbleViewer';
 import { MeetingsV2View } from './components/meetings_v2/MeetingsV2View';
 import { TalkbackPage } from './components/talkback/TalkbackPage';
 
-import { ProviderSettings } from './components/settings/ProviderSettings';
+import { ProviderSettings, type SettingsSection } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RelayLogo } from './components/common/RelayLogo';
 import { ChangelogModal } from './components/common/ChangelogModal';
@@ -49,6 +49,7 @@ const TAB_LABELS: Record<MainTabType, string> = {
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<MainTabType>('capture');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
   const [lastResult, setLastResult] = useState<ProcessedPipelineResult | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
@@ -107,7 +108,32 @@ export const App: React.FC = () => {
 
     setupNotifications();
 
-    // 2. Listen for backend Tauri account, profile, & settings events
+    // 2. Listen for backend Tauri account, profile, settings, & navigation events
+    const handleNavigate = (payload: unknown) => {
+      if (typeof payload === 'string') {
+        if (payload in TAB_LABELS) {
+          setActiveTab(payload as MainTabType);
+          if (payload === 'settings') {
+            setSettingsSection(undefined);
+          }
+        }
+      } else if (payload && typeof payload === 'object') {
+        const obj = payload as { tab?: MainTabType; section?: SettingsSection };
+        if (obj.tab && obj.tab in TAB_LABELS) {
+          setActiveTab(obj.tab);
+        }
+        if (obj.section) {
+          setSettingsSection(obj.section);
+        }
+      }
+    };
+
+    const unlistenNavigate = listen<unknown>('navigate-tab', (event) => {
+      if (event.payload) {
+        handleNavigate(event.payload);
+      }
+    });
+
     const unlistenAccount = listen<RelayAccount>('account-changed', (event) => {
       if (event.payload) {
         setAccount(event.payload);
@@ -141,15 +167,25 @@ export const App: React.FC = () => {
       }
     };
 
+    const handleDomNavigate = (e: Event) => {
+      const customEvent = e as CustomEvent<unknown>;
+      if (customEvent.detail) {
+        handleNavigate(customEvent.detail);
+      }
+    };
+
     window.addEventListener('relay-account-changed', handleDomAccountChange);
     window.addEventListener('relay-profile-changed', handleDomProfileChange);
+    window.addEventListener('relay-navigate-tab', handleDomNavigate);
 
     return () => {
+      unlistenNavigate.then((unlisten) => unlisten());
       unlistenAccount.then((unlisten) => unlisten());
       unlistenProfile.then((unlisten) => unlisten());
       unlistenSettings.then((unlisten) => unlisten());
       window.removeEventListener('relay-account-changed', handleDomAccountChange);
       window.removeEventListener('relay-profile-changed', handleDomProfileChange);
+      window.removeEventListener('relay-navigate-tab', handleDomNavigate);
     };
   }, []);
 
@@ -249,7 +285,12 @@ export const App: React.FC = () => {
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={(tab) => {
+          setActiveTab(tab);
+          if (tab === 'settings') {
+            setSettingsSection(undefined);
+          }
+        }}
         account={account}
         profile={profile}
         appVersion={appVersion}
@@ -323,7 +364,7 @@ export const App: React.FC = () => {
 
 
 
-          {activeTab === 'settings' && <ProviderSettings />}
+          {activeTab === 'settings' && <ProviderSettings initialSection={settingsSection} />}
         </main>
       </div>
     </div>

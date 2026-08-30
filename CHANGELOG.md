@@ -1,5 +1,18 @@
 # Relay — Changelog
 
+## [0.19.3] - 2026-08-31
+
+### Talkback Living Voice-Reactive Agent & Curated Voice Library
+
+**Type**: minor — conversational agent animation, real-time audio reactivity, and neural voice catalogue (`native/src/components/talkback/TalkbackOrbCanvas.tsx (new)`, `native/src/components/talkback/TalkbackAgent.tsx`, `native/src/components/talkback/talkbackAudioQueue.ts`, `native/src/components/talkback/useTalkback.ts`, `native/src/components/settings/VoiceLibraryModal.tsx (new)`, `native/src/components/settings/VoiceSettings.tsx`, `native/src-tauri/resources/voice-manifest.json`, `native/src-tauri/src/commands.rs`).
+
+#### Features
+
+- **Living, voice-reactive Talkback agent presence (`TalkbackOrbCanvas.tsx`, `TalkbackAgent.tsx`)**: Replaced static graphic rings with a continuous, organic Canvas presence. Ambient breathing during idle, real-time radial wave reactivity to microphone volume during listening, accelerated rotational vortex energy during thinking, and voice acoustic wave pulsations reacting to synthesized output audio during speaking. Smooth spring interpolation ensures seamless transitions between states without abrupt jumps, pausing automatically when hidden and respecting reduced-motion preferences.
+- **Real-time output audio metering (`talkbackAudioQueue.ts`, `useTalkback.ts`)**: Integrated real-time Web Audio API frequency analysis directly into the Talkback playback sink, streaming output audio amplitude into the agent so Talkback visually speaks through the orb.
+- **Curated Multi-Language Voice Library (`VoiceLibraryModal.tsx`, `VoiceSettings.tsx`, `voice-manifest.json`)**: Expanded the voice catalogue from 3 to 10 curated neural voices across US English (Amy, Ryan, Lessac), UK English (Alba, Alan, Cori), Hindi (Pratham), Spanish (Sharvard), French (Siwis), and German (Thorsten). Added an interactive Voice Catalogue modal with language/gender filtering, search, quality tier badges ("Balanced", "Fast", "High Quality"), on-demand pinned SHA-256 downloads, and test playback.
+- **Settings tab navigation fix (`App.tsx`, `commands.rs`, `ProviderSettings.tsx`)**: Wired `navigate-tab` and DOM event listeners to enable direct navigation to settings sub-sections (such as Talkback voice setup) from banners and floating windows.
+
 ## [0.19.2] - 2026-08-31
 
 ### Event-Aware Dictation Watchdog, Long-Recording Support & Explicit Stop Diagnostics

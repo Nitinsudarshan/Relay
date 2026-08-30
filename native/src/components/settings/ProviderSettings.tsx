@@ -138,8 +138,20 @@ const DEFAULT_SETTINGS: AppSettings = {
   snippets: [],
 };
 
-export const ProviderSettings: React.FC = () => {
-  const [activeSection, setActiveSection] = useState<SettingsSection>('general');
+interface ProviderSettingsProps {
+  initialSection?: SettingsSection;
+}
+
+export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
+  initialSection = 'general',
+}) => {
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
+
+  useEffect(() => {
+    if (initialSection) {
+      setActiveSection(initialSection);
+    }
+  }, [initialSection]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);

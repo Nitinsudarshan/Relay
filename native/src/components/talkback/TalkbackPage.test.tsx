@@ -142,7 +142,9 @@ describe('TalkbackPage', () => {
       await screen.findByRole('button', { name: /set up local voice/i }),
     );
     await waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith('open_settings_window');
+      expect(mockedInvoke).toHaveBeenCalledWith('open_settings_window', {
+        section: 'talkback',
+      });
     });
   });
 

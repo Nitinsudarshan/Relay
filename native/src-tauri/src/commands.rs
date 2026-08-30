@@ -1100,11 +1100,18 @@ pub async fn save_settings(
 }
 
 #[tauri::command]
-pub async fn open_settings_window(app: AppHandle) -> Result<(), CommandError> {
+pub async fn open_settings_window(
+    app: AppHandle,
+    section: Option<String>,
+) -> Result<(), CommandError> {
     if let Some(window) = app.get_webview_window(crate::hotkeys::MAIN_WINDOW_LABEL) {
         let _ = window.show();
         let _ = window.set_focus();
-        let _ = app.emit("navigate-tab", "settings");
+        let payload = serde_json::json!({
+            "tab": "settings",
+            "section": section,
+        });
+        let _ = app.emit("navigate-tab", payload);
     }
     Ok(())
 }

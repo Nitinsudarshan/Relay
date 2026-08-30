@@ -8,8 +8,13 @@ import {
   Play,
   Square,
   Volume2,
+  Globe,
+  Sparkles,
+  BookOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { VoiceLibraryModal } from './VoiceLibraryModal';
 import type { InstallProgress, PiperOrigin, TtsStatus } from '../../types';
 
 /** How Relay found the engine, in words rather than a path. Advanced only. */
@@ -33,16 +38,12 @@ interface VoiceSettingsProps {
 }
 
 /**
- * Local voice setup — one button, no filesystem.
+ * Local voice setup — curated neural voice library, running offline.
  *
  * The product question this answers is "make Relay speak", not "where did
  * you put piper.exe". Downloading the engine, fetching a voice, verifying
  * checksums and proving it can actually speak are Relay's job; the user
- * presses one button and waits.
- *
- * Paths, versions and engine names live under Advanced, because they are
- * implementation details that happen to be occasionally useful — not part
- * of the setup experience.
+ * selects a voice and it runs with pinned security.
  */
 export const VoiceSettings: React.FC<VoiceSettingsProps> = ({
   heading,
@@ -55,6 +56,7 @@ export const VoiceSettings: React.FC<VoiceSettingsProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const installing = progress !== null;
@@ -174,9 +176,14 @@ export const VoiceSettings: React.FC<VoiceSettingsProps> = ({
             onTest={() => void testVoice()}
             onStopTest={stopTest}
             onChangeVoice={(id) => void setup(id)}
+            onOpenLibrary={() => setLibraryOpen(true)}
           />
         ) : (
-          <SetupPanel status={status} onSetup={() => void setup()} />
+          <SetupPanel
+            status={status}
+            onSetup={() => void setup()}
+            onOpenLibrary={() => setLibraryOpen(true)}
+          />
         )}
 
         {error && (
@@ -185,6 +192,26 @@ export const VoiceSettings: React.FC<VoiceSettingsProps> = ({
           </p>
         )}
       </div>
+
+      {/* Voice Library Modal */}
+      {status.catalogue && status.catalogue.length > 0 && (
+        <VoiceLibraryModal
+          open={libraryOpen}
+          onClose={() => setLibraryOpen(false)}
+          catalogue={status.catalogue}
+          activeVoiceId={selectedId(status) ?? null}
+          onSelectVoice={async (voiceId) => {
+            setLibraryOpen(false);
+            await setup(voiceId);
+          }}
+          onTestVoice={async () => {
+            await testVoice();
+          }}
+          onStopTest={stopTest}
+          isPlayingTest={playing}
+          busyVoiceId={busy}
+        />
+      )}
 
       {/* Implementation detail, on request only. */}
       {!installing && (
@@ -196,27 +223,23 @@ export const VoiceSettings: React.FC<VoiceSettingsProps> = ({
           <summary className="text-[11px] font-medium text-muted-foreground cursor-pointer">
             Advanced
           </summary>
-          {/* Rendered only once opened. A collapsed <details> still puts its
-              content in the DOM, where find-in-page and screen readers reach
-              it — so "not part of the default experience" has to mean not
-              present, not merely not visible. */}
           {showAdvanced && (
-          <dl className="mt-2 space-y-1.5 text-[10px] font-mono">
-            <AdvancedRow label="Engine" value={status.ready ? 'Piper' : 'None'} />
-            {status.engineVersion && (
-              <AdvancedRow label="Version" value={status.engineVersion} />
-            )}
-            {status.binaryOrigin && (
-              <AdvancedRow label="Source" value={ORIGIN_LABEL[status.binaryOrigin]} />
-            )}
-            {status.binaryPath && (
-              <AdvancedRow label="Program" value={status.binaryPath} wrap />
-            )}
-            {status.voicePath && (
-              <AdvancedRow label="Voice file" value={status.voicePath} wrap />
-            )}
-            <AdvancedRow label="Folder" value={status.voicesDir} wrap />
-          </dl>
+            <dl className="mt-2 space-y-1.5 text-[10px] font-mono">
+              <AdvancedRow label="Engine" value={status.ready ? 'Piper' : 'None'} />
+              {status.engineVersion && (
+                <AdvancedRow label="Version" value={status.engineVersion} />
+              )}
+              {status.binaryOrigin && (
+                <AdvancedRow label="Source" value={ORIGIN_LABEL[status.binaryOrigin]} />
+              )}
+              {status.binaryPath && (
+                <AdvancedRow label="Program" value={status.binaryPath} wrap />
+              )}
+              {status.voicePath && (
+                <AdvancedRow label="Voice file" value={status.voicePath} wrap />
+              )}
+              <AdvancedRow label="Folder" value={status.voicesDir} wrap />
+            </dl>
           )}
         </details>
       )}
@@ -225,10 +248,11 @@ export const VoiceSettings: React.FC<VoiceSettingsProps> = ({
 };
 
 /** Before setup: what this is, and one button. */
-const SetupPanel: React.FC<{ status: TtsStatus; onSetup: () => void }> = ({
-  status,
-  onSetup,
-}) => {
+const SetupPanel: React.FC<{
+  status: TtsStatus;
+  onSetup: () => void;
+  onOpenLibrary: () => void;
+}> = ({ status, onSetup, onOpenLibrary }) => {
   const recommended = status.recommendedVoice;
 
   return (
@@ -261,10 +285,18 @@ const SetupPanel: React.FC<{ status: TtsStatus; onSetup: () => void }> = ({
             </p>
           </div>
 
-          <Button className="w-full gap-2" onClick={onSetup}>
-            <Download className="w-4 h-4" />
-            Download &amp; Set Up
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button className="flex-1 gap-2" onClick={onSetup}>
+              <Download className="w-4 h-4" />
+              Download &amp; Set Up
+            </Button>
+            {status.catalogue && status.catalogue.length > 1 && (
+              <Button variant="outline" onClick={onOpenLibrary} className="gap-1.5 text-xs">
+                <Globe className="w-3.5 h-3.5" />
+                Browse Catalogue ({status.catalogue.length})
+              </Button>
+            )}
+          </div>
           <p className="text-[10px] text-center text-muted-foreground">
             You can change the voice afterwards.
           </p>
@@ -347,7 +379,8 @@ const ReadyPanel: React.FC<{
   onTest: () => void;
   onStopTest: () => void;
   onChangeVoice: (id: string) => void;
-}> = ({ status, playing, busy, onTest, onStopTest, onChangeVoice }) => {
+  onOpenLibrary: () => void;
+}> = ({ status, playing, busy, onTest, onStopTest, onChangeVoice, onOpenLibrary }) => {
   const current =
     status.catalogue.find((v) => v.installed && v.id === selectedId(status)) ??
     status.catalogue.find((v) => v.id === selectedId(status));
@@ -356,7 +389,7 @@ const ReadyPanel: React.FC<{
     <div>
       <div className="flex items-center gap-2.5 px-4 py-3 bg-emerald-500/10 border-b border-emerald-500/20">
         <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold text-foreground">Local voice ready</p>
           <p className="text-[11px] text-muted-foreground truncate">
             {current?.displayName ?? status.voiceLabel ?? 'Installed'}
@@ -367,8 +400,18 @@ const ReadyPanel: React.FC<{
 
       <div className="p-4 space-y-3">
         {status.catalogue.length > 1 && (
-          <label className="block space-y-1">
-            <span className="text-[11px] font-medium text-muted-foreground">Voice</span>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium text-muted-foreground">Voice</span>
+              <button
+                type="button"
+                onClick={onOpenLibrary}
+                className="text-[11px] text-primary hover:underline flex items-center gap-1 font-medium"
+              >
+                <Globe className="w-3 h-3" />
+                Browse Voice Library ({status.catalogue.length})
+              </button>
+            </div>
             <select
               value={selectedId(status) ?? ''}
               aria-label="Voice"
@@ -383,7 +426,7 @@ const ReadyPanel: React.FC<{
                 </option>
               ))}
             </select>
-          </label>
+          </div>
         )}
 
         <div className="flex gap-2">
@@ -394,7 +437,7 @@ const ReadyPanel: React.FC<{
               className="flex-1 h-7 gap-1.5 text-[11px]"
               onClick={onStopTest}
             >
-              <Square className="w-3 h-3" />
+              <Square className="w-3 h-3 text-primary animate-pulse" />
               Stop
             </Button>
           ) : (
@@ -408,6 +451,16 @@ const ReadyPanel: React.FC<{
               {busy === 'test' ? 'Speaking…' : 'Test voice'}
             </Button>
           )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] gap-1"
+            onClick={onOpenLibrary}
+          >
+            <Globe className="w-3 h-3" />
+            Library
+          </Button>
         </div>
 
         <p className="text-[10px] leading-relaxed text-muted-foreground">

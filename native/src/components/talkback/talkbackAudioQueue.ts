@@ -134,21 +134,105 @@ export class TalkbackAudioQueue {
   }
 }
 
-/** An {@link AudioSink} backed by an HTML audio element. */
-export const createElementSink = (): AudioSink => {
+/** An {@link AudioSink} backed by an HTML audio element with real-time level metering. */
+export const createElementSink = (onLevel?: (level: number) => void): AudioSink => {
   let current: HTMLAudioElement | null = null;
+  let animId: number | null = null;
+  let audioCtx: AudioContext | null = null;
+  let analyser: AnalyserNode | null = null;
+  let dataArray: Uint8Array | null = null;
+
+  const cleanupMeter = () => {
+    if (animId !== null) {
+      cancelAnimationFrame(animId);
+      animId = null;
+    }
+    onLevel?.(0);
+  };
+
+  const startMeter = (audio: HTMLAudioElement) => {
+    if (!onLevel) return;
+    try {
+      if (!audioCtx && typeof window !== 'undefined') {
+        const AudioCtxClass =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (AudioCtxClass) {
+          audioCtx = new AudioCtxClass();
+        }
+      }
+      if (audioCtx && !analyser) {
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 128;
+        analyser.smoothingTimeConstant = 0.5;
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
+      }
+      if (audioCtx && analyser) {
+        if (audioCtx.state === 'suspended') {
+          void audioCtx.resume().catch(() => {});
+        }
+        try {
+          const sourceNode = audioCtx.createMediaElementSource(audio);
+          sourceNode.connect(analyser);
+          analyser.connect(audioCtx.destination);
+        } catch {
+          // If source node is already connected or not allowed, continue with fallback
+        }
+      }
+    } catch {
+      // AudioContext unavailable or restricted
+    }
+
+    const tick = () => {
+      if (!current || current.paused || current.ended) {
+        cleanupMeter();
+        return;
+      }
+      if (analyser && dataArray) {
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        const normalized = Math.min(1, avg / 120);
+        onLevel(normalized);
+      } else {
+        // Subtle rhythmic modulation if Web Audio analyser node is unavailable
+        const t = performance.now() / 120;
+        const fallbackLevel = 0.25 + 0.2 * Math.sin(t) + 0.1 * Math.sin(t * 2.7);
+        onLevel(fallbackLevel);
+      }
+      animId = requestAnimationFrame(tick);
+    };
+    animId = requestAnimationFrame(tick);
+  };
 
   return {
     play(wavBase64: string) {
       return new Promise<void>((resolve, reject) => {
+        cleanupMeter();
         const audio = new Audio(`data:audio/wav;base64,${wavBase64}`);
         current = audio;
-        audio.onended = () => resolve();
-        audio.onerror = () => reject(new Error('audio decode failed'));
-        void audio.play().catch(reject);
+        audio.onplay = () => {
+          startMeter(audio);
+        };
+        audio.onended = () => {
+          cleanupMeter();
+          resolve();
+        };
+        audio.onerror = () => {
+          cleanupMeter();
+          reject(new Error('audio decode failed'));
+        };
+        void audio.play().catch((err) => {
+          cleanupMeter();
+          reject(err);
+        });
       });
     },
     stop() {
+      cleanupMeter();
       if (current) {
         current.pause();
         current.src = '';
