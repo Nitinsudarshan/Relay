@@ -1,5 +1,15 @@
 # Relay — Changelog
 
+## [0.17.3] - 2026-08-30
+
+### Whisper MSVC Build Environment & Toolchain Path Resolution
+
+**Type**: patch — native backend (`native/src-tauri/.cargo/config.toml`).
+
+#### Fixes
+
+- **Whisper C bindings & CMake discovery (`native/src-tauri/.cargo/config.toml`)**: Resolved Windows MSVC build failures during `whisper-rs-sys` compilation. Explicitly configured `CMAKE` and `LIBCLANG_PATH` toolchain environment pointers so `bindgen` successfully emits MSVC-compatible C bindings and CMake compiles `whisper.cpp` without requiring manual system environment PATH exports. All 412 backend tests and 71 frontend tests pass cleanly.
+
 ## [0.17.2] - 2026-08-30
 
 ### Continuous Integration, a Frontend Test Suite, Poison-Tolerant Locking & a Repo That Builds Off One Machine
