@@ -9,12 +9,10 @@ description: What to test, what not to, and where tests live — across all thre
 
 - Use `cargo test` with standard `#[test]`/`#[tokio::test]` — no separate
   framework decision needed, unlike the frontend's Vitest choice below.
-- Prioritize testing the two flagged technical risks first (see
-  `Relay - IDE Build Prompt.md`): `pipeline/` (meeting→Kanban extraction
-  quality) and `triggers/` (trigger-phrase matching, including
-  false-positive/false-negative behavior across a range of user-defined
-  phrases, not just the two examples from research). These carry the actual
-  product risk.
+- Prioritize the two areas that carry the real product risk: `pipeline/`
+  (meeting→Kanban extraction quality) and `triggers/` (trigger-phrase
+  matching, including false-positive and false-negative behavior across a
+  range of user-defined phrases, not just the two examples from research).
 - Test `providers/`'s trait-based Ollama/cloud-LLM swap with a fake/mock
   provider — don't hit a real LLM API or a real Ollama instance in CI.
 - Don't chase coverage on `commands.rs` itself — it should be thin enough

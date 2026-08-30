@@ -10,12 +10,12 @@ management UI). **Relay does not have this, and shouldn't get it yet.**
 
 ## Why this is deliberately absent
 
-- `Relay - Decision Log.md`'s primary-users framing (decision-log context)
-  is the builder themselves, personal use — a single-user product has
-  nothing for RBAC to gate.
+- The primary-user framing in `docs/decisions.md` is the builder
+  themselves, personal use — a single-user product has nothing for RBAC to
+  gate.
 - A team/enterprise, mutual-sharing model was raised as a real future
-  direction (see `Relay - Decision Log.md`'s "Noted for later, not decided"
-  section) but is explicitly **not decided or scoped** — building
+  direction (logged in `maybe_later.md`, not `docs/decisions.md` — it is
+  deferred, not decided) but is explicitly **not scoped** — building
   permission infrastructure now would be exactly the kind of "design for
   hypothetical future requirements" the build prompt's operating mode
   argues against.

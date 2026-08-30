@@ -5,11 +5,11 @@ description: Master index and precedence rules for the /Rules directory. Always 
 
 # Global Rules
 
-All development on Relay must follow the rules defined in this `Rules/` directory.
+All development on Relay must follow the rules defined in this `rules/` directory.
 This file is the entry point — read it first, then apply the specific files
 relevant to the surface you're editing.
 
-Relay is **three surfaces sharing one repo**, per `Relay - Decision Log.md`
+Relay is **three surfaces sharing one repo**, per `docs/decisions.md`
 (decisions 1, 2, 3, 12):
 - **`native/src-tauri/`** — the Rust (Axum-style) backend: capture, STT,
   the meeting→Kanban and scribble→structured-output pipelines, the
@@ -64,14 +64,14 @@ If two rules conflict, resolve in this order (most specific wins):
 6. `design-system.md` / `ui-components.md` / `charts.md` / `responsive-design.md` / `accessibility.md`
 7. `documentation.md` / `readme.md` / `version-and-changelog.md`
 
-If a conflict can't be resolved this way, stop and ask rather than guessing —
-see `Relay - IDE Build Prompt.md` section 14 for what actually warrants
-stopping.
+If a conflict can't be resolved this way, stop and ask rather than guessing.
+A genuine conflict between two rules is worth raising; a rule that simply does
+not cover your case is not.
 
 ## Scope
 
 These rules apply to all code generated or edited under `native/` and `web/`.
 They don't apply to one-off root-level maintenance scripts unless explicitly
 asked. Every decision referenced by number here (e.g. "decision 2") refers to
-`App Ideas/Relay/Relay - Decision Log.md` — read it before starting if you
-haven't already; it resolves several things these rule files assume as given.
+`docs/decisions.md` — read it before starting if you haven't already; it
+resolves several things these rule files assume as given.

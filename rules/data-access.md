@@ -7,7 +7,7 @@ globs: "native/src-tauri/**, web/src/**"
 # Data Access Rules
 
 Relay has two genuinely different storage layers (decisions 1, 3, 12 in
-`Relay - Decision Log.md`), unlike NGConnect's single Supabase-backed
+`docs/decisions.md`), unlike NGConnect's single Supabase-backed
 `data-access.md` — keep them clearly separated rather than reusing one
 pattern for both.
 

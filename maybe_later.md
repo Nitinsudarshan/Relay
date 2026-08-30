@@ -3,7 +3,7 @@
 This document tracks deferred features, rejected/postponed UI patterns, and architecture concepts that have been set aside for future evaluation. 
 
 > [!NOTE]
-> When a feature, visual affordance, or architectural idea is identified as speculative, half-implemented, or deferred to keep the current surface clean and reliable, it **must** be documented here rather than left as ghost UI or commented-out code. See [Rules/maybe-later.md](file:///d:/Projects/Relay/Rules/maybe-later.md).
+> When a feature, visual affordance, or architectural idea is identified as speculative, half-implemented, or deferred to keep the current surface clean and reliable, it **must** be documented here rather than left as ghost UI or commented-out code. See [`rules/maybe-later.md`](rules/maybe-later.md).
 
 ---
 

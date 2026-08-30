@@ -7,7 +7,7 @@ description: Requirements and conventions for logging deferred, postponed, or sp
 
 When designing, refactoring, or cleaning up Relay's surfaces (Native Desktop, Rust Backend, Web Dashboard), speculative affordances, half-implemented features, or deprioritized UX enhancements must **never** be left in the code as ghost UI, misleading labels, or dead code.
 
-Instead, they must be cleanly removed from the active surface and documented in [`maybe_later.md`](file:///d:/Projects/Relay/maybe_later.md) at the repository root.
+Instead, they must be cleanly removed from the active surface and documented in [`maybe_later.md`](../maybe_later.md) at the repository root.
 
 ---
 
@@ -18,7 +18,7 @@ Instead, they must be cleanly removed from the active surface and documented in 
    - If an element is non-functional or speculative, remove it from the user interface immediately.
 
 2. **Mandatory Documentation in `maybe_later.md`**:
-   - When a feature, visual shortcut, or capability is postponed, removed, or identified as a good future improvement, log it in [`maybe_later.md`](file:///d:/Projects/Relay/maybe_later.md).
+   - When a feature, visual shortcut, or capability is postponed, removed, or identified as a good future improvement, log it in [`maybe_later.md`](../maybe_later.md).
    - Each entry in `maybe_later.md` must follow the standard structure below.
 
 3. **No Dead / Commented-Out Code**:
