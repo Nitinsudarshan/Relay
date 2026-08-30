@@ -1,5 +1,17 @@
 # Relay — Changelog
 
+## [0.19.2] - 2026-08-31
+
+### Event-Aware Dictation Watchdog, Long-Recording Support & Explicit Stop Diagnostics
+
+**Type**: patch — native backend (`native/src-tauri/src/hotkeys/mod.rs`).
+
+#### Fixes
+
+- **Unconditional 60-second dictation cutoff removed (`native/src-tauri/src/hotkeys/mod.rs`)**: Resolved the product bug where hold-to-talk dictation recordings were forcefully terminated after 60 seconds by an unconditional sleep timer. Continuous recordings of arbitrary length (e.g. 2m, 5m, 10m+) now continue as long as the user holds the hotkey.
+- **Physical key-state aware safety recovery (`native/src-tauri/src/hotkeys/mod.rs`)**: Separated normal recording duration from lost-key safety recovery. In hold-to-talk mode, the safety watchdog queries physical key states (`GetAsyncKeyState` on Windows) to detect lost OS key-up events within ~1.0s and safely recovers stuck recordings without prematurely terminating active user dictation.
+- **Explicit stop reasons & generation protection (`native/src-tauri/src/hotkeys/mod.rs`)**: Introduced `DictationStopReason` (`NormalRelease`, `TogglePress`, `WatchdogLostRelease`, `WatchdogEmergencyCeiling`) to clearly distinguish user actions from safety recoveries in diagnostic logs. Re-verified generation guards so delayed watchdogs never stop subsequent recording sessions.
+
 ## [0.19.1] - 2026-08-30
 
 ### The Voice Installer Was Pointed at a Python Package
