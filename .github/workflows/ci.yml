@@ -32,6 +32,14 @@ jobs:
       - name: Verify version, changelog, and README
         run: npm run verify:rules
 
+      # scripts/build-voice-manifest.mjs decides what Relay is willing to
+      # download and execute. Its refusals — a Python wheel named as an
+      # engine, an archive with no executable in it — are the kind of thing
+      # that only stays correct if something checks. No network needed:
+      # the fixtures are built in the test.
+      - name: Test the release scripts
+        run: npm run test:scripts
+
   rust:
     name: Rust backend
     runs-on: ubuntu-latest

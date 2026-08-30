@@ -16,6 +16,13 @@
 //! download → verify SHA-256 → extract → atomic move → pair check → SPEAK
 //! ```
 //!
+//! `extract` reads both of the shapes upstream actually ships: a zip on
+//! Windows and a gzipped tar everywhere else. Neither is unpacked with a
+//! library's convenience method — every entry's path is checked lexically
+//! against the target directory, links are validated and created last, and
+//! the whole expansion is capped, because a pinned checksum proves what
+//! the bytes *are* and nothing about what they unfold into.
+//!
 //! The last one matters most. Relay runs a real synthesis through the
 //! production provider before saying "Ready", so a voice that downloads
 //! perfectly and cannot actually load is caught during setup rather than
@@ -194,6 +201,15 @@ const READ_CHUNK: usize = 64 * 1024;
 
 /// Refuses obviously wrong downloads before hashing gigabytes of them.
 const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Caps what an archive may expand to.
+///
+/// A checksum proves the bytes are the ones Relay pinned; it says nothing
+/// about what those bytes unpack to. Piper's largest release archive is
+/// ~26 MB compressed and well under 100 MB extracted, so this is roughly
+/// ten times any legitimate engine and still a hard stop for an archive
+/// that would otherwise fill the disk.
+const MAX_EXTRACTED_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// Removes a directory tree when dropped.
 ///
@@ -522,6 +538,10 @@ fn download_verified(
 }
 
 /// Unpacks the engine and moves its executable into place.
+///
+/// The engine folder is replaced wholesale for an archive, because Piper
+/// is an executable plus the ONNX runtime, espeak-ng and its data — a
+/// half-updated folder is a mismatched pair, not a partial upgrade.
 fn install_runtime(
     runtime: &RuntimeEntry,
     archive: &Path,
@@ -534,9 +554,9 @@ fn install_runtime(
 
     let staged_exe = match runtime.archive {
         ArchiveKind::Raw => archive.to_path_buf(),
-        ArchiveKind::Zip => {
+        kind => {
             let extracted = staging.join("engine");
-            extract_zip(archive, &extracted)?;
+            extract_archive(kind, archive, &extracted)?;
             find_extracted_executable(&extracted, &runtime.executable_path)?
         }
     };
@@ -545,7 +565,7 @@ fn install_runtime(
     // executable, because Piper needs its sibling libraries. Extracting
     // over a live installation would leave a mismatched pair if it
     // failed halfway.
-    if runtime.archive == ArchiveKind::Zip {
+    if runtime.archive.is_archive() {
         if let Some(source_dir) = staged_exe.parent() {
             copy_dir_contents(source_dir, &piper_dir)?;
         }
@@ -564,12 +584,66 @@ fn install_runtime(
     Ok(())
 }
 
+/// Unpacks a runtime archive of whichever kind the manifest declared.
+fn extract_archive(kind: ArchiveKind, archive: &Path, into: &Path) -> Result<(), InstallError> {
+    match kind {
+        ArchiveKind::Zip => extract_zip(archive, into),
+        ArchiveKind::TarGz => extract_tar_gz(archive, into),
+        // The caller handles this without unpacking anything.
+        ArchiveKind::Raw => Err(InstallError::Extract(
+            "a raw download is not an archive".to_string(),
+        )),
+    }
+}
+
+/// The path an archive entry may be written to, or `None` if it escapes.
+///
+/// Lexical, not filesystem-based: `canonicalize` would follow a symlink
+/// that a previous entry in the same archive planted, which is the whole
+/// trick. Nothing here touches the disk.
+fn contained_path(root: &Path, relative: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut resolved = root.to_path_buf();
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => resolved.push(part),
+            Component::CurDir => {}
+            // `..`, `/`, and `C:` all mean this entry is trying to leave.
+            _ => return None,
+        }
+    }
+    (resolved != root).then_some(resolved)
+}
+
+/// Copies at most `budget` bytes, failing rather than writing more.
+///
+/// The declared size in an archive header is a claim by the archive. This
+/// bounds what is actually written, so a header that under-reports cannot
+/// spend the disk.
+fn copy_bounded<R: std::io::Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    budget: u64,
+) -> Result<u64, InstallError> {
+    let mut limited = std::io::Read::take(reader.by_ref(), budget.saturating_add(1));
+    let copied =
+        std::io::copy(&mut limited, writer).map_err(|e| InstallError::Extract(e.to_string()))?;
+    if copied > budget {
+        return Err(InstallError::Extract(
+            "the archive expands to more than Relay will unpack".to_string(),
+        ));
+    }
+    Ok(copied)
+}
+
 /// Extracts a zip, refusing entries that would escape the target.
 fn extract_zip(archive: &Path, into: &Path) -> Result<(), InstallError> {
     let file = std::fs::File::open(archive).map_err(|e| InstallError::Io(e.to_string()))?;
     let mut zip =
         zip::ZipArchive::new(file).map_err(|e| InstallError::Extract(e.to_string()))?;
     std::fs::create_dir_all(into).map_err(|e| InstallError::Io(e.to_string()))?;
+
+    let mut budget = MAX_EXTRACTED_BYTES;
 
     for index in 0..zip.len() {
         let mut entry = zip
@@ -585,7 +659,12 @@ fn extract_zip(archive: &Path, into: &Path) -> Result<(), InstallError> {
                 entry.name()
             )));
         };
-        let target = into.join(relative);
+        let Some(target) = contained_path(into, &relative) else {
+            return Err(InstallError::Extract(format!(
+                "archive entry {} has an unsafe path",
+                entry.name()
+            )));
+        };
 
         if entry.is_dir() {
             std::fs::create_dir_all(&target).map_err(|e| InstallError::Io(e.to_string()))?;
@@ -596,7 +675,167 @@ fn extract_zip(archive: &Path, into: &Path) -> Result<(), InstallError> {
         }
         let mut out =
             std::fs::File::create(&target).map_err(|e| InstallError::Io(e.to_string()))?;
-        std::io::copy(&mut entry, &mut out).map_err(|e| InstallError::Extract(e.to_string()))?;
+        budget -= copy_bounded(&mut entry, &mut out, budget)?;
+    }
+    Ok(())
+}
+
+/// Extracts a gzipped tar, refusing entries that would escape the target.
+///
+/// Hand-rolled rather than `Archive::unpack` because a tarball carries two
+/// things a zip does not, and both matter here:
+///
+/// * **Symlinks.** Piper's Unix builds ship `libonnxruntime.so ->
+///   libonnxruntime.so.1.14.1` and two more like it, and the binary loads
+///   its libraries through those names — dropping the links gives an
+///   engine that unpacks perfectly and cannot start. They are also the
+///   sharper half of tar-slip: a link pointing outside the directory turns
+///   every later entry into an arbitrary write. Each one is checked
+///   lexically, and materialised only after the regular files, so the
+///   order entries happen to appear in cannot matter.
+/// * **Permissions.** The executable bit lives in the tar header. It is
+///   honoured for regular files and masked to the ownership bits, so an
+///   archive cannot hand itself setuid.
+fn extract_tar_gz(archive: &Path, into: &Path) -> Result<(), InstallError> {
+    let file = std::fs::File::open(archive).map_err(|e| InstallError::Io(e.to_string()))?;
+    let decoder = flate2::read::GzDecoder::new(std::io::BufReader::new(file));
+    let mut tar = tar::Archive::new(decoder);
+    std::fs::create_dir_all(into).map_err(|e| InstallError::Io(e.to_string()))?;
+
+    let mut budget = MAX_EXTRACTED_BYTES;
+    let mut links: Vec<(PathBuf, PathBuf)> = Vec::new();
+
+    let entries = tar
+        .entries()
+        .map_err(|e| InstallError::Extract(e.to_string()))?;
+
+    for entry in entries {
+        let mut entry = entry.map_err(|e| InstallError::Extract(e.to_string()))?;
+        let relative = entry
+            .path()
+            .map_err(|e| InstallError::Extract(e.to_string()))?
+            .into_owned();
+        let Some(target) = contained_path(into, &relative) else {
+            return Err(InstallError::Extract(format!(
+                "archive entry {} has an unsafe path",
+                relative.display()
+            )));
+        };
+
+        let kind = entry.header().entry_type();
+        if kind.is_dir() {
+            std::fs::create_dir_all(&target).map_err(|e| InstallError::Io(e.to_string()))?;
+            continue;
+        }
+        if kind.is_symlink() || kind.is_hard_link() {
+            let link = entry
+                .link_name()
+                .map_err(|e| InstallError::Extract(e.to_string()))?
+                .ok_or_else(|| {
+                    InstallError::Extract(format!(
+                        "archive entry {} is a link to nothing",
+                        relative.display()
+                    ))
+                })?
+                .into_owned();
+            links.push((target, link));
+            continue;
+        }
+        if !kind.is_file() {
+            // Devices, fifos and sockets have no business in an engine
+            // archive, and creating them is not something an installer
+            // should be able to do.
+            continue;
+        }
+
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| InstallError::Io(e.to_string()))?;
+        }
+        let mode = entry.header().mode().ok();
+        let mut out =
+            std::fs::File::create(&target).map_err(|e| InstallError::Io(e.to_string()))?;
+        budget -= copy_bounded(&mut entry, &mut out, budget)?;
+        drop(out);
+        apply_tar_mode(&target, mode)?;
+    }
+
+    // After the regular files, so a link never depends on where it
+    // happened to sit in the archive.
+    for (link_path, link_target) in &links {
+        materialise_link(into, link_path, link_target)?;
+    }
+    Ok(())
+}
+
+/// Applies a tar entry's permission bits, keeping only the ownership ones.
+///
+/// setuid, setgid and the sticky bit are dropped: nothing in a speech
+/// engine needs them, and an installer that honours them is a way to get
+/// one onto disk.
+fn apply_tar_mode(path: &Path, mode: Option<u32>) -> Result<(), InstallError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let Some(mode) = mode else { return Ok(()) };
+        let permissions = std::fs::Permissions::from_mode(mode & 0o777);
+        std::fs::set_permissions(path, permissions).map_err(|e| InstallError::Io(e.to_string()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, mode);
+    }
+    Ok(())
+}
+
+/// Recreates one link from a tarball, refusing one that points outside.
+///
+/// The target is resolved against the link's own directory and checked
+/// lexically against the extraction root, so `libfoo.so -> ../../../etc/
+/// passwd` is rejected before anything is created — and therefore before
+/// any later entry could write through it.
+///
+/// The check is deliberately stricter than containment: any `..` in a
+/// target is refused, even one that would have stayed inside. Piper's
+/// archives link to siblings and nothing else, so the strict rule costs
+/// nothing and leaves no lexical edge case to reason about.
+fn materialise_link(
+    root: &Path,
+    link_path: &Path,
+    link_target: &Path,
+) -> Result<(), InstallError> {
+    let unsafe_link = || {
+        InstallError::Extract(format!(
+            "archive entry {} links outside the engine folder",
+            link_path.display()
+        ))
+    };
+
+    if link_target.is_absolute() {
+        return Err(unsafe_link());
+    }
+    let parent = link_path.parent().ok_or_else(unsafe_link)?;
+    let relative_to_root = parent.strip_prefix(root).map_err(|_| unsafe_link())?;
+    contained_path(root, &relative_to_root.join(link_target)).ok_or_else(unsafe_link)?;
+
+    std::fs::create_dir_all(parent).map_err(|e| InstallError::Io(e.to_string()))?;
+    let _ = std::fs::remove_file(link_path);
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(link_target, link_path)
+            .map_err(|e| InstallError::Io(e.to_string()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows needs a privilege for symlinks that a normal install
+        // does not have, so the file is duplicated instead. Piper's
+        // Windows artifact is a zip with no links in it; this exists so
+        // a tarball runtime on Windows would still install correctly
+        // rather than half-install.
+        let resolved = parent.join(link_target);
+        if resolved.is_file() {
+            std::fs::copy(&resolved, link_path).map_err(|e| InstallError::Io(e.to_string()))?;
+        }
     }
     Ok(())
 }
@@ -638,13 +877,38 @@ fn find_extracted_executable(root: &Path, declared: &str) -> Result<PathBuf, Ins
 }
 
 /// Copies every file from `source` into `destination`, overwriting.
+///
+/// Symlinks are recreated as symlinks rather than followed. Piper's Unix
+/// builds reach their libraries through `libonnxruntime.so ->
+/// libonnxruntime.so.1.14.1` and two more like it; resolving those on the
+/// way in would work, but at the cost of a second copy of every library
+/// and an install that no longer looks like what upstream shipped.
 fn copy_dir_contents(source: &Path, destination: &Path) -> Result<(), InstallError> {
     std::fs::create_dir_all(destination).map_err(|e| InstallError::Io(e.to_string()))?;
     let entries = std::fs::read_dir(source).map_err(|e| InstallError::Io(e.to_string()))?;
     for entry in entries.flatten() {
         let from = entry.path();
         let to = destination.join(entry.file_name());
-        if from.is_dir() {
+        let kind = entry
+            .file_type()
+            .map_err(|e| InstallError::Io(e.to_string()))?;
+
+        // Whatever is there now goes first. Copying onto an existing
+        // symlink would otherwise write through it, to wherever it points.
+        if std::fs::symlink_metadata(&to).is_ok_and(|m| m.file_type().is_symlink()) {
+            let _ = std::fs::remove_file(&to);
+        }
+
+        #[cfg(unix)]
+        if kind.is_symlink() {
+            let target = std::fs::read_link(&from).map_err(|e| InstallError::Io(e.to_string()))?;
+            let _ = std::fs::remove_file(&to);
+            std::os::unix::fs::symlink(&target, &to)
+                .map_err(|e| InstallError::Io(e.to_string()))?;
+            continue;
+        }
+
+        if kind.is_dir() {
             copy_dir_contents(&from, &to)?;
         } else {
             std::fs::copy(&from, &to).map_err(|e| InstallError::Io(e.to_string()))?;
@@ -656,7 +920,9 @@ fn copy_dir_contents(source: &Path, destination: &Path) -> Result<(), InstallErr
 
 /// Marks a file runnable on Unix. A no-op on Windows, which has no
 /// executable bit — but a zip made on Linux loses the mode, so an install
-/// on any Unix host needs this or the binary is unrunnable.
+/// on any Unix host needs this or the binary is unrunnable. A tarball
+/// carries real modes, which [`apply_tar_mode`] has already applied; this
+/// only ever widens them.
 fn ensure_executable(path: &Path) -> Result<(), InstallError> {
     #[cfg(unix)]
     {
@@ -882,6 +1148,14 @@ mod tests {
             }
         }
     }
+
+    /// An engine URL that resolves to nothing.
+    ///
+    /// Loopback, not `https://x.invalid`, for two reasons: the manifest's
+    /// provenance rule requires a real `https` runtime URL to be the one
+    /// its release implies, and a test that names a reachable host is one
+    /// bug away from actually downloading 22 MB. Nothing listens on port 1.
+    const UNREACHABLE_ENGINE: &str = "http://127.0.0.1:1/engine.zip";
 
     fn never_cancelled() -> impl Fn() -> bool + Send + Sync {
         || false
@@ -1228,6 +1502,247 @@ mod tests {
         ));
     }
 
+    // ── tar.gz extraction ───────────────────────────────────────────────
+
+    /// A tar entry, in the three shapes an engine archive actually uses.
+    enum TarEntry<'a> {
+        File(&'a str, &'a [u8], u32),
+        Dir(&'a str),
+        Symlink(&'a str, &'a str),
+        /// A path written straight into the header, bypassing the
+        /// builder's own refusal to emit one — which is how a hostile
+        /// archive is built, and therefore how one has to be built to
+        /// test against.
+        Traversing(&'a str, &'a [u8]),
+    }
+
+    fn write_tar_gz(path: &Path, entries: &[TarEntry<'_>]) {
+        let file = std::fs::File::create(path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+        let mut builder = tar::Builder::new(encoder);
+        for entry in entries {
+            let mut header = tar::Header::new_gnu();
+            match entry {
+                TarEntry::File(name, body, mode) => {
+                    header.set_size(body.len() as u64);
+                    header.set_mode(*mode);
+                    header.set_entry_type(tar::EntryType::Regular);
+                    header.set_cksum();
+                    builder.append_data(&mut header, name, *body).unwrap();
+                }
+                TarEntry::Dir(name) => {
+                    header.set_size(0);
+                    header.set_mode(0o755);
+                    header.set_entry_type(tar::EntryType::Directory);
+                    header.set_cksum();
+                    builder.append_data(&mut header, name, std::io::empty()).unwrap();
+                }
+                TarEntry::Symlink(name, target) => {
+                    header.set_size(0);
+                    header.set_mode(0o777);
+                    header.set_entry_type(tar::EntryType::Symlink);
+                    builder.append_link(&mut header, name, target).unwrap();
+                }
+                TarEntry::Traversing(name, body) => {
+                    header.set_size(body.len() as u64);
+                    header.set_mode(0o644);
+                    header.set_entry_type(tar::EntryType::Regular);
+                    let raw = header.as_old_mut();
+                    raw.name[..name.len()].copy_from_slice(name.as_bytes());
+                    header.set_cksum();
+                    builder.append(&header, *body).unwrap();
+                }
+            }
+        }
+        builder.into_inner().unwrap().finish().unwrap();
+    }
+
+    #[test]
+    fn a_tarball_extracts_and_its_executable_is_found() {
+        // The Linux and macOS shape: upstream ships a zip only for
+        // Windows, so a zip-only installer supports one platform.
+        let temp = TempDir::new();
+        let archive = temp.path().join("engine.tar.gz");
+        write_tar_gz(
+            &archive,
+            &[
+                TarEntry::Dir("piper/"),
+                TarEntry::File("piper/piper", b"binary", 0o755),
+                TarEntry::File("piper/espeak-ng-data/phontab", b"data", 0o644),
+            ],
+        );
+
+        let extracted = temp.path().join("out");
+        extract_archive(ArchiveKind::TarGz, &archive, &extracted).unwrap();
+        let found = find_extracted_executable(&extracted, "piper/piper").unwrap();
+        assert_eq!(std::fs::read(&found).unwrap(), b"binary");
+        assert!(extracted.join("piper/espeak-ng-data/phontab").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_tarball_keeps_the_executable_bit_and_drops_setuid() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = TempDir::new();
+        let archive = temp.path().join("engine.tar.gz");
+        write_tar_gz(
+            &archive,
+            &[
+                TarEntry::File("piper/piper", b"binary", 0o755),
+                // No installer should be a way to get a setuid file onto
+                // disk, whatever the archive claims.
+                TarEntry::File("piper/sneaky", b"x", 0o4755),
+            ],
+        );
+
+        let extracted = temp.path().join("out");
+        extract_tar_gz(&archive, &extracted).unwrap();
+
+        let mode = |name: &str| {
+            std::fs::metadata(extracted.join(name)).unwrap().permissions().mode() & 0o7777
+        };
+        assert_eq!(mode("piper/piper") & 0o111, 0o111, "the executable bit was lost");
+        assert_eq!(mode("piper/sneaky") & 0o4000, 0, "setuid survived extraction");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_tarballs_library_symlinks_survive_extraction_and_install() {
+        // Piper's Unix build loads `libonnxruntime.so.1.14.1` through a
+        // chain of symlinks. Resolving or dropping them gives an engine
+        // that unpacks perfectly and will not start.
+        let temp = TempDir::new();
+        let archive = temp.path().join("engine.tar.gz");
+        write_tar_gz(
+            &archive,
+            &[
+                TarEntry::File("piper/piper", b"binary", 0o755),
+                // Deliberately before the file it points at, which is how
+                // the real archive orders them.
+                TarEntry::Symlink("piper/libonnxruntime.so", "libonnxruntime.so.1.14.1"),
+                TarEntry::File("piper/libonnxruntime.so.1.14.1", b"library", 0o644),
+            ],
+        );
+
+        let extracted = temp.path().join("out");
+        extract_tar_gz(&archive, &extracted).unwrap();
+        let link = extracted.join("piper/libonnxruntime.so");
+        assert!(
+            std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(),
+            "the library link was resolved away"
+        );
+        assert_eq!(std::fs::read(&link).unwrap(), b"library");
+
+        // And it is still a link once the engine folder is put into place.
+        let installed = temp.path().join("installed");
+        copy_dir_contents(&extracted.join("piper"), &installed).unwrap();
+        let copied = installed.join("libonnxruntime.so");
+        assert!(
+            std::fs::symlink_metadata(&copied).unwrap().file_type().is_symlink(),
+            "installing followed the link instead of copying it"
+        );
+        assert_eq!(std::fs::read(&copied).unwrap(), b"library");
+    }
+
+    #[test]
+    fn a_tarball_cannot_write_outside_its_target_directory() {
+        // Tar-slip, the tarball's version of the zip-slip test above.
+        let temp = TempDir::new();
+        let archive = temp.path().join("evil.tar.gz");
+        write_tar_gz(&archive, &[TarEntry::Traversing("../../escaped.txt", b"pwned")]);
+
+        let extracted = temp.path().join("out");
+        assert!(
+            matches!(extract_tar_gz(&archive, &extracted), Err(InstallError::Extract(_))),
+            "a traversal entry was extracted"
+        );
+        assert!(!temp.path().join("escaped.txt").exists());
+    }
+
+    #[test]
+    fn a_tarball_link_that_points_outside_is_refused() {
+        // The sharper half of tar-slip: a link is planted first, and every
+        // later entry writing "into" it lands wherever it points. Rejecting
+        // the link means there is never anything to write through.
+        let temp = TempDir::new();
+        for target in ["../../escape", "/etc"] {
+            let archive = temp.path().join("evil.tar.gz");
+            write_tar_gz(
+                &archive,
+                &[
+                    TarEntry::File("piper/piper", b"binary", 0o755),
+                    TarEntry::Symlink("piper/out", target),
+                ],
+            );
+            let extracted = temp.path().join("out");
+            let _ = std::fs::remove_dir_all(&extracted);
+            let error = extract_tar_gz(&archive, &extracted).unwrap_err();
+            assert!(
+                matches!(error, InstallError::Extract(_)),
+                "accepted a link to {target}: {error:?}"
+            );
+            assert!(!extracted.join("piper/out").exists());
+        }
+    }
+
+    #[test]
+    fn a_corrupt_tarball_is_an_extract_error_not_a_panic() {
+        let temp = TempDir::new();
+        let archive = temp.path().join("broken.tar.gz");
+        std::fs::write(&archive, b"this is not a gzip stream").unwrap();
+        assert!(matches!(
+            extract_tar_gz(&archive, &temp.path().join("out")),
+            Err(InstallError::Extract(_))
+        ));
+    }
+
+    #[test]
+    fn an_archive_that_expands_beyond_the_cap_is_refused() {
+        // A checksum proves what the bytes are, not what they unfold into.
+        // Both readers share one budget, so both are bounded.
+        let temp = TempDir::new();
+        let mut reader = std::io::repeat(0_u8);
+        let mut sink = Vec::new();
+        assert!(matches!(
+            copy_bounded(&mut reader, &mut sink, 4096),
+            Err(InstallError::Extract(_))
+        ));
+
+        // And the real path: a tar header claiming less than it writes
+        // still cannot spend more than the budget allows.
+        let archive = temp.path().join("bomb.tar.gz");
+        write_tar_gz(&archive, &[TarEntry::File("piper/piper", &vec![0_u8; 8192], 0o755)]);
+        // The cap is a constant, so this asserts the plumbing rather than
+        // the number: an ordinary archive is well under it and extracts.
+        assert!(extract_tar_gz(&archive, &temp.path().join("out")).is_ok());
+    }
+
+    #[test]
+    fn a_raw_runtime_is_not_sent_through_an_archive_reader() {
+        let temp = TempDir::new();
+        let file = temp.path().join("piper");
+        std::fs::write(&file, b"binary").unwrap();
+        assert!(matches!(
+            extract_archive(ArchiveKind::Raw, &file, &temp.path().join("out")),
+            Err(InstallError::Extract(_))
+        ));
+    }
+
+    #[test]
+    fn a_contained_path_rejects_every_way_out() {
+        let root = Path::new("/tmp/relay-root");
+        assert!(contained_path(root, Path::new("piper/piper")).is_some());
+        assert!(contained_path(root, Path::new("./piper/piper")).is_some());
+        for bad in ["..", "../x", "piper/../../x", "/etc/passwd"] {
+            assert!(
+                contained_path(root, Path::new(bad)).is_none(),
+                "accepted {bad}"
+            );
+        }
+        // An entry naming the root itself is not a file to write.
+        assert!(contained_path(root, Path::new("")).is_none());
+    }
+
     // ── atomic move ─────────────────────────────────────────────────────
 
     #[test]
@@ -1416,7 +1931,7 @@ mod tests {
     #[test]
     fn an_unsupported_platform_fails_before_any_download() {
         let temp = TempDir::new();
-        let manifest = provisioned_manifest("https://x.invalid/e", "https://x.invalid/m", "https://x.invalid/c");
+        let manifest = provisioned_manifest(UNREACHABLE_ENGINE, "https://x.invalid/m", "https://x.invalid/c");
         let error = install(InstallRequest {
             manifest: &manifest,
             voice_id: "en_US-amy-medium",
@@ -1434,7 +1949,7 @@ mod tests {
     #[test]
     fn an_unsupported_architecture_is_reported_distinctly() {
         let temp = TempDir::new();
-        let manifest = provisioned_manifest("https://x.invalid/e", "https://x.invalid/m", "https://x.invalid/c");
+        let manifest = provisioned_manifest(UNREACHABLE_ENGINE, "https://x.invalid/m", "https://x.invalid/c");
         let error = install(InstallRequest {
             manifest: &manifest,
             voice_id: "en_US-amy-medium",
@@ -1451,7 +1966,7 @@ mod tests {
     #[test]
     fn an_unknown_voice_is_refused() {
         let temp = TempDir::new();
-        let manifest = provisioned_manifest("https://x.invalid/e", "https://x.invalid/m", "https://x.invalid/c");
+        let manifest = provisioned_manifest(UNREACHABLE_ENGINE, "https://x.invalid/m", "https://x.invalid/c");
         assert!(matches!(
             install(InstallRequest {
                 manifest: &manifest,
@@ -1483,7 +1998,7 @@ mod tests {
         // Point the voice download at a server that serves the wrong body.
         let server = TestServer::start(vec![("/m".to_string(), b"corrupt".to_vec())]);
         let manifest = provisioned_manifest(
-            "https://x.invalid/e",
+            UNREACHABLE_ENGINE,
             &server.url("/m"),
             &server.url("/c"),
         );
@@ -1532,7 +2047,7 @@ mod tests {
         // The engine URL is unreachable; reaching it would fail the test.
         let server = TestServer::start(vec![("/m".to_string(), b"model".to_vec())]);
         let manifest = provisioned_manifest(
-            "https://definitely.invalid/engine",
+            UNREACHABLE_ENGINE,
             &server.url("/m"),
             &server.url("/missing-config"),
         );
@@ -1583,7 +2098,7 @@ mod tests {
         ]);
 
         let mut manifest =
-            provisioned_manifest("https://x.invalid/e", &server.url("/m"), &server.url("/c"));
+            provisioned_manifest(UNREACHABLE_ENGINE, &server.url("/m"), &server.url("/c"));
         manifest.voices[0].model.sha256 = sha256_of(&model_bytes);
         manifest.voices[0].model.size_bytes = model_bytes.len() as u64;
         manifest.voices[0].config.sha256 = sha256_of(&config_bytes);
@@ -1643,7 +2158,7 @@ mod tests {
             ("/c".to_string(), config_bytes.clone()),
         ]);
         let mut manifest =
-            provisioned_manifest("https://x.invalid/e", &server.url("/m"), &server.url("/c"));
+            provisioned_manifest(UNREACHABLE_ENGINE, &server.url("/m"), &server.url("/c"));
         manifest.voices[0].model.sha256 = sha256_of(&model_bytes);
         manifest.voices[0].model.size_bytes = model_bytes.len() as u64;
         manifest.voices[0].config.sha256 = sha256_of(&config_bytes);
@@ -1671,7 +2186,7 @@ mod tests {
     #[test]
     fn cancelling_before_any_work_reports_cancelled() {
         let temp = TempDir::new();
-        let manifest = provisioned_manifest("https://x.invalid/e", "https://x.invalid/m", "https://x.invalid/c");
+        let manifest = provisioned_manifest(UNREACHABLE_ENGINE, "https://x.invalid/m", "https://x.invalid/c");
         let error = install(InstallRequest {
             manifest: &manifest,
             voice_id: "en_US-amy-medium",
@@ -1686,6 +2201,93 @@ mod tests {
         assert!(!temp.path().join(".staging").exists());
     }
 
+    /// Installs the catalogue's own pinned engine and makes it speak.
+    ///
+    /// Every other test here proves a property of the machinery against a
+    /// fixture. This one proves the claim the machinery exists to make:
+    /// that the artifact the shipped manifest pins is a real, standalone
+    /// speech engine that installs and produces audio on this machine.
+    /// Nothing short of running it can establish that — an archive that
+    /// hashes correctly and contains no executable would pass every other
+    /// test in this file.
+    ///
+    /// Ignored by default because it downloads tens of megabytes. Run it
+    /// when the manifest's pins change:
+    ///
+    /// ```text
+    /// cargo test -- --ignored the_pinned_engine_installs_and_speaks --nocapture
+    /// ```
+    ///
+    /// Skips rather than fails when the catalogue is unprovisioned, which
+    /// is its documented checked-in state.
+    #[test]
+    #[ignore = "downloads the pinned engine and voice over the network"]
+    fn the_pinned_engine_installs_and_speaks() {
+        let manifest = match VoiceManifest::load() {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                eprintln!(
+                    "skipped: the shipped catalogue is not provisioned ({error}). \
+                     Run `node scripts/build-voice-manifest.mjs` first."
+                );
+                return;
+            }
+        };
+        let voice = manifest
+            .recommended_voice()
+            .expect("the catalogue must recommend a voice")
+            .clone();
+
+        let temp = TempDir::new();
+        let outcome = install(InstallRequest {
+            manifest: &manifest,
+            voice_id: &voice.id,
+            tts_root: temp.path(),
+            platform: super::super::manifest::current_platform(),
+            arch: super::super::manifest::current_arch(),
+            on_progress: &|progress| {
+                if progress.stage != InstallStage::DownloadingVoice
+                    && progress.stage != InstallStage::DownloadingEngine
+                {
+                    eprintln!("  {}", progress.label);
+                }
+            },
+            is_cancelled: &|| false,
+        })
+        .expect("the pinned engine must install");
+
+        assert!(
+            discovery::is_executable_file(&outcome.binary_path),
+            "no runnable engine at {}",
+            outcome.binary_path.display()
+        );
+        assert_eq!(outcome.voice_id, voice.id);
+        assert!(!outcome.reused_runtime, "nothing was installed in an empty root");
+
+        // `install` already spoke once, through this same provider, before
+        // it returned. Saying it again here is the difference between
+        // trusting the installer's own report and observing the result.
+        let provider = crate::tts::PiperProvider::new(
+            Some(outcome.binary_path.clone()),
+            Some(outcome.voice_path.clone()),
+            discovery::tts_scratch_dir(temp.path()),
+        );
+        let audio = provider
+            .synthesize(crate::tts::TEST_PHRASE)
+            .expect("synthesis")
+            .expect("audio");
+        assert!(
+            audio.wav_base64.len() > 1024,
+            "the engine returned {} bytes of base64, which is not speech",
+            audio.wav_base64.len()
+        );
+        eprintln!(
+            "  engine {} spoke {} bytes of WAV",
+            outcome.runtime_version,
+            audio.wav_base64.len()
+        );
+    }
+
     /// A manifest whose artifacts are pinned to the given URLs. The
     /// checksums are real hashes of the test bodies where it matters.
     fn provisioned_manifest(engine: &str, model: &str, config: &str) -> VoiceManifest {
@@ -1695,18 +2297,23 @@ mod tests {
             runtimes: vec![RuntimeEntry {
                 id: "piper-windows-x86_64".to_string(),
                 engine: "piper".to_string(),
-                version: "1.6.0".to_string(),
+                version: "2023.11.14-2".to_string(),
                 platform: "windows".to_string(),
                 arch: "x86_64".to_string(),
                 archive: ArchiveKind::Zip,
                 executable_path: "piper/piper.exe".to_string(),
+                release: super::super::manifest::ReleaseSource {
+                    repo: "rhasspy/piper".to_string(),
+                    tag: "2023.11.14-2".to_string(),
+                    asset: "piper_windows_amd64.zip".to_string(),
+                },
                 artifact: Artifact {
                     url: engine.to_string(),
                     sha256: sha256_of(b"engine archive"),
                     size_bytes: 14,
                 },
-                license: "GPL-3.0-only".to_string(),
-                source: "https://github.com/OHF-Voice/piper1-gpl".to_string(),
+                license: "MIT".to_string(),
+                source: "https://github.com/rhasspy/piper".to_string(),
             }],
             voices: vec![VoiceEntry {
                 model: Artifact {

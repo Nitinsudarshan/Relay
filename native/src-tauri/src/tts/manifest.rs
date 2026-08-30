@@ -12,6 +12,31 @@
 //! have. Compiled in, the manifest either parses at startup or the build
 //! is broken, and there is no third state.
 //!
+//! ## Which upstream build the catalogue points at
+//!
+//! Relay installs a **standalone executable** and spawns it. That
+//! narrows the field to one upstream distribution: `rhasspy/piper`'s
+//! release archives, which contain `piper/piper.exe` (or `piper/piper`)
+//! alongside the ONNX runtime and espeak-ng data it needs.
+//!
+//! The successor project `OHF-Voice/piper1-gpl` is **not** a drop-in
+//! substitute here, and the difference is packaging rather than
+//! preference: its release workflow uploads `dist/*`, which is Python
+//! wheels and an sdist. `piper_tts-1.7.0-cp39-abi3-win_amd64.whl` is a
+//! CPython package — `piper/*.py` plus an `espeakbridge.pyd` extension —
+//! that needs an interpreter and `onnxruntime` installed to run at all.
+//! There is no `.exe` in it, in any release from v1.3.0 to v1.7.0. Its
+//! C++ CLI (`libpiper`) is built in CI but never published as a release
+//! asset. Pointing the installer at a wheel would not be a rename; it
+//! would be asking Relay to execute a zip full of Python.
+//!
+//! So each runtime here names its provenance explicitly — `repo`, `tag`
+//! and the exact `asset` filename — and [`validate`] re-derives the
+//! download URL from those three fields. An artifact cannot be swapped
+//! for a different one without the swap showing up in the JSON, and an
+//! asset whose extension disagrees with its declared `archive` kind is
+//! refused rather than guessed at.
+//!
 //! ## Provisioning
 //!
 //! Checksums cannot be invented. `scripts/build-voice-manifest.mjs`
@@ -29,7 +54,12 @@ const MANIFEST_JSON: &str = include_str!("../../resources/voice-manifest.json");
 
 /// Bumped when the shape changes incompatibly, so an old file fails loudly
 /// instead of deserializing into something subtly wrong.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// 2 added per-runtime release provenance and the `tar_gz` archive kind.
+/// A version-1 file names neither, and its Linux entry claims to be a zip
+/// when the artifact it points at is a tarball — exactly the kind of
+/// quietly-wrong state this number exists to prevent.
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ManifestError {
@@ -110,8 +140,92 @@ impl Artifact {
 pub enum ArchiveKind {
     /// A zip archive; the executable is extracted from `executable_path`.
     Zip,
+    /// A gzipped tar. Upstream ships Windows as a zip and every Unix
+    /// platform as a tarball, so supporting only one of the two means
+    /// supporting only one of the platforms.
+    TarGz,
     /// The download *is* the executable.
     Raw,
+}
+
+impl ArchiveKind {
+    /// Whether the download has to be unpacked to find the executable.
+    pub fn is_archive(self) -> bool {
+        !matches!(self, Self::Raw)
+    }
+
+    /// The kind implied by a filename, or `None` when it names no
+    /// packaging Relay can unpack.
+    ///
+    /// Used to check the declared `archive` against the asset actually
+    /// named, so a manifest cannot claim `zip` while pointing at a
+    /// tarball — or at a Python wheel.
+    fn from_filename(name: &str) -> Option<Self> {
+        let lower = name.to_ascii_lowercase();
+        if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
+            Some(Self::TarGz)
+        } else if lower.ends_with(".zip") {
+            Some(Self::Zip)
+        } else {
+            None
+        }
+    }
+}
+
+/// Where a runtime artifact comes from, named rather than inferred.
+///
+/// The generator resolves the asset by this exact name and no other
+/// rule — no pattern matching over a release's asset list, which is how
+/// a wheel gets mistaken for an engine. [`VoiceManifest::validate`] then
+/// re-derives the download URL from these three fields and requires the
+/// artifact to carry it, so provenance is checked at load time on the
+/// user's machine, not only at release time on ours.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseSource {
+    /// `owner/name` on GitHub.
+    pub repo: String,
+    /// The release tag, pinned. Never "latest": a project is free to
+    /// change what it publishes, and Relay is not free to run it.
+    pub tag: String,
+    /// The exact asset filename within that release.
+    pub asset: String,
+}
+
+impl ReleaseSource {
+    /// The canonical download URL for this asset.
+    pub fn download_url(&self) -> String {
+        format!(
+            "https://github.com/{}/releases/download/{}/{}",
+            self.repo, self.tag, self.asset
+        )
+    }
+
+    /// The project page, for the licence notice in the UI.
+    pub fn project_url(&self) -> String {
+        format!("https://github.com/{}", self.repo)
+    }
+
+    fn problems(&self, label: &str) -> Vec<String> {
+        let mut problems = Vec::new();
+        let segments: Vec<&str> = self.repo.split('/').collect();
+        if segments.len() != 2 || segments.iter().any(|s| s.is_empty()) {
+            problems.push(format!("{label}: release repo must be owner/name"));
+        }
+        if self.tag.is_empty() {
+            problems.push(format!("{label}: release tag is not pinned"));
+        }
+        // A path separator in either would let the derived URL point
+        // somewhere other than this release.
+        for (field, value) in [("tag", &self.tag), ("asset", &self.asset)] {
+            if value.contains('/') || value.contains("..") {
+                problems.push(format!("{label}: release {field} is not a plain name"));
+            }
+        }
+        if self.asset.is_empty() {
+            problems.push(format!("{label}: no release asset named"));
+        }
+        problems
+    }
 }
 
 /// A speech engine build for one platform and architecture.
@@ -131,6 +245,8 @@ pub struct RuntimeEntry {
     /// Ignored for [`ArchiveKind::Raw`].
     #[serde(default)]
     pub executable_path: String,
+    /// The upstream release this artifact is taken from.
+    pub release: ReleaseSource,
     pub artifact: Artifact,
     pub license: String,
     pub source: String,
@@ -236,10 +352,14 @@ impl VoiceManifest {
                     runtime.id, runtime.engine
                 ));
             }
-            if runtime.archive == ArchiveKind::Zip && runtime.executable_path.is_empty() {
-                problems.push(format!("runtime {}: zip with no executable path", runtime.id));
+            let label = format!("runtime {}", runtime.id);
+            if runtime.archive.is_archive() {
+                problems.extend(executable_path_problems(&runtime.executable_path, &label));
             }
-            problems.extend(runtime.artifact.problems(&format!("runtime {}", runtime.id)));
+            problems.extend(runtime.release.problems(&label));
+            problems.extend(archive_matches_asset(runtime, &label));
+            problems.extend(artifact_matches_release(runtime, &label));
+            problems.extend(runtime.artifact.problems(&label));
         }
 
         let mut voice_ids = std::collections::HashSet::new();
@@ -308,6 +428,90 @@ impl VoiceManifest {
     }
 }
 
+/// Rejects an executable path that could land outside the engine folder.
+///
+/// The path is joined onto a directory Relay owns, so `..`, a leading
+/// slash or a drive letter would put the "executable" somewhere else
+/// entirely. A backslash is refused too: the field is documented as
+/// forward-slashed, and a `\` would be one path component on Unix and
+/// two on Windows, which is precisely the kind of disagreement a
+/// traversal check is supposed to have no room for.
+fn executable_path_problems(path: &str, label: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    if path.is_empty() {
+        problems.push(format!("{label}: archive with no executable path"));
+        return problems;
+    }
+    if path.contains('\\') {
+        problems.push(format!("{label}: executable path must be forward-slashed"));
+    }
+    if path.starts_with('/') || path.split('/').any(|part| part == ".." || part.is_empty()) {
+        problems.push(format!("{label}: executable path escapes the engine folder"));
+    }
+    // `C:\...`, and the `\\server\share` form once backslashes are ruled out.
+    if path.contains(':') {
+        problems.push(format!("{label}: executable path is not relative"));
+    }
+    problems
+}
+
+/// Requires the declared packaging to agree with the asset's own name.
+///
+/// This is the check that would have caught pointing Windows at
+/// `piper_tts-1.7.0-cp39-abi3-win_amd64.whl`: a wheel is a zip by format
+/// but a Python package by content, and nothing in it is runnable. The
+/// rule is deliberately about the *declared* asset rather than the bytes,
+/// because a manifest that names a wheel is wrong before anything is
+/// downloaded.
+fn archive_matches_asset(runtime: &RuntimeEntry, label: &str) -> Vec<String> {
+    let asset = &runtime.release.asset;
+    let lower = asset.to_ascii_lowercase();
+
+    if lower.ends_with(".whl") {
+        return vec![format!(
+            "{label}: {asset} is a Python wheel, not a standalone engine Relay can run"
+        )];
+    }
+
+    match runtime.archive {
+        ArchiveKind::Raw => Vec::new(),
+        kind => match ArchiveKind::from_filename(asset) {
+            Some(actual) if actual == kind => Vec::new(),
+            Some(actual) => vec![format!(
+                "{label}: declared {kind:?} but {asset} is {actual:?}"
+            )],
+            None => vec![format!(
+                "{label}: {asset} is not an archive Relay knows how to unpack"
+            )],
+        },
+    }
+}
+
+/// Requires the artifact URL to be the one its release provenance implies.
+///
+/// Loopback is exempt, for the same reason it is exempt from the HTTPS
+/// rule: the installer's end-to-end tests serve artifacts from a local
+/// server, and the shipped catalogue is separately asserted to contain no
+/// loopback URLs.
+fn artifact_matches_release(runtime: &RuntimeEntry, label: &str) -> Vec<String> {
+    let url = &runtime.artifact.url;
+    if url.is_empty() || url.starts_with("http://127.0.0.1:") || url.starts_with("http://localhost:")
+    {
+        return Vec::new();
+    }
+    let mut problems = Vec::new();
+    let expected = runtime.release.download_url();
+    if url != &expected {
+        problems.push(format!("{label}: download URL is not {expected}"));
+    }
+    if runtime.source != runtime.release.project_url() {
+        problems.push(format!(
+            "{label}: source is not the project the artifact comes from"
+        ));
+    }
+    problems
+}
+
 /// This machine's platform, in the manifest's vocabulary.
 pub fn current_platform() -> &'static str {
     if cfg!(windows) {
@@ -346,18 +550,31 @@ mod tests {
         "a".repeat(64)
     }
 
+    fn release() -> ReleaseSource {
+        ReleaseSource {
+            repo: "rhasspy/piper".to_string(),
+            tag: "2023.11.14-2".to_string(),
+            asset: "piper_windows_amd64.zip".to_string(),
+        }
+    }
+
     fn runtime() -> RuntimeEntry {
+        let release = release();
         RuntimeEntry {
-            id: "piper-1.6.0-windows-x86_64".to_string(),
+            id: "piper-windows-x86_64".to_string(),
             engine: "piper".to_string(),
-            version: "1.6.0".to_string(),
+            version: "2023.11.14-2".to_string(),
             platform: "windows".to_string(),
             arch: "x86_64".to_string(),
             archive: ArchiveKind::Zip,
             executable_path: "piper/piper.exe".to_string(),
-            artifact: artifact(&valid_sha()),
-            license: "GPL-3.0-only".to_string(),
-            source: "https://github.com/OHF-Voice/piper1-gpl".to_string(),
+            artifact: Artifact {
+                url: release.download_url(),
+                ..artifact(&valid_sha())
+            },
+            source: release.project_url(),
+            release,
+            license: "MIT".to_string(),
         }
     }
 
@@ -501,14 +718,159 @@ mod tests {
     }
 
     #[test]
-    fn a_zip_runtime_must_say_where_the_executable_is() {
+    fn an_archive_runtime_must_say_where_the_executable_is() {
+        for archive in [ArchiveKind::Zip, ArchiveKind::TarGz] {
+            let mut broken = manifest();
+            broken.runtimes[0].archive = archive;
+            broken.runtimes[0].release.asset = match archive {
+                ArchiveKind::TarGz => "piper_linux_x86_64.tar.gz".to_string(),
+                _ => "piper_windows_amd64.zip".to_string(),
+            };
+            broken.runtimes[0].artifact.url = broken.runtimes[0].release.download_url();
+            broken.runtimes[0].executable_path = String::new();
+            assert!(
+                broken
+                    .validate()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("archive with no executable path"),
+                "{archive:?} accepted without an executable path"
+            );
+        }
+    }
+
+    #[test]
+    fn an_executable_path_may_not_escape_the_engine_folder() {
+        // The path is joined onto a directory Relay owns. Every one of
+        // these would put the "executable" somewhere else.
+        for bad in [
+            "../piper.exe",
+            "piper/../../piper.exe",
+            "/usr/bin/piper",
+            "C:/Windows/System32/piper.exe",
+            "piper\\piper.exe",
+            "piper//piper.exe",
+        ] {
+            let mut broken = manifest();
+            broken.runtimes[0].executable_path = bad.to_string();
+            assert!(
+                broken.validate().is_err(),
+                "accepted an escaping executable path: {bad}"
+            );
+        }
+        // And the ordinary case still passes.
+        assert_eq!(manifest().validate(), Ok(()));
+    }
+
+    #[test]
+    fn a_python_wheel_is_refused_as_an_engine() {
+        // The bug this schema version exists for. Piper's successor
+        // project publishes `piper_tts-1.7.0-cp39-abi3-win_amd64.whl` and
+        // no executable at all. A wheel is a zip by format, so nothing
+        // upstream of here would notice; it is a Python package by
+        // content, so nothing in it can be spawned.
         let mut broken = manifest();
-        broken.runtimes[0].executable_path = String::new();
-        assert!(broken
+        broken.runtimes[0].release.asset =
+            "piper_tts-1.7.0-cp39-abi3-win_amd64.whl".to_string();
+        broken.runtimes[0].artifact.url = broken.runtimes[0].release.download_url();
+        let error = broken.validate().unwrap_err().to_string();
+        assert!(error.contains("Python wheel"), "{error}");
+    }
+
+    #[test]
+    fn a_declared_archive_kind_must_match_the_asset_it_names() {
+        // Renaming the expected asset to make a build pass is exactly the
+        // failure mode this catches: the Linux artifact is a tarball, and
+        // calling it a zip means `extract_zip` on gzip bytes.
+        let mut broken = manifest();
+        broken.runtimes[0].release.asset = "piper_linux_x86_64.tar.gz".to_string();
+        broken.runtimes[0].artifact.url = broken.runtimes[0].release.download_url();
+        let error = broken.validate().unwrap_err().to_string();
+        assert!(error.contains("declared Zip"), "{error}");
+
+        let mut unknown = manifest();
+        unknown.runtimes[0].release.asset = "piper_tts-1.7.0.tar.bz2".to_string();
+        unknown.runtimes[0].artifact.url = unknown.runtimes[0].release.download_url();
+        assert!(unknown
             .validate()
             .unwrap_err()
             .to_string()
-            .contains("zip with no executable path"));
+            .contains("not an archive Relay knows how to unpack"));
+    }
+
+    #[test]
+    fn an_artifact_url_must_be_the_one_its_release_implies() {
+        // Provenance is re-derived on the user's machine, so a manifest
+        // that names one release and downloads from another is rejected
+        // at load rather than trusted because it parsed.
+        let mut broken = manifest();
+        broken.runtimes[0].artifact.url =
+            "https://github.com/someone-else/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip"
+                .to_string();
+        let error = broken.validate().unwrap_err().to_string();
+        assert!(error.contains("download URL is not"), "{error}");
+
+        let mut mislabelled = manifest();
+        mislabelled.runtimes[0].source = "https://github.com/OHF-Voice/piper1-gpl".to_string();
+        assert!(mislabelled
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("source is not the project"));
+    }
+
+    #[test]
+    fn a_release_must_be_pinned_to_a_plain_tag_and_asset() {
+        for mutate in [
+            (|r: &mut ReleaseSource| r.tag = String::new()) as fn(&mut ReleaseSource),
+            |r: &mut ReleaseSource| r.repo = "piper".to_string(),
+            |r: &mut ReleaseSource| r.asset = String::new(),
+            |r: &mut ReleaseSource| r.tag = "../../other".to_string(),
+            |r: &mut ReleaseSource| r.asset = "nested/piper.zip".to_string(),
+        ] {
+            let mut broken = manifest();
+            mutate(&mut broken.runtimes[0].release);
+            assert!(broken.validate().is_err(), "accepted a loose release pin");
+        }
+    }
+
+    #[test]
+    fn a_loopback_artifact_is_exempt_from_the_provenance_check() {
+        // The installer's end-to-end tests serve artifacts locally. The
+        // carve-out matches the one `transport_is_safe` already makes,
+        // and a separate test asserts the shipped catalogue uses neither.
+        let mut local = manifest();
+        local.runtimes[0].artifact.url = "http://127.0.0.1:8080/engine.zip".to_string();
+        assert_eq!(local.validate(), Ok(()));
+    }
+
+    #[test]
+    fn the_shipped_manifest_installs_something_runnable_not_a_wheel() {
+        // A regression guard on the catalogue itself, independent of
+        // whether it has been provisioned yet.
+        let parsed: VoiceManifest = serde_json::from_str(MANIFEST_JSON).unwrap();
+        for runtime in &parsed.runtimes {
+            assert!(
+                !runtime.release.asset.to_ascii_lowercase().ends_with(".whl"),
+                "{} points at a Python wheel",
+                runtime.id
+            );
+            assert_eq!(
+                ArchiveKind::from_filename(&runtime.release.asset),
+                Some(runtime.archive),
+                "{} declares {:?} but names {}",
+                runtime.id,
+                runtime.archive,
+                runtime.release.asset
+            );
+            assert!(
+                runtime.artifact.url.is_empty()
+                    || runtime.artifact.url == runtime.release.download_url(),
+                "{} downloads from somewhere other than the release it names",
+                runtime.id
+            );
+            assert_eq!(runtime.source, runtime.release.project_url());
+        }
     }
 
     #[test]

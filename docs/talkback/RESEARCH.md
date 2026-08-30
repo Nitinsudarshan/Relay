@@ -77,8 +77,8 @@ crates.io, not from secondary write-ups, except where marked *(secondary)*.
 | **Silero VAD** | VAD | MIT (code and weights) | Yes | Yes | ~1 ms per 30 ms frame, 1 thread | No | Frame-by-frame | 6000+ | Mature, widely deployed | Medium: ONNX runtime + model file | Best-in-class streaming speech gate | **EVALUATE** — architecture accommodates it, V1 does not ship it (see §D) |
 | **Pipecat Smart Turn v3** | Semantic turn detection | Open weights + open training data/code | Yes | Yes | ~8M params, <60 ms CPU | No | Per-utterance | Multilingual | New but from the Pipecat team | Medium-high: ONNX + Whisper-tiny-style mel front end | The right answer to "has the user finished a thought" | **EVALUATE** — V2 candidate |
 | **Relay's existing energy VAD** | VAD | — (in repo) | Yes | Yes | Trivial | No | Post-hoc over a finished buffer | n/a | Shipped, tested | Zero | Trims silence from a completed recording; **not** a turn detector | **KEEP for capture, INSUFFICIENT for Talkback turn-taking** — see §D |
-| **Piper (`rhasspy/piper`)** | TTS | MIT | Yes | Yes | Yes | No | No (batch WAV) | ~30 | **Archived Oct 2025 — read-only** | Zero (already wired) | Relay's shipped TTS; still works, no longer maintained | **KEEP as the V1 baseline provider, flagged as archived** |
-| **Piper successor (`OHF-Voice/piper1-gpl`)** | TTS | **GPL-3.0** (relicensed) | Yes | Yes | Yes | No | Partial | ~30 | Active, Open Home Foundation, v1.6.0 Jul 2026 *(secondary)* | Low — same CLI shape, out-of-process | GPL-3.0 is fine *for Relay*: AGPL-3.0 is GPL-3.0-compatible, and Relay shells out to a separate process rather than linking. Relay downloads it at the user's request from the project's own release URL and does not redistribute it. | **KEEP** — what the installer fetches |
+| **Piper (`rhasspy/piper`)** | TTS | MIT | Yes | Yes | Yes | No | No (batch WAV) | ~30 | **Archived Oct 2025 — read-only**; last release `2023.11.14-2` | Zero (already wired) | Relay's shipped TTS. **The only Piper distribution that is a standalone executable**: `piper_windows_amd64.zip` and `piper_linux_x86_64.tar.gz` carry `piper/piper[.exe]` with onnxruntime and espeak-ng beside it. Verified 2026-08-30 by downloading both, listing their contents, and synthesising through `PiperProvider`. | **KEEP as the V1 baseline provider and as what the installer fetches, flagged as archived** |
+| **Piper successor (`OHF-Voice/piper1-gpl`)** | TTS | **GPL-3.0** (relicensed) | Yes | Yes (as a Python package) | Yes | No | Partial | ~30 | Active, Open Home Foundation, v1.7.0 | **High, and not what it looks like** — see §B.1 | Licensing is fine (AGPL-3.0 is GPL-3.0-compatible, and Relay shells out rather than links). **Packaging is not**: every release asset is a Python wheel or an sdist. | **NOT INSTALLABLE by the current architecture** — revisit only if it starts publishing a binary |
 | **Kokoro-82M** | TTS | Apache-2.0 (weights **and** code) | Yes | Yes | Yes (real-time-ish) | Optional | Yes, chunked | 8 incl. Hindi | v1.0 Jan 2025, very widely used | Medium: ONNX + a Rust port (`Kokoros`, `kokoroxide`, `kokoro-en`, `tts-rs`) or a bundled CLI | Best quality-per-MB local option; Apache weights are redistributable | **EVALUATE** — second provider behind the trait, benchmark before adopting |
 | **Chatterbox / Turbo / Nano** (Resemble AI) | TTS | MIT (code) | Yes | Python only | Nano ~3× realtime on 8 cores *(secondary)* | 8–16 GB VRAM for the full model *(secondary)* | Yes | Multilingual | Active | **Very high** — PyTorch runtime inside a Tauri app | Expressive, agent-oriented; wrong runtime for a Windows desktop installer | **REFERENCE ONLY** for V1; re-evaluate if an ONNX/Rust path appears |
 | **openWakeWord** | Wake word | Apache-2.0 | Yes | Python | Yes | No | Yes | Custom | Maintained, Home-Assistant ecosystem | High (Python) | Right idea, wrong runtime | **REFERENCE ONLY** — informs the `activation_mode` seam |
@@ -90,13 +90,54 @@ crates.io, not from secondary write-ups, except where marked *(secondary)*.
 | **`fastembed` 5.x** | Local embeddings | Apache-2.0 | Yes | Yes | Yes | Optional | — | Multilingual models available | Active (v5.16.2, Jun 2026) *(secondary)* | Medium — same `ort` caveat, plus a first-run model download | The credible path to real semantic retrieval | **EVALUATE** — V2, behind the retriever's scoring seam |
 | **Ollama `/api/embed`** | Embeddings via existing provider | MIT (Ollama) | Yes | Yes | Yes | Optional | — | Model-dependent | Shipped | **Low** — Relay already talks to Ollama over HTTP | Embeddings with *zero* new native dependencies | **EVALUATE** — the preferred first semantic-retrieval experiment |
 
+### B.1 The successor project publishes a Python package, not a program
+
+Worth writing down, because the row above reads like a preference and it
+is not. Relay's installer downloads an archive and **spawns an executable
+out of it**. That is the whole architecture: no linking, no interpreter,
+no second runtime inside a Tauri app.
+
+`OHF-Voice/piper1-gpl` cannot satisfy it as published. Its release
+workflow (`.github/workflows/publish.yml`) uploads `dist/*`, and `dist`
+holds wheels and an sdist — nothing else, in any release from v1.3.0 to
+v1.7.0. The Windows asset is:
+
+```text
+piper_tts-1.7.0-cp39-abi3-win_amd64.whl
+```
+
+Downloaded and listed on 2026-08-30, it contains 432 entries: 39 Python
+files, `piper/espeakbridge.pyd`, `espeak-ng-data/`, and a `dist-info`
+directory. No `piper.exe`. Running it means CPython 3.9+ *plus*
+`onnxruntime` and the rest of its dependency tree installed on the user's
+machine — which is a package manager's job, not an installer's.
+
+The project does have a C++ CLI (`libpiper`, added in v1.5.0), and
+`.github/workflows/build-libpiper.yml` builds it for Linux, macOS and
+Windows. It uploads the result as a **CI artifact**, on pull requests and
+manual dispatch only. It is never attached to a release, so there is no
+stable, pinnable URL to install from.
+
+The trap is that a wheel is a zip. It downloads, it hashes, it extracts.
+Every check short of *listing its contents* passes. Relaxing the
+generator's asset matcher — or renaming the expected asset to make a
+failing release step go green — would have pinned it and shipped it, and
+the failure would have surfaced as "the voice installed but couldn't
+speak", on a user's machine, after a 34 MB download.
+
+What Relay does instead: pin `rhasspy/piper` `2023.11.14-2`, the last
+release that publishes standalone binaries, and have the generator open
+every artifact and assert the executable is in it. Archived upstream is a
+real cost, and the honest one to pay: the alternative is not a newer
+engine, it is no engine.
+
 ### Classification
 
 ```text
 KEEP            whisper.cpp / whisper-rs      (STT, unchanged)
                 Relay energy VAD              (capture trimming, unchanged)
-                Piper                         (TTS baseline, now behind a trait)
-                piper1-gpl                    (the maintained binary to point at)
+                Piper 2023.11.14-2            (TTS baseline behind a trait,
+                                               and what the installer fetches)
                 Ollama / LLMClient            (LLM, extended with streaming)
 
 EVALUATE        Kokoro-82M                    (2nd TTS provider — benchmark first)
@@ -241,7 +282,7 @@ Findings that overrode the brief's starting hypotheses:
 
 - [snakers4/silero-vad](https://github.com/snakers4/silero-vad) — MIT, ONNX, ~1 ms/frame
 - [silero-vad-rs](https://crates.io/crates/silero-vad-rs) · [voice_activity_detector](https://crates.io/crates/voice_activity_detector) — Rust ports
-- [OHF-Voice/piper1-gpl](https://github.com/OHF-Voice/piper1-gpl) — GPL-3.0 Piper successor
+- [OHF-Voice/piper1-gpl](https://github.com/OHF-Voice/piper1-gpl) — GPL-3.0 Piper successor (Python package; see §B.1)
 - [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) — Apache-2.0 weights
 - [lucasjinreal/Kokoros](https://github.com/lucasjinreal/Kokoros) · [kokoroxide](https://crates.io/crates/kokoroxide) — Rust Kokoro
 - [resemble-ai/chatterbox](https://github.com/resemble-ai/chatterbox) — MIT, PyTorch

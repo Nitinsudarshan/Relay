@@ -241,12 +241,44 @@ talked into downloading something else. The catalogue carries, per entry:
 version, platform, arch, URL, SHA-256, expected size, the executable's
 path inside the archive, licence and upstream source.
 
+Each runtime also names its **provenance** — `release: { repo, tag, asset }`
+— and `validate()` re-derives the download URL from those three fields and
+requires the artifact to carry it. The generator resolves that exact asset
+name and nothing else. Provenance is therefore checked twice: once at
+release time, and once at load time on the user's machine.
+
 Checksums cannot be written by hand. `scripts/build-voice-manifest.mjs`
 downloads each artifact, hashes it, and rewrites the file — a release
 step. Until it has run, `validate()` rejects the manifest and Relay
 reports *"automatic voice setup isn't available in this build"* rather
 than fetching something it cannot verify. **A catalogue that cannot be
 trusted is treated as no catalogue at all.**
+
+### What the installer can install
+
+An **executable**, spawned as a subprocess. That single constraint decides
+which upstream build the catalogue points at, and it is not the newest
+one: `OHF-Voice/piper1-gpl` publishes only Python wheels, so Relay pins
+`rhasspy/piper` `2023.11.14-2` — the last release that ships standalone
+binaries. See `RESEARCH.md` §B.1.
+
+A wheel is a zip, so it downloads, hashes and extracts like an engine and
+contains no `piper.exe`. Two checks stand between the catalogue and that
+outcome:
+
+- `manifest.rs` refuses a `.whl` asset outright, and refuses any asset
+  whose extension disagrees with its declared `archive` kind.
+- The generator opens every artifact it pins, lists its entries, and fails
+  unless the declared `executable_path` is really inside it, non-empty,
+  and (for a tarball) marked runnable.
+
+Upstream ships Windows as a `.zip` and every Unix platform as a
+`.tar.gz`, so `ArchiveKind` covers both. Neither is unpacked with a
+library's convenience method: every entry path is checked lexically
+against the target, symlinks are validated for containment and created
+after the regular files, tar modes are masked to the ownership bits, and
+the whole expansion is capped. A pinned checksum proves what the bytes
+*are*; it says nothing about what they unfold into.
 
 ### What "installed" has to mean
 

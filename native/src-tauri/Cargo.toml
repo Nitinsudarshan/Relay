@@ -1,6 +1,6 @@
 [package]
 name = "relay-native-backend"
-version = "0.19.0"
+version = "0.19.1"
 description = "Relay AI Voice and Memory Assistant Rust Backend"
 authors = ["Relay Team"]
 license = "AGPL-3.0-only"
@@ -39,6 +39,12 @@ urlencoding = "2.1"
 dotenvy = "0.15"
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# Upstream ships Windows as a zip and every Unix platform as a tarball,
+# so the installer has to read both. `zip` already pulls flate2 in for
+# deflate; naming it here makes the gzip side explicit rather than
+# inherited from another crate's feature choice.
+tar = "0.4"
+flate2 = "1"
 
 [features]
 default = ["whisper-local"]
