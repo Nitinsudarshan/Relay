@@ -65,6 +65,7 @@ jobs:
             librsvg2-dev \
             libasound2-dev \
             libxdo-dev \
+            libclang-dev \
             build-essential \
             cmake
 
