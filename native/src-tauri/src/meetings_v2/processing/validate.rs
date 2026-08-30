@@ -8,8 +8,9 @@
 //! Warnings are recorded and kept. They are the signal that summary quality is
 //! drifting — visible in the processing log without changing what the user sees.
 
+use super::length::SummaryBudget;
 use super::model::{
-    ActionItem, IssueSeverity, MeetingFacts, OwnerType, Speaker, SummaryMode, ValidationIssue,
+    ActionItem, IssueSeverity, KeyPointKind, MeetingFacts, OwnerType, Speaker, ValidationIssue,
     ValidationReport,
 };
 use std::collections::HashSet;
@@ -21,6 +22,43 @@ const MAX_TRANSCRIPT_OVERLAP_WORDS: usize = 6;
 
 /// A summary shorter than this is not a summary.
 const MIN_SUMMARY_WORDS: usize = 8;
+
+/// The heading the output contract requires first.
+const REQUIRED_FIRST_HEADING: &str = "## Overview";
+
+/// Placeholder text a model writes when a section has nothing in it.
+///
+/// The contract says to omit an empty section; a model that writes the heading
+/// anyway and fills it with "None" has produced a summary that talks about its
+/// own structure. Worse, the same instinct produces "No pre-meeting notes were
+/// provided", which would appear on nearly every meeting Relay ever records.
+const EMPTY_SECTION_PLACEHOLDERS: &[&str] = &[
+    "none.",
+    "none",
+    "n/a",
+    "not applicable",
+    "nothing to report",
+    "no items",
+    "not available",
+];
+
+/// Openings that mean the model started talking to the user instead of writing
+/// the summary.
+const PREAMBLE_OPENERS: &[&str] = &[
+    "here is",
+    "here's",
+    "sure,",
+    "sure!",
+    "certainly",
+    "of course",
+    "i have",
+    "i've",
+    "below is",
+    "this is a summary",
+    "the following is",
+    "as requested",
+    "based on the",
+];
 
 fn error(code: &str, message: String) -> ValidationIssue {
     ValidationIssue {
@@ -50,7 +88,7 @@ pub fn validate_summary(
     markdown: &str,
     facts: &MeetingFacts,
     speakers: &[Speaker],
-    mode: SummaryMode,
+    budget: &SummaryBudget,
     transcript_text: &str,
     prose_is_deterministic: bool,
 ) -> ValidationReport {
@@ -70,16 +108,81 @@ pub fn validate_summary(
             "SUMMARY_TOO_SHORT",
             format!("The summary is only {} words long.", word_count),
         ));
+    } else if word_count < budget.thin_below_words() {
+        // Long enough to be prose, far too short to be this meeting's record.
+        issues.push(warning(
+            "SUMMARY_THIN",
+            format!(
+                "The summary is {} words for a meeting of about {} words; it is unlikely to carry what happened.",
+                word_count, budget.transcript_words
+            ),
+        ));
     }
-    if word_count > mode.max_words() {
+
+    // Length is judged against this meeting's own budget, not a fixed per-mode
+    // cap. A slight overrun is a style problem and stays a warning: rejecting a
+    // correct 600-word summary of a ninety-minute meeting, and replacing it with
+    // a fact dump, is a far worse outcome for the reader than forty extra words.
+    if word_count > budget.reject_above_words() {
         issues.push(error(
             "SUMMARY_TOO_LONG",
             format!(
-                "The summary is {} words, over the {} allowed for {} mode.",
-                word_count,
-                mode.max_words(),
-                mode.label()
+                "The summary is {} words, well past the {} this meeting's length allows.",
+                word_count, budget.max_words
             ),
+        ));
+    } else if word_count > budget.max_words {
+        issues.push(warning(
+            "SUMMARY_OVER_BUDGET",
+            format!(
+                "The summary is {} words, over the {} this meeting's length allows.",
+                word_count, budget.max_words
+            ),
+        ));
+    }
+
+    if !body.starts_with(REQUIRED_FIRST_HEADING) {
+        issues.push(error(
+            "SUMMARY_MISSING_OVERVIEW",
+            format!(
+                "The summary must begin with \"{}\"; it begins with \"{}\".",
+                REQUIRED_FIRST_HEADING,
+                body.lines().next().unwrap_or("").chars().take(60).collect::<String>()
+            ),
+        ));
+    }
+
+    if let Some(opener) = preamble_opener(body) {
+        issues.push(error(
+            "SUMMARY_HAS_PREAMBLE",
+            format!("The summary opens with commentary: \"{}\".", opener),
+        ));
+    }
+
+    for heading in empty_sections(body) {
+        issues.push(warning(
+            "SUMMARY_EMPTY_SECTION",
+            format!(
+                "Section \"{}\" has no content, or is filled with a placeholder.",
+                heading
+            ),
+        ));
+    }
+
+    for claim in unsupported_decisions_from_proposals(body, facts) {
+        issues.push(error(
+            "SUMMARY_PROPOSAL_AS_DECISION",
+            format!(
+                "The Decisions section states \"{}\", which the facts record only as a proposal.",
+                claim
+            ),
+        ));
+    }
+
+    if body.contains("## Risks") && facts.risks.is_empty() {
+        issues.push(error(
+            "SUMMARY_INVENTED_RISK",
+            "The summary has a risks section, but the facts record no risks.".to_string(),
         ));
     }
 
@@ -325,6 +428,233 @@ pub fn validate_speakers(speakers: &[Speaker]) -> ValidationReport {
     ValidationReport::from_issues(issues)
 }
 
+/// The commentary a summary opens with when the model answered the user instead
+/// of writing the record.
+fn preamble_opener(markdown: &str) -> Option<String> {
+    let first = markdown.lines().find(|l| !l.trim().is_empty())?.trim();
+    if first.starts_with('#') {
+        return None;
+    }
+    let lower = first.to_lowercase();
+    PREAMBLE_OPENERS
+        .iter()
+        .find(|opener| lower.starts_with(*opener))
+        .map(|_| first.chars().take(60).collect())
+}
+
+/// Headings with nothing under them, or with a placeholder standing in for
+/// content.
+fn empty_sections(markdown: &str) -> Vec<String> {
+    let mut empty = Vec::new();
+    let mut current: Option<String> = None;
+    let mut has_content = false;
+
+    let flush = |heading: &Option<String>, has_content: bool, empty: &mut Vec<String>| {
+        if let Some(heading) = heading {
+            if !has_content {
+                empty.push(heading.clone());
+            }
+        }
+    };
+
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("## ") {
+            flush(&current, has_content, &mut empty);
+            current = Some(trimmed.trim_start_matches('#').trim().to_string());
+            has_content = false;
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with("### ") {
+            continue;
+        }
+        let content = trimmed
+            .trim_start_matches(['-', '*', ' '])
+            .trim_start_matches("[ ]")
+            .trim_start_matches("[x]")
+            .trim()
+            .to_lowercase();
+        if !EMPTY_SECTION_PLACEHOLDERS.contains(&content.as_str()) {
+            has_content = true;
+        }
+    }
+    flush(&current, has_content, &mut empty);
+    empty
+}
+
+/// Decisions lines that restate something the facts recorded as a proposal.
+///
+/// The most consequential hallucination a meeting summary makes, because it is
+/// the one a reader cannot detect: "the team decided to launch Friday" reads
+/// exactly like a decision whether or not anyone agreed to it. Matching is
+/// deliberately conservative — a Decisions line has to substantially reproduce a
+/// proposal's own wording before it is called out.
+fn unsupported_decisions_from_proposals(markdown: &str, facts: &MeetingFacts) -> Vec<String> {
+    let proposals: Vec<String> = facts
+        .key_points
+        .iter()
+        .filter(|p| matches!(p.kind, KeyPointKind::Proposal | KeyPointKind::Recommendation))
+        .map(|p| comparable_words(&p.text).join(" "))
+        .filter(|p| p.split_whitespace().count() >= 4)
+        .collect();
+    if proposals.is_empty() {
+        return Vec::new();
+    }
+
+    let decided: Vec<String> = facts
+        .decisions
+        .iter()
+        .map(|d| comparable_words(&d.statement).join(" "))
+        .collect();
+
+    section_bullets(markdown, "Decisions")
+        .into_iter()
+        .filter(|line| {
+            let normalized = comparable_words(line).join(" ");
+            // A line that matches a real decision is fine even if it happens to
+            // resemble a proposal too.
+            if decided.iter().any(|d| overlaps(&normalized, d)) {
+                return false;
+            }
+            proposals.iter().any(|p| overlaps(&normalized, p))
+        })
+        .collect()
+}
+
+/// True when one normalized phrase substantially contains the other.
+fn overlaps(line: &str, claim: &str) -> bool {
+    let claim_words: Vec<&str> = claim.split_whitespace().collect();
+    if claim_words.len() < 4 {
+        return false;
+    }
+    // Two thirds of the claim's words, in order, appearing in the line.
+    let needed = (claim_words.len() * 2) / 3;
+    let mut matched = 0usize;
+    let mut cursor = 0usize;
+    let line_words: Vec<&str> = line.split_whitespace().collect();
+    for word in &claim_words {
+        if let Some(offset) = line_words[cursor..].iter().position(|w| w == word) {
+            cursor += offset + 1;
+            matched += 1;
+        }
+    }
+    matched >= needed
+}
+
+/// The bullet lines under one `##` heading.
+fn section_bullets(markdown: &str, heading: &str) -> Vec<String> {
+    let mut inside = false;
+    let mut lines = Vec::new();
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("## ") {
+            inside = trimmed
+                .trim_start_matches('#')
+                .trim()
+                .eq_ignore_ascii_case(heading);
+            continue;
+        }
+        if inside && (trimmed.starts_with("- ") || trimmed.starts_with("* ")) {
+            lines.push(
+                trimmed
+                    .trim_start_matches(['-', '*', ' '])
+                    .trim()
+                    .to_string(),
+            );
+        }
+    }
+    lines
+}
+
+/// Turns a failed report into instructions the model can act on.
+///
+/// The point of a retry is that the second attempt is *different*. Re-sending an
+/// identical prompt is not a repair, it is a second roll of the same dice, so
+/// this names the rule that was broken and what to do instead. Only errors are
+/// reported: a warning is something to record, not something to make the user
+/// wait for another model call over.
+///
+/// Returns `None` when nothing actionable failed, which is the caller's signal
+/// that a repair would be pointless.
+pub fn repair_feedback(report: &ValidationReport, budget: &SummaryBudget) -> Option<String> {
+    let mut instructions: Vec<String> = Vec::new();
+
+    for issue in report
+        .issues
+        .iter()
+        .filter(|i| i.severity == IssueSeverity::Error)
+    {
+        let instruction = match issue.code.as_str() {
+            "SUMMARY_MISSING_OVERVIEW" => format!(
+                "Your previous answer did not begin with \"{}\". Start the summary with that \
+heading, and use the section headings exactly as the structure requires.",
+                REQUIRED_FIRST_HEADING
+            ),
+            "SUMMARY_HAS_PREAMBLE" => "Your previous answer opened with commentary addressed to \
+me. Return only the summary — no introduction, no sign-off, no description of what \
+you did."
+                .to_string(),
+            "SUMMARY_TOO_LONG" => format!(
+                "Your previous answer was too long for this meeting. Rewrite it to about {} \
+words and no more than {}. Cut repetition, secondary detail, and explanation — not \
+decisions, commitments, owners, deadlines, risks, or open questions.",
+                budget.target_words, budget.max_words
+            ),
+            "SUMMARY_TOO_SHORT" => format!(
+                "Your previous answer was too short to be a summary. Write about {} words, \
+covering what was decided, what has to happen next, and what is unresolved.",
+                budget.target_words
+            ),
+            "SUMMARY_JSON_LEAKED" => "Your previous answer contained raw JSON. Return \
+GitHub-flavored Markdown prose, never the facts object you were given."
+                .to_string(),
+            "SUMMARY_COPIES_TRANSCRIPT" => "Your previous answer reproduced a long run of wording \
+from the meeting itself. Write each point as your own claim about what was discussed, \
+never as a phrase lifted from it."
+                .to_string(),
+            "SUMMARY_INVENTED_PARTICIPANT" => format!(
+                "Your previous answer named someone who is not a participant in this meeting. \
+{} Use only the names in the facts, and \"Unassigned\" where the facts say so.",
+                issue.message
+            ),
+            "SUMMARY_INVENTED_DEADLINE" => "Your previous answer showed a due date. No action \
+item in the facts has one. Remove every date."
+                .to_string(),
+            "SUMMARY_INVENTED_RISK" => "Your previous answer included a risks section. The facts \
+record no risks. Remove that section rather than filling it."
+                .to_string(),
+            "SUMMARY_PROPOSAL_AS_DECISION" => format!(
+                "Your previous answer recorded a proposal as a decision. {} Move it out of \
+Decisions and write it as something that was proposed, not settled.",
+                issue.message
+            ),
+            "SUMMARY_EMPTY" => "Your previous answer was empty. Write the summary.".to_string(),
+            _ => continue,
+        };
+        if !instructions.contains(&instruction) {
+            instructions.push(instruction);
+        }
+    }
+
+    if instructions.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "CORRECTION — your previous answer was rejected
+{}
+
+Rewrite the summary from the same \
+facts, fixing only what is listed above. Do not add anything the facts do not \
+contain, and do not drop anything you had right.",
+        instructions
+            .iter()
+            .map(|i| format!("- {}", i))
+            .collect::<Vec<_>>()
+            .join("\n")
+    ))
+}
+
 /// True when the text is a JSON document rather than Markdown. Deliberately
 /// narrow: a Markdown summary may legitimately contain braces in a code span.
 fn looks_like_json(text: &str) -> bool {
@@ -535,7 +865,7 @@ mod tests {
     use super::*;
     use crate::meetings_v2::processing::model::{
         ActionItemStatus, Decision, Entity, EntityKind, KeyPoint, MeetingType, SegmentChannel,
-        SpeakerOrigin, SPEAKER_ID_ME, SPEAKER_ID_REMOTE,
+        SpeakerOrigin, SummaryMode, SPEAKER_ID_ME, SPEAKER_ID_REMOTE,
     };
 
     fn speaker(id: &str, fallback: &str, name: Option<&str>, local: bool) -> Speaker {
@@ -568,6 +898,7 @@ mod tests {
             key_points: vec![KeyPoint {
                 id: "point_0".into(),
                 text: "The release date was settled.".into(),
+                kind: KeyPointKind::Discussion,
                 topic_id: None,
                 source_segment_ids: vec!["seg_00000".into()],
             }],
@@ -575,12 +906,14 @@ mod tests {
             decisions: vec![Decision {
                 id: "decision_0".into(),
                 statement: "Ship the release on Friday.".into(),
+                rationale: None,
                 decided_by_speaker_id: Some(SPEAKER_ID_ME.into()),
                 source_segment_ids: vec!["seg_00000".into()],
                 confidence: 0.8,
             }],
             action_items: Vec::new(),
             open_questions: Vec::new(),
+            risks: Vec::new(),
             entities: vec![Entity {
                 id: "entity_0".into(),
                 name: "Relay".into(),
@@ -592,14 +925,21 @@ mod tests {
         }
     }
 
+    /// The budget a meeting of roughly this size would get. Length is judged
+    /// against the meeting, so a test that checks a length has to say how big
+    /// the meeting was.
+    fn budget(mode: SummaryMode) -> SummaryBudget {
+        crate::meetings_v2::processing::length::summary_budget(1_200, mode)
+    }
+
     #[test]
     fn a_reasonable_summary_passes() {
-        let markdown = "## Summary\n\n- The team settled the release date after weighing migration risk.\n\n## Decisions\n\n- Ship the release on Friday — Me\n";
+        let markdown = "## Overview\n\n- The team settled the release date after weighing migration risk.\n\n## Decisions\n\n- Ship the release on Friday — Me\n";
         let report = validate_summary(
             markdown,
             &facts(),
             &roster(),
-            SummaryMode::Standard,
+            &budget(SummaryMode::Standard),
             "we decided to ship the release on friday",
             false,
         );
@@ -608,20 +948,48 @@ mod tests {
 
     #[test]
     fn an_empty_summary_is_an_error() {
-        let report = validate_summary("   ", &facts(), &roster(), SummaryMode::Standard, "", false);
+        let report = validate_summary("   ", &facts(), &roster(), &budget(SummaryMode::Standard), "", false);
         assert!(!report.passed);
         assert_eq!(report.issues[0].code, "SUMMARY_EMPTY");
     }
 
     #[test]
-    fn an_over_long_summary_is_an_error() {
-        let padding = "The team discussed the architecture at some length. ".repeat(40);
-        let markdown = format!("## Summary\n\n{}", padding);
+    fn a_modest_overrun_is_recorded_but_the_summary_is_still_shown() {
+        // The regression this pins: a fixed cap turned a slightly long but
+        // perfectly good summary into a rejection, and the user was handed a
+        // deterministic fact dump instead. Forty words over is a style problem.
+        let budget = budget(SummaryMode::Concise);
+        let over = budget.max_words + 20;
+        let markdown = format!("## Overview\n\n{}", "word ".repeat(over));
+
         let report = validate_summary(
             &markdown,
             &facts(),
             &roster(),
-            SummaryMode::Concise,
+            &budget,
+            "unrelated transcript",
+            false,
+        );
+        assert!(
+            report.passed,
+            "a slight overrun must not cost the whole summary: {:?}",
+            report.issues
+        );
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.code == "SUMMARY_OVER_BUDGET"));
+    }
+
+    #[test]
+    fn a_runaway_summary_is_an_error() {
+        let padding = "The team discussed the architecture at some length. ".repeat(120);
+        let markdown = format!("## Overview\n\n{}", padding);
+        let report = validate_summary(
+            &markdown,
+            &facts(),
+            &roster(),
+            &budget(SummaryMode::Concise),
             "unrelated transcript",
             false,
         );
@@ -630,9 +998,27 @@ mod tests {
     }
 
     #[test]
+    fn length_is_judged_against_the_meeting_not_a_constant() {
+        // The same prose is fine for a long meeting and far too long for a
+        // two-minute one. Under the old fixed cap both got the same verdict.
+        let words = 400;
+        let markdown = format!("## Overview\n\n{}", "word ".repeat(words));
+        let long_meeting =
+            crate::meetings_v2::processing::length::summary_budget(9_000, SummaryMode::Standard);
+        let short_meeting =
+            crate::meetings_v2::processing::length::summary_budget(220, SummaryMode::Standard);
+
+        let ok = validate_summary(&markdown, &facts(), &roster(), &long_meeting, "", false);
+        let bad = validate_summary(&markdown, &facts(), &roster(), &short_meeting, "", false);
+
+        assert!(ok.passed, "unexpected: {:?}", ok.issues);
+        assert!(bad.issues.iter().any(|i| i.code == "SUMMARY_TOO_LONG"));
+    }
+
+    #[test]
     fn leaked_json_is_an_error() {
         let markdown = r#"{"title": "Release", "summary": "we shipped"}"#;
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
+        let report = validate_summary(markdown, &facts(), &roster(), &budget(SummaryMode::Standard), "", false);
         assert!(report
             .issues
             .iter()
@@ -641,8 +1027,8 @@ mod tests {
 
     #[test]
     fn a_markdown_summary_containing_braces_in_code_is_not_flagged_as_json() {
-        let markdown = "## Summary\n\n- The config change was agreed: ```{\"a\": \"b\", \"c\": \"d\"}``` stays as is for now.";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
+        let markdown = "## Overview\n\n- The config change was agreed: ```{\"a\": \"b\", \"c\": \"d\"}``` stays as is for now.";
+        let report = validate_summary(markdown, &facts(), &roster(), &budget(SummaryMode::Standard), "", false);
         assert!(!report
             .issues
             .iter()
@@ -652,12 +1038,12 @@ mod tests {
     #[test]
     fn copying_the_transcript_is_an_error() {
         let transcript = "so we really need to move the migration script review to next week because nobody has looked at it";
-        let markdown = format!("## Summary\n\n- {}", transcript);
+        let markdown = format!("## Overview\n\n- {}", transcript);
         let report = validate_summary(
             &markdown,
             &facts(),
             &roster(),
-            SummaryMode::Standard,
+            &budget(SummaryMode::Standard),
             transcript,
             false,
         );
@@ -672,12 +1058,12 @@ mod tests {
     fn a_short_incidental_overlap_is_allowed() {
         // Proper nouns and short policy phrases may legitimately overlap.
         let transcript = "we should ship the release on friday because the client expects it";
-        let markdown = "## Summary\n\n- The team committed to a Friday release, driven by client expectations rather than readiness.";
+        let markdown = "## Overview\n\n- The team committed to a Friday release, driven by client expectations rather than readiness.";
         let report = validate_summary(
             markdown,
             &facts(),
             &roster(),
-            SummaryMode::Standard,
+            &budget(SummaryMode::Standard),
             transcript,
             false,
         );
@@ -693,8 +1079,8 @@ mod tests {
 
     #[test]
     fn an_invented_participant_is_an_error() {
-        let markdown = "## Summary\n\n- Work was assigned.\n\n## Action Items\n\n- [ ] Send the deck — **Rajesh**\n";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
+        let markdown = "## Overview\n\n- Work was assigned.\n\n## Action Items\n\n- [ ] Send the deck — **Rajesh**\n";
+        let report = validate_summary(markdown, &facts(), &roster(), &budget(SummaryMode::Standard), "", false);
         assert!(!report.passed);
         assert!(report
             .issues
@@ -704,8 +1090,8 @@ mod tests {
 
     #[test]
     fn a_renamed_speaker_is_not_treated_as_invented() {
-        let markdown = "## Summary\n\n- Work was assigned to the reviewer.\n\n## Action Items\n\n- [ ] Send the deck — **Pranjali**\n";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
+        let markdown = "## Overview\n\n- Work was assigned to the reviewer.\n\n## Action Items\n\n- [ ] Send the deck — **Pranjali**\n";
+        let report = validate_summary(markdown, &facts(), &roster(), &budget(SummaryMode::Standard), "", false);
         assert!(
             !report
                 .issues
@@ -718,8 +1104,8 @@ mod tests {
 
     #[test]
     fn a_bold_section_label_is_not_mistaken_for_a_person() {
-        let markdown = "## Summary\n\n**Topics discussed:** Release Planning, Schema\n\n- The release date was settled.";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
+        let markdown = "## Overview\n\n**Topics discussed:** Release Planning, Schema\n\n- The release date was settled.";
+        let report = validate_summary(markdown, &facts(), &roster(), &budget(SummaryMode::Standard), "", false);
         assert!(!report
             .issues
             .iter()
@@ -729,8 +1115,8 @@ mod tests {
     #[test]
     fn duplicate_bullets_are_a_warning_not_a_failure() {
         let markdown =
-            "## Summary\n\n- The release date was settled.\n- The release date was settled.\n";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
+            "## Overview\n\n- The release date was settled.\n- The release date was settled.\n";
+        let report = validate_summary(markdown, &facts(), &roster(), &budget(SummaryMode::Standard), "", false);
         assert!(report.passed, "duplicates should not block a summary");
         assert!(report
             .issues
@@ -740,8 +1126,8 @@ mod tests {
 
     #[test]
     fn a_fabricated_decision_is_flagged() {
-        let markdown = "## Summary\n\n- Things were discussed at length.\n\n## Decisions\n\n- Acquire a competitor in the fourth quarter\n";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
+        let markdown = "## Overview\n\n- Things were discussed at length.\n\n## Decisions\n\n- Acquire a competitor in the fourth quarter\n";
+        let report = validate_summary(markdown, &facts(), &roster(), &budget(SummaryMode::Standard), "", false);
         assert!(report
             .issues
             .iter()
@@ -750,8 +1136,8 @@ mod tests {
 
     #[test]
     fn a_paraphrased_decision_is_accepted() {
-        let markdown = "## Summary\n\n- Timing was agreed.\n\n## Decisions\n\n- The release will ship on Friday\n";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
+        let markdown = "## Overview\n\n- Timing was agreed.\n\n## Decisions\n\n- The release will ship on Friday\n";
+        let report = validate_summary(markdown, &facts(), &roster(), &budget(SummaryMode::Standard), "", false);
         assert!(
             !report
                 .issues
@@ -764,8 +1150,8 @@ mod tests {
 
     #[test]
     fn a_due_date_with_no_backing_action_item_is_an_error() {
-        let markdown = "## Summary\n\n- Work was assigned to people.\n\n## Action Items\n\n- [ ] Send the deck — **Me** · Due: 2026-09-01\n";
-        let report = validate_summary(markdown, &facts(), &roster(), SummaryMode::Standard, "", false);
+        let markdown = "## Overview\n\n- Work was assigned to people.\n\n## Action Items\n\n- [ ] Send the deck — **Me** · Due: 2026-09-01\n";
+        let report = validate_summary(markdown, &facts(), &roster(), &budget(SummaryMode::Standard), "", false);
         assert!(report
             .issues
             .iter()

@@ -138,15 +138,16 @@ fn facts_json() -> String {
         "title": "Release Cut And Schema Freeze",
         "meeting_type": "planning",
         "key_points": [
-            {"text": "Timing was settled after weighing the migration risk.", "topic": "Release Planning", "source_segment_ids": ["seg_00000"]},
-            {"text": "Schema stability was prioritized for this sprint.", "topic": "Data Migration Strategy", "source_segment_ids": ["seg_00001"]}
+            {"text": "Timing was settled after weighing the migration risk.", "kind": "discussion", "topic": "Release Planning", "source_segment_ids": ["seg_00000"]},
+            {"text": "Schema stability was prioritized for this sprint.", "kind": "discussion", "topic": "Data Migration Strategy", "source_segment_ids": ["seg_00001"]},
+            {"text": "Cutting the release a day early instead.", "kind": "proposal", "topic": "Release Planning", "source_segment_ids": ["seg_00000"]}
         ],
         "topics": [
             {"label": "Release Planning", "segment_ids": ["seg_00000"]},
             {"label": "Data Migration Strategy", "segment_ids": ["seg_00001"]}
         ],
         "decisions": [
-            {"statement": "Ship the release on Friday.", "decided_by": "speaker_me", "source_segment_ids": ["seg_00000"]},
+            {"statement": "Ship the release on Friday.", "rationale": "downstream teams have been waiting on it", "decided_by": "speaker_me", "source_segment_ids": ["seg_00000"]},
             {"statement": "Freeze the schema for this sprint.", "decided_by": "speaker_1", "source_segment_ids": ["seg_00001"]}
         ],
         "action_items": [
@@ -156,6 +157,9 @@ fn facts_json() -> String {
         "open_questions": [
             {"question": "Who signs off on the migration?", "source_segment_ids": ["seg_00001"]}
         ],
+        "risks": [
+            {"statement": "The migration script has had no review.", "kind": "blocker", "raised_by": "speaker_1", "source_segment_ids": ["seg_00001"]}
+        ],
         "entities": [
             {"name": "Relay", "kind": "product", "segment_ids": ["seg_00000"]}
         ]
@@ -163,10 +167,28 @@ fn facts_json() -> String {
     .to_string()
 }
 
+/// Prose in the shape the output contract requires.
 fn prose() -> String {
-    "## Summary\n\n- Release timing was settled once the migration risk had been weighed.\n\
+    "## Overview\n\nRelease timing and schema stability were settled for this sprint.\n\n\
+## Discussion\n\n### Release Planning\n\n\
+- Release timing was settled once the migration risk had been weighed.\n\n\
+### Data Migration Strategy\n\n\
 - Schema stability was prioritized over new fields for this sprint.\n\n\
-## Decisions\n\n- The release ships Friday — Me\n- The schema is frozen for the sprint — Speaker 1\n\n\
+## Decisions\n\n- The release ships Friday, because downstream teams have been waiting — Me\n\
+- The schema is frozen for the sprint — Speaker 1\n\n\
+## Action Items\n\n- [ ] Write the changelog — **Me** · Due: 2026-08-28\n\
+- [ ] Review the migration script — **Speaker 1**\n\n\
+## Risks & Blockers\n\n- **Blocker:** The migration script has had no review.\n\n\
+## Open Questions\n\n- Who signs off on the migration?\n"
+        .to_string()
+}
+
+/// The same structure, short enough to fit even Concise's budget for this
+/// two-chunk fixture. The fixture transcript is 46 words, so the budget it earns
+/// is genuinely small — which is the point of deriving it from the meeting.
+fn short_prose() -> String {
+    "## Overview\n\nRelease timing and the schema freeze were settled.\n\n\
+## Decisions\n\n- The release ships Friday — Me\n- The schema is frozen — Speaker 1\n\n\
 ## Action Items\n\n- [ ] Write the changelog — **Me** · Due: 2026-08-28\n\
 - [ ] Review the migration script — **Speaker 1**\n\n\
 ## Open Questions\n\n- Who signs off on the migration?\n"
@@ -526,7 +548,7 @@ async fn an_unavailable_model_leaves_the_meeting_fully_usable() {
     let summary = processing.summary.as_ref().unwrap();
     assert!(summary.deterministic);
     assert!(!summary.markdown.is_empty());
-    assert!(summary.markdown.contains("## Summary"));
+    assert!(summary.markdown.contains("## Overview"));
 
     // And the failure is on the record.
     assert!(processing.stages.extraction.error.is_some());
@@ -564,9 +586,16 @@ async fn prose_that_fails_validation_is_replaced_rather_than_shown() {
     let harness = Harness::new(&fixture_a());
 
     // Prose naming someone who was never in the meeting.
-    let bad_prose = "## Summary\n\n- Work was distributed among the attendees today.\n\n\
+    let bad_prose = "## Overview\n\nWork was distributed among the attendees today.\n\n\
 ## Action Items\n\n- [ ] Send the deck — **Rajesh**\n";
-    let llm = ScriptedLlm::new(vec![Ok(facts_json()), Ok(bad_prose.to_string())]);
+    // Twice, because a rejected draft now gets one corrected attempt before the
+    // deterministic renderer takes over. A model that keeps inventing the same
+    // participant is what this test is about.
+    let llm = ScriptedLlm::new(vec![
+        Ok(facts_json()),
+        Ok(bad_prose.to_string()),
+        Ok(bad_prose.to_string()),
+    ]);
 
     let processing = harness
         .processor
@@ -712,7 +741,7 @@ async fn each_mode_replaces_the_summary_without_touching_anything_upstream() {
         SummaryMode::Standard,
         SummaryMode::Detailed,
     ] {
-        let llm = ScriptedLlm::new(vec![Ok(prose())]);
+        let llm = ScriptedLlm::new(vec![Ok(short_prose())]);
         let mut opts = options();
         opts.summary_mode = mode;
 
@@ -1617,7 +1646,7 @@ async fn fixture_f_a_rejected_model_summary_still_shows_a_summary() {
 
     // Prose that both copies the transcript verbatim and runs far over the cap —
     // the exact pair of codes a real meeting produced.
-    let mut bad = String::from("## Summary\n\n- so um we decided to ship the release on Friday \
+    let mut bad = String::from("## Overview\n\n- so um we decided to ship the release on Friday \
 and I will write the changelog tonight before the freeze because the client is expecting it\n");
     for i in 0..200 {
         bad.push_str(&format!(
@@ -1655,7 +1684,7 @@ and I will write the changelog tonight before the freeze because the client is e
     // The fallback rendered, and it is what the user sees.
     assert!(summary.fallback_used);
     assert!(!summary.markdown.contains("padding line"));
-    assert!(summary.markdown.contains("## Summary"));
+    assert!(summary.markdown.contains("## Overview"));
 
     // And the stage is a success, because a summary exists.
     assert!(
@@ -1992,4 +2021,832 @@ async fn the_gate_keeps_the_hard_patterns_a_model_gets_right() {
     // The two decisions stay decisions and are not duplicated as tasks.
     assert_eq!(facts.decisions.len(), 2);
     assert!(!kept.iter().any(|d| d.contains("Gmail SMTP is")));
+}
+
+// ---------------------------------------------------------------------------
+// The summary quality evaluation set
+//
+// These run every case in `processing::eval` through the real pipeline and
+// measure the result. They are the answer to "is the output actually any
+// better?", which no amount of behaviour testing answers on its own.
+// ---------------------------------------------------------------------------
+
+/// Runs one evaluation case end to end and returns the summary the user would
+/// see, along with the derived data behind it.
+///
+/// `extraction` is the Stage A answer to replay. `None` runs with no model at
+/// all, which measures the deterministic floor: the summary a user gets when
+/// Ollama is not running.
+async fn run_eval_case(
+    case: &crate::meetings_v2::processing::eval::EvalCase,
+    extraction: Option<&str>,
+) -> MeetingProcessing {
+    let harness = Harness::new(&case.transcript);
+    if !case.notes.is_empty() {
+        harness
+            .sessions
+            .save_notes(&harness.meeting_id, &case.notes)
+            .unwrap();
+    }
+
+    // Stage A replays the fixture; Stage B has no model, so the deterministic
+    // renderer presents the facts. That isolates the measurement to what the
+    // pipeline does with a plausible model answer, rather than to prose a test
+    // author wrote to pass its own assertions.
+    let llm = match extraction {
+        Some(json) => ScriptedLlm::new(vec![Ok(json.to_string())]),
+        None => ScriptedLlm::always_unavailable(),
+    };
+
+    harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn the_deterministic_floor_never_invents_anything() {
+    // With no model reachable at all, every case must still come out clean.
+    // A summary that hallucinates when the provider is down is worse than no
+    // summary, because nothing on screen says the provider was down.
+    use crate::meetings_v2::processing::eval;
+
+    for case in eval::cases() {
+        let processing = run_eval_case(&case, None).await;
+        let summary = processing.summary.as_ref().unwrap();
+        let card = eval::score(case.name, &summary.markdown, &case.expected);
+
+        assert!(
+            card.hallucinations.is_empty(),
+            "the deterministic floor invented something on {}: {}",
+            case.name,
+            card.report()
+        );
+        assert!(
+            summary.source.is_deterministic(),
+            "{} should have taken the deterministic path",
+            case.name
+        );
+    }
+}
+
+#[tokio::test]
+async fn every_case_survives_the_model_path_without_a_hallucination() {
+    use crate::meetings_v2::processing::eval;
+
+    for case in eval::cases() {
+        let processing = run_eval_case(&case, Some(case.model_extraction)).await;
+        let summary = processing.summary.as_ref().unwrap();
+        let card = eval::score(case.name, &summary.markdown, &case.expected);
+
+        assert!(
+            card.hallucinations.is_empty(),
+            "{} — {}\n{}",
+            case.name,
+            case.premise,
+            card.report()
+        );
+        assert_eq!(
+            card.owner_accuracy, 1.0,
+            "{} reported an owner the meeting did not establish\n{}",
+            case.name,
+            card.report()
+        );
+        assert_eq!(
+            card.deadline_accuracy, 1.0,
+            "{} reported a date the meeting did not give\n{}",
+            case.name,
+            card.report()
+        );
+    }
+}
+
+#[tokio::test]
+async fn understanding_the_meeting_scores_better_than_reading_it_for_cues() {
+    // The measurement that says the two-stage pipeline earns its second model
+    // call: the same meetings, scored with and without comprehension.
+    use crate::meetings_v2::processing::eval;
+
+    let mut with_model = 0.0;
+    let mut without_model = 0.0;
+    let mut lines = Vec::new();
+
+    for case in eval::cases() {
+        let floor = run_eval_case(&case, None).await;
+        let understood = run_eval_case(&case, Some(case.model_extraction)).await;
+
+        let floor_card = eval::score(
+            case.name,
+            &floor.summary.as_ref().unwrap().markdown,
+            &case.expected,
+        );
+        let understood_card = eval::score(
+            case.name,
+            &understood.summary.as_ref().unwrap().markdown,
+            &case.expected,
+        );
+
+        lines.push(format!(
+            "  {:<40} floor {:.2} → understood {:.2}",
+            case.name,
+            floor_card.overall(),
+            understood_card.overall()
+        ));
+        without_model += floor_card.overall();
+        with_model += understood_card.overall();
+
+        assert!(
+            understood_card.overall() >= floor_card.overall(),
+            "comprehension made {} worse:\n  floor:      {}\n  understood: {}",
+            case.name,
+            floor_card.report(),
+            understood_card.report()
+        );
+    }
+
+    let cases = eval::cases().len() as f64;
+    assert!(
+        with_model / cases > without_model / cases,
+        "comprehension must beat cue matching across the set:\n{}",
+        lines.join("\n")
+    );
+}
+
+#[tokio::test]
+async fn the_decision_rationale_reaches_the_summary() {
+    // The single most valuable field, and the one the schema had no room for
+    // before: "move the launch to Monday" is a note, "move it because QA needs
+    // three more days on the payment integration" is a memory.
+    use crate::meetings_v2::processing::eval;
+
+    let case = eval::cases()
+        .into_iter()
+        .find(|c| c.name == "decision_with_rationale")
+        .unwrap();
+    let processing = run_eval_case(&case, Some(case.model_extraction)).await;
+    let markdown = &processing.summary.as_ref().unwrap().markdown;
+
+    let card = eval::score(case.name, markdown, &case.expected);
+    assert_eq!(
+        card.decision_recall, 1.0,
+        "the decision was lost: {}",
+        card.report()
+    );
+    assert_eq!(
+        card.rationale_preservation, 1.0,
+        "the reason was lost: {}",
+        card.report()
+    );
+    assert!(markdown.contains("because"));
+}
+
+#[tokio::test]
+async fn a_proposal_never_becomes_a_decision_end_to_end() {
+    use crate::meetings_v2::processing::eval;
+
+    let case = eval::cases()
+        .into_iter()
+        .find(|c| c.name == "proposal_is_not_a_decision")
+        .unwrap();
+    let processing = run_eval_case(&case, Some(case.model_extraction)).await;
+    let facts = processing.facts.as_ref().unwrap();
+    let markdown = &processing.summary.as_ref().unwrap().markdown;
+
+    assert!(
+        facts.decisions.is_empty(),
+        "nothing was settled, so nothing may be recorded as settled"
+    );
+    assert!(
+        !markdown.contains("## Decisions"),
+        "an empty section is omitted, never printed with a placeholder:\n{}",
+        markdown
+    );
+    assert!(
+        markdown.contains("Proposed:"),
+        "the proposal is kept, and kept as a proposal:\n{}",
+        markdown
+    );
+    assert!(eval::score(case.name, markdown, &case.expected)
+        .hallucinations
+        .is_empty());
+}
+
+#[tokio::test]
+async fn work_nobody_took_on_reaches_the_user_without_an_owner() {
+    use crate::meetings_v2::processing::eval;
+
+    let case = eval::cases()
+        .into_iter()
+        .find(|c| c.name == "unclear_owner")
+        .unwrap();
+    let processing = run_eval_case(&case, Some(case.model_extraction)).await;
+    let markdown = &processing.summary.as_ref().unwrap().markdown;
+
+    for item in &processing.facts.as_ref().unwrap().action_items {
+        assert!(
+            matches!(item.owner_type, OwnerType::Unassigned),
+            "\"{}\" acquired an owner nobody agreed to be",
+            item.description
+        );
+    }
+    assert!(!markdown.contains("**Speaker 1**"));
+    assert!(!markdown.contains("**Me**"));
+}
+
+#[tokio::test]
+async fn a_meeting_that_settled_nothing_says_so_rather_than_inventing_a_decision() {
+    use crate::meetings_v2::processing::eval;
+
+    let case = eval::cases()
+        .into_iter()
+        .find(|c| c.name == "nothing_was_settled")
+        .unwrap();
+    let processing = run_eval_case(&case, Some(case.model_extraction)).await;
+    let facts = processing.facts.as_ref().unwrap();
+    let markdown = &processing.summary.as_ref().unwrap().markdown;
+
+    assert!(facts.decisions.is_empty());
+    assert!(facts.action_items.is_empty());
+    assert!(!markdown.contains("## Decisions"));
+    assert!(!markdown.contains("## Action Items"));
+    // What it does carry is the thing a reader needs: the question still open.
+    assert!(markdown.contains("## Open Questions"));
+    assert_eq!(
+        eval::score(case.name, markdown, &case.expected).open_question_recall,
+        1.0
+    );
+}
+
+#[tokio::test]
+async fn user_notes_reach_stage_a_and_absent_notes_change_nothing() {
+    use crate::meetings_v2::processing::eval;
+
+    let case = eval::cases()
+        .into_iter()
+        .find(|c| c.name == "notes_carry_what_the_transcript_garbled")
+        .unwrap();
+
+    let harness = Harness::new(&case.transcript);
+    harness
+        .sessions
+        .save_notes(&harness.meeting_id, &case.notes)
+        .unwrap();
+    let llm = ScriptedLlm::new(vec![Ok(case.model_extraction.to_string())]);
+    harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    {
+        let calls = llm.calls.lock().unwrap();
+        let (system, user) = &calls[0];
+        assert!(
+            user.contains("alumni placement data is the blocker"),
+            "the user's notes must reach the extraction stage"
+        );
+        assert!(system.contains("SOURCES — how to weigh what you are given"));
+        assert!(system.contains("A user's to-do list is not the meeting's action items"));
+    }
+
+    // The same meeting with no notes: the prompt loses the notes block and says
+    // nothing at all about their absence.
+    let bare = Harness::new(&case.transcript);
+    let llm = ScriptedLlm::new(vec![Ok(case.model_extraction.to_string())]);
+    bare.processor
+        .generate_summary(&bare.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let calls = llm.calls.lock().unwrap();
+    let (system, user) = &calls[0];
+    assert!(!user.contains("USER NOTES"));
+    assert!(!system.contains("SOURCES — how to weigh"));
+    assert!(
+        !user.to_lowercase().contains("no notes")
+            && !user.to_lowercase().contains("pre-meeting notes: none"),
+        "the absence of notes is never mentioned"
+    );
+}
+
+#[tokio::test]
+async fn pre_meeting_notes_are_optional_enrichment_and_never_a_section() {
+    // The 1-in-100 case. Present, they add intent; absent, nothing changes.
+    let harness = Harness::new(&fixture_a());
+    harness
+        .sessions
+        .save_notes(
+            &harness.meeting_id,
+            &crate::meetings_v2::types::MeetingNotes {
+                before: "agenda: release date, schema freeze".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    let llm = ScriptedLlm::new(vec![Ok(facts_json()), Ok(short_prose())]);
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    {
+        let calls = llm.calls.lock().unwrap();
+        assert!(calls[0].1.contains("agenda: release date, schema freeze"));
+        assert!(calls[0].0.contains("Notes written before the meeting describe intent"));
+        // Never handed to the writer as something to reproduce.
+        assert!(!calls[1].1.contains("agenda: release date"));
+    }
+
+    let markdown = &processing.summary.as_ref().unwrap().markdown;
+    assert!(!markdown.contains("Pre-Meeting"));
+    assert!(!markdown.contains("Agenda"));
+}
+
+// ---------------------------------------------------------------------------
+// Validation, repair, long meetings, and regeneration
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_formatting_failure_is_caught_and_repaired_rather_than_costing_the_summary() {
+    // The behaviour this replaces: one fixable slip — an opening line addressed
+    // to the user — threw away the whole model-written summary and handed the
+    // reader a deterministic fact dump instead.
+    let harness = Harness::new(&fixture_a());
+
+    let with_preamble = format!("Sure! Here is the summary you asked for.\n\n{}", short_prose());
+    let llm = ScriptedLlm::new(vec![
+        Ok(facts_json()),
+        Ok(with_preamble),
+        Ok(short_prose()),
+    ]);
+
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let summary = processing.summary.as_ref().unwrap();
+    assert!(summary.repair_attempted);
+    assert!(!summary.deterministic, "the repaired draft is the model's own prose");
+    assert_eq!(summary.provider_output_status, ProviderOutputStatus::Accepted);
+    assert!(!summary.markdown.contains("Here is the summary"));
+    assert!(summary.markdown.starts_with("## Overview"));
+    assert!(summary
+        .rejected_issues
+        .iter()
+        .any(|i| i.code == "SUMMARY_HAS_PREAMBLE"));
+
+    // The correction named the rule, rather than re-rolling the same prompt.
+    let calls = llm.calls.lock().unwrap();
+    assert_eq!(calls.len(), 3);
+    let repair_prompt = &calls[2].1;
+    assert!(repair_prompt.starts_with("CORRECTION"));
+    assert!(repair_prompt.contains("opened with commentary"));
+    assert_ne!(
+        calls[1].1, calls[2].1,
+        "a repair must differ from the attempt it repairs"
+    );
+}
+
+#[tokio::test]
+async fn a_second_failure_falls_back_rather_than_looping() {
+    let harness = Harness::new(&fixture_a());
+    let bad = format!("Here is the summary.\n\n{}", short_prose());
+    let llm = ScriptedLlm::new(vec![Ok(facts_json()), Ok(bad.clone()), Ok(bad)]);
+
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let summary = processing.summary.as_ref().unwrap();
+    assert!(summary.repair_attempted);
+    assert!(summary.fallback_used);
+    assert_eq!(summary.provider_output_status, ProviderOutputStatus::Rejected);
+    assert!(summary.validation.passed, "what is shown is still valid");
+    assert_eq!(
+        llm.call_count(),
+        3,
+        "one extraction, one draft, one repair — never a loop"
+    );
+}
+
+#[tokio::test]
+async fn a_long_meeting_is_read_in_passes_and_its_opening_survives() {
+    // The failure this replaces was silent and in the provider: a transcript
+    // longer than the model's window was handed over whole and the front of it
+    // — where the agenda and the framing decisions are — was discarded with
+    // nothing in the response to say so.
+    let mut fixture: Vec<(&'static str, bool, bool)> = vec![(
+        "right, first thing, we decided to move the launch to Monday because QA needs \
+another three days on the payment integration",
+        true,
+        false,
+    )];
+    for _ in 0..30 {
+        fixture.push((
+            "then we went through the audio pipeline and the whisper decoding settings and the \
+tradeoffs around chunk size and latency in a good deal of detail",
+            false,
+            true,
+        ));
+    }
+    fixture.push((
+        "and last thing before we close, I'll write up the migration plan",
+        true,
+        false,
+    ));
+
+    let harness = Harness::new(&fixture);
+
+    let opening_facts = serde_json::json!({
+        "title": "Launch Slip",
+        "meeting_type": "planning",
+        "key_points": [{"text": "QA needs three more days on the payment integration.", "kind": "discussion", "source_segment_ids": ["seg_00000"]}],
+        "topics": [{"label": "Launch timing", "segment_ids": ["seg_00000"]}],
+        "decisions": [{"statement": "Move the launch to Monday.", "rationale": "QA needs another three days on the payment integration", "decided_by": "speaker_me", "source_segment_ids": ["seg_00000"]}],
+        "action_items": [],
+        "open_questions": [],
+        "risks": [],
+        "entities": []
+    })
+    .to_string();
+    let middle_facts = serde_json::json!({
+        "title": "Audio Pipeline Review",
+        "meeting_type": "project_review",
+        "key_points": [{"text": "Chunk size trades latency against decoding accuracy.", "kind": "tradeoff", "source_segment_ids": []}],
+        "topics": [{"label": "Audio pipeline", "segment_ids": []}],
+        "decisions": [], "action_items": [], "open_questions": [], "risks": [], "entities": []
+    })
+    .to_string();
+
+    // A window small enough that this fixture needs several passes.
+    let llm = ScriptedLlm::new(vec![
+        Ok(opening_facts),
+        Ok(middle_facts.clone()),
+        Ok(middle_facts.clone()),
+        Ok(middle_facts.clone()),
+        Ok(middle_facts.clone()),
+        Ok(middle_facts.clone()),
+        Ok(middle_facts.clone()),
+        Ok(middle_facts.clone()),
+        Ok(middle_facts.clone()),
+        Ok(middle_facts),
+    ])
+    .with_prompt_budget(3_000);
+
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let facts = processing.facts.as_ref().unwrap();
+    assert!(!facts.deterministic);
+
+    // Extraction passes are the calls that carry the meeting itself; the
+    // trailing calls are Stage B, which is given facts.
+    let extraction_passes = llm
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, user)| user.starts_with("MEETING"))
+        .count();
+    assert!(
+        extraction_passes > 2,
+        "a long meeting must be read in more than one pass, got {}",
+        extraction_passes
+    );
+
+    // The first pass's decision is still there after the later passes ran.
+    assert!(
+        facts
+            .decisions
+            .iter()
+            .any(|d| d.statement.contains("Move the launch to Monday")),
+        "the opening decision was lost: {:?}",
+        facts.decisions
+    );
+    assert!(facts.decisions[0]
+        .rationale
+        .as_deref()
+        .is_some_and(|r| r.contains("three days")));
+
+    // Every pass saw the participants and the meeting's framing, not just a
+    // slice of transcript.
+    let calls = llm.calls.lock().unwrap();
+    let extractions: Vec<&(String, String)> = calls
+        .iter()
+        .filter(|(_, user)| user.starts_with("MEETING"))
+        .collect();
+    for (system, user) in &extractions {
+        assert!(user.contains("PARTICIPANTS"));
+        assert!(
+            system.contains("one stretch of a longer meeting"),
+            "each pass must know it is reading part of something larger"
+        );
+    }
+
+    // And ids survive the merge without colliding.
+    let ids: std::collections::HashSet<&str> =
+        facts.decisions.iter().map(|d| d.id.as_str()).collect();
+    assert_eq!(ids.len(), facts.decisions.len());
+    let point_ids: std::collections::HashSet<&str> =
+        facts.key_points.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(point_ids.len(), facts.key_points.len());
+}
+
+#[tokio::test]
+async fn a_failed_pass_does_not_cost_the_passes_that_worked() {
+    let mut fixture: Vec<(&'static str, bool, bool)> = Vec::new();
+    for _ in 0..20 {
+        fixture.push((
+            "we walked through the migration plan and the rollout sequencing and what it means \
+for the teams downstream in a fair amount of detail",
+            true,
+            false,
+        ));
+    }
+    let harness = Harness::new(&fixture);
+
+    let good = serde_json::json!({
+        "title": "Migration Rollout",
+        "meeting_type": "planning",
+        "key_points": [{"text": "Rollout sequencing affects the downstream teams.", "kind": "discussion", "source_segment_ids": []}],
+        "topics": [], "decisions": [], "action_items": [], "open_questions": [], "risks": [], "entities": []
+    })
+    .to_string();
+
+    // The second pass fails outright; the rest answer.
+    let llm = ScriptedLlm::new(vec![
+        Ok(good.clone()),
+        Err(crate::meetings_v2::processing::llm::LlmError::Unavailable("timeout".into())),
+        Ok(good.clone()),
+        Ok(good.clone()),
+        Ok(good.clone()),
+        Ok(good.clone()),
+        Ok(good),
+    ])
+    .with_prompt_budget(3_000);
+
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let facts = processing.facts.as_ref().unwrap();
+    assert!(
+        !facts.deterministic,
+        "one failed pass must not discard the passes that worked"
+    );
+    assert!(!facts.key_points.is_empty());
+    assert!(processing
+        .stages
+        .extraction
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("part 2"));
+}
+
+#[tokio::test]
+async fn regeneration_starts_from_the_meeting_not_from_the_previous_summary() {
+    // Summarizing a summary loses information every time. Each regeneration
+    // must read the same canonical facts the first one did.
+    let harness = Harness::new(&fixture_a());
+
+    let llm = ScriptedLlm::new(vec![Ok(facts_json()), Ok(short_prose())]);
+    let first = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+    let first_markdown = first.summary.as_ref().unwrap().markdown.clone();
+
+    let second_prose = short_prose().replace("Release timing", "Timing");
+    let llm = ScriptedLlm::new(vec![Ok(second_prose)]);
+    harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    let calls = llm.calls.lock().unwrap();
+    let user_prompt = &calls[0].1;
+    assert!(
+        user_prompt.contains("Ship the release on Friday."),
+        "the regeneration reads the original facts"
+    );
+    assert!(
+        !user_prompt.contains(&first_markdown),
+        "the previous summary must never be the input to the next one"
+    );
+    for marker in ["## Overview", "## Action Items", "- [ ]"] {
+        assert!(
+            !user_prompt.contains(marker),
+            "rendered prose from the previous run leaked into the input: {}",
+            marker
+        );
+    }
+}
+
+#[tokio::test]
+async fn conflicting_notes_and_transcript_are_left_conflicting() {
+    // Neither source is declared the winner. The rules tell the model to record
+    // what the transcript supports and leave the disagreement visible; nothing
+    // in the pipeline manufactures a reconciliation.
+    let harness = Harness::new(&fixture_a());
+    harness
+        .sessions
+        .save_notes(
+            &harness.meeting_id,
+            &crate::meetings_v2::types::MeetingNotes {
+                during: "launch is Wednesday, not Friday".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    let llm = ScriptedLlm::new(vec![Ok(facts_json()), Ok(short_prose())]);
+    let processing = harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    {
+        let calls = llm.calls.lock().unwrap();
+        let system = &calls[0].0;
+        assert!(system.contains("not automatically right and not"));
+        assert!(system.contains("leave the disagreement visible rather than picking a"));
+    }
+
+    // The note did not become a decision on its own.
+    let facts = processing.facts.as_ref().unwrap();
+    assert!(
+        !facts
+            .decisions
+            .iter()
+            .any(|d| d.statement.to_lowercase().contains("wednesday")),
+        "a note is not evidence that something was decided"
+    );
+}
+
+#[tokio::test]
+async fn a_meetings_notes_are_never_written_by_the_pipeline() {
+    let harness = Harness::new(&fixture_a());
+    let notes = crate::meetings_v2::types::MeetingNotes {
+        during: "budget is the blocker".to_string(),
+        before: "agenda: budget".to_string(),
+        updated_at: None,
+    };
+    harness
+        .sessions
+        .save_notes(&harness.meeting_id, &notes)
+        .unwrap();
+
+    let notes_path = harness
+        .sessions
+        .session_dir(&harness.meeting_id)
+        .join("notes.json");
+    let before = fs::read(&notes_path).unwrap();
+
+    let llm = ScriptedLlm::new(vec![Ok(facts_json()), Ok(short_prose())]);
+    harness
+        .processor
+        .generate_summary(&harness.meeting_id, &llm, &options(), false)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        fs::read(&notes_path).unwrap(),
+        before,
+        "notes are a source artifact; summarizing must leave them byte-identical"
+    );
+    let reloaded = harness.sessions.get_notes(&harness.meeting_id).unwrap();
+    assert_eq!(reloaded.during, "budget is the blocker");
+    assert_eq!(reloaded.before, "agenda: budget");
+}
+
+// ---------------------------------------------------------------------------
+// Before / after
+// ---------------------------------------------------------------------------
+
+/// What the previous pipeline produced for the same meeting.
+///
+/// Reconstructed from the code it replaced, not invented to lose: the old
+/// `MeetingFacts` had no field for a decision's reason, no risks collection, and
+/// no way to mark a point as a proposal, so no prompt could have recovered them
+/// — and `render_markdown` emitted exactly these four sections in this order.
+/// Everything the old schema *could* carry is present here.
+fn previous_pipeline_output() -> &'static str {
+    "## Summary\n\n\
+**Topics discussed:** Launch timing\n\n\
+- The payment integration still carries three blocking bugs.\n\
+- Shipping on top of the open bugs was judged worse than a weekend of slip.\n\n\
+## Decisions\n\n\
+- Move the launch from Friday to Monday. — Me\n\n\
+## Action Items\n\n\
+- [ ] Update the release calendar — **Speaker 1**\n\
+- [ ] Tell support about the new date — **Speaker 1**\n"
+}
+
+#[tokio::test]
+async fn the_new_pipeline_scores_better_on_the_same_meeting() {
+    use crate::meetings_v2::processing::eval;
+
+    let case = eval::cases()
+        .into_iter()
+        .find(|c| c.name == "decision_with_rationale")
+        .unwrap();
+
+    let before = eval::score("before", previous_pipeline_output(), &case.expected);
+
+    let processing = run_eval_case(&case, Some(case.model_extraction)).await;
+    let after_markdown = processing.summary.as_ref().unwrap().markdown.clone();
+    let after = eval::score("after", &after_markdown, &case.expected);
+
+    println!("\nBEFORE  {}", before.report());
+    println!("AFTER   {}", after.report());
+    println!("\n--- before ---\n{}\n--- after ---\n{}", previous_pipeline_output(), after_markdown);
+
+    // The specific improvements, named rather than summed:
+    assert_eq!(
+        before.rationale_preservation, 0.0,
+        "the old schema had nowhere to put a reason"
+    );
+    assert_eq!(
+        after.rationale_preservation, 1.0,
+        "the reason must survive now: {}",
+        after.report()
+    );
+    assert!(
+        after.risk_recall >= before.risk_recall,
+        "risks were unrepresentable before and must not regress"
+    );
+    assert!(
+        after.structure_ok && !before.structure_ok,
+        "the output contract is now enforced"
+    );
+    assert!(
+        before.hallucinations.is_empty() && after.hallucinations.is_empty(),
+        "neither may invent anything"
+    );
+
+    // And it is not merely longer: decisions and actions were already right,
+    // so the gain has to come from information the old output could not carry.
+    assert_eq!(before.decision_recall, after.decision_recall);
+    assert_eq!(before.action_recall, after.action_recall);
+    assert!(
+        after.overall() > before.overall(),
+        "no measured improvement:\n  before {}\n  after  {}",
+        before.report(),
+        after.report()
+    );
+}
+
+#[tokio::test]
+async fn the_whole_evaluation_set_improves_and_the_report_is_printable() {
+    use crate::meetings_v2::processing::eval;
+
+    let mut floor_total = 0.0;
+    let mut model_total = 0.0;
+    println!("\nRelay summary quality — evaluation set\n");
+
+    for case in eval::cases() {
+        let floor = run_eval_case(&case, None).await;
+        let understood = run_eval_case(&case, Some(case.model_extraction)).await;
+
+        let floor_card = eval::score(
+            case.name,
+            &floor.summary.as_ref().unwrap().markdown,
+            &case.expected,
+        );
+        let model_card = eval::score(
+            case.name,
+            &understood.summary.as_ref().unwrap().markdown,
+            &case.expected,
+        );
+        println!("  no model     {}", floor_card.report());
+        println!("  with model   {}", model_card.report());
+        println!();
+
+        floor_total += floor_card.overall();
+        model_total += model_card.overall();
+    }
+
+    let n = eval::cases().len() as f64;
+    println!(
+        "  mean overall: no model {:.2}, with model {:.2}",
+        floor_total / n,
+        model_total / n
+    );
+    assert!(model_total > floor_total);
 }

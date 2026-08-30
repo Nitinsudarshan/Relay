@@ -97,6 +97,48 @@ impl MeetingSession {
     }
 }
 
+/// Notes a person wrote about a meeting.
+///
+/// A **source** artifact, not derived: nothing in the processing pipeline may
+/// write it, and regenerating a summary never touches it. It sits beside
+/// `session.json` and `transcript.jsonl` for the same reason those do — it is
+/// something a human produced, and the pipeline's job is to read it.
+///
+/// Two fields, because they answer different questions and the model is told to
+/// treat them differently. `during` is what the user captured while the meeting
+/// was happening, and is the single cheapest quality signal Relay has: three
+/// bullets a person typed outrank any amount of prompt tuning at saying which
+/// part of ninety minutes mattered. `before` is a rare enrichment — an agenda or
+/// a set of questions written in advance — and the pipeline is built so that its
+/// absence changes nothing at all.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct MeetingNotes {
+    /// Written during or after the meeting. Markdown, as the user typed it.
+    #[serde(default)]
+    pub during: String,
+    /// Written before the meeting, if anything was. Roughly one meeting in a
+    /// hundred; never required, never a pipeline stage, never a summary section.
+    #[serde(default)]
+    pub before: String,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+impl MeetingNotes {
+    /// True when there is nothing here worth sending to a model.
+    pub fn is_empty(&self) -> bool {
+        self.during.trim().is_empty() && self.before.trim().is_empty()
+    }
+
+    pub fn has_during(&self) -> bool {
+        !self.during.trim().is_empty()
+    }
+
+    pub fn has_before(&self) -> bool {
+        !self.before.trim().is_empty()
+    }
+}
+
 /// A single incremental transcript segment derived from an audio chunk.
 ///
 /// This is the **raw** transcript record: one line of `transcript.jsonl`, written

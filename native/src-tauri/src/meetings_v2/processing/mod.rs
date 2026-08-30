@@ -3,14 +3,17 @@
 //! One pipeline, one canonical representation, many projections:
 //!
 //! ```text
-//! transcript.jsonl (raw, immutable)
+//! transcript.jsonl (raw, immutable)   notes.json (raw, user-authored)
 //!         ↓  normalize        deterministic, no model
 //! NormalizedTranscript        the canonical human-readable transcript
 //!         ↓  attribute        channel-based speaker ids
 //!         ↓  converse         speaker-grouped turns
-//!         ↓  extract          Stage A → MeetingFacts (JSON)
-//!         ↓  summarize        Stage B → Markdown (mode + extension)
-//!         ↓  validate         discard and re-render rather than show bad prose
+//!         ↓  context          canonical meeting context (+ notes, metadata)
+//!         ↓  extract          Stage A → MeetingFacts (JSON), in passes if long
+//!         ↓  summarize        Stage B → Markdown (mode + extension + budget)
+//!         ↓  validate         ──► repair once with targeted feedback, then
+//!                                 re-render deterministically rather than
+//!                                 show prose that failed
 //!    processing.json
 //!         ↓
 //! Summary · Conversation · Action items · Topics · Entities · Type
@@ -31,8 +34,12 @@
 //! * **Nothing here blocks recording.** The pipeline runs after finalization,
 //!   holds no capture resources, and shares no state with either audio clock.
 
+pub mod context;
 pub mod conversation;
+/// The summary quality evaluation set — fixtures, expectations, and a scorer.
+pub mod eval;
 pub mod extract;
+pub mod length;
 pub mod llm;
 pub mod model;
 pub mod modes;
@@ -47,7 +54,7 @@ pub mod tasks;
 pub mod validate;
 
 use super::session_store::SessionStore;
-use super::types::{TranscriptSegment, TranscriptSegmentStatus};
+use super::types::{MeetingNotes, TranscriptSegment, TranscriptSegmentStatus};
 use llm::MeetingLlm;
 pub use model::MeetingProcessing;
 use model::{
@@ -55,6 +62,8 @@ use model::{
     ScribbleRef, StageState, StageStatus, SummaryArtifact, SummaryMode, SummarySource,
     ValidationReport, PROCESSING_VERSION, RULES_VERSION,
 };
+use context::MeetingContext;
+use length::summary_budget;
 use normalize::RawSegmentInput;
 use related::{find_related, MeetingIndexEntry, RelatedMeeting};
 use speakers::SpeakerIdentificationMode;
@@ -73,6 +82,10 @@ pub struct ProcessingOptions {
     pub summary_mode: SummaryMode,
     pub extension_id: String,
     pub user_extensions: Vec<MeetingExtension>,
+    /// Standing instructions the user gave for how their summaries should read.
+    /// Presentation only — see the summary contract, which subordinates them to
+    /// the accuracy rules.
+    pub user_instructions: Option<String>,
 }
 
 impl Default for ProcessingOptions {
@@ -84,6 +97,7 @@ impl Default for ProcessingOptions {
             summary_mode: SummaryMode::Standard,
             extension_id: modes::DEFAULT_EXTENSION_ID.to_string(),
             user_extensions: Vec::new(),
+            user_instructions: None,
         }
     }
 }
@@ -295,7 +309,24 @@ audio are unaffected."
         // Step 3 — speaker data, however incomplete. An empty roster is valid.
         let roster = processing.speakers.clone();
 
-        // Step 4 — the canonical structured representation.
+        // Step 4 — the canonical meeting context: everything a model is told
+        // about this meeting, assembled in one place.
+        //
+        // The user's notes are a *source* artifact and are read here, never
+        // written. A meeting with no notes is the common case and produces an
+        // identical pipeline — nothing branches on their absence.
+        let notes = self
+            .sessions
+            .get_notes(meeting_id)
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    meeting_id = %meeting_id,
+                    "meeting_processing: notes unreadable ({}); summarizing without them",
+                    e
+                );
+                MeetingNotes::default()
+            });
+
         let meeting_date = session
             .started_at
             .as_deref()
@@ -303,6 +334,17 @@ audio are unaffected."
             .and_then(|d| d.split('T').next())
             .unwrap_or("")
             .to_string();
+
+        let context = MeetingContext {
+            title: &session.title,
+            date_iso: &meeting_date,
+            duration_minutes: (session.duration_seconds > 0.0)
+                .then(|| (session.duration_seconds / 60.0).round() as u64),
+            speakers: &roster,
+            segments: &normalized.segments,
+            notes: &notes,
+            glossary: &options.glossary,
+        };
 
         let reuse_facts = !force_extraction
             && processing.facts.as_ref().is_some_and(|f| !f.deterministic)
@@ -320,14 +362,7 @@ audio are unaffected."
                 .expect("reuse_facts implies facts are present")
         } else {
             let started = Instant::now();
-            let output = extract::extract_facts(
-                llm,
-                &normalized.segments,
-                &roster,
-                &meeting_date,
-                &session.title,
-            )
-            .await;
+            let output = extract::extract_facts(llm, &context, &session.title).await;
             let duration_ms = started.elapsed().as_millis() as u64;
 
             let mut facts = output.facts;
@@ -392,32 +427,50 @@ audio are unaffected."
 
         // Steps 5 and 6 — mode, then extension, over the same facts.
         let extension = modes::find_extension(&options.user_extensions, &options.extension_id);
+        // The size the summary is judged against is derived from this meeting,
+        // not from a constant. Stage B is told it, so the model is aiming at the
+        // same target the validator measures.
+        let budget = summary_budget(normalized.word_count(), options.summary_mode);
+        let summary_input = summarize::SummaryInput {
+            facts: &facts,
+            speakers: &roster,
+            budget,
+            extension: &extension,
+            notes: &notes,
+            user_instructions: options.user_instructions.as_deref(),
+        };
 
         let started = Instant::now();
-        let summary_output =
-            summarize::generate_summary(llm, &facts, &roster, options.summary_mode, &extension)
-                .await;
+        let summary_output = summarize::generate_summary(llm, &summary_input).await;
         let transcript_text = normalized.plain_text();
 
         // Step 7 — validate, and act on the verdict.
         //
-        // Three outcomes, kept distinct because the UI has to tell them apart:
+        // Four outcomes, kept distinct because the UI has to tell them apart:
         //
         // ```text
-        // model answered ──► validate ──┬── pass ──► show the model's prose
-        //                               └── fail ──► reject it
-        //                                              ↓
-        //                                     deterministic render
-        //                                              ↓
-        //                                          validate ──┬── pass ──► show the fallback
-        //                                                     └── fail ──► the summary failed
+        // model answered ─► validate ─┬─ pass ────────────────► show the model's prose
+        //                             └─ fail ─► targeted repair ─► validate ─┬─ pass ─► show it
+        //                                                                     └─ fail ─┐
+        //                                                                              ↓
+        //                                                            deterministic render
+        //                                                                     ↓
+        //                                                                 validate ─┬─ pass ─► show
+        //                                                                           └─ fail ─► failed
         // ```
         //
-        // "The model failed" and "the summary stage failed" are different facts.
-        // Merging the rejected draft's issues into the fallback's report — which
-        // is what this code used to do — made every rejected draft read as a
-        // failed stage, and the user was told "Summary unavailable" over a
-        // perfectly good summary.
+        // The repair step is what changed. Rejected prose used to go straight to
+        // the deterministic renderer, so a single fixable slip — a code fence, an
+        // opening "Here's the summary", forty words over — cost the user the
+        // whole model-written summary and downgraded them to a fact dump. The
+        // retry is *not* the same prompt again: `repair_feedback` names the rule
+        // that was broken, so the second attempt has a reason to differ from the
+        // first.
+        //
+        // "The model failed" and "the summary stage failed" remain different
+        // facts. Merging a rejected draft's issues into what replaced it made
+        // every rejected draft read as a failed stage, and the user was told
+        // "Summary unavailable" over a perfectly good summary.
         let mut markdown = summary_output.markdown;
         let mut provider_output_status = if summary_output.deterministic {
             ProviderOutputStatus::Unavailable
@@ -427,44 +480,129 @@ audio are unaffected."
         let mut fallback_used = summary_output.deterministic;
         let mut llm_error = summary_output.llm_error;
         let mut rejected_issues: Vec<model::ValidationIssue> = Vec::new();
+        let mut repair_attempted = false;
 
         let mut validation = validate::validate_summary(
             &markdown,
             &facts,
             &roster,
-            options.summary_mode,
+            &budget,
             &transcript_text,
             fallback_used,
         );
 
         if validation.has_errors() && !fallback_used {
-            // Model prose that fails validation is not shown. The same facts are
-            // rendered deterministically instead, which cannot hallucinate and so
-            // cannot fail these checks.
-            let codes: Vec<&str> = validation.issues.iter().map(|i| i.code.as_str()).collect();
-            tracing::warn!(
-                meeting_id = %meeting_id,
-                stage = "summary",
-                issues = ?codes,
-                "meeting_processing: model prose failed validation; rendering deterministically"
-            );
-            llm_error = Some(format!(
-                "model output rejected by validation ({})",
-                codes.join(", ")
-            ));
-            // Kept as diagnostics, not folded into the verdict on what is shown.
-            rejected_issues = std::mem::take(&mut validation.issues);
-            provider_output_status = ProviderOutputStatus::Rejected;
-            fallback_used = true;
-            markdown = summarize::render_markdown(&facts, &roster, options.summary_mode);
-            validation = validate::validate_summary(
-                &markdown,
-                &facts,
-                &roster,
-                options.summary_mode,
-                &transcript_text,
-                true,
-            );
+            let codes: Vec<String> = validation
+                .issues
+                .iter()
+                .map(|i| i.code.clone())
+                .collect();
+
+            match validate::repair_feedback(&validation, &budget) {
+                Some(feedback) => {
+                    repair_attempted = true;
+                    tracing::info!(
+                        meeting_id = %meeting_id,
+                        stage = "summary",
+                        issues = ?codes,
+                        "meeting_processing: model prose failed validation; asking for a repair"
+                    );
+
+                    let repaired = summarize::repair_summary(llm, &summary_input, &feedback).await;
+                    if repaired.deterministic {
+                        // The repair call itself could not be made. Keep the
+                        // first draft's diagnosis rather than the retry's.
+                        rejected_issues = std::mem::take(&mut validation.issues);
+                        llm_error = Some(format!(
+                            "model output rejected ({}); repair unavailable: {}",
+                            codes.join(", "),
+                            repaired.llm_error.unwrap_or_default()
+                        ));
+                        provider_output_status = ProviderOutputStatus::Rejected;
+                        fallback_used = true;
+                        markdown = repaired.markdown;
+                    } else {
+                        let retry_validation = validate::validate_summary(
+                            &repaired.markdown,
+                            &facts,
+                            &roster,
+                            &budget,
+                            &transcript_text,
+                            false,
+                        );
+                        if retry_validation.has_errors() {
+                            let retry_codes: Vec<&str> = retry_validation
+                                .issues
+                                .iter()
+                                .map(|i| i.code.as_str())
+                                .collect();
+                            tracing::warn!(
+                                meeting_id = %meeting_id,
+                                stage = "summary",
+                                first_issues = ?codes,
+                                repair_issues = ?retry_codes,
+                                "meeting_processing: repair also failed validation; rendering deterministically"
+                            );
+                            llm_error = Some(format!(
+                                "model output rejected twice ({} then {})",
+                                codes.join(", "),
+                                retry_codes.join(", ")
+                            ));
+                            // Both drafts' findings are kept as diagnostics; only
+                            // the second is what the repair actually produced.
+                            rejected_issues = std::mem::take(&mut validation.issues);
+                            rejected_issues.extend(retry_validation.issues);
+                            provider_output_status = ProviderOutputStatus::Rejected;
+                            fallback_used = true;
+                            markdown =
+                                summarize::render_markdown(&facts, &roster, options.summary_mode);
+                        } else {
+                            tracing::info!(
+                                meeting_id = %meeting_id,
+                                stage = "summary",
+                                issues = ?codes,
+                                "meeting_processing: repair accepted"
+                            );
+                            rejected_issues = std::mem::take(&mut validation.issues);
+                            llm_error = Some(format!(
+                                "first draft rejected ({}); repaired draft accepted",
+                                codes.join(", ")
+                            ));
+                            markdown = repaired.markdown;
+                            validation = retry_validation;
+                        }
+                    }
+                }
+                None => {
+                    // Nothing a corrective instruction could address. Re-asking
+                    // would only cost the user another wait.
+                    tracing::warn!(
+                        meeting_id = %meeting_id,
+                        stage = "summary",
+                        issues = ?codes,
+                        "meeting_processing: model prose failed validation with no repairable cause"
+                    );
+                    llm_error = Some(format!(
+                        "model output rejected by validation ({})",
+                        codes.join(", ")
+                    ));
+                    rejected_issues = std::mem::take(&mut validation.issues);
+                    provider_output_status = ProviderOutputStatus::Rejected;
+                    fallback_used = true;
+                    markdown = summarize::render_markdown(&facts, &roster, options.summary_mode);
+                }
+            }
+
+            if fallback_used {
+                validation = validate::validate_summary(
+                    &markdown,
+                    &facts,
+                    &roster,
+                    &budget,
+                    &transcript_text,
+                    true,
+                );
+            }
         }
 
         let duration_ms = started.elapsed().as_millis() as u64;
@@ -492,6 +630,8 @@ audio are unaffected."
             provider_output_status,
             fallback_used,
             rejected_issues: rejected_issues.clone(),
+            repair_attempted,
+            length_budget_words: Some(budget.max_words),
             speaker_names_stale: false,
             validation: validation.clone(),
         };
@@ -537,6 +677,9 @@ audio are unaffected."
             extension = %extension.id,
             provider_output = provider_output_status.label(),
             fallback_used,
+            repair_attempted,
+            budget_words = budget.max_words,
+            transcript_words = normalized.word_count(),
             rejected_issue_codes = ?rejected_issues.iter().map(|i| i.code.as_str()).collect::<Vec<_>>(),
             title = %title,
             duration_ms,

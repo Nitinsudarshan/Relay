@@ -340,6 +340,12 @@ export interface MeetingSettings {
   default_extension_id: string;
   speaker_identification: SpeakerIdentificationSetting;
   extensions: MeetingExtensionSetting[];
+  /**
+   * Standing instructions for how summaries should read. Presentation only —
+   * subordinate to the accuracy rules, so nothing written here can make Relay
+   * assign an owner or a deadline the meeting did not establish.
+   */
+  summary_instructions: string;
 }
 
 export type AccountMode = 'local' | 'hybrid';
@@ -697,6 +703,20 @@ export interface Conversation {
   unattributed_turn_count: number;
 }
 
+/**
+ * Notes a person wrote about a meeting.
+ *
+ * A source artifact, not derived: generating or regenerating a summary reads
+ * them and never writes them.
+ */
+export interface MeetingNotes {
+  /** Written during or after the meeting. The common case. */
+  during: string;
+  /** Written before it, if anything was. Optional enrichment, roughly 1 in 100. */
+  before: string;
+  updated_at?: string | null;
+}
+
 export type OwnerType = 'ME' | 'SPEAKER' | 'EXTERNAL' | 'GROUP' | 'UNASSIGNED';
 export type ActionItemStatus = 'OPEN' | 'DONE';
 
@@ -723,9 +743,25 @@ export interface ActionItem {
 export interface Decision {
   id: string;
   statement: string;
+  /**
+   * Why it was settled this way, when the meeting said so. Null when no reason
+   * was given — never filled in with a plausible one.
+   */
+  rationale?: string | null;
   decided_by_speaker_id?: string | null;
   source_segment_ids: string[];
   confidence: number;
+}
+
+export type RiskKind = 'RISK' | 'BLOCKER' | 'DEPENDENCY' | 'CONSTRAINT';
+
+/** A risk, blocker, dependency, or constraint the meeting actually raised. */
+export interface MeetingRisk {
+  id: string;
+  statement: string;
+  kind: RiskKind;
+  raised_by_speaker_id?: string | null;
+  source_segment_ids: string[];
 }
 
 export interface MeetingTopic {
@@ -755,9 +791,21 @@ export interface OpenQuestion {
   source_segment_ids: string[];
 }
 
+/**
+ * What kind of claim a key point is. Keeps a proposal from being read — or
+ * rendered — as something the meeting settled.
+ */
+export type KeyPointKind =
+  | 'DISCUSSION'
+  | 'PROPOSAL'
+  | 'RECOMMENDATION'
+  | 'DISAGREEMENT'
+  | 'TRADEOFF';
+
 export interface KeyPoint {
   id: string;
   text: string;
+  kind: KeyPointKind;
   topic_id?: string | null;
   source_segment_ids: string[];
 }
@@ -780,6 +828,7 @@ export interface MeetingFacts {
   decisions: Decision[];
   action_items: ActionItem[];
   open_questions: OpenQuestion[];
+  risks: MeetingRisk[];
   entities: MeetingEntity[];
   speaker_ids: string[];
   /** True when no model was reachable and these came from the cue-based extractor. */
@@ -849,6 +898,13 @@ export interface SummaryArtifact {
    * which describes only the prose actually on screen.
    */
   rejected_issues: ValidationIssue[];
+  /**
+   * True when the first draft failed validation and a corrected one was asked
+   * for. "Needed a second try" and "could not do it" are different signals.
+   */
+  repair_attempted: boolean;
+  /** The word ceiling this meeting's own length allowed. */
+  length_budget_words?: number | null;
   /** True when a speaker was renamed after this prose was written. */
   speaker_names_stale: boolean;
   validation: ValidationReport;

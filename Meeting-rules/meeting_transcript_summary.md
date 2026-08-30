@@ -21,6 +21,17 @@
 > So: structured JSON internally, Markdown at the presentation boundary. Nothing
 > is asked to produce machine-readable and human-facing output at once. See
 > `docs/meetings/MEETINGS_INTELLIGENCE_AUDIT.md` §1.11.
+>
+> **Implementation status (v0.16.0).** §5's output structure, §6's length table,
+> §8's chunking, and §11's per-stage temperatures are all implemented as of the
+> summary quality rebuild; before it, only §3's rewrite rule and §4's artifact
+> stripping were enforced in code. §6 is applied as a *budget derived from the
+> meeting* rather than as a lookup — `processing/length.rs` scales it by surviving
+> words and states it to the model, which is what §6 means by "judge by surviving
+> content, not raw word count". §8's chunking lives in
+> `processing/context.rs::windows` and runs Stage A per window with Stage B once
+> over the merged result, exactly as §8 requires. See
+> `docs/meetings/SUMMARY_QUALITY_REBUILD.md`.
 
 
 ---

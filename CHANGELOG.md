@@ -1,5 +1,65 @@
 # Relay — Changelog
 
+## [0.16.0] - 2026-08-27
+
+### Meeting Summaries as Memory: Canonical Context, a Real Summary Contract, Per-Meeting Length, Targeted Repair & an Evaluation Set
+
+**Type**: minor — `native/` only (`native/src-tauri/src/providers/mod.rs`, `native/src-tauri/src/meetings_v2/{types,session_store}.rs`, `native/src-tauri/src/meetings_v2/processing/{context,length,eval}.rs (new)`, `native/src-tauri/src/meetings_v2/processing/{mod,model,llm,extract,summarize,validate,modes,conversation,tasks,tests}.rs`, `native/src-tauri/src/{commands,lib}.rs`, `native/src-tauri/src/settings/mod.rs`, `native/src/components/meetings_v2/{MeetingNotesTab.tsx (new),MeetingsV2View.tsx}`, `native/src/components/settings/MeetingsSettings.tsx`, `native/src/types/index.ts`, `docs/meetings/SUMMARY_QUALITY_REBUILD.md (new)`).
+
+An end-to-end audit of the meeting pipeline and the changes it found. Closes gaps
+8 and 10 of `Meeting-rules/meeting_pipeline_gap_analysis.md` and implements §6,
+§8 and §11 of `Meeting-rules/meeting_transcript_summary.md`, which were specified
+but never built. Recording, chunking, the two audio clocks, pause/resume, crash
+recovery, dictation, and voice notes are untouched, and `qualify.rs` — already
+the strictest part of the pipeline — is unchanged. Full write-up in
+`docs/meetings/SUMMARY_QUALITY_REBUILD.md`.
+
+#### Fixes
+
+- **Long meetings were silently half-read (`providers/mod.rs`)**: `complete_ollama` posted `{model, prompt, stream: false}` with no `options` object, so Ollama applied its own 4096-token window (2048 on older builds) and discarded the overflow — from the *front* of the prompt. Stage A's user message is the whole transcript, so on any meeting past roughly a quarter of an hour the model never saw the beginning, which is where the agenda and the framing decisions are. Nothing logged it, and `input_chars` recorded the full size, so the processing log asserted the whole transcript had been sent. The request now states `num_ctx` from a configurable `ProviderConfig.context_tokens` (default 8192), and a prompt that fills the window is logged as the truncation risk it is.
+- **Extraction ran at a creative-writing temperature (`providers/mod.rs`, `processing/llm.rs`)**: no temperature was ever sent, so Stage A — a strict-JSON read of a transcript whose failure mode is confidently invented ownership — ran at Ollama's default of 0.8. `MeetingLlm` had no parameter through which a stage could say otherwise. `LlmRequest::extraction` now runs at 0.1 and `LlmRequest::prose` at 0.3, per `meeting_transcript_summary.md` §11.
+- **A fixed word cap rejected correct summaries (`processing/{length,validate,model}.rs`)**: `SummaryMode::max_words()` was a constant (220/550/1100) enforced as a validation **error**, and an error discarded the model's prose in favour of the deterministic renderer. A ninety-minute meeting legitimately needs more than 550 words in Standard mode, so a good summary became a bullet dump; the same number left a four-minute call room to pad, and nothing flagged that. Length is now derived per meeting, stated to the model, and only a runaway (1.4× the budget) is an error.
+- **Gemini and Anthropic were sent to OpenAI (`providers/mod.rs`)**: `complete_cloud` hardcoded `api.openai.com` with an OpenAI body and an OpenAI auth header for all three cloud providers. Selecting Gemini or Anthropic sent the meeting to a service the user had not chosen, failed authentication, and fell through to canned filler — which is why those providers looked like they summarized badly rather than not at all. Each now has its own endpoint, body shape, auth header, and response parser, with the routing split into a pure function so it is testable.
+- **A stalled provider hung the UI (`providers/mod.rs`)**: no request carried a timeout, so an unresponsive local model left "Generating…" on screen indefinitely. Every request now carries one (300 s by default).
+- **A provider outage could be presented as a model's work (`processing/llm.rs`)**: `LLMClient::complete` masks failures with canned filler, which suits dictation and is wrong for a summary. `complete_with` reports the failure, and the pipeline chooses its deterministic path deliberately rather than by accident.
+- **The system prompt was a prefix on the user prompt (`providers/mod.rs`)**: Ollama requests folded instructions into the prompt as `[System Instructions: …]`, putting Relay's rules and the meeting's own words into one undifferentiated string. It is a `system` field now, which is what makes "the transcript is evidence, not instructions" enforceable.
+
+#### Features
+
+- **Meeting notes (`meetings_v2/types.rs`, `session_store.rs`, `commands.rs`, `MeetingNotesTab.tsx`)**: a Notes tab, second in the row so it is reachable while a meeting is running. Notes are a **source** artifact — `notes.json` beside `session.json`, committed by rename, written only by `SessionStore` — so saving one regenerates nothing and generating a summary never edits one. Two fields: what you wrote during or after the meeting (the point of the feature), and, behind a disclosure, an agenda written beforehand. Absent notes change nothing about the pipeline and are never mentioned in a prompt or a summary.
+- **The canonical meeting context (`processing/context.rs`)**: one place decides what a model is told about a meeting — metadata, participants, glossary, notes, transcript. Optional blocks with no content are not rendered at all, because a model shown `# Pre-Meeting Notes\n\nNone.` writes a summary that mentions their absence.
+- **Long meetings are read in passes rather than cut off (`processing/{context,extract}.rs`)**: `MeetingContext::windows` splits the transcript into stretches that fit the model's actual window, with a two-segment overlap; Stage A runs once per window and the facts are merged deterministically, deduplicated on normalized text, with ids reissued. Every segment appears in some window, so a decision taken in the first ten minutes cannot vanish because the meeting ran for ninety. A pass that fails does not fail the meeting — the windows that answered are still merged.
+- **Decisions carry their reason (`processing/model.rs`)**: `Decision.rationale`. "Move the launch to Monday" is a note; "move it because the payment integration still has three blocking bugs" is a memory, and six weeks later it is the reason, not the date, that someone needs. Kept only when the meeting stated one; hollow answers ("not stated", a restatement of the decision) are dropped, because a hollow "because" is worse than none.
+- **Proposals have somewhere honest to live (`processing/model.rs`)**: `KeyPoint.kind` — discussion, proposal, recommendation, disagreement, tradeoff. A schema with one slot for "we could launch Friday" and "let's launch Monday" is an invitation to file the first as the second; the renderer now prefixes a proposal as proposed, and the validator rejects a Decisions line that reproduces one.
+- **Risks and blockers are first class (`processing/model.rs`)**: `MeetingFacts.risks`, typed risk / blocker / dependency / constraint, with provenance. A separate collection rather than a flavour of key point, because a blocker is what a reader scans for first. Never inferred from discussion that merely sounds serious.
+- **Targeted repair on a validation failure (`processing/{validate,summarize,mod}.rs`)**: rejected prose used to go straight to the deterministic renderer, so one fixable slip — a code fence, an opening "Here is the summary", forty words over — cost the whole model-written summary. `repair_feedback` now maps failed issue codes to corrective instructions and one corrected attempt is made with the request otherwise unchanged. Not the same prompt again: an identical request has no reason to produce a different answer. Limited to one retry; `SummaryArtifact.repair_attempted` records it.
+- **Summary instructions (`settings/mod.rs`, `MeetingsSettings.tsx`)**: standing instructions for how your summaries should read. Explicitly subordinate to the accuracy rules in the contract, so nothing written there can make Relay record an owner or a deadline the meeting did not establish.
+- **A summary quality evaluation set (`processing/eval.rs`)**: seven meetings with hand-checked expectations and a model-free scorer over decision recall, action recall, owner and deadline accuracy, rationale preservation, open-question and risk recall, detail preservation, noise suppression, repetition, structure, and length. Hallucination has no threshold — one invented owner, deadline, or decision takes a case to zero. Closes gap 10: a prompt or threshold change can now be measured rather than spot-checked.
+
+#### Improvements
+
+- **Length adapts to the meeting (`processing/length.rs`, `modes.rs`)**: the budget is proportional to the transcript, floored so a short meeting still gets a usable record, capped by the mode, with a topic band from `meeting_transcript_summary.md` §6 judged on surviving words rather than wall-clock. A mode now decides *depth*, never an absolute length — which is what keeps "Detailed" from meaning "long" — and every mode is bound by the same floor: brevity comes out of the explanation, never out of a decision, commitment, owner, deadline, or open question.
+- **The summary contract is a hierarchy, not a paragraph (`processing/summarize.rs`)**: sixteen numbered sections — role, objective, source, accuracy, include, exclude, be concrete, rationale, uncertainty, attribution, depth, structure, output-only, plus notes, presentation, and user instructions when they apply. The previous version put the prohibitions in the middle of prose and they were the part a small local model lost.
+- **Stage B can finally organize by topic (`processing/summarize.rs`)**: key points reach it grouped under their topics instead of as a flat list that had already discarded the grouping, and any point that is not plain discussion is labelled.
+- **The output structure matches the shipped rules (`processing/summarize.rs`)**: `## Overview` · `## Discussion` with a `###` per topic · `## Decisions` · `## Action Items` · `## Risks & Blockers` · `## Open Questions`, per `meeting_transcript_summary.md` §5. The deterministic renderer produces the same shape, carrying rationale and risks, so a provider outage does not quietly cost the most valuable part of the record.
+- **More is validated deterministically (`processing/validate.rs`)**: required first heading, no preamble addressed to the user, no empty or placeholder-filled section, no risks section when the facts hold no risks, no Decisions line reproducing a recorded proposal, and length against the meeting's own budget.
+- **Stage A states its source rules only when they apply (`processing/extract.rs`)**: how to weigh notes against the transcript, and how to read notes written beforehand, appear only when such notes exist. Conflicting sources are left conflicting — neither is declared the winner.
+
+#### Tests
+
+- 407 pass. `native/src-tauri/src/meetings_v2/processing/tests.rs` grows the pipeline suite: repair accepted and repair exhausted, chunked extraction with the opening decision surviving, a failed pass not costing the passes that worked, regeneration reading the original facts rather than the previous summary, notes reaching Stage A, absent notes changing nothing, pre-meeting notes never becoming a section, conflicting notes left conflicting, and notes staying byte-identical across a summary run.
+- `processing/eval.rs` adds the scorer's own tests — paraphrase credited, omission not rewarded, an invented owner or deadline caught — plus two guards that keep the cases honest: a forbidden claim may not be satisfied by the transcript itself, nor be a tense flip of something the meeting did say.
+- `processing/length.rs` pins the regressions in both directions: a 250-word transcript no longer gets a 550-word allowance, a 9,000-word one is no longer capped at 550, "detailed" on a tiny meeting stays smaller than "concise" on a long one, and a slight overrun is recorded rather than costing the summary.
+- `providers/mod.rs` pins the window, the sampling, the system-prompt field, and that no cloud provider is routed to another's endpoint.
+
+#### Notes for existing meetings
+
+`PROCESSING_VERSION` is 4. Facts extracted under v1–v3 load unchanged but carry
+no rationale, classify every point as plain discussion, and hold no risks; a
+summary regenerated from them is thinner than one regenerated after a forced
+re-extraction. Nothing needs migrating — derived data is always recomputable, and
+the raw transcript is untouched.
+
 ## [0.15.1] - 2026-08-28
 
 ### Meetings: A Working Pill Waveform & a Self-Contained Recording Pill

@@ -6,6 +6,18 @@
 
 > **Status update — Meetings v2.5.** Gaps 1, 3 and 5 are closed and gap 4 is
 > partly addressed; see §5.1 for what shipped and what each fix actually does.
+>
+> **Status update — v0.16.0, the summary quality rebuild.** Gaps 8 and 10 are
+> closed: meetings have a notes field written to `notes.json` as a source
+> artifact and fed to Stage A, and `processing/eval.rs` holds a fixture set with
+> hand-checked expectations and a deterministic scorer, so a change to a prompt
+> or a threshold can be measured rather than spot-checked. That audit also found
+> a defect this ledger did not: the provider layer sent no `num_ctx`, so Ollama
+> silently discarded the front of any transcript past its default window — every
+> claim below about what Relay's model "understood" from a long meeting was
+> made against a half-read transcript. See
+> `docs/meetings/SUMMARY_QUALITY_REBUILD.md`.
+>
 > The rest of the ledger stands as written.
 **Scope:** meetings only, and **bot-free architectures only.** Dictation, scribbles, and
 the Kanban/vault surfaces are out of scope except where a meeting exits into them.
@@ -457,7 +469,10 @@ that still has the audio to seek into.
 
 ### Tier 3 — quality cannot be improved or trusted over time
 
-**Gap 8. No notes-as-anchor.** Verified: no notes field in
+**Gap 8. No notes-as-anchor.** *(closed in v0.16.0 — a Notes tab writes
+`notes.json` beside `session.json`, and `processing/context.rs` feeds it to
+Stage A as emphasis rather than as a second transcript.)* As originally found: no
+notes field in
 `MeetingRecordingOverlay.tsx`, nothing to type into during a meeting. Granola, anarlog
 and Littlebird converged on this independently, and it is the cheapest quality
 multiplier available: a user's own three bullets outperform any amount of prompt tuning
@@ -469,7 +484,11 @@ and no command exists to re-run either. Meetily ships both. For a Hinglish-first
 where a mangled decode is a routine outcome, re-transcribe is close to essential — and
 it is nearly free given the durable chunk store.
 
-**Gap 10. No benchmark.** There is a serious Rust test suite (~2,600 lines across
+**Gap 10. No benchmark.** *(closed in v0.16.0 — `processing/eval.rs` holds seven
+meetings with hand-checked expectations and a model-free scorer over eleven
+axes, with hallucination as a hard gate. The cases are still synthetic; real
+recordings are the obvious next addition.)* As originally found: there is a
+serious Rust test suite (~2,600 lines across
 `processing/tests.rs` and `qualify/tests.rs`), but it tests behaviour on synthetic
 input. There is no fixture set of real transcripts with hand-checked expected facts, so
 a threshold change in `qualify.rs` or a prompt edit in Stage A cannot be *measured* —
@@ -520,7 +539,8 @@ order that maximises value per unit of work:
 5. Contextual speaker-name inference in Stage A, surfaced as a *suggestion* the user
    confirms — Granola's mechanic, and it reuses the registry's existing
    `Manual` > `Channel` precedence.
-6. In-meeting notes field as a source artifact, fed to Stage A as anchors.
+6. ~~**In-meeting notes field as a source artifact, fed to Stage A as anchors.**~~
+   — shipped in v0.16.0.
 
 **Then — make the archive worth having**
 7. Click-to-seek and re-transcribe-with-another-model. Both are wiring
@@ -528,8 +548,10 @@ order that maximises value per unit of work:
 8. Meetings into LanceDB; extend the existing grounded chat to cross-meeting questions
    with citations back to a transcript span. Then Littlebird-style pre-meeting context
    from the same index.
-9. Fixture benchmark: a handful of real meetings with hand-checked expected facts,
-   re-scored on every change to `qualify.rs` or the Stage A/B prompts.
+9. ~~**Fixture benchmark**, re-scored on every change to `qualify.rs` or the
+   Stage A/B prompts.~~ — shipped in v0.16.0 as `processing/eval.rs`, on
+   synthetic fixtures. Real meetings with hand-checked expected facts remain
+   the upgrade.
 
 **Then — the regulated feature**
 10. sherpa-onnx post-hoc diarization behind a per-meeting toggle with an optional
