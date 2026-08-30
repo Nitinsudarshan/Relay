@@ -11,11 +11,11 @@ interface MeetingProcessingStatusProps {
 }
 
 const TONE_CLASSES: Record<string, string> = {
-  idle: 'text-zinc-400 bg-white/5 border-white/10',
-  busy: 'text-zinc-300 bg-white/5 border-white/15',
-  ok: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
-  warn: 'text-amber-400 bg-amber-500/10 border-amber-500/25',
-  error: 'text-red-400 bg-red-500/10 border-red-500/25',
+  idle: 'text-muted-foreground bg-muted/50 border-border',
+  busy: 'text-foreground bg-accent border-border',
+  ok: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+  warn: 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/25',
+  error: 'text-destructive bg-destructive/10 border-destructive/25',
 };
 
 /** The stages worth showing a user, in pipeline order. */
@@ -32,17 +32,15 @@ const StageChip: React.FC<{ label: string; stage?: StageState | null }> = ({
   const status = stage?.status ?? 'NOT_RUN';
   const icon =
     status === 'SUCCESS' ? (
-      <Check className="w-3 h-3 text-emerald-400" />
+      <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
     ) : status === 'FAILED' ? (
-      <AlertTriangle className="w-3 h-3 text-red-400" />
+      <AlertTriangle className="w-3 h-3 text-destructive" />
     ) : status === 'RUNNING' ? (
-      <Loader2 className="w-3 h-3 text-zinc-300 animate-spin" />
+      <Loader2 className="w-3 h-3 text-primary animate-spin" />
     ) : (
-      <Minus className="w-3 h-3 text-zinc-600" />
+      <Minus className="w-3 h-3 text-muted-foreground/40" />
     );
 
-  // Skipped stages carry the reason they were skipped, which is a setting the
-  // user chose — not an error, and worth saying plainly on hover.
   const title =
     status === 'SKIPPED'
       ? stage?.error ?? 'Turned off in settings'
@@ -50,11 +48,11 @@ const StageChip: React.FC<{ label: string; stage?: StageState | null }> = ({
 
   return (
     <span
-      className="flex items-center gap-1.5 text-[11px] text-zinc-400 font-medium"
+      className="flex items-center gap-1.5 text-[11px] text-muted-foreground font-medium"
       title={title}
     >
       {icon}
-      <span className={status === 'SKIPPED' ? 'text-zinc-600 line-through' : ''}>
+      <span className={status === 'SKIPPED' ? 'text-muted-foreground/60 line-through' : ''}>
         {label}
       </span>
     </span>
@@ -63,10 +61,6 @@ const StageChip: React.FC<{ label: string; stage?: StageState | null }> = ({
 
 /**
  * A compact, honest report of what processing produced.
- *
- * Shows per-stage outcomes rather than one "something went wrong": a meeting
- * whose summary failed still has its transcript and conversation, and the user
- * should be able to see that and retry only the part that failed.
  */
 export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = ({
   processing,
@@ -78,10 +72,6 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
   const label = isBusy ? 'Processing meeting…' : headline.label;
 
   const summaryStage = processing?.stages.summary;
-  // A summary is unavailable only when nothing rendered. A model draft that was
-  // rejected and replaced by the deterministic renderer is a *successful*
-  // summary — the user has something to read, and saying otherwise over a
-  // perfectly good summary is what this distinction exists to prevent.
   const summaryFailed = summaryStage?.status === 'FAILED';
   const summary = processing?.summary;
   const usedFallback = summary?.fallback_used === true;
@@ -91,7 +81,7 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
     .join(', ');
 
   return (
-    <div className="flex flex-col gap-2 px-6 py-2.5 border-b border-white/5 bg-zinc-950/30">
+    <div className="flex flex-col gap-2 px-6 py-2.5 border-b border-border bg-card/40">
       <div className="flex items-center gap-3 flex-wrap">
         <span
           className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${
@@ -112,10 +102,8 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
         </div>
 
         {summary && (
-          <span className="text-[10px] font-mono text-zinc-600 ml-auto">
+          <span className="text-[10px] font-mono text-muted-foreground ml-auto">
             {summary.mode.toLowerCase()} ·{' '}
-            {/* Naming the model on prose no model wrote would be a lie about
-                provenance, however small. */}
             {usedFallback ? 'no model' : summary.model} · v
             {summary.processing_version}
           </span>
@@ -123,7 +111,7 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
       </div>
 
       {summaryFailed && (
-        <div className="flex items-center gap-2 text-[11px] text-red-300">
+        <div className="flex items-center gap-2 text-[11px] text-destructive">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
           <span className="flex-1 min-w-0 truncate">
             Summary unavailable — {summaryStage?.error ?? 'processing did not complete'}
@@ -131,7 +119,7 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
           {onRetry && (
             <button
               onClick={onRetry}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 font-medium transition-colors cursor-pointer shrink-0"
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted hover:bg-accent border border-border text-foreground font-medium transition-colors cursor-pointer shrink-0"
             >
               <RefreshCw className="w-3 h-3" />
               <span>Retry</span>
@@ -141,7 +129,7 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
       )}
 
       {!summaryFailed && usedFallback && (
-        <p className="text-[11px] text-amber-300/80">
+        <p className="text-[11px] text-amber-600 dark:text-amber-400">
           {modelRejected ? (
             <>
               Generated from fallback because the model output failed validation
@@ -160,3 +148,4 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
     </div>
   );
 };
+

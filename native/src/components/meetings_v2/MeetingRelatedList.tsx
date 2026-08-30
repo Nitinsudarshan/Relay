@@ -9,10 +9,6 @@ interface MeetingRelatedListProps {
 
 /**
  * Meetings related to this one, with the reason shown.
- *
- * The reason matters: two meetings both called "Daily Standup" are not related
- * by that fact alone, so each row names the topics and entities they actually
- * share rather than presenting an unexplained score.
  */
 export const MeetingRelatedList: React.FC<MeetingRelatedListProps> = ({
   related,
@@ -21,9 +17,9 @@ export const MeetingRelatedList: React.FC<MeetingRelatedListProps> = ({
   if (related.length === 0) return null;
 
   return (
-    <div className="p-5 rounded-xl bg-zinc-950/50 border border-white/5 flex flex-col gap-3">
-      <span className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
-        <Link2 className="w-3.5 h-3.5 text-zinc-500" />
+    <div className="p-5 rounded-lg bg-card border border-border flex flex-col gap-3">
+      <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+        <Link2 className="w-3.5 h-3.5 text-primary" />
         Related Meetings
       </span>
 
@@ -38,17 +34,17 @@ export const MeetingRelatedList: React.FC<MeetingRelatedListProps> = ({
             <button
               key={meeting.meeting_id}
               onClick={() => onSelect(meeting.meeting_id)}
-              className="flex flex-col gap-1 p-2.5 rounded-md bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 hover:border-white/15 text-left transition-colors cursor-pointer"
+              className="flex flex-col gap-1 p-2.5 rounded-md bg-muted/40 hover:bg-accent border border-border text-left transition-colors cursor-pointer"
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-zinc-200 truncate">
+                <span className="text-xs font-medium text-foreground truncate">
                   {meeting.title}
                 </span>
-                <span className="text-[10px] font-mono text-zinc-500 shrink-0">
+                <span className="text-[10px] font-mono text-muted-foreground shrink-0">
                   {meeting.created_at.split('T')[0]}
                 </span>
               </div>
-              <span className="text-[10px] text-zinc-500 truncate">
+              <span className="text-[10px] text-muted-foreground truncate">
                 {reasons.length > 0
                   ? `Shares ${reasons.join(', ')}`
                   : 'Related by participants and meeting type'}
@@ -60,3 +56,4 @@ export const MeetingRelatedList: React.FC<MeetingRelatedListProps> = ({
     </div>
   );
 };
+

@@ -40,7 +40,7 @@ export function LoginForm() {
     <Card className="w-full max-w-sm border-border bg-card shadow-2xl">
       <CardHeader className="text-center pb-4 space-y-2">
         <div className="flex justify-center mb-1">
-          <div className="w-12 h-12 rounded-2xl bg-card border border-border flex items-center justify-center shadow-md">
+          <div className="w-12 h-12 rounded-lg bg-card border border-border flex items-center justify-center shadow-md">
             <RelayLogo className="w-7 h-7" />
           </div>
         </div>

@@ -49,6 +49,8 @@ import {
   isActiveState,
   resolveSelectedSession,
 } from './meetingsViewState';
+import { EmptyState } from '../common/EmptyState';
+import { Badge } from '@/components/ui/badge';
 
 /** See the recording pill: events alone cannot keep a long-lived view honest. */
 const RECONCILE_INTERVAL_MS = 1000;
@@ -640,90 +642,95 @@ export const MeetingsV2View: React.FC = () => {
   const backlog = activeSession?.pending_transcription_chunks ?? 0;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#0a0a0c] text-zinc-100 overflow-hidden select-none">
-      {/* Top Header */}
-      <div className="border-b border-white/5 px-6 py-4 flex items-center justify-between bg-zinc-950/40 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-md bg-white/5 border border-white/10 flex items-center justify-center">
-            <Mic className="w-4.5 h-4.5 text-zinc-400" />
+    <div className="flex-1 flex gap-4 min-h-0 overflow-hidden select-none">
+      {/* LHS Card: Meeting Recording Controls & Sessions List */}
+      <aside className="w-80 lg:w-88 flex flex-col shrink-0 bg-card rounded-lg border border-border overflow-hidden shadow-xs">
+        {/* Top Header & Recording Trigger */}
+        <div className="p-3 border-b border-border bg-card space-y-2.5 shrink-0">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="font-bold text-foreground">
+              Recorded Sessions ({sessions.length})
+            </span>
+            <button
+              onClick={loadSessions}
+              className="p-1 hover:bg-accent rounded-md transition-colors text-muted-foreground hover:text-foreground"
+              title="Refresh list"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
           </div>
-          <div>
-            <h1 className="text-base font-semibold tracking-tight text-white flex items-center gap-2">
-              Meetings
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-white/5 text-zinc-400 border border-white/10">
-                V2 Crash-Resilient
-              </span>
-            </h1>
-            <p className="text-xs text-zinc-400">
-              30-second incremental persistence &amp; dual microphone + system audio capture.
-            </p>
-          </div>
-        </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-3">
+          {/* Action / Recording Section */}
           {activeSession ? (
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-xs text-zinc-300 tabular-nums px-2">
-                {formatDuration(activeElapsedSec)}
-              </span>
-              <button
-                onClick={handleTogglePause}
-                disabled={isTogglingPause || isFinalizing}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md font-medium text-xs transition-colors border disabled:opacity-50 disabled:cursor-not-allowed ${
-                  isPaused
-                    ? 'bg-zinc-100 hover:bg-white text-zinc-900 border-transparent'
-                    : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-100 border-white/10'
-                }`}
-              >
-                {isPaused ? (
-                  <>
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>Resume</span>
-                  </>
-                ) : (
-                  <>
-                    <Pause className="w-3.5 h-3.5 fill-current" />
-                    <span>Pause</span>
-                  </>
-                )}
-              </button>
-              <button
-                onClick={handleStopRecording}
-                disabled={isStopping || isFinalizing}
-                className="flex items-center gap-2 px-4 py-2 rounded-md bg-red-500/90 hover:bg-red-500 text-white font-medium text-xs transition-colors border border-red-400/30 disabled:opacity-50"
-              >
-                {isStopping || isFinalizing ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Finalizing Audio...</span>
-                  </>
-                ) : (
-                  <>
-                    <Square className="w-3.5 h-3.5 fill-current" />
-                    <span>Stop Meeting Recording</span>
-                  </>
-                )}
-              </button>
+            <div className="p-2.5 rounded-lg bg-destructive/10 border border-destructive/30 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-destructive flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
+                  Recording Active
+                </span>
+                <span className="font-mono text-xs text-foreground font-bold tabular-nums">
+                  {formatDuration(activeElapsedSec)}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={handleTogglePause}
+                  disabled={isTogglingPause || isFinalizing}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-semibold text-xs transition-colors border disabled:opacity-50 cursor-pointer ${
+                    isPaused
+                      ? 'bg-primary text-primary-foreground border-transparent hover:bg-primary/90'
+                      : 'bg-card hover:bg-accent text-foreground border-border'
+                  }`}
+                >
+                  {isPaused ? (
+                    <>
+                      <Play className="w-3 h-3 fill-current" />
+                      <span>Resume</span>
+                    </>
+                  ) : (
+                    <>
+                      <Pause className="w-3 h-3 fill-current" />
+                      <span>Pause</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={handleStopRecording}
+                  disabled={isStopping || isFinalizing}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-destructive hover:bg-destructive/90 text-destructive-foreground font-semibold text-xs transition-colors border border-destructive/30 disabled:opacity-50 cursor-pointer"
+                >
+                  {isStopping || isFinalizing ? (
+                    <>
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      <span>Finalizing…</span>
+                    </>
+                  ) : (
+                    <>
+                      <Square className="w-3 h-3 fill-current" />
+                      <span>Stop</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="space-y-1.5">
               <input
                 type="text"
                 value={meetingTitleInput}
                 onChange={(e) => setMeetingTitleInput(e.target.value)}
-                placeholder="Meeting Title (optional)..."
-                className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-white/10 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-white/25 w-56"
+                placeholder="Meeting title (optional)…"
+                className="w-full px-2.5 py-1.5 rounded-lg bg-background border border-input text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
               <button
                 onClick={handleStartRecording}
                 disabled={isStarting}
-                className="flex items-center gap-2 px-4 py-2 rounded-md bg-zinc-100 hover:bg-white text-zinc-900 font-medium text-xs transition-colors border border-transparent"
+                className="w-full flex items-center justify-center gap-2 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs transition-colors border border-transparent disabled:opacity-50 shadow-xs cursor-pointer"
               >
                 {isStarting ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Starting...</span>
+                    <span>Starting…</span>
                   </>
                 ) : (
                   <>
@@ -735,353 +742,333 @@ export const MeetingsV2View: React.FC = () => {
             </div>
           )}
         </div>
-      </div>
 
-      {activeSession?.capture_warning && (
-        <div className="px-6 py-2 bg-amber-500/10 border-b border-amber-500/20 text-[11px] text-amber-300 flex items-center gap-2">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          <span>{activeSession.capture_warning}</span>
-        </div>
-      )}
-
-      {/* Main Content Split */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left: Meeting Sessions List */}
-        <div className="w-80 border-r border-white/5 flex flex-col bg-zinc-950/20">
-          <div className="p-3 border-b border-white/5 flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-semibold text-zinc-300">
-              Recorded Sessions ({sessions.length})
-            </span>
-            <button
-              onClick={loadSessions}
-              className="p-1 hover:bg-white/5 rounded transition-colors text-zinc-400 hover:text-zinc-200"
-              title="Refresh list"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            </button>
+        {activeSession?.capture_warning && (
+          <div className="px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 text-[11px] text-amber-600 dark:text-amber-300 flex items-center gap-2 shrink-0">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span>{activeSession.capture_warning}</span>
           </div>
+        )}
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            {sessions.length === 0 && !activeSession ? (
-              <div className="h-full flex flex-col items-center justify-center p-6 text-center text-zinc-500">
-                <FileText className="w-8 h-8 mb-2 opacity-30" />
-                <p className="text-xs">No meetings recorded yet.</p>
-                <p className="text-[11px] text-zinc-600 mt-1">
-                  Start a recording above to capture live audio &amp; incremental transcripts.
-                </p>
-              </div>
-            ) : (
-              sessions.map((item) => {
-                const isSelected = selectedSessionId === item.id;
-                const isItemActive = activeSession?.id === item.id;
-                const itemState = isItemActive ? activeSession!.state : item.state;
-                const derived = processingIndex[item.id];
-                // Prefer the extracted title for display; the recorder's own
-                // title is never overwritten.
-                const displayTitle = derived?.title?.trim() || item.title;
+        {/* Recorded Sessions List */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+          {sessions.length === 0 && !activeSession ? (
+            <EmptyState
+              icon={FileText}
+              title="No meetings recorded yet"
+              description="Start a recording above to capture live audio & incremental transcripts."
+              minHeight="min-h-[200px]"
+              className="my-4 border-none bg-transparent"
+            />
+          ) : (
+            sessions.map((item) => {
+              const isSelected = selectedSessionId === item.id;
+              const isItemActive = activeSession?.id === item.id;
+              const itemState = isItemActive ? activeSession!.state : item.state;
+              const derived = processingIndex[item.id];
+              const displayTitle = derived?.title?.trim() || item.title;
 
-                return (
-                  <div
-                    key={item.id}
-                    onClick={() => handleSelectSession(item.id)}
-                    title={displayTitle}
-                    className={`group relative w-full text-left p-3 rounded-md border transition-colors flex flex-col gap-1.5 cursor-pointer ${
-                      isSelected
-                        ? 'bg-white/[0.07] border-white/20 text-white'
-                        : 'bg-zinc-900/40 hover:bg-zinc-900/80 border-white/5 text-zinc-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span
-                        className="font-medium text-xs truncate text-zinc-100 flex-1 min-w-0"
-                        title={displayTitle}
-                      >
-                        {displayTitle}
-                      </span>
-                      <span
-                        className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 ${
-                          isItemActive && itemState === 'PAUSED'
-                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                            : isItemActive
-                            ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                            : itemState === 'RECOVERED'
-                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                            : itemState === 'INTERRUPTED' || itemState === 'ERROR'
-                            ? 'bg-zinc-800 text-zinc-400'
-                            : 'bg-lime-500/10 text-lime-400 border border-lime-500/20'
-                        }`}
-                      >
-                        {isItemActive && itemState === 'RECORDING' ? 'Recording' : itemState}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-[11px] text-zinc-400 gap-2">
-                      <div className="flex items-center gap-2.5 flex-wrap min-w-0">
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3 text-zinc-500" />
-                          {formatDuration(isItemActive ? activeElapsedSec : item.duration_seconds)}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Layers className="w-3 h-3 text-zinc-500" />
-                          {item.chunk_count} chunk{item.chunk_count === 1 ? '' : 's'}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <FileText className="w-3 h-3 text-zinc-500" />
-                          {isItemActive ? activeSessionWords : (item.word_count ?? 0)} word{(isItemActive ? activeSessionWords : (item.word_count ?? 0)) === 1 ? '' : 's'}
-                        </span>
-                        {derived?.meeting_type && (
-                          <span className="text-[10px] px-1.5 rounded bg-white/5 text-zinc-400 border border-white/10">
-                            {derived.meeting_type}
-                          </span>
-                        )}
-                        {derived?.open_action_item_count ? (
-                          <span
-                            title={`${derived.open_action_item_count} open of ${derived.action_item_count} action items`}
-                            className="flex items-center gap-1 text-amber-400"
-                          >
-                            <ListTodo className="w-3 h-3" />
-                            {derived.open_action_item_count}
-                          </span>
-                        ) : null}
-                        {(derived?.has_summary || item.summary) && (
-                          <span
-                            title={
-                              derived?.has_summary
-                                ? 'Summary available'
-                                : 'Summarized before the processing pipeline existed'
-                            }
-                            className="flex items-center text-zinc-400"
-                          >
-                            <Sparkles className="w-3 h-3" />
-                          </span>
-                        )}
-                      </div>
-
-                      {!isItemActive && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPendingDeleteId(item.id);
-                          }}
-                          disabled={deletingId === item.id}
-                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 hover:text-red-400 text-zinc-500 rounded transition-all shrink-0 cursor-pointer"
-                          title="Move to trash"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Right: Selected Session Transcript & Details */}
-        <div className="flex-1 flex flex-col bg-zinc-900/20 overflow-hidden">
-          {selectedSession ? (
-            <div className="flex-1 flex flex-col h-full overflow-hidden">
-              {/* Session Overview Header */}
-              <div className="p-6 border-b border-white/5 bg-zinc-950/30 flex items-start justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold text-white">
-                    {meetingTitle(selectedSession, processing)}
-                  </h2>
-                  <p className="text-xs text-zinc-400 mt-1">
-                    Recorded on {new Date(selectedSession.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} • Duration:{' '}
-                    {formatDuration(
-                      isSelectedActive ? activeElapsedSec : selectedSession.duration_seconds
-                    )}{' '}
-                    • Chunks: {selectedSession.chunk_count} • Words: {selectedSessionWords}
-                    {selectedSession.paused_seconds > 1
-                      ? ` • Paused: ${formatDuration(selectedSession.paused_seconds)}`
-                      : ''}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {!isSelectedActive && (
-                    <>
-                      <button
-                        onClick={() => handleGenerateSummary(selectedSession.id)}
-                        disabled={isSummarizing || (selectedSessionWords === 0 && transcriptSegments.length === 0)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/10 text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                        title="Read the transcript, extract what was decided and who owns what, then write it up"
-                      >
-                        {isSummarizing ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-zinc-300" />
-                            <span>Generating…</span>
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="w-3.5 h-3.5 text-zinc-300" />
-                            <span>{processing?.summary ? 'Regenerate' : 'Generate Summary'}</span>
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        onClick={() => handlePromoteToScribble(selectedSession.id)}
-                        disabled={isPromoting || !processing?.facts}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 border border-white/10 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                        title="Create a Scribble from this meeting, keeping the meeting as its source"
-                      >
-                        {isPromoting ? (
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <NotebookPen className="w-3.5 h-3.5" />
-                        )}
-                        <span>
-                          {processing?.scribble_ref ? 'Scribble again' : 'To Scribble'}
-                        </span>
-                      </button>
-
-                      <button
-                        onClick={() => setPendingDeleteId(selectedSession.id)}
-                        disabled={deletingId === selectedSession.id || isSummarizing}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/30 text-xs font-medium transition-all cursor-pointer"
-                        title="Move this meeting to Trash"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Delete Meeting</span>
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {promotedScribbleTitle && (
-                <div className="mx-6 mt-3 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[11px] text-emerald-300 flex items-center gap-2">
-                  <NotebookPen className="w-3.5 h-3.5 shrink-0" />
-                  <span className="flex-1 min-w-0 truncate">
-                    Saved “{promotedScribbleTitle}” to Scribbles, with this meeting as
-                    its source.
-                  </span>
-                  <button
-                    onClick={() => setPromotedScribbleTitle(null)}
-                    className="text-lime-500/80 hover:text-lime-300 font-medium cursor-pointer shrink-0"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
-
-              <MeetingProcessingStatus
-                processing={processing}
-                isBusy={isSummarizing}
-                onRetry={() =>
-                  handleGenerateSummary(selectedSession.id, undefined, undefined, true)
-                }
-              />
-
-              {/* Tab Navigation — Summary first, raw transcript last. */}
-              <div className="flex items-center gap-1 px-6 border-b border-white/5 bg-zinc-950/20">
-                {TABS.filter(
-                  (tab) => tab.key !== 'raw' || meetingSettings.showRawTranscript,
-                ).map((tab) => {
-                  const Icon = tab.icon;
-                  const isActive = activeMeetingTab === tab.key;
-                  const count =
-                    tab.key === 'raw'
-                      ? transcriptSegments.length
-                      : tab.key === 'conversation'
-                        ? processing?.conversation?.turns.length ?? 0
-                        : 0;
-
-                  return (
-                    <button
-                      key={tab.key}
-                      onClick={() => setActiveMeetingTab(tab.key)}
-                      className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer ${
-                        isActive
-                          ? 'border-zinc-200 text-zinc-100'
-                          : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => handleSelectSession(item.id)}
+                  title={displayTitle}
+                  className={`group relative w-full text-left p-3 rounded-lg border transition-colors flex flex-col gap-1.5 cursor-pointer ${
+                    isSelected
+                      ? 'bg-accent/60 border-primary/50 shadow-xs'
+                      : 'bg-card hover:bg-muted/40 border-transparent text-muted-foreground'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className="font-bold text-xs truncate text-foreground flex-1 min-w-0"
+                      title={displayTitle}
+                    >
+                      {displayTitle}
+                    </span>
+                    <span
+                      className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-lg shrink-0 ${
+                        isItemActive && itemState === 'PAUSED'
+                          ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                          : isItemActive
+                          ? 'bg-destructive/20 text-destructive border border-destructive/30'
+                          : itemState === 'RECOVERED'
+                          ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                          : itemState === 'INTERRUPTED' || itemState === 'ERROR'
+                          ? 'bg-muted text-muted-foreground'
+                          : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                       }`}
                     >
-                      <Icon className="w-3.5 h-3.5" />
-                      <span>{tab.label}</span>
-                      {tab.key === 'summary' && processing?.summary && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-lime-400" />
-                      )}
-                      {tab.key !== 'summary' && count > 0 && (
-                        <span className="text-[10px] font-mono px-1.5 rounded bg-white/5 text-zinc-400">
-                          {count}
+                      {isItemActive && itemState === 'RECORDING' ? 'Recording' : itemState}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground gap-2">
+                    <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-muted-foreground/70" />
+                        {formatDuration(isItemActive ? activeElapsedSec : item.duration_seconds)}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Layers className="w-3 h-3 text-muted-foreground/70" />
+                        {item.chunk_count} chunk{item.chunk_count === 1 ? '' : 's'}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <FileText className="w-3 h-3 text-muted-foreground/70" />
+                        {isItemActive ? activeSessionWords : (item.word_count ?? 0)} word{(isItemActive ? activeSessionWords : (item.word_count ?? 0)) === 1 ? '' : 's'}
+                      </span>
+                      {derived?.meeting_type && (
+                        <span className="text-[10px] px-1.5 rounded-lg bg-muted text-muted-foreground border border-border">
+                          {derived.meeting_type}
                         </span>
                       )}
-                    </button>
-                  );
-                })}
-              </div>
+                      {derived?.open_action_item_count ? (
+                        <span
+                          title={`${derived.open_action_item_count} open of ${derived.action_item_count} action items`}
+                          className="flex items-center gap-1 text-amber-600 dark:text-amber-400"
+                        >
+                          <ListTodo className="w-3 h-3" />
+                          {derived.open_action_item_count}
+                        </span>
+                      ) : null}
+                      {(derived?.has_summary || item.summary) && (
+                        <span
+                          title={
+                            derived?.has_summary
+                              ? 'Summary available'
+                              : 'Summarized before the processing pipeline existed'
+                          }
+                          className="flex items-center text-primary"
+                        >
+                          <Sparkles className="w-3 h-3" />
+                        </span>
+                      )}
+                    </div>
 
-              {activeMeetingTab === 'summary' && (
-                <MeetingSummaryTab
-                  processing={processing}
-                  extensions={extensions}
-                  related={related}
-                  isGenerating={isSummarizing}
-                  canGenerate={!isSelectedActive}
-                  onGenerate={(mode, extensionId) =>
-                    handleGenerateSummary(selectedSession.id, mode, extensionId)
-                  }
-                  onToggleActionItem={(item) =>
-                    handleToggleActionItem(selectedSession.id, item)
-                  }
-                  onAddTask={(item) => handleAddTasks(selectedSession.id, item)}
-                  onAddAllTasks={() => handleAddTasks(selectedSession.id)}
-                  busyActionItemId={busyActionItemId}
-                  isAddingAllTasks={isAddingAllTasks}
-                  onSelectRelated={handleSelectSession}
-                />
-              )}
-
-              {activeMeetingTab === 'notes' && (
-                <MeetingNotesTab
-                  notes={notes}
-                  isLoaded={notes !== null}
-                  onSave={(next) => handleSaveNotes(selectedSession.id, next)}
-                />
-              )}
-
-              {activeMeetingTab === 'conversation' && (
-                <MeetingConversationTab
-                  conversation={processing?.conversation}
-                  speakers={processing?.speakers ?? []}
-                  isRenaming={isRenamingSpeaker}
-                  isDisabled={!meetingSettings.generateConversationTranscript}
-                  onRenameSpeaker={(speakerId, displayName) =>
-                    handleRenameSpeaker(selectedSession.id, speakerId, displayName)
-                  }
-                />
-              )}
-
-              {activeMeetingTab === 'raw' &&
-                (meetingSettings.showRawTranscript ? (
-                  <MeetingRawTranscriptTab
-                    segments={transcriptSegments}
-                    liveUpdates={liveUpdates}
-                    isRecording={isSelectedActive}
-                    isPaused={isPaused}
-                    backlog={backlog}
-                    latestLatency={latestLatency}
-                  />
-                ) : (
-                  <RawTranscriptHidden />
-                ))}
-            </div>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-zinc-500">
-              <FileText className="w-10 h-10 mb-3 opacity-20" />
-              <p className="text-sm font-medium text-zinc-400">No Meeting Selected</p>
-              <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-                Select a meeting from the list or start a new recording to capture audio &amp;
-                incremental transcripts.
-              </p>
-            </div>
+                    {!isItemActive && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPendingDeleteId(item.id);
+                        }}
+                        disabled={deletingId === item.id}
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-destructive/20 hover:text-destructive text-muted-foreground rounded-lg transition-all shrink-0 cursor-pointer"
+                        title="Move to trash"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
-      </div>
+      </aside>
+
+      {/* RHS Card: Selected Session Details, Tabs & Viewer */}
+      <main className="flex-1 flex flex-col min-h-0 bg-card rounded-lg border border-border overflow-hidden shadow-xs">
+        {selectedSession ? (
+          <div className="flex-1 flex flex-col h-full overflow-hidden">
+            {/* Session Overview Header */}
+            <div className="p-5 border-b border-border bg-card flex flex-wrap items-start justify-between gap-3 shrink-0">
+              <div className="flex-1 min-w-0">
+                <h2 className="text-lg font-extrabold text-foreground tracking-tight truncate">
+                  {meetingTitle(selectedSession, processing)}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Recorded on {new Date(selectedSession.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} • Duration:{' '}
+                  {formatDuration(
+                    isSelectedActive ? activeElapsedSec : selectedSession.duration_seconds
+                  )}{' '}
+                  • Chunks: {selectedSession.chunk_count} • Words: {selectedSessionWords}
+                  {selectedSession.paused_seconds > 1
+                    ? ` • Paused: ${formatDuration(selectedSession.paused_seconds)}`
+                    : ''}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {!isSelectedActive && (
+                  <>
+                    <button
+                      onClick={() => handleGenerateSummary(selectedSession.id)}
+                      disabled={isSummarizing || (selectedSessionWords === 0 && transcriptSegments.length === 0)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-card hover:bg-accent text-foreground border border-border text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                      title="Read the transcript, extract what was decided and who owns what, then write it up"
+                    >
+                      {isSummarizing ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary" />
+                          <span>Generating…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5 text-primary" />
+                          <span>{processing?.summary ? 'Regenerate' : 'Generate Summary'}</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => handlePromoteToScribble(selectedSession.id)}
+                      disabled={isPromoting || !processing?.facts}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-card hover:bg-accent text-foreground border border-border text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                      title="Create a Scribble from this meeting, keeping the meeting as its source"
+                    >
+                      {isPromoting ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <NotebookPen className="w-3.5 h-3.5 text-primary" />
+                      )}
+                      <span>
+                        {processing?.scribble_ref ? 'Scribble again' : 'To Scribble'}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => setPendingDeleteId(selectedSession.id)}
+                      disabled={deletingId === selectedSession.id || isSummarizing}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/20 hover:border-destructive/30 text-xs font-medium transition-all cursor-pointer"
+                      title="Move this meeting to Trash"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {promotedScribbleTitle && (
+              <div className="mx-5 mt-3 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[11px] text-emerald-700 dark:text-emerald-300 flex items-center gap-2 shrink-0">
+                <NotebookPen className="w-3.5 h-3.5 shrink-0" />
+                <span className="flex-1 min-w-0 truncate">
+                  Saved “{promotedScribbleTitle}” to Scribbles, with this meeting as
+                  its source.
+                </span>
+                <button
+                  onClick={() => setPromotedScribbleTitle(null)}
+                  className="text-emerald-700 dark:text-emerald-400 hover:underline font-medium cursor-pointer shrink-0"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            <MeetingProcessingStatus
+              processing={processing}
+              isBusy={isSummarizing}
+              onRetry={() =>
+                handleGenerateSummary(selectedSession.id, undefined, undefined, true)
+              }
+            />
+
+            {/* Tab Navigation */}
+            <div className="flex items-center gap-1 px-5 border-b border-border bg-card shrink-0">
+              {TABS.filter(
+                (tab) => tab.key !== 'raw' || meetingSettings.showRawTranscript,
+              ).map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeMeetingTab === tab.key;
+                const count =
+                  tab.key === 'raw'
+                    ? transcriptSegments.length
+                    : tab.key === 'conversation'
+                      ? processing?.conversation?.turns.length ?? 0
+                      : 0;
+
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveMeetingTab(tab.key)}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer ${
+                      isActive
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent/40'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                    {tab.key === 'summary' && processing?.summary && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    )}
+                    {tab.key !== 'summary' && count > 0 && (
+                      <span className="text-[10px] font-mono px-1.5 rounded-lg bg-muted text-muted-foreground">
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {activeMeetingTab === 'summary' && (
+              <MeetingSummaryTab
+                processing={processing}
+                extensions={extensions}
+                related={related}
+                isGenerating={isSummarizing}
+                canGenerate={!isSelectedActive}
+                onGenerate={(mode, extensionId) =>
+                  handleGenerateSummary(selectedSession.id, mode, extensionId)
+                }
+                onToggleActionItem={(item) =>
+                  handleToggleActionItem(selectedSession.id, item)
+                }
+                onAddTask={(item) => handleAddTasks(selectedSession.id, item)}
+                onAddAllTasks={() => handleAddTasks(selectedSession.id)}
+                busyActionItemId={busyActionItemId}
+                isAddingAllTasks={isAddingAllTasks}
+                onSelectRelated={handleSelectSession}
+              />
+            )}
+
+            {activeMeetingTab === 'notes' && (
+              <MeetingNotesTab
+                notes={notes}
+                isLoaded={notes !== null}
+                onSave={(next) => handleSaveNotes(selectedSession.id, next)}
+              />
+            )}
+
+            {activeMeetingTab === 'conversation' && (
+              <MeetingConversationTab
+                conversation={processing?.conversation}
+                speakers={processing?.speakers ?? []}
+                isRenaming={isRenamingSpeaker}
+                isDisabled={!meetingSettings.generateConversationTranscript}
+                onRenameSpeaker={(speakerId, displayName) =>
+                  handleRenameSpeaker(selectedSession.id, speakerId, displayName)
+                }
+              />
+            )}
+
+            {activeMeetingTab === 'raw' &&
+              (meetingSettings.showRawTranscript ? (
+                <MeetingRawTranscriptTab
+                  segments={transcriptSegments}
+                  liveUpdates={liveUpdates}
+                  isRecording={isSelectedActive}
+                  isPaused={isPaused}
+                  backlog={backlog}
+                  latestLatency={latestLatency}
+                />
+              ) : (
+                <RawTranscriptHidden />
+              ))}
+          </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center p-8 text-center text-muted-foreground">
+            <EmptyState
+              icon={FileText}
+              title="No Meeting Selected"
+              description="Select a meeting from the list or start a new recording to capture audio & incremental transcripts."
+              minHeight="min-h-[220px]"
+            />
+          </div>
+        )}
+      </main>
 
       <ConfirmationModal
         isOpen={!!pendingDeleteId}

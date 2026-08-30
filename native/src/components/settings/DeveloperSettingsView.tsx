@@ -101,7 +101,7 @@ export const DeveloperSettingsView: React.FC = () => {
       </div>
 
       {/* Notification Surface Mode Selector */}
-      <div className="p-5 rounded-xl border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
+      <div className="p-5 rounded-lg border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
@@ -199,7 +199,7 @@ export const DeveloperSettingsView: React.FC = () => {
       </div>
 
       {/* Onboarding Replay Override Section */}
-      <div className="p-5 rounded-xl border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
+      <div className="p-5 rounded-lg border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -225,7 +225,7 @@ export const DeveloperSettingsView: React.FC = () => {
       </div>
 
       {/* Mock Meeting Reminders Section */}
-      <div className="p-5 rounded-xl border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
+      <div className="p-5 rounded-lg border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
         <div className="space-y-1">
           <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Bell className="w-4 h-4 text-primary" />

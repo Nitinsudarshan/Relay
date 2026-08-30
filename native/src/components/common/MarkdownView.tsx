@@ -128,7 +128,7 @@ export const MermaidBlock: React.FC<MermaidBlockProps> = ({ code }) => {
 
   if (error) {
     return (
-      <div className="my-3 rounded-xl border border-destructive/30 bg-destructive/5 overflow-hidden shadow-xs">
+      <div className="my-3 rounded-lg border border-destructive/30 bg-destructive/5 overflow-hidden shadow-xs">
         <div className="flex items-center justify-between px-3 py-2 bg-destructive/10 border-b border-destructive/20 text-xs">
           <div className="flex items-center gap-1.5 font-medium text-destructive">
             <AlertTriangle className="w-3.5 h-3.5" />
@@ -157,7 +157,7 @@ export const MermaidBlock: React.FC<MermaidBlockProps> = ({ code }) => {
   }
 
   return (
-    <div className="my-3 rounded-xl border border-border/80 bg-card/90 backdrop-blur-xs overflow-hidden shadow-xs group transition-all duration-200 hover:border-primary/40">
+    <div className="my-3 rounded-lg border border-border/80 bg-card/90 backdrop-blur-xs overflow-hidden shadow-xs group transition-all duration-200 hover:border-primary/40">
       {/* Header bar */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-muted/40 border-b border-border/60 text-xs select-none">
         <div className="flex items-center gap-2">

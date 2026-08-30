@@ -7,14 +7,10 @@ import {
   ShieldCheck,
   Activity,
   ChevronsUpDown,
-  Radio,
-  FileText,
   Database,
   Cloud,
   Sparkle,
   Sliders,
-  Bell,
-
 } from 'lucide-react';
 import { RelayLogo } from '@/components/common/RelayLogo';
 import { Badge } from '@/components/ui/badge';
@@ -126,7 +122,7 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className={`flex items-center rounded-xl transition-all cursor-pointer group shadow-2xs overflow-hidden ${
+                className={`flex items-center rounded-lg transition-all cursor-pointer group shadow-2xs overflow-hidden ${
                   isOpen
                     ? 'w-full h-10 border border-sidebar-border bg-card/60 hover:bg-sidebar-accent/70 p-1.5'
                     : 'size-8 rounded-lg border border-border bg-card hover:bg-sidebar-accent text-foreground justify-center p-0 shadow-xs'
@@ -265,38 +261,6 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
               return button;
             })}
           </nav>
-
-          {/* Quick Access Section (Expanded Only) */}
-          {isOpen && (
-            <div className="w-full mt-4 pt-3 border-t border-sidebar-border shrink-0">
-              <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground/80 tracking-wider uppercase">
-                Quick Vault
-              </div>
-              <div className="mt-1 space-y-0.5">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('capture')}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/40 transition-colors text-left cursor-pointer overflow-hidden whitespace-nowrap"
-                >
-                  <Radio className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                  <span className="truncate">Instant Voice Capture</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('scribble')}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/40 transition-colors text-left cursor-pointer overflow-hidden whitespace-nowrap"
-                >
-                  <FileText className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                  <span className="truncate">Active Knowledge Graph</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Collapsed Divider */}
-          {!isOpen && (
-            <div className="w-5 h-px bg-sidebar-border mx-auto my-2.5 shrink-0" />
-          )}
         </div>
 
         {/* User Footer Card & Popover Menu (sidebar-07 NavUser Pattern) */}
@@ -307,7 +271,7 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
                 type="button"
                 className={`flex items-center transition-all cursor-pointer group shadow-2xs overflow-hidden ${
                   isOpen
-                    ? 'w-full h-10 rounded-xl bg-card/60 hover:bg-card border border-sidebar-border p-1.5 mb-2'
+                    ? 'w-full h-10 rounded-lg bg-card/60 hover:bg-card border border-sidebar-border p-1.5 mb-2'
                     : 'size-8 rounded-full border border-border bg-card flex items-center justify-center p-0 mb-2 hover:ring-2 hover:ring-primary/40 shadow-xs'
                 }`}
                 title="Account & Session Settings"

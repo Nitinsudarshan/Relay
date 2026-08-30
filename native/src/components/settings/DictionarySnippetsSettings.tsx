@@ -342,7 +342,7 @@ export const DictionarySnippetsSettings: React.FC<DictionarySnippetsSettingsProp
 
           {/* Words Chips Grid */}
           {words.length === 0 ? (
-            <div className="text-center py-12 px-4 rounded-xl border border-dashed border-border bg-muted/10 flex flex-col items-center justify-center space-y-3">
+            <div className="text-center py-12 px-4 rounded-lg border border-dashed border-border bg-muted/10 flex flex-col items-center justify-center space-y-3">
               <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
                 <BookOpen className="w-5 h-5" />
               </div>
@@ -354,7 +354,7 @@ export const DictionarySnippetsSettings: React.FC<DictionarySnippetsSettingsProp
               </div>
             </div>
           ) : (
-            <div className="p-4 rounded-xl bg-card border border-border space-y-3 shadow-xs">
+            <div className="p-4 rounded-lg bg-card border border-border space-y-3 shadow-xs">
               <div className="flex items-center justify-between text-xs text-muted-foreground border-b border-border/60 pb-2">
                 <span>Recognized Vocabulary ({filteredWords.length} words)</span>
                 <span className="text-[10px]">Injected directly into STT initial prompt</span>
@@ -413,7 +413,7 @@ export const DictionarySnippetsSettings: React.FC<DictionarySnippetsSettingsProp
           </form>
 
           {/* Showcase Banner (OpenWhispr Style) */}
-          <div className="p-4 rounded-xl bg-gradient-to-r from-blue-500/10 via-primary/5 to-transparent border border-blue-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="p-4 rounded-lg bg-gradient-to-r from-blue-500/10 via-primary/5 to-transparent border border-blue-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
             <div className="space-y-1">
               <h3 className="text-sm font-bold text-foreground">The stuff you shouldn't have to say twice</h3>
               <p className="text-xs text-muted-foreground max-w-xl leading-relaxed">
@@ -440,7 +440,7 @@ export const DictionarySnippetsSettings: React.FC<DictionarySnippetsSettingsProp
           {/* Snippets List */}
           <div className="space-y-3">
             {snippets.length === 0 ? (
-              <div className="text-center py-12 px-4 rounded-xl border border-dashed border-border bg-muted/10 flex flex-col items-center justify-center space-y-2">
+              <div className="text-center py-12 px-4 rounded-lg border border-dashed border-border bg-muted/10 flex flex-col items-center justify-center space-y-2">
                 <Sparkles className="w-6 h-6 text-muted-foreground/50 mb-1" />
                 <p className="text-xs font-semibold text-foreground">No snippets configured yet</p>
                 <p className="text-[11px] text-muted-foreground">Add your first voice expansion snippet above</p>
@@ -449,7 +449,7 @@ export const DictionarySnippetsSettings: React.FC<DictionarySnippetsSettingsProp
               snippets.map((snip) => (
                 <div
                   key={snip.id}
-                  className={`p-3.5 rounded-xl border transition-all ${
+                  className={`p-3.5 rounded-lg border transition-all ${
                     snip.enabled
                       ? 'bg-card border-border hover:border-primary/40 shadow-xs'
                       : 'bg-muted/20 border-border/50 opacity-60'
@@ -523,7 +523,7 @@ export const DictionarySnippetsSettings: React.FC<DictionarySnippetsSettingsProp
           {/* Modal: New Snippet */}
           {newSnippetModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4 animate-in fade-in-50">
-              <div className="w-full max-w-lg bg-card border border-border rounded-xl p-6 shadow-2xl space-y-4">
+              <div className="w-full max-w-lg bg-card border border-border rounded-lg p-6 shadow-2xl space-y-4">
                 <div className="space-y-1">
                   <h3 className="text-sm font-bold text-foreground">Create Spoken Snippet</h3>
                   <p className="text-xs text-muted-foreground">
@@ -593,7 +593,7 @@ export const DictionarySnippetsSettings: React.FC<DictionarySnippetsSettingsProp
           {/* Modal: Edit Snippet */}
           {editingSnippet && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4 animate-in fade-in-50">
-              <div className="w-full max-w-lg bg-card border border-border rounded-xl p-6 shadow-2xl space-y-4">
+              <div className="w-full max-w-lg bg-card border border-border rounded-lg p-6 shadow-2xl space-y-4">
                 <div className="space-y-1">
                   <h3 className="text-sm font-bold text-foreground">Edit Snippet</h3>
                   <p className="text-xs text-muted-foreground">Modify trigger phrase or expansion text.</p>

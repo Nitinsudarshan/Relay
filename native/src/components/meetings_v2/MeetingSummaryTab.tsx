@@ -39,10 +39,6 @@ interface MeetingSummaryTabProps {
 
 /**
  * The default meeting view: what mattered, what was decided, what needs doing.
- *
- * Everything here is a projection of the same extracted facts — the prose, the
- * action items, the topics, and the related meetings all come from one
- * `MeetingProcessing`, so they cannot disagree with each other.
  */
 export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
   processing,
@@ -84,11 +80,11 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
     const hasTranscript = canSummarize(processing);
     return (
       <div className="flex-1 overflow-y-auto py-16 px-4 text-center flex flex-col items-center justify-center gap-3">
-        <div className="w-12 h-12 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-zinc-400 mb-1">
-          <Sparkles className="w-6 h-6" />
+        <div className="w-12 h-12 rounded-lg bg-muted/40 border border-border flex items-center justify-center text-muted-foreground mb-1">
+          <Sparkles className="w-6 h-6 text-primary" />
         </div>
-        <h4 className="text-sm font-semibold text-zinc-200">No summary yet</h4>
-        <p className="text-xs text-zinc-400 max-w-sm">
+        <h4 className="text-sm font-semibold text-foreground">No summary yet</h4>
+        <p className="text-xs text-muted-foreground max-w-sm">
           {hasTranscript
             ? 'Relay will read the transcript, work out what was decided and who owns what, and write it up.'
             : 'This meeting has no transcribed speech yet. The recording and raw transcript are unaffected.'}
@@ -97,7 +93,7 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
           <button
             onClick={() => onGenerate()}
             disabled={isGenerating || !hasTranscript}
-            className="mt-2 flex items-center gap-1.5 px-4 py-2 rounded-md bg-zinc-100 hover:bg-white text-zinc-900 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-400"
+            className="mt-2 flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {isGenerating ? (
               <>
@@ -118,8 +114,7 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-5">
-      {/* Mode and extension pickers. Two controls, not a configuration screen:
-          both change presentation only and reuse the facts already extracted. */}
+      {/* Mode and extension pickers */}
       <div className="flex items-center gap-2 flex-wrap">
         <div className="relative">
           <button
@@ -127,14 +122,14 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
               setModeMenuOpen((v) => !v);
               setExtensionMenuOpen(false);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-zinc-200 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-card hover:bg-accent border border-border text-xs font-medium text-foreground transition-colors cursor-pointer"
           >
-            <span className="text-zinc-500">Summary</span>
+            <span className="text-muted-foreground">Summary</span>
             <span>{SUMMARY_MODES.find((m) => m.value === activeMode)?.label}</span>
-            <ChevronDown className="w-3 h-3 text-zinc-500" />
+            <ChevronDown className="w-3 h-3 text-muted-foreground" />
           </button>
           {modeMenuOpen && (
-            <div className="absolute z-20 mt-1 w-48 rounded-md bg-zinc-900 border border-white/10 shadow-lg overflow-hidden">
+            <div className="absolute z-20 mt-1 w-48 rounded-lg bg-popover border border-border shadow-lg overflow-hidden">
               {SUMMARY_MODES.map((mode) => (
                 <button
                   key={mode.value}
@@ -142,12 +137,12 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
                     setModeMenuOpen(false);
                     onGenerate(mode.value, activeExtension?.id);
                   }}
-                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-white/5 transition-colors cursor-pointer ${
-                    mode.value === activeMode ? 'text-lime-400' : 'text-zinc-300'
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-accent transition-colors cursor-pointer ${
+                    mode.value === activeMode ? 'text-primary font-semibold' : 'text-foreground'
                   }`}
                 >
                   <span>{mode.label}</span>
-                  <span className="text-[10px] text-zinc-500">{mode.hint}</span>
+                  <span className="text-[10px] text-muted-foreground">{mode.hint}</span>
                 </button>
               ))}
             </div>
@@ -161,14 +156,14 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
                 setExtensionMenuOpen((v) => !v);
                 setModeMenuOpen(false);
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-zinc-200 transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-card hover:bg-accent border border-border text-xs font-medium text-foreground transition-colors cursor-pointer"
             >
-              <span className="text-zinc-500">Extension</span>
+              <span className="text-muted-foreground">Extension</span>
               <span>{activeExtension?.name ?? 'Default'}</span>
-              <ChevronDown className="w-3 h-3 text-zinc-500" />
+              <ChevronDown className="w-3 h-3 text-muted-foreground" />
             </button>
             {extensionMenuOpen && (
-              <div className="absolute z-20 mt-1 w-52 rounded-md bg-zinc-900 border border-white/10 shadow-lg overflow-hidden">
+              <div className="absolute z-20 mt-1 w-52 rounded-lg bg-popover border border-border shadow-lg overflow-hidden">
                 {extensions.map((extension) => (
                   <button
                     key={extension.id}
@@ -176,10 +171,10 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
                       setExtensionMenuOpen(false);
                       onGenerate(activeMode, extension.id);
                     }}
-                    className={`w-full px-3 py-2 text-xs text-left hover:bg-white/5 transition-colors cursor-pointer ${
+                    className={`w-full px-3 py-2 text-xs text-left hover:bg-accent transition-colors cursor-pointer ${
                       extension.id === activeExtension?.id
-                        ? 'text-lime-400'
-                        : 'text-zinc-300'
+                        ? 'text-primary font-semibold'
+                        : 'text-foreground'
                     }`}
                   >
                     {extension.name}
@@ -193,7 +188,7 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
         <button
           onClick={() => onGenerate(activeMode, activeExtension?.id)}
           disabled={isGenerating}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-zinc-300 transition-colors disabled:opacity-50 cursor-pointer"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-card hover:bg-accent border border-border text-xs font-medium text-foreground transition-colors disabled:opacity-50 cursor-pointer"
           title="Regenerate from the same transcript"
         >
           <RefreshCw className={`w-3 h-3 ${isGenerating ? 'animate-spin' : ''}`} />
@@ -202,12 +197,12 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
 
         <button
           onClick={handleCopy}
-          className="ml-auto flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-mono text-zinc-400 hover:text-zinc-100 bg-white/5 hover:bg-white/10 border border-white/5 transition-colors cursor-pointer"
+          className="ml-auto flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-mono text-muted-foreground hover:text-foreground bg-card hover:bg-accent border border-border transition-colors cursor-pointer"
         >
           {copied ? (
             <>
-              <Check className="w-3 h-3 text-lime-400" />
-              <span className="text-lime-400">Copied</span>
+              <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+              <span className="text-emerald-600 dark:text-emerald-400 font-sans">Copied</span>
             </>
           ) : (
             <>
@@ -219,7 +214,7 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
       </div>
 
       {summary.speaker_names_stale && (
-        <p className="flex items-start gap-2 text-[11px] text-amber-300/90 px-3 py-2 rounded-md bg-amber-500/5 border border-amber-500/20">
+        <p className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <span>
             A speaker was renamed after this was written, so the text below still uses
@@ -229,9 +224,7 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
         </p>
       )}
 
-      {/* The summary reads as a document, not as a card. It is the thing the
-          user came here for, so nothing frames it or competes with it. */}
-      <div className="text-[13px] text-zinc-200 leading-relaxed font-sans select-text">
+      <div className="text-[13px] text-foreground/90 leading-relaxed font-sans select-text">
         <MarkdownView content={summary.markdown} />
       </div>
 
@@ -251,14 +244,14 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
         <div className="flex flex-col gap-3 pt-1">
           {facts.topics.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium uppercase tracking-wider text-zinc-400">
+              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 Topics
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {facts.topics.map((topic) => (
                   <span
                     key={topic.id}
-                    className="text-[11px] px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-zinc-300"
+                    className="text-[11px] px-2 py-0.5 rounded-md bg-muted border border-border text-foreground"
                   >
                     {topic.label}
                   </span>
@@ -269,14 +262,14 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
 
           {facts.entities.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium uppercase tracking-wider text-zinc-400">
+              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 Mentioned
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {facts.entities.map((entity) => (
                   <span
                     key={entity.id}
-                    className="text-[11px] px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-zinc-300"
+                    className="text-[11px] px-2 py-0.5 rounded-md bg-muted border border-border text-foreground"
                     title={entity.kind.toLowerCase()}
                   >
                     {entity.name}
@@ -292,3 +285,4 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
     </div>
   );
 };
+
