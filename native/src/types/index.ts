@@ -308,6 +308,7 @@ export interface AppSettings {
   startup?: StartupSettings;
   audio_input?: AudioInputSettings;
   meetings?: MeetingSettings;
+  talkback?: TalkbackSettings;
   dictionary?: string[];
   snippets?: SnippetItem[];
 }
@@ -1109,4 +1110,105 @@ export interface MeetingTaskPushResult {
   assignee: string;
   /** Set only when this to-do could not be added. */
   error?: string | null;
+}
+
+// ── Talkback ────────────────────────────────────────────────────────────
+//
+// Mirrors `native/src-tauri/src/talkback/`. The backend owns the state
+// machine; these types are what it broadcasts and the UI renders.
+
+/** Where a piece of retrieved context came from. */
+export type TalkbackSourceType =
+  | 'VOICE_NOTE'
+  | 'SCRIBBLE'
+  | 'MEETING'
+  | 'MEETING_FACTS';
+
+/** One retrieved piece of context, with its provenance intact. */
+export interface TalkbackContextItem {
+  source_type: TalkbackSourceType;
+  source_id: string;
+  title: string;
+  timestamp: string;
+  relevance: number;
+  excerpt: string;
+  detail?: string | null;
+  /** Reached through a relationship/topic hop rather than by matching. */
+  expanded?: boolean;
+}
+
+export interface TalkbackRetrievalResult {
+  items: TalkbackContextItem[];
+  searchedSources: TalkbackSourceType[];
+  totalCandidates: number;
+}
+
+/**
+ * The authoritative conversation state. Rendered, never invented — the
+ * frontend has no path that sets this itself.
+ */
+export type TalkbackStateName =
+  | 'OFF'
+  | 'STARTING'
+  | 'LISTENING'
+  | 'USER_SPEAKING'
+  | 'TRANSCRIBING'
+  | 'THINKING'
+  | 'SPEAKING'
+  | 'INTERRUPTED'
+  | 'ERROR';
+
+export type TalkbackIntent =
+  | 'PERSONAL_MEMORY'
+  | 'START_VOICE_NOTE'
+  | 'STOP_VOICE_NOTE'
+  | 'CREATE_SCRIBBLE'
+  | 'SHOW_SOURCES'
+  | 'GENERAL';
+
+export interface TalkbackTurn {
+  turn_id: string;
+  role: 'user' | 'agent';
+  text: string;
+  timestamp: string;
+  sources: TalkbackContextItem[];
+  intent?: TalkbackIntent | null;
+  typed?: boolean;
+}
+
+export interface TalkbackSession {
+  session_id: string;
+  started_at: string;
+  turns: TalkbackTurn[];
+  voice_note_buffer?: string | null;
+}
+
+/** Durations, counts and ids only — never transcript or context text. */
+export interface TalkbackMetrics {
+  session_id: string;
+  turn_id: string;
+  provider: string;
+  model: string;
+  stt_ms?: number | null;
+  retrieval_ms: number;
+  retrieved_count: number;
+  candidate_count: number;
+  llm_first_token_ms?: number | null;
+  llm_total_ms?: number | null;
+  tts_first_audio_ms?: number | null;
+  total_ms: number;
+  interrupted: boolean;
+  deterministic: boolean;
+  intent: TalkbackIntent;
+}
+
+export type TalkbackActivationMode = 'toggle' | 'wake_word';
+
+export interface TalkbackSettings {
+  activation_mode: TalkbackActivationMode;
+  speak_responses: boolean;
+  allow_barge_in: boolean;
+  /** Empty means every source. */
+  sources: TalkbackSourceType[];
+  end_of_turn_silence_ms: number;
 }

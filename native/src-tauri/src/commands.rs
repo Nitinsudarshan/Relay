@@ -89,6 +89,9 @@ pub struct AppState {
     /// Derived meeting intelligence. Shares the recorder's session directory but
     /// only reads from it — everything it produces goes to `processing.json`.
     pub meeting_processor: Arc<crate::meetings_v2::MeetingProcessor>,
+    /// The conversational surface over everything above. Owns its own
+    /// microphone stream and its own ephemeral session; owns no storage.
+    pub talkback: Arc<crate::talkback::TalkbackEngine>,
 }
 
 impl AppState {
@@ -330,7 +333,7 @@ pub async fn stop_capture(
             // hallucination (e.g. "Hello.") on a marginal recording that
             // whisper.cpp's own confidence/no-speech heuristics rejected
             // internally, leaving an empty transcript. Must not run
-            // trigger-matching or the note/kanban/chat pipeline on nothing.
+            // trigger-matching or the note/kanban pipeline on nothing.
             tracing::info!("[Dictation] Transcription produced no usable text");
             emit_capture_status_event(&app, false, None, "NO_SPEECH", None);
         }
@@ -399,7 +402,7 @@ async fn process_captured_audio(
     // still land on nothing (most commonly a short hallucination that its
     // own internal confidence/no-speech heuristics then reject, leaving an
     // empty result) on a marginal recording. An empty transcript must never
-    // reach the note/kanban/chat pipeline.
+    // reach the note/kanban pipeline.
     if transcript.trim().is_empty() {
         return Ok(None);
     }
@@ -410,13 +413,10 @@ async fn process_captured_audio(
 
     // Every successful, non-empty transcript becomes a Voice Note — this
     // must not depend on which mode-specific pipeline runs next, or on
-    // whether it succeeds. "chat" is Voice Chat (a deferred, unrelated
-    // feature per docs/decisions.md Decision 34) answering a spoken
-    // question, not a dictation to keep — excluded so voice chat queries
-    // don't clutter the Voice Note history.
-    if captured.mode != "chat" {
-        save_voice_note(app, &state.vault, &transcript);
-    }
+    // whether it succeeds. Talkback does not come through here at all: it
+    // owns its own microphone stream and only persists a Voice Note when
+    // the user explicitly asks for one.
+    save_voice_note(app, &state.vault, &transcript);
 
     match captured.mode.as_str() {
         "voice_note" => Ok(Some(ProcessedPipelineResult {
@@ -431,13 +431,6 @@ async fn process_captured_audio(
         "scribble" => {
             let llm = LLMClient::new(settings.provider.clone());
             PipelineEngine::process_scribble(&llm, &state.vault, &transcript)
-                .await
-                .map(Some)
-                .map_err(|e| CommandError::new("PIPELINE_ERROR", &e.to_string()))
-        }
-        "chat" => {
-            let llm = LLMClient::new(settings.provider.clone());
-            crate::pipeline::process_chat(&llm, &state.vault, &settings.tts, &transcript)
                 .await
                 .map(Some)
                 .map_err(|e| CommandError::new("PIPELINE_ERROR", &e.to_string()))
@@ -2456,3 +2449,154 @@ pub async fn promote_meeting_v2_to_scribble(
 
 
 
+
+// ── Talkback ────────────────────────────────────────────────────────────
+//
+// The conversational surface. Commands here stay thin per
+// `rules/api-conventions.md`: they resolve settings, hand off to
+// `talkback::engine`, and map its errors. Nothing decides anything.
+
+/// Turns Talkback on.
+///
+/// `voice` false is the text fallback — the same engine, same retrieval,
+/// same session, no microphone. That is what makes RAG and provider
+/// behaviour testable without a sound card, and what keeps Talkback
+/// usable when TTS or STT is unconfigured.
+#[tauri::command]
+pub async fn start_talkback(
+    app: AppHandle,
+    voice: bool,
+    state: State<'_, AppState>,
+) -> Result<crate::talkback::TalkbackState, CommandError> {
+    // Dictation and Talkback share one microphone. Refusing with a
+    // specific code beats two capture sessions fighting over the device.
+    if voice && state.recorder.is_active() {
+        return Err(CommandError::new(
+            "CAPTURE_ACTIVE",
+            "Relay is already recording. Stop dictation before starting Talkback.",
+        ));
+    }
+
+    let settings = state.settings.lock_or_recover().clone();
+    let language = crate::capture::SttLanguageConfig::from_settings(&settings.language);
+    let models_dir = state.config_dir.join("models");
+    let model_path = if voice {
+        crate::capture::stt::resolve_dictation_model_path(&models_dir, &settings.stt)
+            .await
+            .map(PathBuf::from)
+    } else {
+        None
+    };
+
+    state
+        .talkback
+        .enable(&app, &settings.talkback, voice, model_path, language)
+        .map_err(|e| CommandError::new("TALKBACK_START_FAILED", &e))
+}
+
+/// Turns Talkback off, closing the microphone stream rather than muting it.
+#[tauri::command]
+pub async fn stop_talkback(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::talkback::TalkbackState, CommandError> {
+    Ok(state.talkback.disable(&app))
+}
+
+#[tauri::command]
+pub async fn get_talkback_state(
+    state: State<'_, AppState>,
+) -> Result<crate::talkback::TalkbackState, CommandError> {
+    Ok(state.talkback.state())
+}
+
+#[tauri::command]
+pub async fn get_talkback_session(
+    state: State<'_, AppState>,
+) -> Result<crate::talkback::TalkbackSession, CommandError> {
+    Ok(state.talkback.session_snapshot())
+}
+
+/// Submits one turn — typed, or the text of a spoken utterance.
+///
+/// Both paths run the identical engine; `stt_ms` is the only difference,
+/// and it exists so latency numbers are not polluted by typed turns.
+#[tauri::command]
+pub async fn submit_talkback_turn(
+    app: AppHandle,
+    text: String,
+    typed: bool,
+    stt_ms: Option<u64>,
+    state: State<'_, AppState>,
+) -> Result<String, CommandError> {
+    if text.trim().is_empty() {
+        return Err(CommandError::new("INVALID_INPUT", "Turn text is empty"));
+    }
+    if state.talkback.state() == crate::talkback::TalkbackState::Off {
+        return Err(CommandError::new(
+            "TALKBACK_OFF",
+            "Talkback is off. Switch it on before sending a turn.",
+        ));
+    }
+
+    let settings = state.settings.lock_or_recover().clone();
+    let ctx = crate::talkback::TurnContext {
+        app: &app,
+        engine: &state.talkback,
+        vault: &state.vault,
+        sessions: &state.meetings_v2.store(),
+        processor: &state.meeting_processor,
+        settings: &settings,
+        stt_ms: stt_ms.map(u128::from),
+        typed,
+    };
+
+    crate::talkback::engine::run_turn(ctx, &text)
+        .await
+        .map_err(|e| CommandError::new("TALKBACK_TURN_FAILED", &e))
+}
+
+/// Barge-in: stop speaking and listen.
+///
+/// Called by the frontend when the user clicks "stop", and by the voice
+/// worker when it hears speech over the agent.
+#[tauri::command]
+pub async fn interrupt_talkback(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::talkback::TalkbackState, CommandError> {
+    state.talkback.interrupt(&app);
+    Ok(state.talkback.state())
+}
+
+/// Retrieval on its own, with no model involved.
+///
+/// The debugging and evaluation entry point: it answers "what would
+/// Talkback have been given?" without spending a generation, which is how
+/// retrieval quality gets judged rather than guessed.
+#[tauri::command]
+pub async fn search_talkback_context(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<crate::talkback::RetrievalResult, CommandError> {
+    if query.trim().is_empty() {
+        return Err(CommandError::new("INVALID_INPUT", "Query is empty"));
+    }
+    let settings = state.settings.lock_or_recover().clone();
+    let wanted = settings.talkback.effective_sources();
+    let candidates = crate::talkback::sources::gather_candidates(
+        &state.vault,
+        &state.meetings_v2.store(),
+        &state.meeting_processor,
+        &wanted,
+    );
+    let budget = crate::talkback::assemble::char_budget_for(settings.provider.context_tokens);
+    let request = crate::talkback::RetrievalQuery::new(&query)
+        .with_sources(wanted)
+        .with_char_budget(budget);
+    Ok(crate::talkback::retrieval::rank(
+        &candidates,
+        &request,
+        chrono::Utc::now(),
+    ))
+}

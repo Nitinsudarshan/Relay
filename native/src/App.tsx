@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { VoiceNotePage } from './components/voicenotes/VoiceNotePage';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
 import { MeetingsV2View } from './components/meetings_v2/MeetingsV2View';
+import { TalkbackPage } from './components/talkback/TalkbackPage';
 
 import { ProviderSettings } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -21,6 +22,7 @@ import { NativeSidebar } from './components/common/NativeSidebar';
 import {
   Mic,
   Calendar,
+  MessageCircle,
   Sparkles,
   Settings,
   Sidebar as SidebarIcon,
@@ -34,12 +36,14 @@ export type MainTabType =
   | 'capture'
   | 'meetings'
   | 'scribble'
+  | 'talkback'
   | 'settings';
 
 const TAB_LABELS: Record<MainTabType, string> = {
   capture: 'Voice Note',
   meetings: 'Meetings',
   scribble: 'Scribbles',
+  talkback: 'Talkback',
   settings: 'Settings',
 };
 
@@ -215,6 +219,16 @@ export const App: React.FC = () => {
             glowColor="primary"
           />
         );
+      case 'talkback':
+        return (
+          <PageHeader
+            badge={{ label: 'Conversational Layer', icon: MessageCircle, variant: 'emerald' }}
+            title="Think with"
+            highlightText="what Relay knows."
+            description="Ask about your own Voice Notes, Scribbles and Meetings out loud. Answers about your history come from your own capture, with the sources shown."
+            glowColor="emerald"
+          />
+        );
       case 'settings':
         return (
           <PageHeader
@@ -304,6 +318,8 @@ export const App: React.FC = () => {
           {activeTab === 'meetings' && <MeetingsV2View />}
 
           {activeTab === 'scribble' && <ScribbleViewer />}
+
+          {activeTab === 'talkback' && <TalkbackPage />}
 
 
 
