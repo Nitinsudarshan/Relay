@@ -100,6 +100,11 @@ impl TalkbackState {
             (S::Transcribing, E::TranscriptReady) => Ok(S::Thinking),
             (S::Interrupted, E::TranscriptReady) => Ok(S::Thinking),
 
+            // Nothing usable came out of the decode — a cough, a door, a
+            // failed model load. Without this arm the conversation stops
+            // dead in TRANSCRIBING and only an app restart clears it.
+            (S::Transcribing, E::ResponseComplete) => Ok(S::Listening),
+
             (S::Thinking, E::ResponseStarted) => Ok(S::Speaking),
             // A turn with no spoken output (TTS unconfigured, or an
             // action that only needs a confirmation line) goes straight
@@ -215,6 +220,41 @@ mod tests {
     #[test]
     fn error_can_be_re_enabled() {
         assert_eq!(S::Error.apply(E::Enable), Ok(S::Starting));
+    }
+
+    #[test]
+    fn a_decode_that_produced_nothing_returns_to_listening() {
+        // Silence, background noise, or an unavailable model. Every one
+        // of these must leave a conversation the user can carry on.
+        drive(
+            S::Listening,
+            &[
+                (E::SpeechStarted, S::UserSpeaking),
+                (E::SpeechEnded, S::Transcribing),
+                (E::ResponseComplete, S::Listening),
+            ],
+        );
+    }
+
+    #[test]
+    fn every_state_can_reach_listening_again_without_a_restart() {
+        for state in [
+            S::Off,
+            S::Starting,
+            S::Listening,
+            S::UserSpeaking,
+            S::Transcribing,
+            S::Thinking,
+            S::Speaking,
+            S::Interrupted,
+            S::Error,
+        ] {
+            let recovered = state
+                .apply(E::Disable)
+                .and_then(|s| s.apply(E::Enable))
+                .and_then(|s| s.apply(E::Ready));
+            assert_eq!(recovered, Ok(S::Listening), "dead end at {state:?}");
+        }
     }
 
     #[test]

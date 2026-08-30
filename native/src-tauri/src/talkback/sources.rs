@@ -4,7 +4,7 @@
 //! knows a `Scribble` from a `MeetingFacts`. Everything downstream sees
 //! [`CandidateDoc`]s.
 //!
-//! Talkback creates **no storage of its own** (`ARCHITECTURE.md` §11).
+//! Talkback creates **no storage of its own** (`ARCHITECTURE.md` §12).
 //! Adding a future source — files, calendar, email — means adding a
 //! projector here, not a database.
 

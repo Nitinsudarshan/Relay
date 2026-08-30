@@ -1,5 +1,6 @@
 import React from 'react';
 import { Switch } from '@/components/ui/switch';
+import { VoiceSettings } from './VoiceSettings';
 import type {
   AppSettings,
   TalkbackSettings,
@@ -100,8 +101,7 @@ export const TalkbackSettingsView: React.FC<TalkbackSettingsViewProps> = ({
               Speak answers aloud
             </span>
             <span className="block text-[11px] text-muted-foreground mt-0.5">
-              Needs a local TTS engine configured under General. Without one,
-              answers stay text-only.
+              Turn this off to keep Talkback text-only even with a voice set up.
             </span>
           </span>
           <Switch
@@ -109,6 +109,11 @@ export const TalkbackSettingsView: React.FC<TalkbackSettingsViewProps> = ({
             onCheckedChange={(checked) => update({ speak_responses: checked })}
           />
         </label>
+
+        {/* The voice card lives here rather than in General: a user asking
+            "why isn't Talkback speaking?" should not have to know that the
+            answer is filed under a different settings section. */}
+        {talkback.speak_responses && <VoiceSettings />}
 
         <label className="flex items-start justify-between gap-4 cursor-pointer">
           <span>

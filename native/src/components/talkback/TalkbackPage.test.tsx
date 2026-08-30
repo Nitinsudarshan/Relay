@@ -12,9 +12,27 @@ beforeEach(() => {
     if (command === 'start_talkback') return 'LISTENING';
     if (command === 'stop_talkback') return 'OFF';
     if (command === 'get_talkback_session') return { turns: [] };
+    if (command === 'get_tts_status') return readyVoice;
     return undefined;
   });
 });
+
+const readyVoice = {
+  engine: 'piper',
+  ready: true,
+  availableVoices: [],
+  problems: [],
+  installDir: 'C:\\piper',
+  voicesDir: 'C:\\voices',
+  executableName: 'piper.exe',
+};
+
+const unconfiguredVoice = {
+  ...readyVoice,
+  engine: 'none',
+  ready: false,
+  problems: ['No Piper executable found.'],
+};
 
 describe('TalkbackPage', () => {
   it('starts with the microphone off and says so', () => {
@@ -82,12 +100,54 @@ describe('TalkbackPage', () => {
     ).toBeInTheDocument();
   });
 
+  it('says voice is unavailable and offers a way to fix it', async () => {
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === 'get_tts_status') return unconfiguredVoice;
+      if (command === 'get_talkback_session') return { turns: [] };
+      return undefined;
+    });
+    render(<TalkbackPage />);
+
+    // The whole failure mode this replaces: Talkback silently not
+    // speaking, with nothing on screen explaining why.
+    expect(await screen.findByTestId('voice-unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/no piper executable found/i)).toBeInTheDocument();
+    expect(screen.getByText(/still answers in text/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /set up local voice/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('does not nag when voice is working', async () => {
+    render(<TalkbackPage />);
+    await screen.findByText(/your microphone is off/i);
+    expect(screen.queryByTestId('voice-unavailable')).not.toBeInTheDocument();
+  });
+
+  it('opens settings from the voice banner', async () => {
+    const user = userEvent.setup();
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === 'get_tts_status') return unconfiguredVoice;
+      if (command === 'get_talkback_session') return { turns: [] };
+      return undefined;
+    });
+    render(<TalkbackPage />);
+
+    await user.click(
+      await screen.findByRole('button', { name: /set up local voice/i }),
+    );
+    await waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith('open_settings_window');
+    });
+  });
+
   it('surfaces a backend failure instead of failing silently', async () => {
     const user = userEvent.setup();
     mockedInvoke.mockImplementation(async (command: string) => {
       if (command === 'start_talkback') {
         throw { code: 'CAPTURE_ACTIVE', message: 'Relay is already recording.' };
       }
+      if (command === 'get_tts_status') return readyVoice;
       return undefined;
     });
 

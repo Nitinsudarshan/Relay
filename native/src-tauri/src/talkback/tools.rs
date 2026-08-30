@@ -3,7 +3,7 @@
 //! Talkback can create a Voice Note and a Scribble, and look things up.
 //! It does all three through the **existing** persistence — there is no
 //! Talkback note type, no Talkback Scribble schema, no Talkback vector
-//! store (`ARCHITECTURE.md` §11). A Scribble made by talking is
+//! store (`ARCHITECTURE.md` §12). A Scribble made by talking is
 //! indistinguishable from one made by typing, except for its
 //! `source_metadata`.
 //!

@@ -9,7 +9,7 @@
 //! * `DualAudioCapture` is the meeting recorder — dual-source, writing
 //!   30-second durable chunks, with crash recovery hanging off its clock.
 //!   Reaching into it for a conversational feature is exactly the kind of
-//!   change `docs/talkback/ARCHITECTURE.md` §11 rules out.
+//!   change `docs/talkback/ARCHITECTURE.md` §12 rules out.
 //!
 //! What is *not* duplicated: the resampler
 //! ([`crate::capture::resample_to_16k_mono`]) and the transcriber
@@ -17,7 +17,7 @@
 //!
 //! The microphone stream is created on enable and dropped on disable.
 //! "Talkback off" means the OS-level stream does not exist, not that a
-//! running stream is being ignored (`ARCHITECTURE.md` §10).
+//! running stream is being ignored (`ARCHITECTURE.md` §11).
 
 use crate::capture::resample_to_16k_mono;
 use crate::sync::MutexExt;

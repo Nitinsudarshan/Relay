@@ -1,7 +1,7 @@
 # Talkback — architecture
 
 The conversational layer over everything Relay has already captured.
-Written against **v0.18.0**. This is a *living specification*: if it and the
+Written against **v0.18.1**. This is a *living specification*: if it and the
 code disagree, the code is right and this file is a bug.
 
 The research behind these choices is in [`RESEARCH.md`](RESEARCH.md).
@@ -81,10 +81,12 @@ STT → retrieval → streaming LLM → phrase buffer → TTS.
 | `talkback/chunk.rs` | Phrase buffer for streaming TTS | Yes |
 | `talkback/tools.rs` | Tool contracts and execution | Partly |
 | `talkback/turn.rs` | Streaming turn detector (energy + hangover) | Yes |
+| `talkback/speech.rs` | Overlapped synthesis pipeline | Yes — against a recording sink |
 | `talkback/audio.rs` | Talkback-only mic worker (cpal) | No — device I/O |
 | `talkback/engine.rs` | Orchestration, cancellation, event emission | Partly |
-| `tts/mod.rs` | `TtsProvider` trait, capabilities, resolution | Yes |
-| `tts/piper.rs` | Piper provider (was `tts::TtsEngine`) | No — subprocess |
+| `tts/mod.rs` | `TtsProvider` trait, capabilities, status | Yes |
+| `tts/discovery.rs` | Finding and validating a Piper install | Yes |
+| `tts/piper.rs` | Piper provider (subprocess) | Partly — a shell stub drives the lifecycle |
 
 ## 5. State machine
 
@@ -177,17 +179,62 @@ not to ask a model to avoid it.
   not a decimal or a known abbreviation, with a soft split at clause
   boundaries past ~140 chars and a hard flush at 240. Tokens never reach
   TTS; sentences do.
-- **TTS**: one short synthesis per phrase. That is what makes a batch
-  engine like Piper behave like a streaming one — time-to-first-audio is
-  the cost of the *first sentence*, not the whole answer.
+- **TTS**: one short synthesis per phrase, run by `talkback::speech` on a
+  **separate thread, concurrently with generation**. Phrases are pushed
+  into a bounded queue (24 deep) from inside the stream callback; a single
+  worker consumes it, so ordering is structural rather than sorted, and a
+  full queue applies backpressure rather than growing. This is what makes
+  a batch engine like Piper behave like a streaming one — time-to-first-audio
+  is the cost of the *first sentence*, not the whole answer.
+
+  Collecting phrases during the stream and synthesizing them afterwards —
+  which is what v0.18.0 shipped — is **not** this, however much it looks
+  like it from the outside. See `BENCHMARKS.md`.
 - **Playback**: in the WebView, not in Rust. `rodio` would drag in a second
   `cpal` (see `RESEARCH.md` §E.4), and the Web Audio API already gives
   queueing and instant cancellation.
-- **Cancellation**: one `CancellationToken` per turn, checked before each
-  LLM chunk, each synthesis, and each emit. Interrupting sets it, clears
-  the frontend queue, and starts a new turn.
+- **Cancellation**: one generation counter per turn, checked before each
+  LLM chunk, before dequeuing a phrase, *inside* synthesis (every 15 ms —
+  the Piper child is killed, not waited out), and before emitting audio.
+  Interrupting bumps it, which stops all four at once. A manual "stop
+  speaking" additionally returns the machine to LISTENING, because nothing
+  follows it; a voice barge-in stays in INTERRUPTED for the words that do.
 
-## 9. Activation
+- **No dead ends.** A `TurnGuard` returns the machine to a resting state
+  on every exit from a turn — success, error, or panic — because THINKING
+  with no way out is the one failure that forces an application restart.
+
+## 9. Local voice: distribution and setup
+
+Piper is **not bundled**. The binary plus one voice is 40–100 MB, the
+release artifacts are per-platform and per-architecture, and Relay cannot
+verify a download it never performed. What ships is a *managed location*
+Relay owns and discovers without being told:
+
+```text
+<app-data>/Relay/tts/piper/piper.exe    the executable
+<app-data>/Relay/tts/voices/*.onnx      voices (+ .onnx.json sidecars)
+```
+
+`tts::discovery::discover` looks there first, then beside Relay's own
+executable, then in Tauri's resource directory — so *bundling* Piper later
+is a packaging change, not a code change — and finally on `PATH`. An
+explicit setting always wins, and a stale one is reported rather than
+silently replaced by a discovered binary.
+
+The root is anchored to the **OS application-data directory**, not to
+Relay's `config_dir`. `config_dir` is process-relative
+(`current_dir()/.relay/config`), which is fine beside a checkout and wrong
+for a packaged Windows app: launched from a Start Menu shortcut,
+`current_dir()` is typically `C:\Windows\System32`. Telling a user to put
+a file somewhere only works if that somewhere is stable and writable.
+
+Settings › Talkback shows readiness, the resolved program and how it was
+found, a voice picker, the exact folders to use, and a **Test voice**
+button that drives the real provider — so a configuration that passes
+there cannot fail differently in conversation.
+
+## 10. Activation
 
 ```text
 activation_mode: toggle | wake_word
@@ -198,7 +245,7 @@ has two and a third would be one too many. `wake_word` is a value the
 settings type accepts and the engine rejects with a clear error, so the
 seam is real rather than aspirational. No always-on listener ships.
 
-## 10. Privacy
+## 11. Privacy
 
 - Talkback OFF means **no Talkback microphone stream exists** — the cpal
   stream is created on enable and dropped on disable, not merely muted.
@@ -212,7 +259,7 @@ seam is real rather than aspirational. No always-on listener ships.
 - Observability logs ids, durations and counts. It never logs transcript
   text, retrieved content, or audio.
 
-## 11. What Talkback deliberately does not do
+## 12. What Talkback deliberately does not do
 
 - No second knowledge base, no Talkback notes, no Talkback vector store.
 - No new Scribble or Voice Note schema — the tools call the existing
