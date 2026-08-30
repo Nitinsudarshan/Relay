@@ -1150,9 +1150,61 @@ mod tests {
 
         let loaded_cards = manager.list_kanban_cards().unwrap();
         assert_eq!(loaded_cards.len(), 1);
-        assert_eq!(loaded_cards[0].id, "card_101");
-        assert_eq!(loaded_cards[0].title, "Build Tauri Rust Shell");
-        assert_eq!(loaded_cards[0].assignee, "Nitin");
+        let loaded = &loaded_cards[0];
+
+        // Every field, not just the first three: the round trip is the only
+        // thing standing between a frontmatter-parser change and silently
+        // dropping a card's status, priority, or provenance.
+        assert_eq!(loaded.id, "card_101");
+        assert_eq!(loaded.title, "Build Tauri Rust Shell");
+        assert_eq!(loaded.assignee, "Nitin");
+        assert_eq!(loaded.status, "in_progress");
+        assert_eq!(loaded.priority, "high");
+        assert_eq!(loaded.due_date.as_deref(), Some("2026-08-25"));
+        assert_eq!(loaded.created_at, "2026-08-19T01:50:00Z");
+        assert_eq!(loaded.source_note_id.as_deref(), Some("note_001"));
+        assert_eq!(
+            loaded.description,
+            "Scaffold Rust domain modules per project rules."
+        );
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    /// The optional fields are written as empty strings, never omitted, so the
+    /// parser has to tell "no due date" from the string `""` — and a
+    /// `source_note_id:` key must not be mistaken for the `id:` key that is a
+    /// suffix of it.
+    #[test]
+    fn test_kanban_card_without_optional_fields_round_trips() {
+        let card = KanbanCard {
+            id: "card_102".to_string(),
+            title: "Untriaged".to_string(),
+            assignee: String::new(),
+            status: "todo".to_string(),
+            priority: "medium".to_string(),
+            due_date: None,
+            created_at: "2026-08-30T09:00:00Z".to_string(),
+            description: "No owner, no deadline, no source.".to_string(),
+            source_note_id: None,
+        };
+
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+        manager.save_kanban_card(&card).unwrap();
+
+        let loaded_cards = manager.list_kanban_cards().unwrap();
+        assert_eq!(loaded_cards.len(), 1);
+        let loaded = &loaded_cards[0];
+
+        assert_eq!(loaded.id, "card_102");
+        assert_eq!(loaded.assignee, "");
+        assert_eq!(loaded.status, "todo");
+        assert_eq!(loaded.priority, "medium");
+        // Absent, not `Some("")` — an empty deadline is no deadline.
+        assert_eq!(loaded.due_date, None);
+        assert_eq!(loaded.source_note_id, None);
+        assert_eq!(loaded.created_at, "2026-08-30T09:00:00Z");
 
         let _ = fs::remove_dir_all(temp_dir);
     }
