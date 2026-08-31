@@ -208,6 +208,7 @@ pub fn run() {
             commands::update_voice_note,
             commands::delete_voice_note,
             commands::merge_voice_notes,
+            commands::unmerge_voice_note,
             commands::get_vault_location,
             commands::choose_vault_folder,
             commands::set_vault_location,

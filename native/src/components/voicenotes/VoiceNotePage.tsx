@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { HardDrive, Mic, ShieldCheck, Edit3, Trash2, GitMerge, Copy, Check, X, Save, Sparkles } from 'lucide-react';
+import { HardDrive, Mic, ShieldCheck, Edit3, Trash2, GitMerge, Copy, Check, X, Save, Sparkles, Undo, AlertCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '../common/EmptyState';
@@ -28,35 +28,47 @@ function formatNoteTimestamp(iso: string): string {
   return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} · ${time}`;
 }
 
-function countWords(text: string): number {
-  const trimmed = text.trim();
-  return trimmed ? trimmed.split(/\s+/).length : 0;
+function countWords(str: string): number {
+  return str.trim().split(/\s+/).filter(Boolean).length;
 }
 
-const VaultSetupPrompt: React.FC<{
-  recovery: boolean;
+interface VaultSetupPromptProps {
+  recovery?: boolean;
   defaultPath: string;
   busy: boolean;
   error: string;
   onChooseFolder: () => void;
   onUseDefault: () => void;
-}> = ({ recovery, busy, error, onChooseFolder, onUseDefault }) => (
-  <div className="flex-1 flex flex-col items-center justify-center text-center py-16 px-6 rounded-lg border border-dashed border-border bg-card">
-    <HardDrive className="w-9 h-9 mb-3 text-muted-foreground opacity-60" />
-    <h2 className="text-lg font-bold text-foreground mb-1.5 max-w-sm">
-      {recovery ? "We can't access your Voice Note folder" : 'Where should Relay save your Voice Notes?'}
+}
+
+const VaultSetupPrompt: React.FC<VaultSetupPromptProps> = ({
+  recovery = false,
+  defaultPath,
+  busy,
+  error,
+  onChooseFolder,
+  onUseDefault,
+}) => (
+  <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+    <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-4">
+      {recovery ? <ShieldCheck className="w-6 h-6" /> : <HardDrive className="w-6 h-6" />}
+    </div>
+    <h2 className="text-lg font-bold text-foreground mb-1">
+      {recovery ? 'Vault Access Required' : 'Choose Your Relay Vault Location'}
     </h2>
-    <p className="text-xs text-muted-foreground max-w-sm mb-3">
+    <p className="text-xs text-muted-foreground max-w-md mb-6 leading-relaxed">
       {recovery
-        ? 'Choose another location to continue.'
-        : 'Choose a folder where Relay should store your Voice Notes.'}
+        ? 'The configured Vault folder is missing or inaccessible. Re-select the folder or reset to default to view and store your Voice Notes.'
+        : 'Select where Relay stores your Voice Notes, scribbles, and transcripts on your computer.'}
     </p>
-    <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 mb-5">
-      <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-      Your Voice Notes are stored locally on your computer.
-    </p>
-    {error && <p className="text-xs text-destructive mb-4 max-w-sm">{error}</p>}
-    <div className="flex items-center gap-2">
+
+    {error && (
+      <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-600 dark:text-red-400 max-w-md">
+        {error}
+      </div>
+    )}
+
+    <div className="flex items-center gap-3">
       <Button onClick={onChooseFolder} disabled={busy} size="sm">
         Choose Folder
       </Button>
@@ -81,6 +93,7 @@ export const VoiceNotePage: React.FC = () => {
   const [editingContent, setEditingContent] = useState('');
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const [mergingNoteId, setMergingNoteId] = useState<string | null>(null);
+  const [unmergingNoteId, setUnmergingNoteId] = useState<string | null>(null);
   const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
   const [promotedNoteIds, setPromotedNoteIds] = useState<Set<string>>(new Set());
   const [actionBusy, setActionBusy] = useState(false);
@@ -254,6 +267,7 @@ export const VoiceNotePage: React.FC = () => {
 
   const handleMerge = async (primaryId: string, secondaryId: string) => {
     setActionBusy(true);
+    setError('');
     try {
       const merged = await invoke<VaultNote>('merge_voice_notes', {
         primaryId,
@@ -263,10 +277,39 @@ export const VoiceNotePage: React.FC = () => {
         prev
           .filter((n) => n.id !== secondaryId)
           .map((n) => (n.id === primaryId ? merged : n))
+          .sort((a, b) => b.created_at.localeCompare(a.created_at))
       );
       setMergingNoteId(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to merge voice notes', err);
+      setError(err?.message || 'Failed to merge voice notes.');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleUnmerge = async (id: string) => {
+    setActionBusy(true);
+    setError('');
+    try {
+      const res = await invoke<{ primary: VaultNote; secondary: VaultNote }>('unmerge_voice_note', { id });
+      setNotes((prev) => {
+        const next = prev.map((n) => (n.id === id ? res.primary : n));
+        if (!next.some((n) => n.id === res.secondary.id)) {
+          next.push(res.secondary);
+        } else {
+          for (let i = 0; i < next.length; i++) {
+            if (next[i].id === res.secondary.id) {
+              next[i] = res.secondary;
+            }
+          }
+        }
+        return next.sort((a, b) => b.created_at.localeCompare(a.created_at));
+      });
+      setUnmergingNoteId(null);
+    } catch (err: any) {
+      console.error('Failed to unmerge voice note', err);
+      setError(err?.message || 'Failed to unmerge voice note. The operation was aborted.');
     } finally {
       setActionBusy(false);
     }
@@ -331,6 +374,24 @@ export const VoiceNotePage: React.FC = () => {
         </div>
       </div>
 
+      {/* Error Alert Banner */}
+      {error && (
+        <div className="flex items-center justify-between gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-600 dark:text-red-400 shrink-0">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setError('')}
+            className="h-6 text-[10px] px-2 text-red-600 hover:text-red-700 dark:text-red-400"
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       {/* Main Transcript History Container */}
       <div className="flex-1 flex flex-col min-h-0 rounded-lg border border-border bg-card p-5">
         <div className="flex items-center justify-between mb-4 shrink-0">
@@ -354,6 +415,7 @@ export const VoiceNotePage: React.FC = () => {
               const isEditing = editingNoteId === note.id;
               const isDeleting = deletingNoteId === note.id;
               const isMerging = mergingNoteId === note.id;
+              const isUnmerging = unmergingNoteId === note.id;
               const canMergeWithNext = index < notes.length - 1;
               const nextNote = canMergeWithNext ? notes[index + 1] : null;
 
@@ -364,13 +426,19 @@ export const VoiceNotePage: React.FC = () => {
                 >
                   {/* Card Header without redundant 'Voice Note' label */}
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-semibold text-foreground font-mono">
                         {formatNoteTimestamp(note.created_at)}
                       </span>
                       <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0">
                         {countWords(note.content)} words
                       </Badge>
+                      {note.merged_from && note.merged_from.length > 0 && (
+                        <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 bg-primary/10 text-primary border-primary/25 gap-1">
+                          <GitMerge className="w-2.5 h-2.5" />
+                          <span>Merged · {note.merged_from.length} Voice Notes</span>
+                        </Badge>
+                      )}
                       {promotedNoteIds.has(note.id) && (
                         <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 bg-primary/10 text-primary border-primary/25 gap-1">
                           <Sparkles className="w-2.5 h-2.5" />
@@ -382,6 +450,29 @@ export const VoiceNotePage: React.FC = () => {
                     {/* Action Buttons Toolbar */}
                     {!isEditing && (
                       <div className="flex items-center gap-1">
+                        {/* Unmerge Action for Merged Notes */}
+                        {note.merged_from && note.merged_from.length > 0 && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => {
+                              setUnmergingNoteId(isUnmerging ? null : note.id);
+                              setMergingNoteId(null);
+                              setDeletingNoteId(null);
+                            }}
+                            disabled={actionBusy}
+                            className={`h-7 w-7 rounded-lg transition-colors ${
+                              isUnmerging
+                                ? 'bg-primary/10 text-primary'
+                                : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
+                            }`}
+                            title="Unmerge this Voice Note"
+                            aria-label="Unmerge this Voice Note"
+                          >
+                            <Undo className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+
                         {/* Merge with adjacent earlier note */}
                         {canMergeWithNext && (
                           <Button
@@ -390,7 +481,9 @@ export const VoiceNotePage: React.FC = () => {
                             onClick={() => {
                               setMergingNoteId(isMerging ? null : note.id);
                               setDeletingNoteId(null);
+                              setUnmergingNoteId(null);
                             }}
+                            disabled={actionBusy}
                             className={`h-7 w-7 rounded-lg transition-colors ${
                               isMerging
                                 ? 'bg-primary/10 text-primary'
@@ -549,6 +642,40 @@ export const VoiceNotePage: React.FC = () => {
                         >
                           <Trash2 className="w-3 h-3" />
                           <span>Move to Trash</span>
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Unmerge Confirmation Inline Banner */}
+                  {isUnmerging && (
+                    <div className="p-3 bg-accent/40 border border-border rounded-lg text-xs space-y-2 animate-in fade-in duration-150">
+                      <div className="flex items-center gap-1.5 font-semibold text-foreground">
+                        <Undo className="w-4 h-4 text-primary shrink-0" />
+                        <span>Unmerge this Voice Note?</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        This will restore the original Voice Notes and remove the merged version.
+                      </p>
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={actionBusy}
+                          onClick={() => setUnmergingNoteId(null)}
+                          className="h-7 text-xs"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="default"
+                          disabled={actionBusy}
+                          onClick={() => handleUnmerge(note.id)}
+                          className="h-7 text-xs gap-1.5 font-semibold"
+                        >
+                          <Undo className="w-3.5 h-3.5" />
+                          <span>Unmerge</span>
                         </Button>
                       </div>
                     </div>

@@ -39,6 +39,22 @@ pub struct VaultNote {
     pub tags: Vec<String>,
     pub source_audio: Option<String>,
     pub content: String,
+    pub merged_from: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MergeRecord {
+    pub id: String,
+    pub merged_note_id: String,
+    pub merged_at: String,
+    pub primary_source: VaultNote,
+    pub secondary_source: VaultNote,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UnmergeResult {
+    pub primary: VaultNote,
+    pub secondary: VaultNote,
 }
 
 impl VaultNote {
@@ -75,6 +91,7 @@ impl VaultNote {
             tags: Vec::new(),
             source_audio: None,
             content: transcript.to_string(),
+            merged_from: None,
         }
     }
 }
@@ -126,6 +143,7 @@ impl VaultManager {
         fs::create_dir_all(dir.join("kanban"))?;
         fs::create_dir_all(dir.join("scribbles"))?;
         fs::create_dir_all(dir.join("trash"))?;
+        fs::create_dir_all(dir.join("merged_sources"))?;
         Ok(())
     }
 
@@ -135,9 +153,13 @@ impl VaultManager {
             .vault_dir()
             .join("notes")
             .join(format!("{}.md", note.id));
+        let merged_from_str = match &note.merged_from {
+            Some(ids) => format!("{:?}", ids),
+            None => "None".to_string(),
+        };
         let frontmatter = format!(
-            "---\nid: \"{}\"\ntitle: \"{}\"\ntype: \"{}\"\ncreated_at: \"{}\"\nupdated_at: \"{}\"\ntags: {:?}\nsource_audio: {:?}\n---\n\n{}",
-            note.id, note.title, note.note_type, note.created_at, note.updated_at, note.tags, note.source_audio, note.content
+            "---\nid: \"{}\"\ntitle: \"{}\"\ntype: \"{}\"\ncreated_at: \"{}\"\nupdated_at: \"{}\"\ntags: {:?}\nsource_audio: {:?}\nmerged_from: {}\n---\n\n{}",
+            note.id, note.title, note.note_type, note.created_at, note.updated_at, note.tags, note.source_audio, merged_from_str, note.content
         );
 
         fs::write(&file_path, frontmatter)?;
@@ -205,6 +227,7 @@ impl VaultManager {
     }
 
     pub fn merge_notes(&self, primary_id: &str, secondary_id: &str) -> Result<VaultNote, VaultError> {
+        self.init()?;
         let note1 = self.get_note(primary_id)?;
         let note2 = self.get_note(secondary_id)?;
 
@@ -217,14 +240,115 @@ impl VaultManager {
 
         let merged_content = format!("{}\n\n{}", older.content.trim(), newer.content.trim());
 
+        // Create pre-merge snapshot record
+        let record = MergeRecord {
+            id: format!("merge_{}", uuid::Uuid::new_v4()),
+            merged_note_id: primary_id.to_string(),
+            merged_at: chrono::Utc::now().to_rfc3339(),
+            primary_source: note1.clone(),
+            secondary_source: note2.clone(),
+        };
+
+        // Push record onto stack in merged_sources/{primary_id}.json
+        let merged_sources_dir = self.vault_dir().join("merged_sources");
+        fs::create_dir_all(&merged_sources_dir)?;
+        let stack_path = merged_sources_dir.join(format!("{}.json", primary_id));
+
+        let mut stack: Vec<MergeRecord> = if stack_path.exists() {
+            let data = fs::read_to_string(&stack_path)?;
+            serde_json::from_str(&data).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        stack.push(record);
+        fs::write(
+            &stack_path,
+            serde_json::to_string_pretty(&stack)
+                .map_err(|e| VaultError::FrontmatterError(e.to_string()))?,
+        )?;
+
+        // Determine aggregated merged_from component note IDs
+        let mut merged_from_ids = Vec::new();
+        if let Some(ref ids) = note1.merged_from {
+            merged_from_ids.extend(ids.clone());
+        } else {
+            merged_from_ids.push(note1.id.clone());
+        }
+        if let Some(ref ids) = note2.merged_from {
+            merged_from_ids.extend(ids.clone());
+        } else {
+            merged_from_ids.push(note2.id.clone());
+        }
+
         let mut merged_note = note1;
         merged_note.content = merged_content;
         merged_note.updated_at = chrono::Utc::now().to_rfc3339();
         merged_note.title = crate::pipeline::extract_deterministic_title(&merged_note.content);
+        merged_note.merged_from = Some(merged_from_ids);
 
         self.save_note(&merged_note)?;
         self.delete_note(secondary_id)?;
         Ok(merged_note)
+    }
+
+    pub fn unmerge_notes(&self, merged_note_id: &str) -> Result<UnmergeResult, VaultError> {
+        self.init()?;
+        let merged_note = self.get_note(merged_note_id)?;
+
+        if merged_note.merged_from.is_none() {
+            return Err(VaultError::FrontmatterError(format!(
+                "Note {} is not a merged note",
+                merged_note_id
+            )));
+        }
+
+        let stack_path = self
+            .vault_dir()
+            .join("merged_sources")
+            .join(format!("{}.json", merged_note_id));
+        if !stack_path.exists() {
+            return Err(VaultError::NotFound(format!(
+                "Merge history for note {} not found",
+                merged_note_id
+            )));
+        }
+
+        let data = fs::read_to_string(&stack_path)?;
+        let mut stack: Vec<MergeRecord> = serde_json::from_str(&data)
+            .map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
+
+        if stack.is_empty() {
+            return Err(VaultError::NotFound(format!(
+                "Merge stack for note {} is empty",
+                merged_note_id
+            )));
+        }
+
+        let record = stack.pop().unwrap();
+        let primary_restored = record.primary_source;
+        let secondary_restored = record.secondary_source;
+
+        // Atomically save both restored original notes
+        self.save_note(&primary_restored)?;
+        self.save_note(&secondary_restored)?;
+
+        // Update or remove stack file
+        if stack.is_empty() {
+            let _ = fs::remove_file(&stack_path);
+        } else {
+            fs::write(
+                &stack_path,
+                serde_json::to_string_pretty(&stack)
+                    .map_err(|e| VaultError::FrontmatterError(e.to_string()))?,
+            )?;
+        }
+
+        let _ = self.sync_scribbles_for_voice_note_unmerge(&primary_restored.id, &secondary_restored.id);
+
+        Ok(UnmergeResult {
+            primary: primary_restored,
+            secondary: secondary_restored,
+        })
     }
 
     pub fn list_notes(&self) -> Result<Vec<VaultNote>, VaultError> {
@@ -317,6 +441,7 @@ impl VaultManager {
         let mut updated_at = String::new();
         let mut tags = Vec::new();
         let mut source_audio = None;
+        let mut merged_from = None;
 
         for line in frontmatter.lines() {
             let line = line.trim();
@@ -344,6 +469,13 @@ impl VaultManager {
                             .to_string(),
                     )
                 };
+            } else if let Some(v) = line.strip_prefix("merged_from:") {
+                let v = v.trim();
+                merged_from = if v == "None" || v.is_empty() {
+                    None
+                } else {
+                    Some(parse_debug_string_list(v))
+                };
             }
         }
 
@@ -360,6 +492,7 @@ impl VaultManager {
             tags,
             source_audio,
             content: body,
+            merged_from,
         })
     }
 
@@ -972,6 +1105,50 @@ impl VaultManager {
         Ok(vec![target_scribble.id])
     }
 
+    /// Synchronizes Scribbles after unmerging Voice Notes, updating metadata and restoring any trashed scribbles if present.
+    pub fn sync_scribbles_for_voice_note_unmerge(
+        &self,
+        primary_vn_id: &str,
+        secondary_vn_id: &str,
+    ) -> Result<(), VaultError> {
+        let scribbles = self.list_scribbles()?;
+        let primary_note = self.get_note(primary_vn_id)?;
+
+        for mut s in scribbles {
+            let mut matches = false;
+            if let Some(arr) = s.source_metadata.get("source_voice_note_ids").and_then(|v| v.as_array()) {
+                if arr.iter().any(|v| v.as_str() == Some(primary_vn_id) || v.as_str() == Some(secondary_vn_id)) {
+                    matches = true;
+                }
+            }
+            if matches {
+                if primary_note.merged_from.is_none() {
+                    s.content = primary_note.content.clone();
+                    if let Some(obj) = s.source_metadata.as_object_mut() {
+                        obj.insert("is_merged".to_string(), serde_json::Value::Bool(false));
+                        obj.insert("source_voice_note_ids".to_string(), serde_json::json!([primary_vn_id]));
+                    }
+                } else if let Some(ref ids) = primary_note.merged_from {
+                    if let Some(obj) = s.source_metadata.as_object_mut() {
+                        obj.insert("source_voice_note_ids".to_string(), serde_json::json!(ids));
+                    }
+                }
+                s.updated_at = chrono::Utc::now().to_rfc3339();
+                let _ = self.save_scribble(&s);
+            }
+        }
+
+        // Restore secondary scribble from trash if it was moved to trash during merge
+        let trash_items = self.get_trash_items().unwrap_or_default();
+        for item in trash_items {
+            if item.item_type == "scribble" && item.original_id.contains(secondary_vn_id) {
+                let _ = self.restore_trash_item(&item.id);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Merges two or more source Scribbles into a brand new synthesized Scribble.
     /// Preserves full provenance to the source Scribbles and links them with DERIVED_FROM.
     pub fn merge_scribbles(&self, source_ids: &[String]) -> Result<Scribble, VaultError> {
@@ -1082,6 +1259,7 @@ mod tests {
             tags: vec![],
             source_audio: None,
             content: "Some LLM-cleaned content".to_string(),
+            merged_from: None,
         };
         manager.save_note(&scribble_note).unwrap();
 
@@ -1225,6 +1403,7 @@ mod tests {
             content:
                 "Relay's backend uses cpal for audio capture and whisper-rs for transcription."
                     .to_string(),
+            merged_from: None,
         };
         manager.save_note(&note).unwrap();
 
@@ -1276,6 +1455,155 @@ mod tests {
         // Delete merged note
         manager.delete_note(&note_a.id).unwrap();
         assert_eq!(manager.list_notes().unwrap().len(), 0);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_voice_note_reversible_merge_basic_and_unmerge() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_vn_unmerge_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+
+        let mut note_a = VaultNote::new_voice_note("Verbatim text for Note A.");
+        note_a.created_at = "2026-08-20T10:00:00Z".to_string();
+        note_a.tags = vec!["tag1".to_string()];
+        note_a.source_audio = Some("audio_a.wav".to_string());
+        manager.save_note(&note_a).unwrap();
+
+        let mut note_b = VaultNote::new_voice_note("Verbatim text for Note B.");
+        note_b.created_at = "2026-08-20T10:01:00Z".to_string();
+        note_b.tags = vec!["tag2".to_string()];
+        note_b.source_audio = Some("audio_b.wav".to_string());
+        manager.save_note(&note_b).unwrap();
+
+        // 1. Merge A + B
+        let merged = manager.merge_notes(&note_a.id, &note_b.id).unwrap();
+        assert_eq!(merged.id, note_a.id);
+        assert!(merged.merged_from.is_some());
+        let merged_from = merged.merged_from.unwrap();
+        assert_eq!(merged_from.len(), 2);
+        assert_eq!(merged_from[0], note_a.id);
+        assert_eq!(merged_from[1], note_b.id);
+        assert!(manager.get_note(&note_b.id).is_err());
+
+        // 2. Unmerge
+        let unmerge_res = manager.unmerge_notes(&merged.id).unwrap();
+        assert_eq!(unmerge_res.primary.id, note_a.id);
+        assert_eq!(unmerge_res.primary.content, "Verbatim text for Note A.");
+        assert_eq!(unmerge_res.primary.tags, vec!["tag1"]);
+        assert_eq!(unmerge_res.primary.source_audio.as_deref(), Some("audio_a.wav"));
+        assert!(unmerge_res.primary.merged_from.is_none());
+
+        assert_eq!(unmerge_res.secondary.id, note_b.id);
+        assert_eq!(unmerge_res.secondary.content, "Verbatim text for Note B.");
+        assert_eq!(unmerge_res.secondary.tags, vec!["tag2"]);
+        assert_eq!(unmerge_res.secondary.source_audio.as_deref(), Some("audio_b.wav"));
+        assert!(unmerge_res.secondary.merged_from.is_none());
+
+        // Both notes restored on disk
+        let all_notes = manager.list_notes().unwrap();
+        assert_eq!(all_notes.len(), 2);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_voice_note_merge_persistence_across_manager_reconstruction() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_vn_persist_{}", uuid::Uuid::new_v4()));
+        let manager1 = VaultManager::new(temp_dir.clone());
+
+        let note_a = VaultNote::new_voice_note("First session notes.");
+        let note_b = VaultNote::new_voice_note("Second session notes.");
+        manager1.save_note(&note_a).unwrap();
+        manager1.save_note(&note_b).unwrap();
+        let merged = manager1.merge_notes(&note_a.id, &note_b.id).unwrap();
+
+        // Simulate Relay restart by instantiating new VaultManager
+        let manager2 = VaultManager::new(temp_dir.clone());
+        let reloaded_merged = manager2.get_note(&merged.id).unwrap();
+        assert!(reloaded_merged.merged_from.is_some());
+
+        // Unmerge on new VaultManager instance
+        let unmerged = manager2.unmerge_notes(&merged.id).unwrap();
+        assert_eq!(unmerged.primary.content, "First session notes.");
+        assert_eq!(unmerged.secondary.content, "Second session notes.");
+        assert_eq!(manager2.list_notes().unwrap().len(), 2);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_voice_note_invalid_and_corrupt_unmerge_failures() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_vn_err_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+
+        let note_normal = VaultNote::new_voice_note("Normal unmerged note.");
+        manager.save_note(&note_normal).unwrap();
+
+        // 1. Unmerging normal note should fail
+        assert!(manager.unmerge_notes(&note_normal.id).is_err());
+
+        // 2. Corrupted missing source history
+        let note_a = VaultNote::new_voice_note("Note A");
+        let note_b = VaultNote::new_voice_note("Note B");
+        manager.save_note(&note_a).unwrap();
+        manager.save_note(&note_b).unwrap();
+        let merged = manager.merge_notes(&note_a.id, &note_b.id).unwrap();
+
+        // Remove the stack file manually to simulate missing/corrupted stack
+        let stack_path = temp_dir.join("merged_sources").join(format!("{}.json", merged.id));
+        let _ = fs::remove_file(&stack_path);
+
+        // Unmerge should fail safely without deleting active merged note
+        assert!(manager.unmerge_notes(&merged.id).is_err());
+        assert!(manager.get_note(&merged.id).is_ok());
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_voice_note_nested_merge_and_stepwise_unmerge() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_vn_nested_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+
+        let mut note_a = VaultNote::new_voice_note("Content A");
+        note_a.created_at = "2026-08-20T10:00:00Z".to_string();
+        let mut note_b = VaultNote::new_voice_note("Content B");
+        note_b.created_at = "2026-08-20T10:01:00Z".to_string();
+        let mut note_c = VaultNote::new_voice_note("Content C");
+        note_c.created_at = "2026-08-20T10:02:00Z".to_string();
+
+        manager.save_note(&note_a).unwrap();
+        manager.save_note(&note_b).unwrap();
+        manager.save_note(&note_c).unwrap();
+
+        // A + B -> AB (id note_a.id)
+        let merged_ab = manager.merge_notes(&note_a.id, &note_b.id).unwrap();
+        assert_eq!(merged_ab.merged_from.as_ref().unwrap().len(), 2);
+
+        // AB + C -> ABC (id note_a.id)
+        let merged_abc = manager.merge_notes(&merged_ab.id, &note_c.id).unwrap();
+        assert_eq!(merged_abc.merged_from.as_ref().unwrap().len(), 3);
+
+        // First unmerge: ABC -> AB and C
+        let unmerge1 = manager.unmerge_notes(&merged_abc.id).unwrap();
+        assert_eq!(unmerge1.primary.id, note_a.id);
+        assert_eq!(unmerge1.primary.merged_from.as_ref().unwrap().len(), 2);
+        assert_eq!(unmerge1.secondary.id, note_c.id);
+        assert_eq!(unmerge1.secondary.content, "Content C");
+
+        // Second unmerge: AB -> A and B
+        let unmerge2 = manager.unmerge_notes(&unmerge1.primary.id).unwrap();
+        assert_eq!(unmerge2.primary.id, note_a.id);
+        assert_eq!(unmerge2.primary.content, "Content A");
+        assert!(unmerge2.primary.merged_from.is_none());
+
+        assert_eq!(unmerge2.secondary.id, note_b.id);
+        assert_eq!(unmerge2.secondary.content, "Content B");
+        assert!(unmerge2.secondary.merged_from.is_none());
+
+        // All 3 notes restored
+        assert_eq!(manager.list_notes().unwrap().len(), 3);
 
         let _ = fs::remove_dir_all(temp_dir);
     }

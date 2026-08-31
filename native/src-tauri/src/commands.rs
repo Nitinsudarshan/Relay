@@ -600,6 +600,28 @@ pub async fn merge_voice_notes(
     Ok(merged)
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct UnmergeVoiceNotesResponse {
+    pub primary: VaultNote,
+    pub secondary: VaultNote,
+}
+
+#[tauri::command]
+pub async fn unmerge_voice_note(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<UnmergeVoiceNotesResponse, CommandError> {
+    let result = state
+        .vault
+        .unmerge_notes(&id)
+        .map_err(|e| CommandError::new("VAULT_UNMERGE_FAILED", &e.to_string()))?;
+
+    Ok(UnmergeVoiceNotesResponse {
+        primary: result.primary,
+        secondary: result.secondary,
+    })
+}
+
 pub const SCRIBBLE_SAVED_EVENT: &str = "scribble-saved";
 pub const SCRIBBLE_ENRICHED_EVENT: &str = "scribble-enriched";
 

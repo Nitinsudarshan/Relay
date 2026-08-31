@@ -1,5 +1,22 @@
 # Relay — Changelog
 
+## [0.21.0] - 2026-09-01
+
+### Fully Reversible Voice Note Merging
+
+**Type**: minor — end-to-end reversible voice note merging with stack-based persistence, deterministic nested unmerging, and UI confirmation (`native/src-tauri/src/vault/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`, `native/src/types/index.ts`, `native/src/components/voicenotes/VoiceNotePage.tsx`, `native/src/components/voicenotes/VoiceNotePage.test.tsx (new)`).
+
+#### Features
+
+- **Stack-Based Pre-Merge Snapshot Persistence (`vault/mod.rs`)**: Saved pre-merge note snapshots (`primary_source` and `secondary_source`) to `{vault_dir}/merged_sources/{primary_id}.json` as a stack of `MergeRecord` objects. Preserves exact note ID, title, created_at, updated_at, tags, source_audio, and content string-for-string without destructive note deletion.
+- **Frontmatter Metadata Integration (`vault/mod.rs`, `types/index.ts`)**: Added `merged_from: ["id1", "id2"]` frontmatter field and optional TS type property `merged_from?: string[]`, enabling the vault to track component notes and unmerge capability across Relay application restarts.
+- **Deterministic Step-by-Step Unmerge Operation (`vault/mod.rs`, `commands.rs`, `lib.rs`)**: Exposed `unmerge_voice_note` Tauri command wrapping `VaultManager::unmerge_notes`. Supports nested merges (`A + B -> AB`, `AB + C -> ABC`), where unmerging `ABC` restores `AB` (which retains its own merge history) and `C`, and subsequent unmerge on `AB` restores `A` and `B`.
+- **UI Merged Indicator & Confirmation Dialog (`VoiceNotePage.tsx`, `VoiceNotePage.test.tsx`)**:
+  - Rendered a `Merged · N Voice Notes` badge and an `Unmerge` action button for merged notes.
+  - Added an inline confirmation banner (*"Unmerge this Voice Note? This will restore the original Voice Notes..."*) with `Cancel` and `Unmerge` buttons.
+  - Surfaced user-visible error alert banners on operation failures and guarded against duplicate action triggers.
+- **Scribble & Provenance Synchronization (`vault/mod.rs`)**: Automatically updated derived Scribble metadata and restored any trashed secondary scribbles upon unmerging.
+
 ## [0.20.0] - 2026-08-31
 
 ### Talkback Immersive Active Mode, Speech Synchronization & Calmer Idle Animation

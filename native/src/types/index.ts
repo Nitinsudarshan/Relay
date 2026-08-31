@@ -19,6 +19,7 @@ export interface VaultNote {
   tags: string[];
   source_audio?: string | null;
   content: string;
+  merged_from?: string[] | null;
 }
 
 export interface VaultLocationInfo {
