@@ -1,5 +1,47 @@
 # Relay — Changelog
 
+## [0.20.1] - 2026-08-31
+
+### A Written Answer to "How Does Anyone Get Relay?"
+
+**Type**: patch — documentation only (`docs/go-to-market.md (new)`, `docs/README.md`).
+
+No code changed. This records something the repository implied but never
+stated: Relay is a Windows desktop application with **no published release and
+no workflow that builds one** — every job in `ci.yml` runs on
+`ubuntu-latest` — so the only way to obtain it is to install Rust, CMake and a
+C++ toolchain and build from source.
+
+#### Features
+
+- **`docs/go-to-market.md` (new)**: what blocks Relay from reaching a
+  non-developer, and in what order. Three gating items, each verifiable in the
+  tree today: no release pipeline (`tauri.conf.json` already sets
+  `bundle.active: true` / `targets: "all"` — the bundler has simply never run
+  on Windows); `base_dir` resolving from `current_dir()`, which is
+  `C:\Windows\System32` under a Start Menu shortcut and would turn the first
+  installer into a silent data-loss bug (`maybe_later.md` item 11); and the
+  deliberately-unprovisioned voice manifest (Decision 54), which means
+  Talkback ships mute. Also covers positioning, the CLA deadline that a public
+  launch imposes on any future dual-licensing decision (`maybe_later.md`
+  item 2), channels, a phased sequence, and the metrics worth tracking instead
+  of stars.
+- **Documentation index (`docs/README.md`)**: the new file is listed under
+  *Honest gaps*, beside `roadmap.md` and `maybe_later.md`, per the "add it to
+  this index in the same commit" rule.
+
+#### Notes for future readers
+
+- Two inconsistencies are named there rather than fixed here, because both are
+  edits to files this change has no other business touching: `docs/product.md`
+  still lists Voice Chat & TTS as "Deferred (Decision 34)" although Talkback
+  shipped across v0.18.0–v0.20.0; and GitHub reports the licence as
+  `NOASSERTION` because `LICENSE` carries an edited AGPL header (643 lines
+  against upstream's ~661), so the repository sidebar never says AGPL-3.0.
+- The document is dated and traced to v0.20.0. Its competitive and channel
+  judgements are judgements, not facts, and should be re-checked before being
+  acted on.
+
 ## [0.20.0] - 2026-08-31
 
 ### Talkback Immersive Active Mode, Speech Synchronization & Calmer Idle Animation

@@ -36,6 +36,7 @@ that was reversed gets a new entry saying so.
 | File | Scope |
 |---|---|
 | [roadmap.md](roadmap.md) | What is real vs. stubbed, and what's next. |
+| [go-to-market.md](go-to-market.md) | What blocks Relay from reaching a non-developer, and in what order. |
 | [../maybe_later.md](../maybe_later.md) | Deferred features, per `rules/maybe-later.md`. |
 
 ## Deep records
