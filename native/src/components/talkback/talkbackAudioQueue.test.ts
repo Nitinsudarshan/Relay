@@ -72,6 +72,25 @@ describe('TalkbackAudioQueue', () => {
     expect(played).toEqual(['a', 'b', 'c']);
   });
 
+  it('notifies onChunkStart as each phrase begins playback', async () => {
+    const { sink, finishCurrent } = makeSink();
+    const startedChunks: string[] = [];
+    const queue = new TalkbackAudioQueue(
+      sink,
+      undefined,
+      (c) => {
+        if (c.text) startedChunks.push(c.text);
+      },
+    );
+
+    queue.enqueue(chunk(0, 'a', { text: 'Hello' }));
+    queue.enqueue(chunk(1, 'b', { text: 'world' }));
+
+    expect(startedChunks).toEqual(['Hello']);
+    await finishCurrent();
+    expect(startedChunks).toEqual(['Hello', 'world']);
+  });
+
   it('waits for a missing phrase rather than playing out of order', async () => {
     const { sink, played, finishCurrent } = makeSink();
     const queue = new TalkbackAudioQueue(sink);

@@ -1,5 +1,22 @@
 # Relay — Changelog
 
+## [0.20.0] - 2026-08-31
+
+### Talkback Immersive Active Mode, Speech Synchronization & Calmer Idle Animation
+
+**Type**: minor — conversational active mode, TTS text/audio synchronization, and directional liquid core animation (`native/src/components/talkback/TalkbackImmersiveView.tsx (new)`, `native/src/components/talkback/TalkbackOrbCanvas.tsx`, `native/src/components/talkback/TalkbackPage.tsx`, `native/src/components/talkback/TalkbackAgent.tsx`, `native/src/components/talkback/talkbackAudioQueue.ts`, `native/src/components/talkback/useTalkback.ts`, `native/src-tauri/src/talkback/speech.rs`, `native/src-tauri/src/talkback/engine.rs`).
+
+#### Features
+
+- **Full-Page Immersive Conversational Mode (`TalkbackImmersiveView.tsx`, `TalkbackPage.tsx`)**: When Talkback is activated, the entire page seamlessly transitions into a distraction-free, full-screen conversational interface centered on the living Relay entity. It removes distracting page banners, duplicated state badges, and latency stats, providing a spacious, enlarged dialog box for natural progressive speech reading. Includes `Escape` shortcut support with a clean top-left exit affordance, top-right history and view-mode switchers, and minimal floating speech controls.
+- **Phrase-Level Text / Audio Synchronization (`speech.rs`, `engine.rs`, `talkbackAudioQueue.ts`, `useTalkback.ts`)**: Embedded synthesized phrase text directly into backend `SpeechChunk` and emitted with `talkback-audio` events. `TalkbackAudioQueue` triggers playback start notifications per chunk (`onChunkStart`), enabling synchronized progressive text reveal where words appear precisely as Relay speaks rather than dumping the full response at once.
+- **Calm, Restrained Idle State (`TalkbackOrbCanvas.tsx`)**: Refined the idle presence to feel quietly present and non-distracting: very subtle core breathing (~4.5s cycle, ±2.5% scale), low-intensity ambient glow, minimal rotation drift, and reduction to subtle floating dust motes with soft opacity.
+- **Directional Liquid Core + Wave Conduit Metaphor (`TalkbackOrbCanvas.tsx`)**:
+  - *Listening*: User voice ripples move inward toward the core, dynamically deformed by live microphone amplitude (`micLevel`).
+  - *Thinking*: Energy gathers and swirls inward in a computational vortex.
+  - *Speaking*: Acoustic harmonic waves radiate outward in sync with real-time TTS audio frequency and intensity (`outputLevel`).
+  - *Interruption*: Immediate transition back to listening upon barge-in or stop speaking.
+
 ## [0.19.3] - 2026-08-31
 
 ### Talkback Living Voice-Reactive Agent & Curated Voice Library

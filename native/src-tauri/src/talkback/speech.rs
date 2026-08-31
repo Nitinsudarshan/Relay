@@ -53,6 +53,8 @@ pub struct SpeechChunk {
     /// The engine's cancellation counter at synthesis time.
     pub generation: u64,
     pub wav_base64: String,
+    /// The text of the phrase that was synthesized.
+    pub text: String,
 }
 
 /// Where synthesized audio goes.
@@ -168,6 +170,7 @@ impl SpeechPipeline {
                             seq,
                             generation,
                             wav_base64: audio.wav_base64,
+                            text: phrase,
                         });
                     }
                     // Not configured. Nothing to say, nothing to report.

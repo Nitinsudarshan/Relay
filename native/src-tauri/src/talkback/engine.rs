@@ -456,6 +456,7 @@ impl SpeechSink for TauriSpeechSink {
                 "seq": chunk.seq,
                 "generation": chunk.generation,
                 "wavBase64": chunk.wav_base64,
+                "text": chunk.text,
             }),
         );
     }

@@ -31,6 +31,12 @@ export interface UseTalkback {
   turns: TalkbackTurn[];
   /** The answer currently being generated, before it becomes a turn. */
   streamingText: string;
+  /** The exact phrase currently playing in TTS. */
+  currentSpokenPhrase: string;
+  /** The accumulated list of phrases spoken in the current agent response. */
+  spokenPhrases: string[];
+  /** The latest user utterance/query in this conversation. */
+  lastUserTranscript: string;
   /** Microphone amplitude, 0–1, for the agent animation. */
   level: number;
   /** Spoken output audio amplitude, 0–1, for speaking animation. */
@@ -56,6 +62,9 @@ export const useTalkback = (): UseTalkback => {
   const [state, setState] = useState<TalkbackStateName>('OFF');
   const [turns, setTurns] = useState<TalkbackTurn[]>([]);
   const [streamingText, setStreamingText] = useState('');
+  const [currentSpokenPhrase, setCurrentSpokenPhrase] = useState('');
+  const [spokenPhrases, setSpokenPhrases] = useState<string[]>([]);
+  const [lastUserTranscript, setLastUserTranscript] = useState('');
   const [level, setLevel] = useState(0);
   const [outputLevel, setOutputLevel] = useState(0);
   const [lastMetrics, setLastMetrics] = useState<TalkbackMetrics | null>(null);
@@ -63,7 +72,20 @@ export const useTalkback = (): UseTalkback => {
   const [busy, setBusy] = useState(false);
 
   const queue = useMemo(
-    () => new TalkbackAudioQueue(createElementSink((lvl) => setOutputLevel(lvl))),
+    () =>
+      new TalkbackAudioQueue(
+        createElementSink((lvl) => setOutputLevel(lvl)),
+        () => {
+          // Playback finished for all chunks in the queue
+          setCurrentSpokenPhrase('');
+        },
+        (chunk) => {
+          if (chunk.text) {
+            setCurrentSpokenPhrase(chunk.text);
+            setSpokenPhrases((prev) => [...prev, chunk.text!]);
+          }
+        },
+      ),
     [],
   );
   // Read inside event callbacks, which capture their first render's
@@ -83,7 +105,15 @@ export const useTalkback = (): UseTalkback => {
         if (next === 'INTERRUPTED' || next === 'OFF') {
           queue.interrupt();
           setStreamingText('');
+          setCurrentSpokenPhrase('');
+          setSpokenPhrases([]);
           setOutputLevel(0);
+        } else if (next === 'STARTING' || next === 'LISTENING' || next === 'USER_SPEAKING' || next === 'THINKING') {
+          setCurrentSpokenPhrase('');
+          if (next === 'USER_SPEAKING' || next === 'THINKING') {
+            setSpokenPhrases([]);
+            setStreamingText('');
+          }
         }
       }),
 
@@ -95,7 +125,14 @@ export const useTalkback = (): UseTalkback => {
             ? previous
             : [...previous, turn],
         );
-        if (turn.role === 'agent') setStreamingText('');
+        if (turn.role === 'user') {
+          setLastUserTranscript(turn.text);
+          setSpokenPhrases([]);
+          setCurrentSpokenPhrase('');
+          setStreamingText('');
+        } else if (turn.role === 'agent') {
+          setStreamingText('');
+        }
       }),
 
       listen<{ text: string }>(EVENTS.delta, (event) => {
@@ -125,6 +162,7 @@ export const useTalkback = (): UseTalkback => {
       listen<{ text: string; sttMs: number }>(EVENTS.utterance, (event) => {
         const payload = event.payload;
         if (!payload?.text?.trim()) return;
+        setLastUserTranscript(payload.text);
         void invoke('submit_talkback_turn', {
           text: payload.text,
           typed: false,
@@ -200,6 +238,9 @@ export const useTalkback = (): UseTalkback => {
     state,
     turns,
     streamingText,
+    currentSpokenPhrase,
+    spokenPhrases,
+    lastUserTranscript,
     level,
     outputLevel,
     lastMetrics,

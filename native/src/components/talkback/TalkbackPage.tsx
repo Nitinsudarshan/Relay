@@ -8,6 +8,8 @@ import { TalkbackAgent } from './TalkbackAgent';
 import { useTalkback, sourceLabel } from './useTalkback';
 import type { TalkbackContextItem, TalkbackTurn, TtsStatus } from '../../types';
 
+import { TalkbackImmersiveView } from './TalkbackImmersiveView';
+
 /** Source chips: where the answer actually came from, per turn. */
 const SourceChips: React.FC<{ sources: TalkbackContextItem[] }> = ({ sources }) => {
   if (sources.length === 0) return null;
@@ -62,6 +64,9 @@ export const TalkbackPage: React.FC = () => {
     state,
     turns,
     streamingText,
+    currentSpokenPhrase,
+    spokenPhrases,
+    lastUserTranscript,
     level,
     outputLevel,
     lastMetrics,
@@ -74,10 +79,12 @@ export const TalkbackPage: React.FC = () => {
   } = useTalkback();
   const [draft, setDraft] = useState('');
   const [voice, setVoice] = useState<TtsStatus | null>(null);
+  const [viewPreference, setViewPreference] = useState<'immersive' | 'split'>('immersive');
   const transcriptEnd = useRef<HTMLDivElement>(null);
 
   const isOn = state !== 'OFF';
   const isSpeaking = state === 'SPEAKING';
+  const isImmersive = isOn && viewPreference === 'immersive';
 
   const refreshVoice = useCallback(async () => {
     try {
@@ -115,8 +122,37 @@ export const TalkbackPage: React.FC = () => {
     await send(text);
   };
 
+  const handleStartTalkback = async () => {
+    setViewPreference('immersive');
+    await start(true);
+  };
+
+  if (isImmersive) {
+    return (
+      <div className="flex-1 flex flex-col min-h-0 w-full animate-in fade-in duration-300">
+        <TalkbackImmersiveView
+          state={state}
+          level={level}
+          outputLevel={outputLevel}
+          currentSpokenPhrase={currentSpokenPhrase}
+          spokenPhrases={spokenPhrases}
+          lastUserTranscript={lastUserTranscript}
+          streamingText={streamingText}
+          turns={turns}
+          voice={voice}
+          error={error}
+          busy={busy}
+          onToggleTalkback={stop}
+          onInterrupt={interrupt}
+          onSend={send}
+          onSwitchToStandard={() => setViewPreference('split')}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex-1 flex flex-col gap-4 min-h-0">
+    <div className="flex-1 flex flex-col gap-4 min-h-0 animate-in fade-in duration-300">
       <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0">
         {/* Agent + controls */}
         <aside className="lg:w-72 shrink-0 flex flex-col items-center gap-5 bg-card border border-border rounded-xl p-6">
@@ -124,7 +160,7 @@ export const TalkbackPage: React.FC = () => {
 
           <div className="w-full flex flex-col gap-2">
             <Button
-              onClick={() => (isOn ? stop() : start(true))}
+              onClick={() => (isOn ? stop() : handleStartTalkback())}
               disabled={busy}
               variant={isOn ? 'secondary' : 'default'}
               className="w-full gap-2"
@@ -132,6 +168,16 @@ export const TalkbackPage: React.FC = () => {
               {isOn ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               {isOn ? 'Turn Talkback off' : 'Turn Talkback on'}
             </Button>
+
+            {isOn && (
+              <Button
+                onClick={() => setViewPreference('immersive')}
+                variant="outline"
+                className="w-full gap-2 text-xs"
+              >
+                Enter immersive mode
+              </Button>
+            )}
 
             {isSpeaking && (
               <Button

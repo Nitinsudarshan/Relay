@@ -165,4 +165,26 @@ describe('TalkbackPage', () => {
       await screen.findByText(/relay is already recording/i),
     ).toBeInTheDocument();
   });
+
+  it('renders immersive active mode when talkback starts and allows switching to split view', async () => {
+    const user = userEvent.setup();
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === 'start_talkback') return 'LISTENING';
+      if (command === 'stop_talkback') return 'OFF';
+      if (command === 'get_talkback_session') return { turns: [] };
+      if (command === 'get_tts_status') return readyVoice;
+      return undefined;
+    });
+
+    render(<TalkbackPage />);
+    await user.click(screen.getByRole('button', { name: /turn talkback on/i }));
+
+    expect(await screen.findByTestId('talkback-immersive-view')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /split view/i })).toBeInTheDocument();
+
+    // Switch to split view
+    await user.click(screen.getByRole('button', { name: /split view/i }));
+    expect(screen.queryByTestId('talkback-immersive-view')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /enter immersive mode/i })).toBeInTheDocument();
+  });
 });

@@ -20,6 +20,8 @@ export interface TalkbackAudioChunk {
   /** The engine's cancellation counter at synthesis time. */
   generation: number;
   wavBase64: string;
+  /** The transcribed text segment being spoken. */
+  text?: string;
 }
 
 /** Injectable so the queue is testable without a real audio element. */
@@ -46,6 +48,7 @@ export class TalkbackAudioQueue {
   constructor(
     private readonly sink: AudioSink,
     private readonly onFinished?: () => void,
+    private readonly onChunkStart?: (chunk: TalkbackAudioChunk) => void,
   ) {}
 
   /** Chunks queued but not yet played. */
@@ -117,6 +120,7 @@ export class TalkbackAudioQueue {
       // of a gap, or the answer is spoken out of sequence.
       while (this.pending.length > 0 && this.pending[0].seq === this.nextSeq) {
         const chunk = this.pending.shift()!;
+        this.onChunkStart?.(chunk);
         await this.sink.play(chunk.wavBase64);
         if (this.generation !== generationAtStart) return;
         this.nextSeq += 1;
