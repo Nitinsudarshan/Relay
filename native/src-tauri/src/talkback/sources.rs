@@ -69,6 +69,20 @@ pub fn scribble_candidate(scribble: &Scribble) -> CandidateDoc {
         )
 }
 
+/// An imported VaultFile as a candidate, carrying its summary, content, topics and entities.
+pub fn file_candidate(file: &crate::vault::VaultFile) -> CandidateDoc {
+    let body = match &file.summary {
+        Some(summary) if !summary.trim().is_empty() => {
+            format!("{}\n\n{}", summary.trim(), file.content)
+        }
+        _ => file.content.clone(),
+    };
+    CandidateDoc::new(SourceType::File, &file.id, &file.original_filename, &cap(&body))
+        .with_timestamp(&file.created_at)
+        .with_topics(file.topics.clone())
+        .with_entities(file.entities.clone())
+}
+
 /// A meeting's generated summary as a candidate.
 ///
 /// Returns `None` for a meeting with no summary — an empty candidate
@@ -199,6 +213,13 @@ pub fn gather_candidates(
         match vault.list_scribbles() {
             Ok(scribbles) => candidates.extend(scribbles.iter().map(scribble_candidate)),
             Err(e) => tracing::warn!("talkback: scribbles unavailable for retrieval: {}", e),
+        }
+    }
+
+    if wanted.contains(&SourceType::File) {
+        match vault.list_vault_files() {
+            Ok(files) => candidates.extend(files.iter().map(file_candidate)),
+            Err(e) => tracing::warn!("talkback: files unavailable for retrieval: {}", e),
         }
     }
 

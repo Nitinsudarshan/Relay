@@ -1,5 +1,5 @@
 use crate::providers::LLMClient;
-use crate::vault::{Scribble, ScribbleRelationship, VaultManager, REL_SAME_TOPIC};
+use crate::vault::{Scribble, ScribbleRelationship, VaultFile, VaultManager, REL_SAME_TOPIC};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -545,6 +545,136 @@ Return ONLY raw JSON or JSON within a markdown code block.
         .map_err(|e| format!("Failed to save enriched scribble: {}", e))?;
 
     Ok(scribble)
+}
+
+/// Enriches and summarizes an imported vault file using the LLM pipeline, matching Scribble summary structure.
+pub async fn enrich_vault_file(
+    llm: &LLMClient,
+    vault: &VaultManager,
+    file_id: &str,
+) -> Result<VaultFile, String> {
+    let mut file = vault
+        .get_vault_file(file_id)
+        .map_err(|e| format!("Vault file not found: {}", e))?;
+
+    if file.content.trim().is_empty() {
+        return Ok(file);
+    }
+
+    let system_prompt = r#"
+You are Relay's Knowledge & Thinking Assistant.
+Analyze this document file and derive high-quality structured knowledge metadata.
+
+Return ONLY a valid JSON object with the following fields:
+- "summary": a structured, short summary (under 75 words total) optimized for rapid reading and visual hierarchy.
+  Formatting Rules:
+  1. Use structured numbered sections (e.g. "1. **Core Insight:** ..." or "1. **Architecture:**") with sub-bullets indented with 2-4 spaces (e.g. "   - Detailed action or context...").
+  2. Use bold lead-ins for key terms and actionable takeaways.
+  3. If the document describes a workflow, state transitions, or system architecture, ALWAYS include a concise 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Input] --> B[Process] --> C[Output]\n```").
+- "topics": an array of 5 to 7 high-level domain topics and conceptual themes.
+- "entities": an array of 5 to 7 specific named entities (technologies, tools, organizations, people, frameworks, platforms, projects) mentioned or central to the text.
+- "questions": an array of 3 to 4 insightful AI exploration questions that prompt deeper thinking, architectural implications, connection opportunities, or risks.
+
+Return ONLY raw JSON or JSON within a markdown code block.
+"#;
+
+    let response = llm.complete(&file.content, Some(system_prompt)).await;
+
+    let parsed_opt = match response {
+        Ok(res) => {
+            let text = res.text.trim();
+            let json_str = if text.contains("```json") {
+                text.split("```json")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split("```")
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+            } else if text.contains("```") {
+                text.split("```")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split("```")
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+            } else {
+                text
+            };
+
+            serde_json::from_str::<AiEnrichmentResponse>(json_str).ok()
+        }
+        Err(err) => {
+            tracing::warn!("AI enrichment LLM call failed for vault file {}: {}", file_id, err);
+            None
+        }
+    };
+
+    let fallback = extract_deterministic_knowledge(&file.content);
+
+    if let Some(parsed) = parsed_opt {
+        if let Some(s) = parsed.summary {
+            let s_clean = s.trim().to_string();
+            if !s_clean.is_empty() && s_clean != "null" {
+                file.summary = Some(s_clean);
+            } else {
+                file.summary = fallback.summary;
+            }
+        } else {
+            file.summary = fallback.summary;
+        }
+
+        let mut new_topics = Vec::new();
+        let mut seen_topics = HashSet::new();
+        for t in parsed.topics {
+            let clean = t.trim().to_string();
+            if !clean.is_empty() && !seen_topics.contains(&clean.to_lowercase()) {
+                seen_topics.insert(clean.to_lowercase());
+                new_topics.push(clean);
+            }
+        }
+        if new_topics.is_empty() {
+            new_topics = fallback.topics;
+        }
+        file.topics = new_topics.clone();
+        file.tags = new_topics;
+
+        let mut new_entities = Vec::new();
+        let mut seen_entities = HashSet::new();
+        for e in parsed.entities {
+            let clean = e.trim().to_string();
+            if !clean.is_empty() && !seen_entities.contains(&clean.to_lowercase()) {
+                seen_entities.insert(clean.to_lowercase());
+                new_entities.push(clean);
+            }
+        }
+        if new_entities.is_empty() {
+            new_entities = fallback.entities;
+        }
+        file.entities = new_entities;
+
+        let mut questions = Vec::new();
+        for q in parsed.questions {
+            let clean = q.trim().to_string();
+            if !clean.is_empty() {
+                questions.push(clean);
+            }
+        }
+        file.ai_metadata.suggested_questions = questions;
+        file.ai_metadata.last_enriched_at = Some(chrono::Utc::now().to_rfc3339());
+    } else {
+        file.summary = fallback.summary;
+        file.topics = fallback.topics.clone();
+        file.tags = fallback.topics;
+        file.entities = fallback.entities;
+    }
+
+    file.updated_at = chrono::Utc::now().to_rfc3339();
+    vault
+        .save_vault_file(&file)
+        .map_err(|e| format!("Failed to save enriched file: {}", e))?;
+    Ok(file)
 }
 
 /// Summarizes a scribble concisely using structured bullets, bold takeaways, and optional mermaid diagrams.

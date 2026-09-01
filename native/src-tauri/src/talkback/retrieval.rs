@@ -30,15 +30,17 @@ pub enum SourceType {
     Scribble,
     Meeting,
     MeetingFacts,
+    File,
 }
 
 impl SourceType {
     /// Every source Talkback can retrieve from, in the order they are
     /// reported. Adding a variant here is what makes it searchable.
-    pub const ALL: [SourceType; 4] = [
+    pub const ALL: [SourceType; 5] = [
         SourceType::MeetingFacts,
         SourceType::Scribble,
         SourceType::Meeting,
+        SourceType::File,
         SourceType::VoiceNote,
     ];
 
@@ -48,6 +50,7 @@ impl SourceType {
             SourceType::Scribble => "Scribble",
             SourceType::Meeting => "Meeting",
             SourceType::MeetingFacts => "Meeting Intelligence",
+            SourceType::File => "Imported File",
         }
     }
 
@@ -62,6 +65,7 @@ impl SourceType {
         match self {
             SourceType::MeetingFacts => 1.25,
             SourceType::Scribble => 1.10,
+            SourceType::File => 1.05,
             SourceType::Meeting => 1.00,
             SourceType::VoiceNote => 0.95,
         }

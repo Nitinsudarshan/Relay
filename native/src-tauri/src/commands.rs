@@ -7,7 +7,7 @@ use crate::settings::{AppSettings, HotkeySettings, PillPosition};
 use crate::triggers::{TriggerConfig, TriggerEngine};
 use crate::vault::{
     GraphFilter, KanbanCard, KnowledgeGraphData, KnowledgeSearchResult,
-    Scribble, ScribbleRelationship, TrashItem, VaultManager, VaultNote,
+    Scribble, ScribbleRelationship, TrashItem, VaultFile, VaultManager, VaultNote,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -788,6 +788,174 @@ pub async fn merge_scribbles(
     spawn_scribble_enrichment(app, &state, merged.id.clone());
 
     Ok(merged)
+}
+
+#[tauri::command]
+pub async fn import_vault_file(
+    source_path: String,
+    state: State<'_, AppState>,
+) -> Result<VaultFile, CommandError> {
+    let path = std::path::Path::new(&source_path);
+    state
+        .vault
+        .import_vault_file(path)
+        .map_err(|e| CommandError::new("IMPORT_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn import_vault_file_bytes(
+    filename: String,
+    bytes: Vec<u8>,
+    source_path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<VaultFile, CommandError> {
+    state
+        .vault
+        .import_vault_file_bytes(&filename, &bytes, source_path.as_deref())
+        .map_err(|e| CommandError::new("IMPORT_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn get_vault_files(
+    state: State<'_, AppState>,
+) -> Result<Vec<VaultFile>, CommandError> {
+    state
+        .vault
+        .list_vault_files()
+        .map_err(|e| CommandError::new("LIST_FILES_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn get_vault_file(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<VaultFile, CommandError> {
+    state
+        .vault
+        .get_vault_file(&id)
+        .map_err(|e| CommandError::new("FILE_NOT_FOUND", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn analyze_vault_file(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<VaultFile, CommandError> {
+    let _ = state.vault.reprocess_vault_file(&id);
+    let settings = state.settings.lock_or_recover().clone();
+    let llm = LLMClient::new(settings.provider);
+    crate::pipeline::enrich_vault_file(&llm, &state.vault, &id)
+        .await
+        .map_err(|e| CommandError::new("ANALYZE_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn summarize_vault_file(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<VaultFile, CommandError> {
+    analyze_vault_file(id, state).await
+}
+
+#[tauri::command]
+pub async fn enrich_vault_file(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<VaultFile, CommandError> {
+    analyze_vault_file(id, state).await
+}
+
+#[tauri::command]
+pub async fn update_vault_file_tags(
+    id: String,
+    tags: Vec<String>,
+    topics: Vec<String>,
+    entities: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<VaultFile, CommandError> {
+    let mut file = state
+        .vault
+        .get_vault_file(&id)
+        .map_err(|e| CommandError::new("FILE_NOT_FOUND", &e.to_string()))?;
+
+    file.tags = tags;
+    file.topics = topics;
+    file.entities = entities;
+    file.updated_at = chrono::Utc::now().to_rfc3339();
+
+    state
+        .vault
+        .save_vault_file(&file)
+        .map_err(|e| CommandError::new("SAVE_FAILED", &e.to_string()))?;
+
+    Ok(file)
+}
+
+#[tauri::command]
+pub async fn create_scribble_from_vault_file(
+    app: AppHandle,
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<Scribble, CommandError> {
+    let scribble = state
+        .vault
+        .create_scribble_from_file(&id)
+        .map_err(|e| CommandError::new("CREATE_SCRIBBLE_FAILED", &e.to_string()))?;
+
+    let _ = app.emit(SCRIBBLE_SAVED_EVENT, &scribble);
+    spawn_scribble_enrichment(app, &state, scribble.id.clone());
+
+    Ok(scribble)
+}
+
+#[tauri::command]
+pub async fn reprocess_vault_file(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<VaultFile, CommandError> {
+    analyze_vault_file(id, state).await
+}
+
+#[tauri::command]
+pub async fn delete_vault_file(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    state
+        .vault
+        .delete_vault_file(&id)
+        .map_err(|e| CommandError::new("DELETE_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn open_vault_file_location(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let file = state
+        .vault
+        .get_vault_file(&id)
+        .map_err(|e| CommandError::new("FILE_NOT_FOUND", &e.to_string()))?;
+
+    let full_path = state.vault.vault_dir().join(&file.vault_path);
+    let target_dir = if full_path.exists() {
+        full_path.parent().unwrap_or(&full_path).to_path_buf()
+    } else {
+        state.vault.vault_dir().join("files").join(&id).join("original")
+    };
+
+    if target_dir.exists() {
+        #[cfg(target_os = "windows")]
+        {
+            let path_buf = std::fs::canonicalize(&target_dir).unwrap_or(target_dir);
+            let path_str = path_buf.to_string_lossy().replace('/', "\\");
+            let clean_path = path_str.trim_start_matches(r"\\?\");
+            let _ = std::process::Command::new("explorer")
+                .arg(clean_path)
+                .spawn();
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]

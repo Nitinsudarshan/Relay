@@ -3,6 +3,7 @@ import { VoiceNotePage } from './components/voicenotes/VoiceNotePage';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
 import { MeetingsV2View } from './components/meetings_v2/MeetingsV2View';
 import { TalkbackPage } from './components/talkback/TalkbackPage';
+import { FilesPage } from './components/files/FilesPage';
 
 import { ProviderSettings, type SettingsSection } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -24,6 +25,7 @@ import {
   Calendar,
   MessageCircle,
   Sparkles,
+  FileText,
   Settings,
   Sidebar as SidebarIcon,
   ChevronRight,
@@ -36,6 +38,7 @@ export type MainTabType =
   | 'capture'
   | 'meetings'
   | 'scribble'
+  | 'files'
   | 'talkback'
   | 'settings';
 
@@ -43,6 +46,7 @@ const TAB_LABELS: Record<MainTabType, string> = {
   capture: 'Voice Note',
   meetings: 'Meetings',
   scribble: 'Scribbles',
+  files: 'Files',
   talkback: 'Talkback',
   settings: 'Settings',
 };
@@ -255,6 +259,16 @@ export const App: React.FC = () => {
             glowColor="primary"
           />
         );
+      case 'files':
+        return (
+          <PageHeader
+            badge={{ label: 'Document Vault', icon: FileText, variant: 'default' }}
+            title="Imported"
+            highlightText="documents & knowledge."
+            description="Bring PDF, Word, Markdown and Text files into Relay without touching your original files. Summarize, enrich, and ask Talkback questions about them."
+            glowColor="primary"
+          />
+        );
       case 'talkback':
         return (
           <PageHeader
@@ -359,6 +373,8 @@ export const App: React.FC = () => {
           {activeTab === 'meetings' && <MeetingsV2View />}
 
           {activeTab === 'scribble' && <ScribbleViewer />}
+
+          {activeTab === 'files' && <FilesPage onNavigateTab={(tab) => setActiveTab(tab as MainTabType)} />}
 
           {activeTab === 'talkback' && <TalkbackPage />}
 

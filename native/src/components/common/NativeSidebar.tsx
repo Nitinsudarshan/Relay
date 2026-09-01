@@ -4,6 +4,7 @@ import {
   Calendar,
   MessageCircle,
   Sparkles,
+  FileText,
   Settings,
   ShieldCheck,
   Activity,
@@ -36,6 +37,7 @@ export type TabType =
   | 'capture'
   | 'meetings'
   | 'scribble'
+  | 'files'
   | 'talkback'
   | 'settings';
 
@@ -96,6 +98,13 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       label: 'Scribbles',
       icon: Sparkles,
       color: 'text-amber-500',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+    {
+      id: 'files' as TabType,
+      label: 'Files',
+      icon: FileText,
+      color: 'text-blue-500',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {

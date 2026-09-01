@@ -291,6 +291,18 @@ pub fn run() {
             commands::prepare_tts_folders,
             commands::install_local_voice,
             commands::cancel_voice_install,
+            commands::import_vault_file,
+            commands::import_vault_file_bytes,
+            commands::analyze_vault_file,
+            commands::get_vault_files,
+            commands::get_vault_file,
+            commands::summarize_vault_file,
+            commands::enrich_vault_file,
+            commands::update_vault_file_tags,
+            commands::create_scribble_from_vault_file,
+            commands::reprocess_vault_file,
+            commands::delete_vault_file,
+            commands::open_vault_file_location,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

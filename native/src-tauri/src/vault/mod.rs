@@ -1,5 +1,6 @@
 use crate::sync::MutexExt;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -16,6 +17,9 @@ pub use scribble::*;
 
 pub mod trash;
 pub use trash::*;
+
+pub mod file;
+pub use file::*;
 
 #[derive(Error, Debug)]
 pub enum VaultError {
@@ -144,6 +148,7 @@ impl VaultManager {
         fs::create_dir_all(dir.join("scribbles"))?;
         fs::create_dir_all(dir.join("trash"))?;
         fs::create_dir_all(dir.join("merged_sources"))?;
+        fs::create_dir_all(dir.join("files"))?;
         Ok(())
     }
 
@@ -666,9 +671,283 @@ impl VaultManager {
             .join(format!("{}.md", id));
         if file_path.exists() {
             fs::remove_file(&file_path)?;
-            tracing::info!("Deleted scribble {:?}", file_path);
+            tracing::info!("Deleted scribble file {:?}", file_path);
         }
         Ok(())
+    }
+
+    pub fn import_vault_file(&self, source_path: &std::path::Path) -> Result<VaultFile, VaultError> {
+        self.init()?;
+
+        if !source_path.exists() || !source_path.is_file() {
+            return Err(VaultError::NotFound(format!(
+                "Source file not found or not a valid file: {:?}",
+                source_path
+            )));
+        }
+
+        let size_bytes = source_path.metadata()?.len();
+        let content_hash = calculate_file_hash(source_path)?;
+
+        // Check if file already exists in vault by hash
+        if let Ok(existing_files) = self.list_vault_files() {
+            if let Some(existing) = existing_files.into_iter().find(|f| f.content_hash == content_hash) {
+                return Ok(existing);
+            }
+        }
+
+        let filename = source_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("untitled")
+            .to_string();
+
+        let file_id = format!("file_{}", uuid::Uuid::new_v4());
+        let vault_file_dir = self.vault_dir().join("files").join(&file_id);
+        let original_dir = vault_file_dir.join("original");
+        fs::create_dir_all(&original_dir)?;
+
+        let dest_file_path = original_dir.join(&filename);
+        // Copy the file to Vault — ORIGINAL FILE IS 100% UNTOUCHED!
+        fs::copy(source_path, &dest_file_path)?;
+
+        let vault_relative_path = format!("files/{}/original/{}", file_id, filename);
+        let mut vault_file = VaultFile::new(source_path, &vault_relative_path, size_bytes, content_hash)?;
+        vault_file.id = file_id;
+
+        // Attempt text extraction
+        match extract_text_from_file(&dest_file_path, &vault_file.file_type) {
+            Ok(text) => {
+                vault_file.content = text.clone();
+                vault_file.extraction_status = "extracted".to_string();
+                vault_file.processing_status = "ready".to_string();
+
+                // Run deterministic knowledge extraction for initial fallback tags & summary
+                let knowledge = crate::pipeline::extract_deterministic_knowledge(&text);
+                vault_file.summary = knowledge.summary;
+                vault_file.topics = knowledge.topics;
+                vault_file.entities = knowledge.entities;
+                vault_file.tags = vault_file.topics.clone();
+            }
+            Err(e) => {
+                tracing::warn!("Text extraction for imported file {} failed/unsupported: {}", filename, e);
+                vault_file.extraction_status = if vault_file.file_type == "doc" {
+                    "unsupported".to_string()
+                } else {
+                    "failed".to_string()
+                };
+                vault_file.processing_status = "ready".to_string();
+            }
+        }
+
+        self.save_vault_file(&vault_file)?;
+        Ok(vault_file)
+    }
+
+    pub fn import_vault_file_bytes(
+        &self,
+        filename: &str,
+        bytes: &[u8],
+        source_path: Option<&str>,
+    ) -> Result<VaultFile, VaultError> {
+        self.init()?;
+
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        let content_hash = format!("{:x}", hasher.finalize());
+
+        // Check if file already exists in vault by hash
+        if let Ok(existing_files) = self.list_vault_files() {
+            if let Some(existing) = existing_files.into_iter().find(|f| f.content_hash == content_hash) {
+                return Ok(existing);
+            }
+        }
+
+        let clean_filename = std::path::Path::new(filename)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(filename);
+
+        let file_id = format!("file_{}", uuid::Uuid::new_v4());
+        let vault_file_dir = self.vault_dir().join("files").join(&file_id);
+        let original_dir = vault_file_dir.join("original");
+        fs::create_dir_all(&original_dir)?;
+
+        let dest_file_path = original_dir.join(clean_filename);
+        fs::write(&dest_file_path, bytes)?;
+
+        let vault_relative_path = format!("files/{}/original/{}", file_id, clean_filename);
+        let dummy_path = std::path::PathBuf::from(source_path.unwrap_or(clean_filename));
+        let mut vault_file = VaultFile::new(&dummy_path, &vault_relative_path, bytes.len() as u64, content_hash)?;
+        vault_file.id = file_id;
+        vault_file.original_filename = clean_filename.to_string();
+
+        match extract_text_from_file(&dest_file_path, &vault_file.file_type) {
+            Ok(text) => {
+                vault_file.content = text.clone();
+                vault_file.extraction_status = "extracted".to_string();
+                vault_file.processing_status = "ready".to_string();
+
+                let knowledge = crate::pipeline::extract_deterministic_knowledge(&text);
+                vault_file.summary = knowledge.summary;
+                vault_file.topics = knowledge.topics;
+                vault_file.entities = knowledge.entities;
+                vault_file.tags = vault_file.topics.clone();
+            }
+            Err(e) => {
+                tracing::warn!("Text extraction for file {} failed/unsupported: {}", clean_filename, e);
+                vault_file.extraction_status = if vault_file.file_type == "doc" {
+                    "unsupported".to_string()
+                } else {
+                    "failed".to_string()
+                };
+                vault_file.processing_status = "ready".to_string();
+            }
+        }
+
+        self.save_vault_file(&vault_file)?;
+        Ok(vault_file)
+    }
+
+    pub fn save_vault_file(&self, file: &VaultFile) -> Result<PathBuf, VaultError> {
+        self.init()?;
+        let vault_file_dir = self.vault_dir().join("files").join(&file.id);
+        fs::create_dir_all(&vault_file_dir)?;
+
+        let meta_path = vault_file_dir.join("metadata.json");
+        let json_data = serde_json::to_string_pretty(file)
+            .map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
+        fs::write(&meta_path, json_data)?;
+        Ok(meta_path)
+    }
+
+    pub fn get_vault_file(&self, id: &str) -> Result<VaultFile, VaultError> {
+        self.init()?;
+        let meta_path = self.vault_dir().join("files").join(id).join("metadata.json");
+        if !meta_path.exists() {
+            return Err(VaultError::NotFound(format!("VaultFile {}", id)));
+        }
+        let content = fs::read_to_string(&meta_path)?;
+        let file: VaultFile = serde_json::from_str(&content)
+            .map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
+        Ok(file)
+    }
+
+    pub fn list_vault_files(&self) -> Result<Vec<VaultFile>, VaultError> {
+        self.init()?;
+        let files_dir = self.vault_dir().join("files");
+        let mut files = Vec::new();
+
+        if !files_dir.exists() {
+            return Ok(files);
+        }
+
+        for entry in fs::read_dir(&files_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                let meta_path = path.join("metadata.json");
+                if meta_path.exists() {
+                    if let Ok(content) = fs::read_to_string(&meta_path) {
+                        if let Ok(file) = serde_json::from_str::<VaultFile>(&content) {
+                            files.push(file);
+                        }
+                    }
+                }
+            }
+        }
+
+        files.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(files)
+    }
+
+    pub fn delete_vault_file(&self, id: &str) -> Result<(), VaultError> {
+        self.init()?;
+        let vault_file_dir = self.vault_dir().join("files").join(id);
+        if vault_file_dir.exists() {
+            let trash_dir = self.vault_dir().join("trash");
+            let trash_id = format!("trash_file_{}", id);
+            let meta_path = trash_dir.join(format!("{}.json", trash_id));
+            let dest_dir = trash_dir.join(&trash_id);
+
+            if let Ok(file) = self.get_vault_file(id) {
+                let trash_item = TrashItem::new(id, "file", &file.original_filename, &file.content);
+                let _ = fs::write(&meta_path, serde_json::to_string_pretty(&trash_item).unwrap_or_default());
+            }
+
+            let _ = fs::rename(&vault_file_dir, &dest_dir);
+        }
+        Ok(())
+    }
+
+    pub fn reprocess_vault_file(&self, id: &str) -> Result<VaultFile, VaultError> {
+        let mut file = self.get_vault_file(id)?;
+        let vault_copy_path = self.vault_dir().join(&file.vault_path);
+
+        if vault_copy_path.exists() {
+            match extract_text_from_file(&vault_copy_path, &file.file_type) {
+                Ok(text) => {
+                    file.content = text.clone();
+                    file.extraction_status = "extracted".to_string();
+                    let knowledge = crate::pipeline::extract_deterministic_knowledge(&text);
+                    file.summary = knowledge.summary;
+                    file.topics = knowledge.topics;
+                    file.entities = knowledge.entities;
+                    file.tags = file.topics.clone();
+                }
+                Err(e) => {
+                    tracing::warn!("Reprocessing file {} failed: {}", id, e);
+                    file.extraction_status = "failed".to_string();
+                }
+            }
+        }
+
+        file.updated_at = chrono::Utc::now().to_rfc3339();
+        self.save_vault_file(&file)?;
+        Ok(file)
+    }
+
+    pub fn create_scribble_from_file(&self, id: &str) -> Result<Scribble, VaultError> {
+        let mut file = self.get_vault_file(id)?;
+
+        // Return existing scribble if already created for this file
+        if let Some(ref scribble_id) = file.linked_scribble_id {
+            if let Ok(existing) = self.get_scribble(scribble_id) {
+                return Ok(existing);
+            }
+        }
+        if let Ok(all_scribbles) = self.list_scribbles() {
+            if let Some(existing) = all_scribbles.into_iter().find(|s| {
+                s.source_metadata.get("source_file_id").and_then(|v| v.as_str()) == Some(file.id.as_str())
+            }) {
+                file.linked_scribble_id = Some(existing.id.clone());
+                let _ = self.save_vault_file(&file);
+                return Ok(existing);
+            }
+        }
+
+        let initial_title = format!("Scribble: {}", file.original_filename);
+        let mut scribble = Scribble::new_text(&file.content, Some(&initial_title));
+        scribble.source_type = crate::vault::SOURCE_TYPE_FILE.to_string();
+        scribble.source_metadata = serde_json::json!({
+            "source_file_id": file.id,
+            "source_filename": file.original_filename,
+            "source_file_type": file.file_type,
+            "imported_at": file.created_at,
+            "source_modality": "FILE",
+            "promoted_at": chrono::Utc::now().to_rfc3339(),
+        });
+        scribble.topics = file.topics.clone();
+        scribble.entities = file.entities.clone();
+        scribble.tags = file.tags.clone();
+        scribble.summary = file.summary.clone();
+
+        self.save_scribble(&scribble)?;
+
+        file.linked_scribble_id = Some(scribble.id.clone());
+        self.save_vault_file(&file)?;
+
+        Ok(scribble)
     }
 
     pub fn search_scribbles(&self, query: &str, top_k: usize) -> Result<Vec<Scribble>, VaultError> {
@@ -930,6 +1209,13 @@ impl VaultManager {
                     fs::rename(&trash_meeting_dir, &active_meeting_dir)?;
                 }
             }
+            "file" => {
+                let active_file_dir = self.vault_dir().join("files").join(&item.original_id);
+                let trash_file_dir = trash_dir.join(format!("trash_file_{}", item.original_id));
+                if trash_file_dir.exists() {
+                    fs::rename(&trash_file_dir, &active_file_dir)?;
+                }
+            }
             _ => {}
         }
 
@@ -1156,7 +1442,7 @@ impl VaultManager {
                             let matches = s.source_metadata.get("source_voice_note_id").and_then(|v| v.as_str()) == Some(secondary_vn_id)
                                 || s.source_metadata.get("source_voice_note_id").and_then(|v| v.as_str()) == Some(primary_vn_id)
                                 || s.source_metadata.get("source_voice_note_ids").and_then(|v| v.as_array())
-                                    .map_or(false, |arr| arr.iter().any(|v| v.as_str() == Some(secondary_vn_id) || v.as_str() == Some(primary_vn_id)));
+                                    .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(secondary_vn_id) || v.as_str() == Some(primary_vn_id)));
                             if matches {
                                 let _ = self.restore_trash_item(&item.id);
                             }
@@ -1937,5 +2223,62 @@ mod tests {
         assert_eq!(trash.len(), 1);
 
         let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_import_vault_file_lifecycle() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_files_{}", uuid::Uuid::new_v4()));
+        let external_dir = std::env::temp_dir().join(format!("relay_test_ext_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&external_dir).unwrap();
+
+        let external_file_path = external_dir.join("System_Architecture.md");
+        let external_content = "# System Architecture\n\nRelay uses local-first storage with offline-first indexing.";
+        fs::write(&external_file_path, external_content).unwrap();
+
+        let manager = VaultManager::new(temp_dir.clone());
+
+        // 1. Import file into Vault
+        let imported = manager.import_vault_file(&external_file_path).unwrap();
+        assert_eq!(imported.original_filename, "System_Architecture.md");
+        assert_eq!(imported.file_type, "md");
+        assert_eq!(imported.extraction_status, "extracted");
+        assert!(imported.content.contains("System Architecture"));
+
+        // 2. CRITICAL IMMUTABILITY GUARANTEE: Original external file must remain unchanged
+        assert!(external_file_path.exists());
+        let read_back_external = fs::read_to_string(&external_file_path).unwrap();
+        assert_eq!(read_back_external, external_content);
+
+        // 3. Vault copy must exist at vault path
+        let vault_copy_full_path = temp_dir.join(&imported.vault_path);
+        assert!(vault_copy_full_path.exists());
+
+        // 4. Duplicate import test: Importing same file again returns existing VaultFile
+        let re_imported = manager.import_vault_file(&external_file_path).unwrap();
+        assert_eq!(re_imported.id, imported.id);
+
+        // 5. Create Scribble from file
+        let scribble = manager.create_scribble_from_file(&imported.id).unwrap();
+        assert_eq!(scribble.source_type, "file");
+        assert_eq!(
+            scribble.source_metadata["source_file_id"].as_str().unwrap(),
+            imported.id
+        );
+
+        // 6. Delete file to trash and restore
+        manager.delete_vault_file(&imported.id).unwrap();
+        assert!(manager.get_vault_file(&imported.id).is_err());
+        // Original file outside Relay STILL exists!
+        assert!(external_file_path.exists());
+
+        let trash_items = manager.get_trash_items().unwrap();
+        let trash_file_item = trash_items.iter().find(|t| t.original_id == imported.id).unwrap();
+        manager.restore_trash_item(&trash_file_item.id).unwrap();
+
+        let restored = manager.get_vault_file(&imported.id).unwrap();
+        assert_eq!(restored.id, imported.id);
+
+        let _ = fs::remove_dir_all(temp_dir);
+        let _ = fs::remove_dir_all(external_dir);
     }
 }

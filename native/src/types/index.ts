@@ -22,6 +22,29 @@ export interface VaultNote {
   merged_from?: string[] | null;
 }
 
+export interface VaultFile {
+  id: string;
+  original_filename: string;
+  file_type: string;
+  mime_type: string;
+  size_bytes: number;
+  content_hash: string;
+  created_at: string;
+  updated_at: string;
+  last_known_source_path: string;
+  vault_path: string;
+  extraction_status: 'extracted' | 'pending' | 'failed' | 'unsupported';
+  processing_status: 'ready' | 'processing' | 'failed';
+  content: string;
+  summary?: string | null;
+  tags: string[];
+  topics: string[];
+  entities: string[];
+  relationships: ScribbleRelationship[];
+  ai_metadata: ScribbleAiMetadata;
+  linked_scribble_id?: string | null;
+}
+
 export interface VaultLocationInfo {
   /** Absolute path currently in use, whether chosen or defaulted. */
   path: string;

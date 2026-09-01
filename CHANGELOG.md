@@ -1,5 +1,20 @@
 # Relay — Changelog
 
+## [0.22.0] - 2026-09-01
+
+### Relay Files — Non-Destructive Vault Document Storage & AI Intelligence
+
+**Type**: minor — top-level document vault supporting `.md`, `.txt`, `.pdf`, and `.docx` with non-destructive byte copy, structured text extraction, AI summarization & enrichment, Talkback candidate retrieval, and React frontend UI (`native/src-tauri/src/vault/file.rs (new)`, `native/src-tauri/src/vault/mod.rs`, `native/src-tauri/src/talkback/sources.rs`, `native/src-tauri/src/talkback/retrieval.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`, `native/src/components/files/FilesPage.tsx (new)`, `native/src/components/files/FileDetailModal.tsx (new)`, `native/src/components/files/FilesPage.test.tsx (new)`).
+
+#### Features
+
+- **Non-Destructive File Import & Immutability Guarantee (`vault/file.rs`, `vault/mod.rs`)**: Users can bring external files (`.md`, `.txt`, `.pdf`, `.docx`, `.doc`) into Relay's vault. Relay makes a 100% byte-for-byte copy in `{vault_dir}/files/{file_id}/original/{filename}` while leaving the original external file completely untouched.
+- **Structured Multi-Format Text Extraction (`vault/file.rs`)**: High-fidelity text extraction using `pdf-extract` for `.pdf` documents and `quick-xml` ZIP parsing for `.docx` `word/document.xml` paragraphs and tables. Legacy binary `.doc` files are stored safely in the vault with explicit non-destructive extraction status reporting.
+- **Duplicate Prevention & Integrity (`vault/file.rs`, `vault/mod.rs`)**: SHA-256 content hashing (`sha2`) detects duplicates on import and tracks modification states.
+- **AI Summarization, Enrichment & Scribble Promotion (`vault/file.rs`, `vault/mod.rs`, `commands.rs`)**: Derived AI summaries, topics, named entities, key concepts, and custom user tags stored in `metadata.json`. Supports promoting files to Scribbles with source provenance (`source_type: "file"`, `source_file_id`).
+- **Talkback Retrieval Integration (`talkback/retrieval.rs`, `talkback/sources.rs`)**: Added `SourceType::File` projector to Talkback candidate retriever so imported documents are searchable and cited in conversational answers out of the box.
+- **Files React Frontend & Detail Modal (`FilesPage.tsx`, `FileDetailModal.tsx`, `FilesPage.test.tsx`)**: Full-featured React Files surface with drag-and-drop dropzone, search/filter toolbar, file cards list, and comprehensive file detail modal with Extracted Content reader, AI Summary & Tag editor, and Vault location launcher.
+
 ## [0.21.0] - 2026-09-01
 
 ### Fully Reversible Voice Note Merging

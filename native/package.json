@@ -1,7 +1,7 @@
 {
   "name": "relay-native-frontend",
   "private": true,
-  "version": "0.21.0",
+  "version": "0.22.0",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -24,6 +24,7 @@
     "@radix-ui/react-tabs": "^1.1.21",
     "@radix-ui/react-tooltip": "^1.2.16",
     "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-global-shortcut": "^2.0.0",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "class-variance-authority": "^0.7.1",

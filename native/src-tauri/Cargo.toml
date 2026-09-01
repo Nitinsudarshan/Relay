@@ -1,6 +1,6 @@
 [package]
 name = "relay-native-backend"
-version = "0.21.0"
+version = "0.22.0"
 description = "Relay AI Voice and Memory Assistant Rust Backend"
 authors = ["Relay Team"]
 license = "AGPL-3.0-only"
@@ -38,6 +38,8 @@ keyring = "2.1"
 urlencoding = "2.1"
 dotenvy = "0.15"
 sha2 = "0.10"
+pdf-extract = "0.7"
+quick-xml = "0.36"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 # Upstream ships Windows as a zip and every Unix platform as a tarball,
 # so the installer has to read both. `zip` already pulls flate2 in for
