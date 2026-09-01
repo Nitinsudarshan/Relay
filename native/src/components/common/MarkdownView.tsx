@@ -43,6 +43,23 @@ interface MermaidBlockProps {
   code: string;
 }
 
+// Helper to sanitize common LLM Mermaid syntax glitches
+export function sanitizeMermaidCode(code: string): string {
+  let cleaned = code.trim();
+  if (!cleaned) return cleaned;
+
+  // 1. Fix LLM edge label syntax glitch: -->|label text|> B  ==>  -->|label text| B
+  cleaned = cleaned.replace(/(-->|---|==>|-\.->)\s*\|([^|\n]+)\|>\s*/g, '$1|$2| ');
+
+  // 2. Fix backticks inside bracketed node labels: [Node `text` contract] ==> [Node 'text' contract]
+  cleaned = cleaned.replace(/\[([^\]\n]+)\]/g, (_match, inner) => {
+    const sanitizedInner = inner.replace(/`/g, "'");
+    return `[${sanitizedInner}]`;
+  });
+
+  return cleaned;
+}
+
 export const MermaidBlock: React.FC<MermaidBlockProps> = ({ code }) => {
   const [svgContent, setSvgContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +73,7 @@ export const MermaidBlock: React.FC<MermaidBlockProps> = ({ code }) => {
     const renderDiagram = async () => {
       try {
         setError(null);
-        const cleanCode = code.trim();
+        const cleanCode = sanitizeMermaidCode(code);
         if (!cleanCode) return;
 
         const isDark = document.documentElement.classList.contains('dark');

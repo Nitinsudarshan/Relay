@@ -346,7 +346,7 @@ Formatting & Hierarchy Rules for Summary:
   2. Sub-bullets under numbered headers MUST be indented with 2-4 spaces (e.g. "   - Detailed action or key context...").
   3. Bold key takeaways and terms for rapid scanning.
 - Flowcharts & Diagrams:
-  If the content describes a workflow, sequential steps, state transitions, or system architecture, ALWAYS include a compact 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Input] --> B[Process] --> C[Result]\n```").
+  If the content describes a workflow, sequential steps, state transitions, or system architecture, ALWAYS include a compact 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Input] -->|Process| B[Result]\n```"). Do NOT use trailing '|>' on edge labels (use '-->|label| B', NOT '-->|label|> B') and do NOT put backticks inside bracketed node labels.
 "#;
 
 /// Canonical Relay Analysis system prompt used across Scribbles and Vault Files.
@@ -360,7 +360,7 @@ Return ONLY a valid JSON object with the following fields:
   Formatting Rules:
   1. Use structured numbered sections (e.g. "1. **Core Insight:** ..." or "1. **Architecture:**") with sub-bullets indented with 2-4 spaces (e.g. "   - Detailed action or context...").
   2. Use bold lead-ins for key terms and actionable takeaways.
-  3. If the content describes a workflow, state transitions, or system architecture, ALWAYS include a concise 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Capture] --> B[Enrich] --> C[Graph]\n```").
+  3. If the content describes a workflow, state transitions, or system architecture, ALWAYS include a concise 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Capture] -->|Enrich| B[Graph]\n```"). Do NOT use trailing '|>' on edge labels (use '-->|label| B', NOT '-->|label|> B') and do NOT put backticks inside bracketed node labels.
 - "topics": an array of 5 to 7 high-level domain topics and conceptual themes (e.g. ["Local-First Architecture", "Knowledge Management", "Cloud Synchronization", "Google Calendar Integration", "Identity Management"]). Return the top 5-7 most relevant topics based on the complete content.
 - "entities": an array of 5 to 7 specific named entities (technologies, tools, organizations, people, frameworks, platforms, projects) mentioned or central to the text. If fewer than 5 exist, return only the meaningful ones without inventing.
 - "concepts": an array of notable concepts or ideas

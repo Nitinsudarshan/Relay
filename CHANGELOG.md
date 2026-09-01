@@ -1,5 +1,16 @@
 # Relay — Changelog
 
+## [0.23.1] - 2026-09-02
+
+### Robust Mermaid Diagram LLM Syntax Sanitization
+
+**Type**: patch — added Mermaid diagram LLM code sanitizer (`sanitizeMermaidCode`) to prevent rendering syntax errors caused by LLM edge label syntax glitches (`-->|label text|> B`) and unescaped backticks in bracketed node labels (`native/src/components/common/MarkdownView.tsx`, `native/src-tauri/src/pipeline/enrichment.rs`).
+
+#### Fixes
+
+- **Mermaid LLM Syntax Glitch Sanitizer (`MarkdownView.tsx`)**: Introduced `sanitizeMermaidCode` helper that automatically fixes trailing `|>` in edge labels (`-->|label text|> B` $\to$ `-->|label text| B`) and strips unescaped backticks from bracketed node labels before passing code to `mermaid.render()`.
+- **System Prompt Guidelines Fortification (`pipeline/enrichment.rs`)**: Updated `CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS` and `CANONICAL_ANALYSIS_SYSTEM_PROMPT` with explicit Mermaid syntax rules, preventing model generation of invalid edge labels or backtick node labels.
+
 ## [0.23.0] - 2026-09-01
 
 ### Canonical Relay Summarise & Analyse Contract — Extended to Files
