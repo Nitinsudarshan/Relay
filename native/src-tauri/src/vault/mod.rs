@@ -1057,8 +1057,14 @@ impl VaultManager {
         let now = chrono::Utc::now().to_rfc3339();
 
         // If multiple scribbles exist (e.g. one for primary and one for secondary),
-        // keep the first/primary scribble and retire the redundant secondary scribbles to trash.
-        let mut target_scribble = matching_scribbles.remove(0);
+        // keep the primary scribble matching primary_vn_id and retire redundant secondary scribbles to trash.
+        let primary_idx = matching_scribbles
+            .iter()
+            .position(|s| {
+                s.source_metadata.get("source_voice_note_id").and_then(|v| v.as_str()) == Some(primary_vn_id)
+            })
+            .unwrap_or(0);
+        let mut target_scribble = matching_scribbles.remove(primary_idx);
 
         // Collect all unique contributing voice note IDs
         let mut all_vn_ids = std::collections::HashSet::new();
@@ -1138,11 +1144,25 @@ impl VaultManager {
             }
         }
 
-        // Restore secondary scribble from trash if it was moved to trash during merge
+        // Restore partner scribble from trash if it was moved to trash during merge
+        let trash_dir = self.vault_dir().join("trash");
         let trash_items = self.get_trash_items().unwrap_or_default();
         for item in trash_items {
-            if item.item_type == "scribble" && item.original_id.contains(secondary_vn_id) {
-                let _ = self.restore_trash_item(&item.id);
+            if item.item_type == "scribble" {
+                let trash_md = trash_dir.join(format!("{}.md", item.id));
+                if trash_md.exists() {
+                    if let Ok(content) = fs::read_to_string(&trash_md) {
+                        if let Some(s) = Scribble::parse_markdown(&content) {
+                            let matches = s.source_metadata.get("source_voice_note_id").and_then(|v| v.as_str()) == Some(secondary_vn_id)
+                                || s.source_metadata.get("source_voice_note_id").and_then(|v| v.as_str()) == Some(primary_vn_id)
+                                || s.source_metadata.get("source_voice_note_ids").and_then(|v| v.as_array())
+                                    .map_or(false, |arr| arr.iter().any(|v| v.as_str() == Some(secondary_vn_id) || v.as_str() == Some(primary_vn_id)));
+                            if matches {
+                                let _ = self.restore_trash_item(&item.id);
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1604,6 +1624,70 @@ mod tests {
 
         // All 3 notes restored
         assert_eq!(manager.list_notes().unwrap().len(), 3);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_scribble_references_preserved_across_voice_note_merge_and_unmerge() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_scribble_unmerge_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+
+        // 1. Create Voice Note A and Scribble A
+        let note_a = VaultNote::new_voice_note("Voice Note A transcript.");
+        manager.save_note(&note_a).unwrap();
+        let scribble_a = Scribble::from_voice_note(&note_a.id, &note_a.content, Some("Scribble A Title"));
+        manager.save_scribble(&scribble_a).unwrap();
+
+        // 2. Create Voice Note B and Scribble B
+        let note_b = VaultNote::new_voice_note("Voice Note B transcript.");
+        manager.save_note(&note_b).unwrap();
+        let scribble_b = Scribble::from_voice_note(&note_b.id, &note_b.content, Some("Scribble B Title"));
+        manager.save_scribble(&scribble_b).unwrap();
+
+        assert_eq!(manager.list_scribbles().unwrap().len(), 2);
+
+        // 3. Merge A + B -> AB
+        let _merged_ab = manager.merge_notes(&note_a.id, &note_b.id).unwrap();
+        let affected = manager.sync_scribbles_for_voice_note_merge(&note_a.id, &note_b.id).unwrap();
+        assert_eq!(affected.len(), 1);
+
+        // Active scribbles is now 1 (Scribble A updated), Scribble B moved to trash
+        assert_eq!(manager.list_scribbles().unwrap().len(), 1);
+        assert_eq!(manager.get_trash_items().unwrap().len(), 1);
+
+        // 4. Unmerge AB -> A restored, B restored
+        let unmerged = manager.unmerge_notes(&note_a.id).unwrap();
+        assert_eq!(unmerged.primary.content, "Voice Note A transcript.");
+        assert_eq!(unmerged.secondary.content, "Voice Note B transcript.");
+
+        // 5. Verify Scribble A is restored to A's content and Scribble B is restored from trash
+        let active_scribbles = manager.list_scribbles().unwrap();
+        assert_eq!(active_scribbles.len(), 2);
+
+        let restored_sa = manager.get_scribble(&scribble_a.id).unwrap();
+        assert_eq!(restored_sa.content, "Voice Note A transcript.");
+        let sa_vn_ids = restored_sa.source_metadata.get("source_voice_note_ids").unwrap().as_array().unwrap();
+        assert_eq!(sa_vn_ids.len(), 1);
+        assert_eq!(sa_vn_ids[0].as_str().unwrap(), note_a.id);
+
+        let restored_sb = manager.get_scribble(&scribble_b.id).unwrap();
+        assert_eq!(restored_sb.content, "Voice Note B transcript.");
+
+        // 6. Test promoting a merged note directly to a Scribble
+        let note_c = VaultNote::new_voice_note("Voice Note C transcript.");
+        let note_d = VaultNote::new_voice_note("Voice Note D transcript.");
+        manager.save_note(&note_c).unwrap();
+        manager.save_note(&note_d).unwrap();
+
+        let merged_cd = manager.merge_notes(&note_c.id, &note_d.id).unwrap();
+        let scribble_cd = Scribble::from_voice_note(&merged_cd.id, &merged_cd.content, Some("Merged CD Scribble"));
+        manager.save_scribble(&scribble_cd).unwrap();
+
+        // Unmerge CD -> Scribble CD remains valid active scribble
+        let _unmerged_cd = manager.unmerge_notes(&merged_cd.id).unwrap();
+        let updated_scd = manager.get_scribble(&scribble_cd.id).unwrap();
+        assert_eq!(updated_scd.content, "Voice Note C transcript.");
 
         let _ = fs::remove_dir_all(temp_dir);
     }
