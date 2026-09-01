@@ -337,7 +337,108 @@ pub fn extract_deterministic_knowledge(content: &str) -> AiEnrichmentResponse {
 }
 
 /// Asynchronously enriches a Scribble with AI-derived title, structured summary,
-/// topics (~5-7), entities (~5-7), and exploration questions.
+/// Canonical Relay Summary specification instructions.
+pub const CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS: &str = r#"
+Formatting & Hierarchy Rules for Summary:
+- Keep it short and impactful (under 75 words total).
+- Clear hierarchy:
+  1. Use structured numbered sections for main takeaways (e.g. "1. **Core Insight:** ..." or "1. **Architecture:** ...").
+  2. Sub-bullets under numbered headers MUST be indented with 2-4 spaces (e.g. "   - Detailed action or key context...").
+  3. Bold key takeaways and terms for rapid scanning.
+- Flowcharts & Diagrams:
+  If the content describes a workflow, sequential steps, state transitions, or system architecture, ALWAYS include a compact 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Input] --> B[Process] --> C[Result]\n```").
+"#;
+
+/// Canonical Relay Analysis system prompt used across Scribbles and Vault Files.
+pub const CANONICAL_ANALYSIS_SYSTEM_PROMPT: &str = r#"
+You are Relay's Knowledge & Thinking Assistant.
+Analyze this content (which may be a note, voice capture, scribble, or document file) and derive high-quality structured knowledge metadata.
+
+Return ONLY a valid JSON object with the following fields:
+- "title": a concise, meaningful concept title (3 to 8 words). Never use transcript conversational prefixes (e.g. 'Yes — this makes a lot', 'I think we should'), brackets, 'Generating title…', or 'Consolidated:'. Derive a clean, insightful title describing the central subject matter (e.g. 'Local Knowledge Layer & Cloud Integration Strategy' or 'Event Pipeline Architecture').
+- "summary": a structured, short summary (under 75 words total) optimized for rapid reading and visual hierarchy.
+  Formatting Rules:
+  1. Use structured numbered sections (e.g. "1. **Core Insight:** ..." or "1. **Architecture:**") with sub-bullets indented with 2-4 spaces (e.g. "   - Detailed action or context...").
+  2. Use bold lead-ins for key terms and actionable takeaways.
+  3. If the content describes a workflow, state transitions, or system architecture, ALWAYS include a concise 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Capture] --> B[Enrich] --> C[Graph]\n```").
+- "topics": an array of 5 to 7 high-level domain topics and conceptual themes (e.g. ["Local-First Architecture", "Knowledge Management", "Cloud Synchronization", "Google Calendar Integration", "Identity Management"]). Return the top 5-7 most relevant topics based on the complete content.
+- "entities": an array of 5 to 7 specific named entities (technologies, tools, organizations, people, frameworks, platforms, projects) mentioned or central to the text. If fewer than 5 exist, return only the meaningful ones without inventing.
+- "concepts": an array of notable concepts or ideas
+- "questions": an array of 3 to 4 insightful AI exploration questions that prompt deeper thinking, architectural implications, connection opportunities, or risks based on the actual content.
+
+Return ONLY raw JSON or JSON within a markdown code block.
+"#;
+
+/// Core shared helper for structured AI Analysis across any text content (Scribble or File).
+pub async fn enrich_content(
+    llm: &LLMClient,
+    content: &str,
+) -> Result<AiEnrichmentResponse, String> {
+    if content.trim().is_empty() {
+        return Err("Content is empty".to_string());
+    }
+
+    let response = llm
+        .complete(content, Some(CANONICAL_ANALYSIS_SYSTEM_PROMPT))
+        .await
+        .map_err(|e| format!("LLM completion failed: {}", e))?;
+
+    let text = response.text.trim();
+    let json_str = if text.contains("```json") {
+        text.split("```json")
+            .nth(1)
+            .unwrap_or("")
+            .split("```")
+            .next()
+            .unwrap_or("")
+            .trim()
+    } else if text.contains("```") {
+        text.split("```")
+            .nth(1)
+            .unwrap_or("")
+            .split("```")
+            .next()
+            .unwrap_or("")
+            .trim()
+    } else {
+        text
+    };
+
+    serde_json::from_str::<AiEnrichmentResponse>(json_str)
+        .map_err(|e| format!("Failed to parse AI enrichment JSON: {}", e))
+}
+
+/// Core shared helper for canonical Summarise across any text content (Scribble or File).
+pub async fn summarize_content(
+    llm: &LLMClient,
+    content: &str,
+) -> Result<String, String> {
+    if content.trim().is_empty() {
+        return Err("Content is empty".to_string());
+    }
+
+    let prompt = format!(
+        "You are Relay's Knowledge & Thinking Assistant.\n\
+         Summarize this content concisely and structure it for rapid comprehension, clean hierarchy, and high readability.\n\n\
+         {}\n\
+         Return ONLY the clean markdown summary text without conversational preamble.",
+        CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS
+    );
+
+    let response = llm
+        .complete(content, Some(&prompt))
+        .await
+        .map_err(|e| format!("LLM summarization failed: {}", e))?;
+
+    let summary_text = response.text.trim().trim_matches('"').to_string();
+    if summary_text.is_empty() {
+        Err("Empty summary generated".to_string())
+    } else {
+        Ok(summary_text)
+    }
+}
+
+/// Asynchronously enriches a Scribble using the canonical Relay Analysis contract.
 /// Replaces derived metadata cleanly rather than compounding.
 pub async fn enrich_scribble(
     llm: &LLMClient,
@@ -348,52 +449,8 @@ pub async fn enrich_scribble(
         .get_scribble(scribble_id)
         .map_err(|e| format!("Scribble not found: {}", e))?;
 
-    let system_prompt = r#"
-You are Relay's Knowledge & Thinking Assistant.
-Analyze this thought/scribble (which may be a new note, voice capture, or consolidated synthesis of merged notes) and derive high-quality structured knowledge metadata.
-
-Return ONLY a valid JSON object with the following fields:
-- "title": a concise, meaningful concept title (3 to 8 words). Never use transcript conversational prefixes (e.g. 'Yes — this makes a lot', 'I think we should'), brackets, 'Generating title…', or 'Consolidated:'. Derive a clean, insightful title describing the central subject matter (e.g. 'Local Knowledge Layer & Cloud Integration Strategy' or 'Event Pipeline Architecture').
-- "summary": a structured, short summary (under 75 words total) optimized for rapid reading and visual hierarchy.
-  Formatting Rules:
-  1. Use structured numbered sections (e.g. "1. **Core Insight:** ..." or "1. **Architecture:**") with sub-bullets indented with 2-4 spaces (e.g. "   - Detailed action or context...").
-  2. Use bold lead-ins for key terms and actionable takeaways.
-  3. If the thought describes a workflow, state transitions, or system architecture, ALWAYS include a concise 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Capture] --> B[Enrich] --> C[Graph]\n```").
-- "topics": an array of 5 to 7 high-level domain topics and conceptual themes (e.g. ["Local-First Architecture", "Knowledge Management", "Cloud Synchronization", "Google Calendar Integration", "Identity Management"]). Return the top 5-7 most relevant topics based on the complete content.
-- "entities": an array of 5 to 7 specific named entities (technologies, tools, organizations, people, frameworks, platforms, projects) mentioned or central to the text. If fewer than 5 exist, return only the meaningful ones without inventing.
-- "concepts": an array of notable concepts or ideas
-- "questions": an array of 3 to 4 insightful AI exploration questions that prompt deeper thinking, architectural implications, connection opportunities, or risks based on the actual content.
-
-Return ONLY raw JSON or JSON within a markdown code block.
-"#;
-
-    let response = llm.complete(&scribble.content, Some(system_prompt)).await;
-
-    let parsed_opt = match response {
-        Ok(res) => {
-            let text = res.text.trim();
-            let json_str = if text.contains("```json") {
-                text.split("```json")
-                    .nth(1)
-                    .unwrap_or("")
-                    .split("```")
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-            } else if text.contains("```") {
-                text.split("```")
-                    .nth(1)
-                    .unwrap_or("")
-                    .split("```")
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-            } else {
-                text
-            };
-
-            serde_json::from_str::<AiEnrichmentResponse>(json_str).ok()
-        }
+    let parsed_opt = match enrich_content(llm, &scribble.content).await {
+        Ok(parsed) => Some(parsed),
         Err(err) => {
             tracing::warn!("AI enrichment LLM call failed for scribble {}: {}", scribble_id, err);
             None
@@ -405,7 +462,15 @@ Return ONLY raw JSON or JSON within a markdown code block.
 
     if let Some(parsed) = parsed_opt {
         // 1. Title Resolution
-        let mut final_title = parsed.title.unwrap_or_default().trim().trim_matches('"').trim_matches('[').trim_matches(']').trim().to_string();
+        let mut final_title = parsed
+            .title
+            .unwrap_or_default()
+            .trim()
+            .trim_matches('"')
+            .trim_matches('[')
+            .trim_matches(']')
+            .trim()
+            .to_string();
         if final_title.is_empty()
             || final_title.contains("Generating title")
             || final_title.contains("+ 2 more")
@@ -446,7 +511,6 @@ Return ONLY raw JSON or JSON within a markdown code block.
                 new_topics.push(clean);
             }
         }
-        // If parsed topics had fewer than 3, blend with fallback topics
         for fb_t in fallback.topics {
             if new_topics.len() >= 7 {
                 break;
@@ -547,7 +611,7 @@ Return ONLY raw JSON or JSON within a markdown code block.
     Ok(scribble)
 }
 
-/// Enriches and summarizes an imported vault file using the LLM pipeline, matching Scribble summary structure.
+/// Enriches an imported vault file using the exact canonical Relay Analysis contract.
 pub async fn enrich_vault_file(
     llm: &LLMClient,
     vault: &VaultManager,
@@ -561,50 +625,8 @@ pub async fn enrich_vault_file(
         return Ok(file);
     }
 
-    let system_prompt = r#"
-You are Relay's Knowledge & Thinking Assistant.
-Analyze this document file and derive high-quality structured knowledge metadata.
-
-Return ONLY a valid JSON object with the following fields:
-- "summary": a structured, short summary (under 75 words total) optimized for rapid reading and visual hierarchy.
-  Formatting Rules:
-  1. Use structured numbered sections (e.g. "1. **Core Insight:** ..." or "1. **Architecture:**") with sub-bullets indented with 2-4 spaces (e.g. "   - Detailed action or context...").
-  2. Use bold lead-ins for key terms and actionable takeaways.
-  3. If the document describes a workflow, state transitions, or system architecture, ALWAYS include a concise 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Input] --> B[Process] --> C[Output]\n```").
-- "topics": an array of 5 to 7 high-level domain topics and conceptual themes.
-- "entities": an array of 5 to 7 specific named entities (technologies, tools, organizations, people, frameworks, platforms, projects) mentioned or central to the text.
-- "questions": an array of 3 to 4 insightful AI exploration questions that prompt deeper thinking, architectural implications, connection opportunities, or risks.
-
-Return ONLY raw JSON or JSON within a markdown code block.
-"#;
-
-    let response = llm.complete(&file.content, Some(system_prompt)).await;
-
-    let parsed_opt = match response {
-        Ok(res) => {
-            let text = res.text.trim();
-            let json_str = if text.contains("```json") {
-                text.split("```json")
-                    .nth(1)
-                    .unwrap_or("")
-                    .split("```")
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-            } else if text.contains("```") {
-                text.split("```")
-                    .nth(1)
-                    .unwrap_or("")
-                    .split("```")
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-            } else {
-                text
-            };
-
-            serde_json::from_str::<AiEnrichmentResponse>(json_str).ok()
-        }
+    let parsed_opt = match enrich_content(llm, &file.content).await {
+        Ok(parsed) => Some(parsed),
         Err(err) => {
             tracing::warn!("AI enrichment LLM call failed for vault file {}: {}", file_id, err);
             None
@@ -634,9 +656,16 @@ Return ONLY raw JSON or JSON within a markdown code block.
                 new_topics.push(clean);
             }
         }
-        if new_topics.is_empty() {
-            new_topics = fallback.topics;
+        for fb_t in fallback.topics {
+            if new_topics.len() >= 7 {
+                break;
+            }
+            if !seen_topics.contains(&fb_t.to_lowercase()) {
+                seen_topics.insert(fb_t.to_lowercase());
+                new_topics.push(fb_t);
+            }
         }
+        new_topics.truncate(7);
         file.topics = new_topics.clone();
         file.tags = new_topics;
 
@@ -649,9 +678,16 @@ Return ONLY raw JSON or JSON within a markdown code block.
                 new_entities.push(clean);
             }
         }
-        if new_entities.is_empty() {
-            new_entities = fallback.entities;
+        for fb_e in fallback.entities {
+            if new_entities.len() >= 7 {
+                break;
+            }
+            if !seen_entities.contains(&fb_e.to_lowercase()) {
+                seen_entities.insert(fb_e.to_lowercase());
+                new_entities.push(fb_e);
+            }
         }
+        new_entities.truncate(7);
         file.entities = new_entities;
 
         let mut questions = Vec::new();
@@ -661,6 +697,7 @@ Return ONLY raw JSON or JSON within a markdown code block.
                 questions.push(clean);
             }
         }
+        questions.truncate(4);
         file.ai_metadata.suggested_questions = questions;
         file.ai_metadata.last_enriched_at = Some(chrono::Utc::now().to_rfc3339());
     } else {
@@ -668,6 +705,8 @@ Return ONLY raw JSON or JSON within a markdown code block.
         file.topics = fallback.topics.clone();
         file.tags = fallback.topics;
         file.entities = fallback.entities;
+        file.ai_metadata.suggested_questions = fallback.questions;
+        file.ai_metadata.last_enriched_at = Some(chrono::Utc::now().to_rfc3339());
     }
 
     file.updated_at = chrono::Utc::now().to_rfc3339();
@@ -677,7 +716,40 @@ Return ONLY raw JSON or JSON within a markdown code block.
     Ok(file)
 }
 
-/// Summarizes a scribble concisely using structured bullets, bold takeaways, and optional mermaid diagrams.
+/// Summarizes an imported vault file concisely using the canonical Relay summary contract.
+pub async fn summarize_vault_file(
+    llm: &LLMClient,
+    vault: &VaultManager,
+    file_id: &str,
+) -> Result<VaultFile, String> {
+    let mut file = vault
+        .get_vault_file(file_id)
+        .map_err(|e| format!("Vault file not found: {}", e))?;
+
+    if file.content.trim().is_empty() {
+        return Ok(file);
+    }
+
+    match summarize_content(llm, &file.content).await {
+        Ok(summary_text) => {
+            file.summary = Some(summary_text);
+        }
+        Err(err) => {
+            tracing::warn!("AI summarization LLM call failed for vault file {}: {}", file_id, err);
+            let fallback = extract_deterministic_knowledge(&file.content);
+            file.summary = fallback.summary;
+        }
+    }
+
+    file.updated_at = chrono::Utc::now().to_rfc3339();
+    vault
+        .save_vault_file(&file)
+        .map_err(|e| format!("Failed to save summarized file: {}", e))?;
+
+    Ok(file)
+}
+
+/// Summarizes a scribble concisely using the canonical Relay summary contract.
 pub async fn summarize_scribble(
     llm: &LLMClient,
     vault: &VaultManager,
@@ -692,37 +764,17 @@ pub async fn summarize_scribble(
         return Err("Summaries are only available for scribbles with 100 or more words.".to_string());
     }
 
-    let system_prompt = r#"
-You are Relay's Knowledge & Thinking Assistant.
-Summarize this thought/scribble concisely and structure it for rapid comprehension, clean hierarchy, and high readability.
-
-Formatting & Hierarchy Rules:
-- Keep it short and impactful (under 75 words total).
-- Clear hierarchy:
-  1. Use bold numbered items for main takeaways (e.g. "1. **Core Insight:** ...").
-  2. Sub-bullets under numbered headers MUST be indented with 2-4 spaces (e.g. "   - Key detail or context...").
-  3. Bold key takeaways and terms for rapid scanning.
-- Flowcharts & Diagrams:
-  If the thought involves workflows, sequential steps, or component relationships, include a compact 2-4 node Mermaid diagram:
-```mermaid
-graph LR
-  A[Input] --> B[Process] --> C[Result]
-```
-- Return ONLY the clean markdown summary text without conversational preamble.
-"#;
-
-    let response = llm
-        .complete(&scribble.content, Some(system_prompt))
-        .await
-        .map_err(|e| format!("LLM summarization failed: {}", e))?;
-
-    let summary_text = response.text.trim().trim_matches('"').to_string();
-    if !summary_text.is_empty() {
-        scribble.summary = Some(summary_text);
-        scribble.updated_at = chrono::Utc::now().to_rfc3339();
-        vault
-            .save_scribble(&scribble)
-            .map_err(|e| format!("Failed to save scribble summary: {}", e))?;
+    match summarize_content(llm, &scribble.content).await {
+        Ok(summary_text) => {
+            scribble.summary = Some(summary_text);
+            scribble.updated_at = chrono::Utc::now().to_rfc3339();
+            vault
+                .save_scribble(&scribble)
+                .map_err(|e| format!("Failed to save scribble summary: {}", e))?;
+        }
+        Err(err) => {
+            return Err(format!("LLM summarization failed: {}", err));
+        }
     }
 
     Ok(scribble)
@@ -820,6 +872,51 @@ mod tests {
         // Verify questions populated
         assert!(!enriched.ai_metadata.suggested_questions.is_empty());
         assert_eq!(enriched.ai_metadata.enrichment_status, "enriched");
+        assert!(enriched.ai_metadata.last_enriched_at.is_some());
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_canonical_prompts_integrity() {
+        assert!(CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS.contains("under 75 words"));
+        assert!(CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS.contains("1. **Core Insight:**"));
+        assert!(CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS.contains("2-4 node Mermaid flowchart"));
+
+        assert!(CANONICAL_ANALYSIS_SYSTEM_PROMPT.contains("under 75 words"));
+        assert!(CANONICAL_ANALYSIS_SYSTEM_PROMPT.contains("5 to 7 high-level domain topics"));
+        assert!(CANONICAL_ANALYSIS_SYSTEM_PROMPT.contains("5 to 7 specific named entities"));
+        assert!(CANONICAL_ANALYSIS_SYSTEM_PROMPT.contains("3 to 4 insightful AI exploration questions"));
+    }
+
+    #[test]
+    fn test_enrich_vault_file_uses_canonical_contract() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_file_enrich_{}", uuid::Uuid::new_v4()));
+        let vault = VaultManager::new(temp_dir.clone());
+        let llm = LLMClient::new(crate::providers::ProviderConfig::default());
+
+        let mut file = vault
+            .import_vault_file_bytes(
+                "architecture_spec.md",
+                "Yes — this makes a lot of sense. The important distinction is that Google Sign In should not make Relay a cloud app.".as_bytes(),
+                None,
+            )
+            .unwrap();
+
+        file.topics = vec!["OldTopic".to_string()];
+        file.entities = vec!["OldEntity".to_string()];
+        vault.save_vault_file(&file).unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let enriched = rt.block_on(async {
+            enrich_vault_file(&llm, &vault, &file.id).await.unwrap()
+        });
+
+        assert!(!enriched.topics.contains(&"OldTopic".to_string()));
+        assert!(!enriched.entities.contains(&"OldEntity".to_string()));
+        assert!(enriched.topics.len() <= 7);
+        assert!(enriched.entities.len() <= 7);
+        assert!(enriched.ai_metadata.suggested_questions.len() <= 4);
         assert!(enriched.ai_metadata.last_enriched_at.is_some());
 
         let _ = std::fs::remove_dir_all(temp_dir);

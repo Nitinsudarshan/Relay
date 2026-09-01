@@ -325,10 +325,27 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
               })}
             </span>
 
-            {scribble.ai_metadata?.enrichment_status === 'enriched' && (
+            {(scribble.ai_metadata?.enrichment_status === 'enriched' || scribble.ai_metadata?.last_enriched_at) && (
               <Badge variant="outline" className="text-[9px] font-mono text-emerald-500 border-emerald-500/30 gap-1">
-                <Sparkles className="w-2.5 h-2.5" />
-                <span>AI Enriched</span>
+                <Check className="w-2.5 h-2.5" />
+                <span>
+                  Analysed
+                  {scribble.ai_metadata?.last_enriched_at
+                    ? ` · ${(() => {
+                        try {
+                          const date = new Date(scribble.ai_metadata.last_enriched_at);
+                          const diffMins = Math.floor((Date.now() - date.getTime()) / (1000 * 60));
+                          if (diffMins < 1) return 'just now';
+                          if (diffMins < 60) return `${diffMins} min ago`;
+                          const diffHours = Math.floor(diffMins / 60);
+                          if (diffHours < 24) return `${diffHours}h ago`;
+                          return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        } catch {
+                          return '';
+                        }
+                      })()}`
+                    : ''}
+                </span>
               </Badge>
             )}
           </div>
@@ -347,16 +364,40 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
           )}
         </div>
 
-        {/* Action Toolbar: Summarise, Prompt & Edit */}
+        {/* Action Toolbar: Summarise, Analyse & Edit */}
         <div className="flex items-center gap-1.5">
+          {!isEditing && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleReEnrich}
+              disabled={isEnriching}
+              className="h-8 text-xs gap-1.5 text-primary border-primary/30 hover:bg-primary/10"
+              title={
+                scribble.ai_metadata?.enrichment_status === 'enriched'
+                  ? 'Re-run the analysis and refresh its derived knowledge.'
+                  : 'Analyse this Scribble to generate structured knowledge, topics, entities, concepts and connections.'
+              }
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isEnriching ? 'animate-spin' : ''}`} />
+              <span>
+                {isEnriching
+                  ? 'Analysing…'
+                  : scribble.ai_metadata?.enrichment_status === 'enriched'
+                  ? 'Re-analyse'
+                  : 'Analyse'}
+              </span>
+            </Button>
+          )}
+
           {!isEditing && isLongScribble && (
             <Button
               size="sm"
               variant="outline"
               onClick={handleSummarize}
               disabled={isSummarizing}
-              className="h-8 text-xs gap-1.5 text-primary border-primary/30 hover:bg-primary/10"
-              title="Summarise this thought in 2-3 lines with AI"
+              className="h-8 text-xs gap-1.5 text-foreground border-border hover:bg-muted"
+              title="Summarise this thought in a concise structured summary"
             >
               <Sparkles className={`w-3.5 h-3.5 ${isSummarizing ? 'animate-spin' : ''}`} />
               <span>{isSummarizing ? 'Summarising…' : 'Summarise'}</span>
@@ -817,10 +858,10 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
             onClick={handleReEnrich}
             disabled={isEnriching}
             className="h-8 text-xs gap-1.5 text-primary"
-            title="Re-run AI title, topic, and entity extraction"
+            title="Re-run the analysis and refresh its derived knowledge."
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isEnriching ? 'animate-spin' : ''}`} />
-            <span>Re-Enrich with AI</span>
+            <span>{isEnriching ? 'Analysing…' : scribble.ai_metadata?.enrichment_status === 'enriched' ? 'Re-analyse' : 'Analyse'}</span>
           </Button>
 
           <Button

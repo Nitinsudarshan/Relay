@@ -5,9 +5,10 @@ use thiserror::Error;
 
 mod enrichment;
 pub use enrichment::{
-    enrich_scribble, enrich_vault_file, extract_deterministic_entities, extract_deterministic_knowledge,
-    extract_deterministic_questions, extract_deterministic_title,
-    extract_deterministic_topics, summarize_scribble, AiEnrichmentResponse,
+    enrich_content, enrich_scribble, enrich_vault_file, extract_deterministic_entities,
+    extract_deterministic_knowledge, extract_deterministic_questions, extract_deterministic_title,
+    extract_deterministic_topics, summarize_content, summarize_scribble, summarize_vault_file,
+    AiEnrichmentResponse, CANONICAL_ANALYSIS_SYSTEM_PROMPT, CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS,
 };
 
 #[derive(Error, Debug)]

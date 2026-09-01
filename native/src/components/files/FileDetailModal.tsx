@@ -137,6 +137,27 @@ export const FileDetailModal: React.FC<FileDetailModalProps> = ({
                 <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-accent text-accent-foreground uppercase">
                   {file.file_type}
                 </span>
+                {file.ai_metadata?.last_enriched_at && (
+                  <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center gap-1">
+                    <Check className="w-3 h-3 text-emerald-500" />
+                    <span>
+                      Analysed ·{' '}
+                      {(() => {
+                        try {
+                          const date = new Date(file.ai_metadata.last_enriched_at);
+                          const diffMins = Math.floor((Date.now() - date.getTime()) / (1000 * 60));
+                          if (diffMins < 1) return 'just now';
+                          if (diffMins < 60) return `${diffMins} min ago`;
+                          const diffHours = Math.floor(diffMins / 60);
+                          if (diffHours < 24) return `${diffHours}h ago`;
+                          return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        } catch {
+                          return '';
+                        }
+                      })()}
+                    </span>
+                  </span>
+                )}
                 {file.extraction_status === 'unsupported' && (
                   <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20">
                     Text Extraction Unsupported
@@ -164,16 +185,38 @@ export const FileDetailModal: React.FC<FileDetailModalProps> = ({
           <div className="flex items-center gap-2">
             <button
               disabled={busyAction !== null}
-              onClick={() => handleAction('analyze', () => onSummarize(file.id))}
+              onClick={() => handleAction('analyze', () => onEnrich(file.id))}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition-colors shadow-sm disabled:opacity-50"
-              title="Run full AI text extraction, summarization, and concept enrichment"
+              title={
+                file.ai_metadata?.last_enriched_at
+                  ? 'Re-run the analysis and refresh its derived knowledge.'
+                  : 'Analyse this file to generate structured knowledge, topics, entities, concepts and connections.'
+              }
             >
               {busyAction === 'analyze' ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
               ) : (
                 <Wand2 className="w-3.5 h-3.5" />
               )}
-              Analyze with AI
+              {busyAction === 'analyze'
+                ? 'Analysing…'
+                : file.ai_metadata?.last_enriched_at
+                ? 'Re-analyse'
+                : 'Analyse'}
+            </button>
+
+            <button
+              disabled={busyAction !== null}
+              onClick={() => handleAction('summarize', () => onSummarize(file.id))}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium border border-border hover:bg-muted text-foreground rounded-lg transition-colors disabled:opacity-50"
+              title="Summarise this file in a concise structured summary"
+            >
+              {busyAction === 'summarize' ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5" />
+              )}
+              {busyAction === 'summarize' ? 'Summarising…' : 'Summarise'}
             </button>
 
             {isScribbleCreated ? (

@@ -854,7 +854,12 @@ pub async fn summarize_vault_file(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<VaultFile, CommandError> {
-    analyze_vault_file(id, state).await
+    let _ = state.vault.reprocess_vault_file(&id);
+    let settings = state.settings.lock_or_recover().clone();
+    let llm = LLMClient::new(settings.provider);
+    crate::pipeline::summarize_vault_file(&llm, &state.vault, &id)
+        .await
+        .map_err(|e| CommandError::new("SUMMARIZE_FAILED", &e))
 }
 
 #[tauri::command]

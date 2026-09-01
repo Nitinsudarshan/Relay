@@ -219,9 +219,9 @@ export const FilesPage: React.FC<FilesPageProps> = ({ onNavigateTab }) => {
       const updated = await invoke<VaultFile>('enrich_vault_file', { id });
       setFiles((prev) => prev.map((f) => (f.id === id ? updated : f)));
       if (selectedFile?.id === id) setSelectedFile(updated);
-      setSuccessBanner(`AI enrichment complete for ${updated.original_filename}.`);
+      setSuccessBanner(`Analysis complete for ${updated.original_filename}.`);
     } catch (err: any) {
-      setErrorBanner(`AI Enrich failed: ${err?.message || err}`);
+      setErrorBanner(`Analyse failed: ${err?.message || err}`);
     }
   };
 
@@ -430,7 +430,7 @@ export const FilesPage: React.FC<FilesPageProps> = ({ onNavigateTab }) => {
           <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
             {searchQuery || selectedFilter !== 'all'
               ? 'No imported files match your search criteria.'
-              : 'Add documents to Relay to extract text, summarize, enrich with AI, and integrate into Talkback context.'}
+              : 'Add documents to Relay to extract text, summarize, analyze, and integrate into Talkback context.'}
           </p>
         </div>
       ) : (
@@ -503,8 +503,8 @@ export const FilesPage: React.FC<FilesPageProps> = ({ onNavigateTab }) => {
 
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={() => handleSummarize(file.id)}
-                    title="Analyze with AI (Extract Text, Summarise & Enrich)"
+                    onClick={() => handleEnrich(file.id)}
+                    title={file.ai_metadata?.last_enriched_at ? "Re-analyse file" : "Analyse file"}
                     className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
                   >
                     <Wand2 className="w-3.5 h-3.5 text-primary" />

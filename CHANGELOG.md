@@ -1,5 +1,19 @@
 # Relay — Changelog
 
+## [0.23.0] - 2026-09-01
+
+### Canonical Relay Summarise & Analyse Contract — Extended to Files
+
+**Type**: minor — canonicalized Relay summary and analysis specification across Scribble and Files pipelines, consolidated prompt templates and shared helpers in Rust backend, normalized UI action labels (`Analyse`, `Re-analyse`, `Summarise`, `✓ Analysed · <time>`), and extended identical knowledge enrichment contract to Files (`native/src-tauri/src/pipeline/enrichment.rs`, `native/src-tauri/src/pipeline/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src/components/scribble/ScribbleDetailEditor.tsx`, `native/src/components/files/FileDetailModal.tsx`, `native/src/components/files/FilesPage.tsx`).
+
+#### Features
+
+- **Single Canonical Summary & Analysis Specification (`pipeline/enrichment.rs`, `pipeline/mod.rs`)**: Refactored prompt definitions and LLM parsing into source-agnostic core helpers (`CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS`, `CANONICAL_ANALYSIS_SYSTEM_PROMPT`, `enrich_content`, `summarize_content`).
+- **Normalized Scribble UI Terminology (`ScribbleDetailEditor.tsx`)**: Renamed actions to **`Analyse`**, **`Analysing…`**, **`Re-analyse`**, and **`Summarise`**, updated header status to `✓ Analysed · <time ago>`, removed visible "AI" button text while preserving context in tooltips.
+- **Identical Extension to Files Pipeline (`pipeline/enrichment.rs`, `commands.rs`)**: Wired `summarize_vault_file` and `enrich_vault_file` to the shared canonical specification, enforcing identical schema constraints (under 75 words summary, 5-7 topics, 5-7 entities, 3-4 exploration questions, 2-4 node Mermaid flowcharts) for document files while maintaining file immutability.
+- **Files UI Action & Status Alignment (`FileDetailModal.tsx`, `FilesPage.tsx`)**: Added **`Analyse`**, **`Re-analyse`**, **`Summarise`** buttons and `✓ Analysed · <time ago>` status badge in File detail modal and file card list items.
+- **Unit & Contract Verification (`enrichment.rs`, `FilesPage.test.tsx`)**: Added automated unit tests verifying schema integrity, deterministic fallbacks, and multi-source enrichment consistency.
+
 ## [0.22.0] - 2026-09-01
 
 ### Relay Files — Non-Destructive Vault Document Storage & AI Intelligence
