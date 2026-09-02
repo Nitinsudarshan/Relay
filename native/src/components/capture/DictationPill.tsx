@@ -681,11 +681,11 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
           }}
           className="inline-flex items-center gap-0 pl-4 pr-2 h-[44px] rounded-lg bg-white dark:bg-[#171717] border border-slate-200 dark:border-[#262626] shadow-[0_16px_40px_rgba(15,23,42,0.15),0_2px_8px_rgba(15,23,42,0.08)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.5)] text-slate-900 dark:text-neutral-100 cursor-pointer"
         >
-          <div className="flex items-center min-w-[120px] pr-2.5 h-[22px]">
+          <div className="flex items-center w-[120px] shrink-0 pr-2.5 h-[22px] overflow-hidden">
             {/* Phase 1: IDLE / READY — Click to dictate */}
             {(phase === 'collapsed' || phase === 'expanded') && (
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-xs font-semibold text-slate-900 dark:text-neutral-100 tracking-tight whitespace-nowrap">
+              <div className="flex items-center gap-2 w-full overflow-hidden">
+                <span className="text-xs font-semibold text-slate-900 dark:text-neutral-100 tracking-tight whitespace-nowrap truncate">
                   Click to dictate
                 </span>
               </div>
@@ -697,7 +697,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
                 near 0, so the whole row collapses to its hairline minimum
                 instead of showing a predetermined pattern. */}
             {phase === 'listening' && (
-              <div className="flex items-center gap-[2.5px] h-[22px] shrink-0">
+              <div className="flex items-center gap-[2.5px] h-[22px] shrink-0 overflow-hidden">
                 {levelHistory.map((level, i) => {
                   const heightPx = Math.min(
                     22,
@@ -706,7 +706,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
                   return (
                     <span
                       key={i}
-                      className="w-[2.5px] bg-blue-600 dark:bg-blue-400 rounded-sm transition-all duration-75 origin-center"
+                      className="w-[2.5px] bg-blue-600 dark:bg-blue-400 rounded-sm transition-all duration-75 origin-center shrink-0"
                       style={{ height: `${heightPx}px` }}
                     />
                   );
@@ -716,9 +716,9 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
             {/* Phase 3: PROCESSING */}
             {phase === 'processing' && (
-              <div className="flex items-center gap-2 max-w-[220px] overflow-hidden">
+              <div className="flex items-center gap-2 w-full overflow-hidden">
                 <span className="w-2.5 h-2.5 rounded-full border-[1.4px] border-slate-300 dark:border-neutral-700 border-t-blue-600 dark:border-t-blue-400 animate-spin shrink-0" />
-                <span className="font-mono text-[10.5px] tracking-wide text-slate-600 dark:text-neutral-400 whitespace-nowrap animate-in fade-in duration-200">
+                <span className="font-mono text-[10.5px] tracking-wide text-slate-600 dark:text-neutral-400 whitespace-nowrap truncate animate-in fade-in duration-200">
                   Transcribing...
                 </span>
               </div>
@@ -731,7 +731,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
                   e.stopPropagation();
                   invoke('open_settings_window').catch(console.error);
                 }}
-                className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 text-xs font-medium max-w-[260px] cursor-pointer hover:underline"
+                className="flex items-center gap-1.5 w-full overflow-hidden text-rose-600 dark:text-rose-400 text-xs font-medium cursor-pointer hover:underline"
                 title="Click to open settings in main window"
               >
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
@@ -746,7 +746,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
                   e.stopPropagation();
                   invoke('open_settings_window').catch(console.error);
                 }}
-                className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 text-xs font-medium max-w-[260px] cursor-pointer hover:underline"
+                className="flex items-center gap-1.5 w-full overflow-hidden text-amber-600 dark:text-amber-400 text-xs font-medium cursor-pointer hover:underline"
                 title="Click to open settings in main window"
               >
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
@@ -756,9 +756,9 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
 
             {/* Phase 6: SUCCESS */}
             {phase === 'success' && (
-              <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 text-xs font-semibold whitespace-nowrap animate-in fade-in duration-200">
-                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span>{successMessage}</span>
+              <div className="flex items-center gap-1.5 w-full overflow-hidden text-blue-600 dark:text-blue-400 text-xs font-semibold animate-in fade-in duration-200">
+                <Check className="w-3.5 h-3.5 stroke-[2.5] shrink-0" />
+                <span className="truncate">{successMessage}</span>
               </div>
             )}
           </div>
