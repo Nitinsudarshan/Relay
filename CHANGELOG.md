@@ -11,6 +11,8 @@
 - **Keep Microphone Warm State Machine (`capture/mod.rs`)**: Implemented stream decoupling with `Closed`, `WarmIdle`, and `ActiveRecording` stream states. Reuses active CPAL input streams across consecutive sessions while dropping real-time PCM audio in `WarmIdle` mode to maintain strict privacy.
 - **Generation-Matched Idle Expiration (`capture/mod.rs`)**: Introduced generation tracking (`generation: u64`) to ensure background stream closure timers only expire streams that remained continuously idle for the configured grace period (`15s`, `30s`, `1m`, `5m`).
 - **Dynamic Configuration Wiring (`settings/mod.rs`, `commands.rs`, `lib.rs`)**: Added `parse_keep_warm_duration` helper on `AudioInputSettings` and wired dynamic recorder configuration updates into application startup and `save_settings` IPC command.
+- **Dictation Pill Contextual UX & 2x Waveform Amplitude (`DictationPill.tsx`)**: Increased visual audio level waveform amplitude to 2×, integrated contextual next-step key instructions (`Hold/Press <Hotkey> to record`, `Release to stop`), and populated success state (`✓ Inserted into document`) inside the fixed Pill viewport.
+- **Immediate Hotkey Synchronization (`commands.rs`, `DictationPill.tsx`)**: Emitted `settings-changed` event from backend `update_hotkeys` command, enabling real-time hotkey label updates on the Dictation Pill without restarting or refreshing.
 
 ## [0.25.2] - 2026-09-02
 

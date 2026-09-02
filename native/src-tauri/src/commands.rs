@@ -207,7 +207,12 @@ pub async fn update_hotkeys(
     settings.hotkeys = hotkeys;
     settings
         .save(&state.settings_path())
-        .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))
+        .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
+    let updated = settings.clone();
+    drop(settings);
+
+    let _ = app.emit("settings-changed", &updated);
+    Ok(())
 }
 
 /// Where the floating pill anchors on screen. Re-anchors immediately using

@@ -56,7 +56,31 @@ const HOVER_COLLAPSE_DELAY_MS = 1000;
 // scale a fixed decorative shape, which at silence still rendered as a
 // non-zero pattern instead of going flat.
 const WAVEFORM_BAR_COUNT = 15;
+const WAVEFORM_AMPLITUDE = 2;
 const SILENT_LEVEL_HISTORY = new Array(WAVEFORM_BAR_COUNT).fill(0);
+
+function renderHotkeyKeys(shortcutStr: string) {
+  if (!shortcutStr) return null;
+  const normalized = shortcutStr
+    .replace(/CommandOrControl/i, 'Ctrl')
+    .replace(/Control/i, 'Ctrl')
+    .replace(/Cmd/i, 'Ctrl');
+
+  const keys = normalized.split('+').map((k) => k.trim()).filter(Boolean);
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      {keys.map((key, idx) => (
+        <kbd
+          key={idx}
+          className="font-mono text-[10px] px-1.5 py-0.5 rounded-lg bg-slate-100 dark:bg-[#262626] text-slate-800 dark:text-neutral-200 border border-slate-200 dark:border-[#404040] font-semibold shadow-xs"
+        >
+          {key}
+        </kbd>
+      ))}
+    </span>
+  );
+}
 
 export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete }) => {
   const [phase, setPhase] = useState<PillState>('collapsed');
@@ -247,6 +271,9 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         }
         if (payload.clipboard) {
           setAutoPaste(payload.clipboard.auto_paste ?? true);
+        }
+        if (payload.hotkeys?.dictation_hotkey) {
+          setDictationShortcut(payload.hotkeys.dictation_hotkey);
         }
       }
     });
@@ -596,40 +623,46 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         )}
       />
 
-      {/* Success Toast */}
-      {phase === 'success' && (
-        <div
-          className={cn(
-            "absolute bottom-[82px] bg-blue-600 dark:bg-blue-500 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold tracking-wide flex items-center gap-1.5 shadow-lg pointer-events-none z-40 animate-in fade-in slide-in-from-bottom-2 duration-200",
-            isLeft ? "left-4" : isRight ? "right-4" : "left-1/2 -translate-x-1/2"
-          )}
-        >
-          <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-          <span>{successMessage}</span>
-        </div>
-      )}
-
-      {/* Keyboard hint bar (floating above main pill, matching application dark card #171717) */}
-      {isExpanded && !popoverOpen && phase !== 'success' && (
-        <div
-          className={cn(
-            "absolute bottom-[70px] bg-white/95 dark:bg-[#171717]/95 border border-slate-200 dark:border-[#262626] shadow-md rounded-lg px-3 py-1.5 whitespace-nowrap flex items-center gap-2 text-xs text-slate-700 dark:text-neutral-300 pointer-events-none z-30 animate-in fade-in slide-in-from-bottom-1 duration-150",
-            isLeft ? "left-4" : isRight ? "right-4" : "left-1/2 -translate-x-1/2"
-          )}
-        >
-          <span className="text-slate-500 dark:text-neutral-400 font-medium">
-            {settings?.hotkeys.toggle_to_talk ? 'Tap to start/stop' : 'Hold to record'}
-          </span>
-          <span className="flex items-center gap-1">
-            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-lg bg-slate-100 dark:bg-[#262626] text-slate-800 dark:text-neutral-200 border border-slate-200 dark:border-[#404040] font-semibold shadow-xs">
-              Ctrl
-            </kbd>
-            <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-lg bg-slate-100 dark:bg-[#262626] text-slate-800 dark:text-neutral-200 border border-slate-200 dark:border-[#404040] font-semibold shadow-xs">
-              Space
-            </kbd>
-          </span>
-        </div>
-      )}
+      {/* Keyboard & Contextual Hint Bar (floating above main pill) */}
+      {(hovering || phase === 'listening' || phase === 'expanded') &&
+        !popoverOpen &&
+        phase !== 'processing' &&
+        phase !== 'success' &&
+        phase !== 'error' &&
+        phase !== 'warning' && (
+          <div
+            className={cn(
+              "absolute bottom-[70px] bg-white/95 dark:bg-[#171717]/95 border border-slate-200 dark:border-[#262626] shadow-md rounded-lg px-3 py-1.5 whitespace-nowrap flex items-center gap-1.5 text-xs text-slate-700 dark:text-neutral-300 pointer-events-none z-30 animate-in fade-in slide-in-from-bottom-1 duration-150",
+              isLeft ? "left-4" : isRight ? "right-4" : "left-1/2 -translate-x-1/2"
+            )}
+          >
+            {(phase as PillState) === 'listening' ? (
+              settings?.hotkeys?.toggle_to_talk ? (
+                <span className="flex items-center gap-1">
+                  <span className="text-slate-500 dark:text-neutral-400 font-medium">Press</span>
+                  {renderHotkeyKeys(dictationShortcut)}
+                  <span className="text-slate-500 dark:text-neutral-400 font-medium">to stop</span>
+                </span>
+              ) : (
+                <span className="text-slate-500 dark:text-neutral-400 font-medium">
+                  Release to stop
+                </span>
+              )
+            ) : settings?.hotkeys?.toggle_to_talk ? (
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500 dark:text-neutral-400 font-medium">Press</span>
+                {renderHotkeyKeys(dictationShortcut)}
+                <span className="text-slate-500 dark:text-neutral-400 font-medium">to record</span>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500 dark:text-neutral-400 font-medium">Hold</span>
+                {renderHotkeyKeys(dictationShortcut)}
+                <span className="text-slate-500 dark:text-neutral-400 font-medium">to record</span>
+              </span>
+            )}
+          </div>
+        )}
 
       {/* Main Relay Pill Surface (Process label removed, dark theme matching #171717) */}
       <div
@@ -666,7 +699,10 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
             {phase === 'listening' && (
               <div className="flex items-center gap-[2.5px] h-[22px] shrink-0">
                 {levelHistory.map((level, i) => {
-                  const heightPx = Math.max(3, Math.round(level * 22));
+                  const heightPx = Math.min(
+                    22,
+                    Math.max(3, Math.round(level * 22 * WAVEFORM_AMPLITUDE))
+                  );
                   return (
                     <span
                       key={i}
@@ -715,6 +751,14 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
               >
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">{warningMessage || 'Sign in to enable AI'}</span>
+              </div>
+            )}
+
+            {/* Phase 6: SUCCESS */}
+            {phase === 'success' && (
+              <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 text-xs font-semibold whitespace-nowrap animate-in fade-in duration-200">
+                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>{successMessage}</span>
               </div>
             )}
           </div>
