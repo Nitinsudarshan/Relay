@@ -26,6 +26,9 @@ pub struct HotkeyRegistrationStatus {
     pub show_hide_hotkey: String,
     pub show_hide_registered: bool,
     pub show_hide_error: Option<String>,
+    pub capture_hotkey: String,
+    pub capture_registered: bool,
+    pub capture_error: Option<String>,
 }
 
 /// In toggle-to-talk mode, a single recording that was never stopped with a
@@ -246,14 +249,14 @@ pub fn is_shortcut_physically_down(vk_codes: &[i32]) -> bool {
     vk_codes.iter().all(|&vk| is_vk_down(vk))
 }
 
-/// Registers Relay's two global (OS-wide) hotkeys used by push-to-talk
-/// dictation.
+/// Registers Relay's global (OS-wide) hotkeys.
 pub fn register_hotkeys(
     app: &AppHandle,
     show_hide_hotkey: &str,
     dictation_hotkey: &str,
+    capture_hotkey: &str,
 ) {
-    try_register_hotkeys(app, show_hide_hotkey, dictation_hotkey);
+    try_register_hotkeys(app, show_hide_hotkey, dictation_hotkey, capture_hotkey);
 }
 
 /// Re-registers hotkeys with new bindings, replacing whatever is
@@ -263,11 +266,12 @@ pub fn apply_hotkeys(
     app: &AppHandle,
     show_hide_hotkey: &str,
     dictation_hotkey: &str,
+    capture_hotkey: &str,
 ) -> Result<(), String> {
     app.global_shortcut()
         .unregister_all()
         .map_err(|e| format!("Could not clear existing hotkeys: {}", e))?;
-    let status = try_register_hotkeys(app, show_hide_hotkey, dictation_hotkey);
+    let status = try_register_hotkeys(app, show_hide_hotkey, dictation_hotkey, capture_hotkey);
     if !status.dictation_registered {
         return Err(status
             .dictation_error
@@ -289,6 +293,7 @@ fn try_register_hotkeys(
     app: &AppHandle,
     show_hide_hotkey: &str,
     dictation_hotkey: &str,
+    capture_hotkey: &str,
 ) -> HotkeyRegistrationStatus {
     let show_hide_app = app.clone();
     let show_hide_result = app
@@ -320,7 +325,29 @@ fn try_register_hotkeys(
         Err(e) => tracing::error!("[Hotkey] Failed to register dictation hotkey: {}", e),
     }
 
+    // Capture's real trigger lives in the browser, because that is the only
+    // place a page can be read (see `settings::HotkeySettings::capture_hotkey`).
+    // This shortcut only brings the Captures surface forward, so a conflict
+    // on it costs convenience, not the feature — which is why, unlike the
+    // other two, it never fails `apply_hotkeys`.
+    let capture_app = app.clone();
+    let capture_result = app
+        .global_shortcut()
+        .on_shortcut(capture_hotkey, move |_app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                show_captures_surface(&capture_app);
+            }
+        })
+        .map_err(|e| format!("capture hotkey '{}': {}", capture_hotkey, e));
+    match &capture_result {
+        Ok(()) => tracing::info!("[Hotkey] Registered capture hotkey '{}'", capture_hotkey),
+        Err(e) => tracing::warn!("[Hotkey] Failed to register capture hotkey: {}", e),
+    }
+
     let status = HotkeyRegistrationStatus {
+        capture_hotkey: capture_hotkey.to_string(),
+        capture_registered: capture_result.is_ok(),
+        capture_error: capture_result.err(),
         dictation_hotkey: dictation_hotkey.to_string(),
         dictation_registered: dictation_result.is_ok(),
         dictation_error: dictation_result.err(),
@@ -330,6 +357,17 @@ fn try_register_hotkeys(
     };
     let _ = app.emit(HOTKEY_STATUS_EVENT, &status);
     status
+}
+
+/// Brings the main window forward on Relay's Captures tab.
+fn show_captures_surface(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+        return;
+    };
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    let _ = app.emit("navigate-tab", serde_json::json!({ "tab": "captures" }));
 }
 
 fn toggle_main_window(app: &AppHandle) {

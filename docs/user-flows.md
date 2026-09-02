@@ -60,3 +60,13 @@
 3. System emits a native Windows OS Toast Notification (`app.notification()`).
 4. Windows displays the native toast notification without opening any Tauri WebView window.
 5. User clicks notification or action -> Relay main window opens and focuses relevant meeting context.
+
+## Flow 9: Capturing a Web Page or AI Conversation
+1. One-time setup: the user builds the extension (`npm --prefix native run build:extension`), loads `native/browser-extension` unpacked, turns **Browser capture** on in Relay's Capture settings, and pastes the port and pairing token into the extension's Options.
+2. On any page, the user presses the extension's shortcut (`Ctrl+Shift+Y`) or clicks the Relay toolbar button. That gesture is what grants the extension access to this one tab — nothing before it did.
+3. The extension injects its extractor into the tab, which reads the rendered document: a site-specific extractor for ChatGPT, Claude or GitHub; otherwise the generic article extractor; otherwise the page's visible text. The toolbar badge shows `…`.
+4. The extractor returns a structured, text-only payload — blocks or conversation turns, plus `<head>` metadata and a coverage verdict saying how much of the page it could honestly claim. Nothing is sent if there was nothing readable; the badge shows `✕` with the reason.
+5. The extension posts the payload to `http://127.0.0.1:<port>/v1/capture` with the pairing token in a header. Relay checks the origin, the token and the size before reading the body.
+6. Relay derives provenance from the URL itself — application, domain, capture type — never from what the payload claimed. It then sanitizes every string, normalizes into markdown, and writes the artifact **and the raw payload** into `.relay/vault/captures/<id>/`. The badge shows `✓`, and Relay's Captures surface shows *Saved*.
+7. Only now does analysis run, in the background: a summary, topics and entities, using the configured provider. If it fails, the surface says the capture is intact and offers *Analyse* again — the captured content is never at risk.
+8. The user can open the capture to read it, see exactly where it came from and what was left out, read the raw stored payload, or add it to Scribbles — which is what carries it into search and the knowledge graph. It is searchable by Talkback either way.

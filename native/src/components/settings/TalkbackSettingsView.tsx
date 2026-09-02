@@ -21,16 +21,39 @@ export const DEFAULT_TALKBACK_SETTINGS: TalkbackSettings = {
   end_of_turn_silence_ms: 700,
 };
 
-const SOURCE_OPTIONS: { value: TalkbackSourceType; label: string; hint: string }[] = [
-  {
-    value: 'MEETING_FACTS',
+/**
+ * Keyed by the union rather than written as an array, so adding a source to
+ * `TalkbackSourceType` without adding it here fails to compile.
+ *
+ * That matters more than it looks: `toggleSource` materializes the full list
+ * from these options before removing one, so a source missing from here is
+ * dropped from the user's saved selection the first time they toggle
+ * anything — and never searched again.
+ */
+const SOURCE_DETAILS: Record<TalkbackSourceType, { label: string; hint: string }> = {
+  MEETING_FACTS: {
     label: 'Meeting intelligence',
     hint: 'Decisions, action items and key points — the strongest source',
   },
-  { value: 'SCRIBBLE', label: 'Scribbles', hint: 'Your structured thoughts' },
-  { value: 'MEETING', label: 'Meeting summaries', hint: 'Generated meeting prose' },
-  { value: 'VOICE_NOTE', label: 'Voice Notes', hint: 'Verbatim dictation history' },
+  SCRIBBLE: { label: 'Scribbles', hint: 'Your structured thoughts' },
+  CAPTURE: { label: 'Captures', hint: 'Pages and conversations you captured' },
+  MEETING: { label: 'Meeting summaries', hint: 'Generated meeting prose' },
+  FILE: { label: 'Files', hint: 'Documents you imported' },
+  VOICE_NOTE: { label: 'Voice Notes', hint: 'Verbatim dictation history' },
+};
+
+/** Presentation order — strongest signal first, matching the backend's weights. */
+const SOURCE_ORDER: TalkbackSourceType[] = [
+  'MEETING_FACTS',
+  'SCRIBBLE',
+  'CAPTURE',
+  'MEETING',
+  'FILE',
+  'VOICE_NOTE',
 ];
+
+const SOURCE_OPTIONS: { value: TalkbackSourceType; label: string; hint: string }[] =
+  SOURCE_ORDER.map((value) => ({ value, ...SOURCE_DETAILS[value] }));
 
 /** Silence before Talkback decides you have finished speaking. */
 const SILENCE_OPTIONS = [

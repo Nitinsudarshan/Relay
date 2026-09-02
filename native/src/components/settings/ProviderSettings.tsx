@@ -45,6 +45,7 @@ import { TrashSettings } from './TrashSettings';
 import { AccountSettings } from './AccountSettings';
 import { DeveloperSettingsView } from './DeveloperSettingsView';
 import { DictionarySnippetsSettings } from './DictionarySnippetsSettings';
+import { CaptureSettingsView } from './CaptureSettingsView';
 import { MeetingsSettings } from './MeetingsSettings';
 import { TalkbackSettingsView, DEFAULT_TALKBACK_SETTINGS } from './TalkbackSettingsView';
 
@@ -54,6 +55,7 @@ export type SettingsSection =
   | 'dictation'
   | 'dictionary'
   | 'meetings'
+  | 'capture'
   | 'talkback'
   | 'languages'
   | 'advanced'
@@ -108,7 +110,12 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   stt: { whisper_model_path: '' },
   tts: { piper_binary_path: '', piper_voice_path: '' },
-  hotkeys: { show_hide_hotkey: 'Ctrl+Shift+Space', dictation_hotkey: 'Ctrl+Space', toggle_to_talk: false },
+  hotkeys: {
+    show_hide_hotkey: 'Ctrl+Shift+Space',
+    dictation_hotkey: 'Ctrl+Space',
+    toggle_to_talk: false,
+    capture_hotkey: 'Ctrl+Shift+C',
+  },
   ui: { pill_position: 'bottom_center' },
   vault: { directory: null },
   language: DEFAULT_LANGUAGE_SETTINGS,
@@ -502,7 +509,21 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
           <span>Meetings</span>
         </button>
 
-        {/* 5. Talkback */}
+        {/* 5. Capture */}
+        <button
+          type="button"
+          onClick={() => setActiveSection('capture')}
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
+            activeSection === 'capture'
+              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          }`}
+        >
+          <Globe className="w-4 h-4 text-primary" />
+          <span>Capture</span>
+        </button>
+
+        {/* 6. Talkback */}
         <button
           type="button"
           onClick={() => setActiveSection('talkback')}
@@ -1893,6 +1914,8 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
             }}
           />
         )}
+
+        {activeSection === 'capture' && <CaptureSettingsView />}
 
         {activeSection === 'talkback' && (
           <TalkbackSettingsView

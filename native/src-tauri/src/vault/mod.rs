@@ -12,6 +12,15 @@ use thiserror::Error;
 /// note types, which remain unchanged.
 pub const VOICE_NOTE_TYPE: &str = "voice_note";
 
+/// Imported documents. One directory per artifact, holding the untouched
+/// original plus `metadata.json`.
+pub const FILES_DIR: &str = "files";
+
+/// Web captures. Same `VaultFile` model and the same directory shape as
+/// `files/`, kept in their own tree so that the Files surface, its dedupe
+/// rules, and its text-extraction path stay exactly as they were.
+pub const CAPTURES_DIR: &str = "captures";
+
 pub mod scribble;
 pub use scribble::*;
 
@@ -148,7 +157,8 @@ impl VaultManager {
         fs::create_dir_all(dir.join("scribbles"))?;
         fs::create_dir_all(dir.join("trash"))?;
         fs::create_dir_all(dir.join("merged_sources"))?;
-        fs::create_dir_all(dir.join("files"))?;
+        fs::create_dir_all(dir.join(FILES_DIR))?;
+        fs::create_dir_all(dir.join(CAPTURES_DIR))?;
         Ok(())
     }
 
@@ -809,9 +819,184 @@ impl VaultManager {
         Ok(vault_file)
     }
 
+    /// Persists a normalized web capture as a Vault artifact.
+    ///
+    /// Acquisition is finished before interpretation begins: the raw
+    /// structured payload and the normalized markdown are both on disk when
+    /// this returns, and analysis is a separate call that is allowed to fail
+    /// without costing the user the capture.
+    ///
+    /// Re-capture follows the convention `import_vault_file` already set —
+    /// identical content is not duplicated. Identical content from the same
+    /// URL bumps a counter on the existing artifact; *changed* content from
+    /// the same URL becomes a new artifact that points back at the one it
+    /// supersedes, because a page that changed is new information, not a
+    /// duplicate.
+    pub fn save_capture(
+        &self,
+        normalized: crate::capture::web::normalize::NormalizedCapture,
+    ) -> Result<VaultFile, VaultError> {
+        self.init()?;
+
+        // Identity is the captured *content*, not the rendered artifact: the
+        // markdown embeds Relay's own capture timestamp, so hashing it would
+        // make every re-capture look like a change.
+        let content_hash = capture_content_hash(&normalized);
+
+        // `list_captures` is newest-first, so this finds the most recent
+        // capture of the same URL — the one a new capture supersedes.
+        let previous = self
+            .list_captures()?
+            .into_iter()
+            .find(|c| {
+                c.capture
+                    .as_ref()
+                    .is_some_and(|p| p.url == normalized.provenance.url)
+            });
+
+        if let Some(mut existing) = previous.clone() {
+            if existing.content_hash == content_hash {
+                if let Some(capture) = existing.capture.as_mut() {
+                    capture.recapture_count = capture.recapture_count.saturating_add(1);
+                }
+                existing.updated_at = chrono::Utc::now().to_rfc3339();
+                self.save_vault_file(&existing)?;
+                tracing::info!(
+                    "Capture of {} is unchanged; recorded a re-capture of {}",
+                    normalized.provenance.url,
+                    existing.id
+                );
+                return Ok(existing);
+            }
+        }
+
+        let id = format!("capture_{}", uuid::Uuid::new_v4());
+        let filename = capture_payload_filename(&normalized.title);
+        let original_dir = self.vault_dir().join(CAPTURES_DIR).join(&id).join("original");
+        fs::create_dir_all(&original_dir)?;
+
+        let payload_json = serde_json::to_string_pretty(&normalized.structured)
+            .map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
+        fs::write(original_dir.join(&filename), payload_json.as_bytes())?;
+
+        let mut provenance = normalized.provenance;
+        if let Some(prev) = previous {
+            provenance.version = prev
+                .capture
+                .as_ref()
+                .map(|p| p.version.saturating_add(1))
+                .unwrap_or(1);
+            provenance.previous_capture_id = Some(prev.id);
+        }
+
+        let vault_relative_path = format!("{}/{}/original/{}", CAPTURES_DIR, id, filename);
+        let mut artifact = VaultFile::new_capture(
+            id,
+            filename,
+            vault_relative_path,
+            normalized.markdown,
+            content_hash,
+            provenance,
+        );
+        artifact.original_filename = normalized.title.clone();
+
+        // Deterministic knowledge first, exactly as file import does, so a
+        // capture is searchable and tagged even if no LLM is configured or
+        // the later analysis pass fails.
+        let knowledge = crate::pipeline::extract_deterministic_knowledge(&artifact.content);
+        artifact.summary = knowledge.summary;
+        artifact.topics = knowledge.topics;
+        artifact.entities = knowledge.entities;
+        artifact.tags = artifact.topics.clone();
+
+        self.save_vault_file(&artifact)?;
+        tracing::info!(
+            "Saved capture {} from {} ({} chars)",
+            artifact.id,
+            artifact
+                .capture
+                .as_ref()
+                .map(|c| c.url.as_str())
+                .unwrap_or("unknown"),
+            artifact.content.len()
+        );
+        Ok(artifact)
+    }
+
+    /// Reads back the raw structured payload stored alongside a capture.
+    ///
+    /// The payload is the source-faithful record: it is written once and
+    /// never rewritten, so it stays valid as evidence of what the page said
+    /// even after summaries and tags have been regenerated several times.
+    pub fn get_capture_payload(
+        &self,
+        id: &str,
+    ) -> Result<crate::capture::web::WebCapturePayload, VaultError> {
+        let artifact = self.get_vault_file(id)?;
+        if !artifact.is_capture() {
+            return Err(VaultError::NotFound(format!("Capture {}", id)));
+        }
+        let path = self.vault_dir().join(&artifact.vault_path);
+        let raw = fs::read_to_string(&path)?;
+        serde_json::from_str(&raw).map_err(|e| VaultError::FrontmatterError(e.to_string()))
+    }
+
+    /// Re-runs normalization over a capture's stored payload.
+    ///
+    /// The point of keeping the raw payload is that improvements to
+    /// normalization are retroactive: identity, provenance history, and
+    /// created-at are preserved, and only the derived markdown changes.
+    pub fn renormalize_capture(&self, id: &str) -> Result<VaultFile, VaultError> {
+        let mut artifact = self.get_vault_file(id)?;
+        let payload = self.get_capture_payload(id)?;
+        let normalized = crate::capture::web::normalize::normalize(&payload)
+            .map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
+
+        artifact.content_hash = capture_content_hash(&normalized);
+        artifact.size_bytes = normalized.markdown.len() as u64;
+
+        let mut provenance = normalized.provenance;
+        if let Some(existing) = artifact.capture.as_ref() {
+            provenance.captured_at = existing.captured_at.clone();
+            provenance.version = existing.version;
+            provenance.previous_capture_id = existing.previous_capture_id.clone();
+            provenance.recapture_count = existing.recapture_count;
+        }
+
+        artifact.content = normalized.markdown;
+        artifact.capture = Some(provenance);
+        artifact.updated_at = chrono::Utc::now().to_rfc3339();
+        self.save_vault_file(&artifact)?;
+        Ok(artifact)
+    }
+
+    /// Where an artifact's directory lives, decided by what the artifact is
+    /// rather than by where it happens to be found — captures and imported
+    /// files share one model but never one tree.
+    pub fn vault_file_dir(&self, file: &VaultFile) -> PathBuf {
+        let subdir = if file.is_capture() { CAPTURES_DIR } else { FILES_DIR };
+        self.vault_dir().join(subdir).join(&file.id)
+    }
+
+    /// Resolves an artifact id to its directory by looking in both trees.
+    ///
+    /// Every existing caller passes an id with no idea whether it names an
+    /// imported file or a capture, and none of them should have to care:
+    /// this is what lets `enrich_vault_file`, `summarize_vault_file`, and
+    /// promotion to a Scribble work on captures without a second code path.
+    fn find_vault_file_dir(&self, id: &str) -> Option<PathBuf> {
+        for subdir in [FILES_DIR, CAPTURES_DIR] {
+            let candidate = self.vault_dir().join(subdir).join(id);
+            if candidate.join("metadata.json").exists() {
+                return Some(candidate);
+            }
+        }
+        None
+    }
+
     pub fn save_vault_file(&self, file: &VaultFile) -> Result<PathBuf, VaultError> {
         self.init()?;
-        let vault_file_dir = self.vault_dir().join("files").join(&file.id);
+        let vault_file_dir = self.vault_file_dir(file);
         fs::create_dir_all(&vault_file_dir)?;
 
         let meta_path = vault_file_dir.join("metadata.json");
@@ -823,19 +1008,31 @@ impl VaultManager {
 
     pub fn get_vault_file(&self, id: &str) -> Result<VaultFile, VaultError> {
         self.init()?;
-        let meta_path = self.vault_dir().join("files").join(id).join("metadata.json");
-        if !meta_path.exists() {
-            return Err(VaultError::NotFound(format!("VaultFile {}", id)));
-        }
+        let meta_path = self
+            .find_vault_file_dir(id)
+            .map(|dir| dir.join("metadata.json"))
+            .ok_or_else(|| VaultError::NotFound(format!("VaultFile {}", id)))?;
         let content = fs::read_to_string(&meta_path)?;
         let file: VaultFile = serde_json::from_str(&content)
             .map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
         Ok(file)
     }
 
+    /// Imported documents only. Captures live in their own tree and are
+    /// listed by `list_captures`, so the Files surface never has to filter
+    /// them out and never silently changed when captures shipped.
     pub fn list_vault_files(&self) -> Result<Vec<VaultFile>, VaultError> {
+        self.read_vault_file_dir(FILES_DIR)
+    }
+
+    /// Web captures, newest first.
+    pub fn list_captures(&self) -> Result<Vec<VaultFile>, VaultError> {
+        self.read_vault_file_dir(CAPTURES_DIR)
+    }
+
+    fn read_vault_file_dir(&self, subdir: &str) -> Result<Vec<VaultFile>, VaultError> {
         self.init()?;
-        let files_dir = self.vault_dir().join("files");
+        let files_dir = self.vault_dir().join(subdir);
         let mut files = Vec::new();
 
         if !files_dir.exists() {
@@ -863,25 +1060,47 @@ impl VaultManager {
 
     pub fn delete_vault_file(&self, id: &str) -> Result<(), VaultError> {
         self.init()?;
-        let vault_file_dir = self.vault_dir().join("files").join(id);
-        if vault_file_dir.exists() {
-            let trash_dir = self.vault_dir().join("trash");
-            let trash_id = format!("trash_file_{}", id);
-            let meta_path = trash_dir.join(format!("{}.json", trash_id));
-            let dest_dir = trash_dir.join(&trash_id);
+        let Some(vault_file_dir) = self.find_vault_file_dir(id) else {
+            return Ok(());
+        };
 
-            if let Ok(file) = self.get_vault_file(id) {
-                let trash_item = TrashItem::new(id, "file", &file.original_filename, &file.content);
-                let _ = fs::write(&meta_path, serde_json::to_string_pretty(&trash_item).unwrap_or_default());
-            }
+        let trash_dir = self.vault_dir().join("trash");
+        // The trash id encodes the item type, and restore reads it back to
+        // decide which tree to put the directory into — so a capture has to
+        // be trashed as a capture, not as a file.
+        let (item_type, trash_id) = match self.get_vault_file(id) {
+            Ok(file) if file.is_capture() => ("capture", format!("trash_capture_{}", id)),
+            _ => ("file", format!("trash_file_{}", id)),
+        };
+        let meta_path = trash_dir.join(format!("{}.json", trash_id));
+        let dest_dir = trash_dir.join(&trash_id);
 
-            let _ = fs::rename(&vault_file_dir, &dest_dir);
+        if let Ok(file) = self.get_vault_file(id) {
+            let title = file
+                .capture
+                .as_ref()
+                .map(|c| c.page_title.clone())
+                .unwrap_or_else(|| file.original_filename.clone());
+            let trash_item = TrashItem::new(id, item_type, &title, &file.content);
+            let _ = fs::write(&meta_path, serde_json::to_string_pretty(&trash_item).unwrap_or_default());
         }
+
+        let _ = fs::rename(&vault_file_dir, &dest_dir);
         Ok(())
     }
 
     pub fn reprocess_vault_file(&self, id: &str) -> Result<VaultFile, VaultError> {
         let mut file = self.get_vault_file(id)?;
+
+        // A capture's text was never extracted from bytes on disk — it was
+        // normalized from a structured payload. Re-running document
+        // extraction on `capture.json` would only overwrite good content with
+        // a failure, so re-normalization is the capture's own operation
+        // (`renormalize_capture`) and this path leaves it alone.
+        if file.is_capture() {
+            return Ok(file);
+        }
+
         let vault_copy_path = self.vault_dir().join(&file.vault_path);
 
         if vault_copy_path.exists() {
@@ -926,17 +1145,41 @@ impl VaultManager {
             }
         }
 
-        let initial_title = format!("Scribble: {}", file.original_filename);
+        let (initial_title, source_type, source_metadata) = match &file.capture {
+            // A promoted capture keeps its provenance: the Scribble says it
+            // came from a ChatGPT conversation, not from "a file".
+            Some(capture) => (
+                capture.page_title.clone(),
+                capture_scribble_source_type(&capture.capture_type).to_string(),
+                serde_json::json!({
+                    "source_file_id": file.id,
+                    "source_capture_id": file.id,
+                    "source_modality": "WEB_CAPTURE",
+                    "capture_type": capture.capture_type,
+                    "application": capture.application,
+                    "domain": capture.domain,
+                    "url": capture.url,
+                    "captured_at": capture.captured_at,
+                    "fidelity": capture.fidelity,
+                    "promoted_at": chrono::Utc::now().to_rfc3339(),
+                }),
+            ),
+            None => (
+                format!("Scribble: {}", file.original_filename),
+                crate::vault::SOURCE_TYPE_FILE.to_string(),
+                serde_json::json!({
+                    "source_file_id": file.id,
+                    "source_filename": file.original_filename,
+                    "source_file_type": file.file_type,
+                    "imported_at": file.created_at,
+                    "source_modality": "FILE",
+                    "promoted_at": chrono::Utc::now().to_rfc3339(),
+                }),
+            ),
+        };
         let mut scribble = Scribble::new_text(&file.content, Some(&initial_title));
-        scribble.source_type = crate::vault::SOURCE_TYPE_FILE.to_string();
-        scribble.source_metadata = serde_json::json!({
-            "source_file_id": file.id,
-            "source_filename": file.original_filename,
-            "source_file_type": file.file_type,
-            "imported_at": file.created_at,
-            "source_modality": "FILE",
-            "promoted_at": chrono::Utc::now().to_rfc3339(),
-        });
+        scribble.source_type = source_type;
+        scribble.source_metadata = source_metadata;
         scribble.topics = file.topics.clone();
         scribble.entities = file.entities.clone();
         scribble.tags = file.tags.clone();
@@ -1210,10 +1453,17 @@ impl VaultManager {
                 }
             }
             "file" => {
-                let active_file_dir = self.vault_dir().join("files").join(&item.original_id);
+                let active_file_dir = self.vault_dir().join(FILES_DIR).join(&item.original_id);
                 let trash_file_dir = trash_dir.join(format!("trash_file_{}", item.original_id));
                 if trash_file_dir.exists() {
                     fs::rename(&trash_file_dir, &active_file_dir)?;
+                }
+            }
+            "capture" => {
+                let active_capture_dir = self.vault_dir().join(CAPTURES_DIR).join(&item.original_id);
+                let trash_capture_dir = trash_dir.join(format!("trash_capture_{}", item.original_id));
+                if trash_capture_dir.exists() {
+                    fs::rename(&trash_capture_dir, &active_capture_dir)?;
                 }
             }
             _ => {}
@@ -1540,6 +1790,70 @@ fn parse_debug_string_list(raw: &str) -> Vec<String> {
         .map(|s| s.trim().trim_matches('"').to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+/// Content identity for a capture.
+///
+/// Hashes the sanitized structured content and the page title — what the page
+/// said — rather than the rendered markdown, which carries the capture
+/// timestamp and would therefore differ on every single capture.
+fn capture_content_hash(
+    normalized: &crate::capture::web::normalize::NormalizedCapture,
+) -> String {
+    let canonical = serde_json::json!({
+        "title": normalized.title,
+        "url": normalized.provenance.url,
+        "content": normalized.structured.content,
+    });
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.to_string().as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// Which Scribble source type a promoted capture should carry.
+///
+/// These constants already existed on the Scribble model — the capture system
+/// is what finally populates them, rather than introducing a parallel
+/// vocabulary for the same idea.
+pub fn capture_scribble_source_type(capture_type: &str) -> &'static str {
+    match capture_type {
+        crate::capture::web::source::CAPTURE_TYPE_CONVERSATION => SOURCE_TYPE_BROWSER_CONVERSATION,
+        _ => SOURCE_TYPE_BROWSER_PAGE,
+    }
+}
+
+/// Builds a filesystem-safe name for a capture's stored payload.
+///
+/// Windows reserves more characters than POSIX does, and a page title is
+/// arbitrary text from an untrusted source, so this is a strict allowlist
+/// rather than a blocklist — and it can never produce a path segment that
+/// escapes its directory.
+fn capture_payload_filename(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+
+    let slug: String = cleaned
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
+        .chars()
+        .take(60)
+        .collect();
+
+    let slug = slug.trim_matches(['-', '.']).to_string();
+    if slug.is_empty() {
+        "capture.json".to_string()
+    } else {
+        format!("{}.json", slug)
+    }
 }
 
 #[cfg(test)]

@@ -183,3 +183,41 @@ This document tracks deferred features, rejected/postponed UI patterns, and arch
   - **ARM64** is the smaller job: add a `piper-windows-aarch64` entry to the manifest once an upstream release asset exists for it. `runtime_for()` already distinguishes an unsupported architecture from an unsupported platform, and nothing else changes — the manifest is the only place a runtime is named.
   - **Offline** is a packaging change, not a code change: `discovery` already looks in Tauri's resource directory (the `Bundled` origin) before falling back to `PATH`, so an offline or enterprise build can ship the engine and the recommended voice as bundled resources and the installer will find them already present and skip the download. What is missing is the build variant and the release pipeline that produces it, not the lookup.
   - A third option, worth considering before either: let the user point setup at a folder they copied from another machine, verified against the same manifest checksums. Cheap, and it covers the air-gapped case without a second build.
+
+### 13. Capturing a Web Page From Relay's Own Hotkey
+
+- **Status**: Deferred — blocked by the browser permission model, not by missing code
+- **Area**: Native backend (`native/src-tauri/src/capture/web/bridge.rs`, `hotkeys/mod.rs`), browser extension (`native/src/webcapture/background.ts`)
+- **Original Context**:
+  - The capture feature was asked for as an OS-level Relay hotkey that reads whatever page the user is looking at. It ships the other way round: the browser owns the trigger, and Relay's `capture_hotkey` opens the Captures surface (`docs/decisions.md` Decision 57).
+  - The blocker is `activeTab`. Chrome grants it only in response to a gesture made inside the browser — the extension's action, a context-menu item, a `commands` shortcut, or an omnibox suggestion. A global desktop hotkey is none of those, so an extension asked to capture "from outside" has no permission to read the tab.
+- **Why it is deferred rather than done**:
+  - The only way to make it work today is `<all_urls>` (or `optional_host_permissions` the user grants once), which trades the entire least-privilege story — the thing that makes this feature safe to install — for the convenience of one shortcut.
+  - Even with the permission, the desktop→browser direction is unreliable: an MV3 service worker is terminated when idle, so Relay cannot simply push a request to it. Keeping one alive means holding a port open, which in practice means native messaging.
+- **Concept & Implementation Blueprint**:
+  - Switch the transport to native messaging (`runtime.connectNative`), which keeps the service worker alive for the life of the port and gives Relay a channel it can *initiate* on. That is the same migration Decision 58 already names as the exit from the loopback bridge, so the two would land together.
+  - Add `optional_host_permissions: ["<all_urls>"]` to the manifest and request it from the options page, with the trade stated plainly: "Relay can capture from its own shortcut, but the extension will be able to read any page you visit."
+  - Keep the current behaviour as the default and the fallback: if the permission is not granted, the desktop hotkey opens Captures and shows the browser shortcut, exactly as it does now.
+
+### 14. Screenshot and OCR Fallback for Unreadable Pages
+
+- **Status**: Deferred — deliberately not a rung on the capture ladder
+- **Area**: Native backend (`native/src-tauri/src/capture/web/`), browser extension
+- **Original Context**:
+  - The capture ladder ends at `text_only` (the page's visible text) and then refuses. A canvas-rendered app, a scanned document in a viewer, or a page that renders entirely into shadow roots produces nothing, and Relay says so rather than saving an empty artifact.
+  - A screenshot plus OCR was considered as a fifth rung and rejected for v1: the product principle is structured acquisition, and the cases it would serve are already labelled honestly rather than silently mis-captured.
+- **Concept & Implementation Blueprint**:
+  - `chrome.tabs.captureVisibleTab` needs the `activeTab` grant Relay already has, so the browser side is small — but it captures the *viewport*, not the page, which means the artifact would be less complete than the fallback it sits below unless scroll-and-stitch is built too.
+  - OCR is the real cost: a Rust OCR engine (Tesseract bindings or an ONNX model) is a large native dependency with a Windows build story, for output that is lower fidelity than every rung above it.
+  - If it is built, it must be a *supplementary* artifact attached to a capture — `ScribbleAttachment` already exists — and never a substitute that lets `coverage` claim more than the text extraction earned.
+
+### 15. Firefox Support for the Capture Extension
+
+- **Status**: Deferred — structurally compatible, not validated
+- **Area**: `native/browser-extension/manifest.json`, `native/src/webcapture/background.ts`
+- **Original Context**:
+  - The extension targets Chrome and Edge. Firefox supports `scripting.executeScript` under MV3 from Firefox 101 and grants `activeTab` on the same gestures, so nothing in the extraction layer is Chrome-specific — but the manifest ships Chrome shapes and no Firefox testing was done, so it is not claimed as supported (`docs/capture.md` §10).
+- **Concept & Implementation Blueprint**:
+  - Add `browser_specific_settings.gecko.id` and, on older Firefox, a `background.scripts` event page instead of `background.service_worker`; the build already emits both an ES module and an IIFE, so no new bundling is required.
+  - Firefox treats `host_permissions` as optional by default, so pairing must handle "granted later" — the options page's **Save and test** is the natural place to call `permissions.request`.
+  - The bridge already accepts `moz-extension://` origins, and there is a test asserting it.

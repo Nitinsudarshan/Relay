@@ -83,6 +83,38 @@ pub fn file_candidate(file: &crate::vault::VaultFile) -> CandidateDoc {
         .with_entities(file.entities.clone())
 }
 
+/// A web capture as a candidate.
+///
+/// Titled by the page rather than by a filename, and given the application
+/// and domain as extra body text so "what did that ChatGPT thread say" can
+/// match on the source as well as on the content.
+pub fn capture_candidate(capture: &crate::vault::VaultFile) -> CandidateDoc {
+    let provenance = capture.capture.as_ref();
+    let mut body = String::new();
+    if let Some(p) = provenance {
+        body.push_str(&format!("{} · {} · {}\n\n", p.application, p.domain, p.capture_type));
+    }
+    if let Some(summary) = capture.summary.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        body.push_str(summary);
+        body.push_str("\n\n");
+    }
+    body.push_str(&capture.content);
+
+    let title = provenance
+        .map(|p| p.page_title.clone())
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| capture.original_filename.clone());
+
+    let mut doc = CandidateDoc::new(SourceType::Capture, &capture.id, &title, &cap(&body))
+        .with_timestamp(&capture.created_at)
+        .with_topics(capture.topics.clone())
+        .with_entities(capture.entities.clone());
+    if let Some(p) = provenance {
+        doc = doc.with_detail(&p.application);
+    }
+    doc
+}
+
 /// A meeting's generated summary as a candidate.
 ///
 /// Returns `None` for a meeting with no summary — an empty candidate
@@ -220,6 +252,13 @@ pub fn gather_candidates(
         match vault.list_vault_files() {
             Ok(files) => candidates.extend(files.iter().map(file_candidate)),
             Err(e) => tracing::warn!("talkback: files unavailable for retrieval: {}", e),
+        }
+    }
+
+    if wanted.contains(&SourceType::Capture) {
+        match vault.list_captures() {
+            Ok(captures) => candidates.extend(captures.iter().map(capture_candidate)),
+            Err(e) => tracing::warn!("talkback: captures unavailable for retrieval: {}", e),
         }
     }
 

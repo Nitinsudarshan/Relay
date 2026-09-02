@@ -1,0 +1,63 @@
+{
+  "protocol_version": 1,
+  "captured_at": "2026-02-14T09:30:00.000Z",
+  "url": "https://chatgpt.com/c/2b1f0e3a",
+  "title": "Designing Relay Capture",
+  "browser": "Relay contract fixture",
+  "extractor": {
+    "id": "chatgpt",
+    "version": 1,
+    "strategy": "site"
+  },
+  "document": {
+    "site_name": "ChatGPT",
+    "language": "en"
+  },
+  "content": {
+    "kind": "conversation",
+    "blocks": [],
+    "messages": [
+      {
+        "role": "user",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Should Relay capture a screenshot or the page itself?"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Capture the page itself. A screenshot loses the structure."
+          },
+          {
+            "type": "list",
+            "ordered": false,
+            "items": [
+              "Preserve provenance",
+              "Preserve turn order"
+            ]
+          },
+          {
+            "type": "code",
+            "language": "json",
+            "text": "{ \"capture_type\": \"conversation\" }"
+          }
+        ]
+      }
+    ]
+  },
+  "links": [],
+  "diagnostics": {
+    "coverage": "rendered_dom",
+    "notes": [
+      "Only the turns the page had rendered were captured. Long conversations load earlier turns as you scroll up."
+    ],
+    "dom_text_length": 233,
+    "truncated": false,
+    "elapsed_ms": 0
+  }
+}

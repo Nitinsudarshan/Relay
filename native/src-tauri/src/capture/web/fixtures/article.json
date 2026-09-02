@@ -1,0 +1,78 @@
+{
+  "protocol_version": 1,
+  "captured_at": "2026-02-14T09:30:00.000Z",
+  "url": "https://example.com/posts/structured-capture",
+  "title": "The case for structured capture",
+  "browser": "Relay contract fixture",
+  "extractor": {
+    "id": "generic",
+    "version": 1,
+    "strategy": "article"
+  },
+  "document": {
+    "canonical_url": "https://example.com/posts/structured-capture",
+    "author": "A. Writer",
+    "published_at": "2026-02-14T09:00:00Z",
+    "language": "en"
+  },
+  "content": {
+    "kind": "article",
+    "blocks": [
+      {
+        "type": "heading",
+        "level": 1,
+        "text": "The case for structured capture"
+      },
+      {
+        "type": "paragraph",
+        "text": "A screenshot is a picture of knowledge. A capture should be the knowledge."
+      },
+      {
+        "type": "heading",
+        "level": 2,
+        "text": "What to preserve"
+      },
+      {
+        "type": "table",
+        "headers": [
+          "Field",
+          "Why"
+        ],
+        "rows": [
+          [
+            "url",
+            "Where it came from"
+          ],
+          [
+            "captured_at",
+            "When it was true"
+          ]
+        ]
+      },
+      {
+        "type": "quote",
+        "text": "Acquisition first, interpretation second."
+      },
+      {
+        "type": "paragraph",
+        "text": "Read the next post for the implementation."
+      }
+    ],
+    "messages": []
+  },
+  "links": [
+    {
+      "text": "next post",
+      "href": "https://example.com/posts/next"
+    }
+  ],
+  "diagnostics": {
+    "coverage": "rendered_dom",
+    "notes": [
+      "About 85% of the page's visible text was recognised as content; the rest was navigation, controls, or a layout Relay could not read."
+    ],
+    "dom_text_length": 306,
+    "truncated": false,
+    "elapsed_ms": 0
+  }
+}
