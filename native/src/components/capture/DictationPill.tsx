@@ -99,7 +99,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const [captureMode, setCaptureMode] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string>('Inserted into document');
+  const [successMessage, setSuccessMessage] = useState<string>('Text inserted');
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   // Dependency Verification Statuses
@@ -422,7 +422,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
           setPhase('success');
           const isDictation = payload.mode === 'dictation' || captureMode === 'dictation';
           if (isDictation) {
-            setSuccessMessage('Inserted into document');
+            setSuccessMessage('Text inserted');
           } else {
             setSuccessMessage('Voice note saved');
           }
