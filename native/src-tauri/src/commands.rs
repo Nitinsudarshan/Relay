@@ -576,6 +576,21 @@ pub async fn delete_voice_note(
 }
 
 #[tauri::command]
+pub async fn delete_voice_notes(
+    ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<usize, CommandError> {
+    let mut count = 0;
+    for id in ids {
+        if state.vault.move_to_trash("voice_note", &id).is_ok() {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+
+#[tauri::command]
 pub async fn merge_voice_notes(
     app: AppHandle,
     primary_id: String,

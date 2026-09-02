@@ -1,5 +1,17 @@
 # Relay — Changelog
 
+## [0.25.2] - 2026-09-02
+
+### Voice Notes On-Demand Multi-Select & Bulk Delete
+
+**Type**: patch — added on-demand multi-selection mode, individual item checkboxes, bulk deletion confirmation, and `delete_voice_notes` batch backend command (`native/src/components/voicenotes/VoiceNotePage.tsx`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`).
+
+#### Features
+
+- **On-Demand Multi-Select UI (`VoiceNotePage.tsx`)**: Added a **Select** mode header button. Selector checkboxes are hidden by default to prevent accidental selections. Removed "Select All" entirely to prevent accidental destructive mass deletions.
+- **Batch Deletion Backend Command (`commands.rs`, `lib.rs`)**: Introduced `delete_voice_notes(ids: Vec<String>)` Tauri IPC command to move selected Voice Notes into Vault Trash atomically in a single request.
+- **Unit Testing Coverage (`VoiceNotePage.test.tsx`)**: Updated Vitest test suite covering on-demand selection mode, manual item checking, absence of Select All, and batch deletion IPC execution.
+
 ## [0.25.1] - 2026-09-02
 
 ### Raw Asterisk Stripping & Heading Formatter Fix

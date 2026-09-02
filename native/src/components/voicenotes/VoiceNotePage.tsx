@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { HardDrive, Mic, ShieldCheck, Edit3, Trash2, GitMerge, Copy, Check, X, Save, Sparkles, Undo, AlertCircle } from 'lucide-react';
+import { HardDrive, Mic, ShieldCheck, Edit3, Trash2, GitMerge, Copy, Check, X, Save, Sparkles, Undo, AlertCircle, CheckSquare } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '../common/EmptyState';
@@ -96,9 +96,42 @@ export const VoiceNotePage: React.FC = () => {
   const [unmergingNoteId, setUnmergingNoteId] = useState<string | null>(null);
   const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
   const [promotedNoteIds, setPromotedNoteIds] = useState<Set<string>>(new Set());
+  const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [settings, setSettings] = useState<AppSettings | null>(null);
 
+  const toggleSelectNote = (id: string) => {
+    setSelectedNoteIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedNoteIds.size === 0) return;
+    setActionBusy(true);
+    setError('');
+    const idsToDelete = Array.from(selectedNoteIds);
+    try {
+      await invoke('delete_voice_notes', { ids: idsToDelete });
+      setNotes((prev) => prev.filter((n) => !selectedNoteIds.has(n.id)));
+      setSelectedNoteIds(new Set());
+      setIsBulkDeleting(false);
+      setIsSelectMode(false);
+    } catch (err: any) {
+      console.error('Failed to bulk delete voice notes', err);
+      setError(err?.message || 'Failed to delete selected voice notes.');
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
   const handlePromoteToScribble = async (note: VaultNote) => {
     setActionBusy(true);
@@ -255,6 +288,11 @@ export const VoiceNotePage: React.FC = () => {
     try {
       await invoke('delete_voice_note', { id });
       setNotes((prev) => prev.filter((n) => n.id !== id));
+      setSelectedNoteIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
       setDeletingNoteId(null);
       if (editingNoteId === id) setEditingNoteId(null);
       if (mergingNoteId === id) setMergingNoteId(null);
@@ -394,12 +432,110 @@ export const VoiceNotePage: React.FC = () => {
 
       {/* Main Transcript History Container */}
       <div className="flex-1 flex flex-col min-h-0 rounded-lg border border-border bg-card p-5">
-        <div className="flex items-center justify-between mb-4 shrink-0">
-          <h2 className="text-sm font-bold text-foreground">Transcript History</h2>
-          <Badge variant="outline" className="text-[10px] font-mono">
-            {notes.length} voice note{notes.length === 1 ? '' : 's'}
-          </Badge>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 shrink-0 pb-3 border-b border-border/60">
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-bold text-foreground">Transcript History</h2>
+            <Badge variant="outline" className="text-[10px] font-mono">
+              {notes.length} voice note{notes.length === 1 ? '' : 's'}
+            </Badge>
+          </div>
+
+          {notes.length > 0 && (
+            <div className="flex items-center gap-2">
+              {isSelectMode ? (
+                <>
+                  {selectedNoteIds.size > 0 && (
+                    <div className="flex items-center gap-2 animate-in fade-in duration-150">
+                      <Badge variant="secondary" className="text-xs font-mono px-2 py-0.5">
+                        {selectedNoteIds.size} selected
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => setIsBulkDeleting(true)}
+                        disabled={actionBusy}
+                        className="h-7 text-xs gap-1.5 font-semibold"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Delete Selected ({selectedNoteIds.size})</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setSelectedNoteIds(new Set());
+                          setIsBulkDeleting(false);
+                        }}
+                        disabled={actionBusy}
+                        className="h-7 text-xs px-2"
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setIsSelectMode(false);
+                      setSelectedNoteIds(new Set());
+                      setIsBulkDeleting(false);
+                    }}
+                    disabled={actionBusy}
+                    className="h-7 text-xs gap-1 font-mono"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Done</span>
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIsSelectMode(true)}
+                  disabled={actionBusy}
+                  className="h-7 text-xs gap-1.5 font-mono"
+                >
+                  <CheckSquare className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span>Select</span>
+                </Button>
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Bulk Delete Banner */}
+        {isBulkDeleting && selectedNoteIds.size > 0 && (
+          <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 flex flex-wrap items-center justify-between gap-2 text-xs text-red-600 dark:text-red-400 shrink-0 animate-in fade-in duration-150">
+            <div className="flex items-center gap-2">
+              <Trash2 className="w-4 h-4 shrink-0" />
+              <span className="font-medium">
+                Move {selectedNoteIds.size} selected Voice Note{selectedNoteIds.size === 1 ? '' : 's'} to Trash? (Kept for 30 days before permanent deletion)
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={actionBusy}
+                onClick={() => setIsBulkDeleting(false)}
+                className="h-7 text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={actionBusy}
+                onClick={handleBulkDelete}
+                className="h-7 text-xs gap-1.5 font-semibold"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Move {selectedNoteIds.size} to Trash</span>
+              </Button>
+            </div>
+          </div>
+        )}
 
         {notes.length === 0 ? (
           <EmptyState
@@ -416,17 +552,31 @@ export const VoiceNotePage: React.FC = () => {
               const isDeleting = deletingNoteId === note.id;
               const isMerging = mergingNoteId === note.id;
               const isUnmerging = unmergingNoteId === note.id;
+              const isSelected = selectedNoteIds.has(note.id);
               const canMergeWithNext = index < notes.length - 1;
               const nextNote = canMergeWithNext ? notes[index + 1] : null;
 
               return (
                 <div
                   key={note.id}
-                  className="p-4 rounded-lg border border-border bg-muted/20 hover:border-border/80 transition-all space-y-2 group"
+                  className={`p-4 rounded-lg border transition-all space-y-2 group ${
+                    isSelected
+                      ? 'border-primary/50 bg-primary/5 ring-1 ring-primary/20'
+                      : 'border-border bg-muted/20 hover:border-border/80'
+                  }`}
                 >
                   {/* Card Header without redundant 'Voice Note' label */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 flex-wrap">
+                      {isSelectMode && (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelectNote(note.id)}
+                          className="w-4 h-4 rounded border-border text-primary focus:ring-primary accent-primary cursor-pointer shrink-0 animate-in fade-in duration-150"
+                          aria-label={`Select voice note from ${formatNoteTimestamp(note.created_at)}`}
+                        />
+                      )}
                       <span className="text-xs font-semibold text-foreground font-mono">
                         {formatNoteTimestamp(note.created_at)}
                       </span>

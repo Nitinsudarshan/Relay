@@ -213,3 +213,93 @@ describe('VoiceNotePage - Reversible Merging', () => {
     expect(screen.getByText(/Merged · 2 Voice Notes/i)).toBeInTheDocument();
   });
 });
+
+describe('VoiceNotePage - Multi-Select and Bulk Delete', () => {
+  it('hides checkboxes until Select button is clicked and does not feature Select All', async () => {
+    const user = userEvent.setup();
+    render(<VoiceNotePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('First transcript content.')).toBeInTheDocument();
+    });
+
+    // Checkboxes should not be present initially
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Select All/i })).not.toBeInTheDocument();
+
+    const selectBtn = screen.getByRole('button', { name: /^Select$/i });
+    expect(selectBtn).toBeInTheDocument();
+
+    // Click Select button to enter select mode
+    await user.click(selectBtn);
+
+    const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Select All/i })).not.toBeInTheDocument();
+
+    // Select both notes individually
+    await user.click(checkboxes[0]);
+    await user.click(checkboxes[1]);
+
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete Selected (2)' })).toBeInTheDocument();
+
+    // Clear selection
+    await user.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(screen.queryByText('2 selected')).not.toBeInTheDocument();
+  });
+
+  it('handles bulk delete confirmation and deletion call', async () => {
+    const user = userEvent.setup();
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === 'get_vault_location') {
+        return {
+          path: 'C:\\Vault',
+          default_path: 'C:\\Vault',
+          configured: true,
+          accessible: true,
+        };
+      }
+      if (cmd === 'get_voice_notes') {
+        return [sampleNormalNote2, sampleNormalNote];
+      }
+      if (cmd === 'delete_voice_notes') {
+        expect(args).toEqual({ ids: ['note_2', 'note_1'] });
+        return 2;
+      }
+      return undefined;
+    });
+
+    render(<VoiceNotePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('First transcript content.')).toBeInTheDocument();
+    });
+
+    // Enter Select mode
+    await user.click(screen.getByRole('button', { name: /^Select$/i }));
+
+    const checkboxes = screen.getAllByRole('checkbox');
+    await user.click(checkboxes[0]);
+    await user.click(checkboxes[1]);
+
+    // Click Delete Selected (2)
+    await user.click(screen.getByRole('button', { name: 'Delete Selected (2)' }));
+
+    // Confirmation banner should be displayed
+    expect(
+      screen.getByText(/Move 2 selected Voice Notes to Trash\?/i)
+    ).toBeInTheDocument();
+
+    // Confirm Move 2 to Trash
+    await user.click(screen.getByRole('button', { name: /Move 2 to Trash/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('First transcript content.')).not.toBeInTheDocument();
+      expect(screen.queryByText('Second transcript content.')).not.toBeInTheDocument();
+      expect(screen.getByText('No Voice Notes yet')).toBeInTheDocument();
+    });
+  });
+});
+
