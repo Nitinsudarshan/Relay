@@ -959,8 +959,8 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                   </div>
 
                   {/* Active Input Device Badge (Green Banner) */}
-                  <div className="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2 font-medium">
-                    <Mic className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <div className="p-2.5 rounded-lg bg-emerald-500/10 dark:bg-emerald-950/30 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs flex items-center gap-2 font-medium">
+                    <Mic className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                     <span>Using: {activeDeviceName}</span>
                   </div>
 
