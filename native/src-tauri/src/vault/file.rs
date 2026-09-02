@@ -5,8 +5,15 @@ use std::io::Read;
 use std::path::Path;
 use zip::ZipArchive;
 
+use crate::capture::web::CaptureProvenance;
 use crate::vault::scribble::{ScribbleAiMetadata, ScribbleRelationship};
 use crate::vault::VaultError;
+
+/// `file_type` marker for a web capture, distinguishing it from an imported
+/// document without needing a second model. Text extraction never runs on
+/// one: its content is produced by `capture::web::normalize`, not by reading
+/// bytes back off disk.
+pub const CAPTURE_FILE_TYPE: &str = "webcapture";
 
 /// Core data model representing an imported document file in Relay's Vault.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -32,6 +39,16 @@ pub struct VaultFile {
     pub ai_metadata: ScribbleAiMetadata,
     #[serde(default)]
     pub linked_scribble_id: Option<String>,
+    /// Set when this artifact came from a capture rather than a file import.
+    ///
+    /// Provenance only — where the content came from and how completely it
+    /// was acquired. Semantic fields (`summary`, `tags`, `topics`,
+    /// `entities`) are produced later by analysis and are deliberately kept
+    /// out of here, so re-analysing a capture can never rewrite the record of
+    /// its source. `None` on every imported file, which is what keeps this
+    /// backwards compatible with vaults written before captures existed.
+    #[serde(default)]
+    pub capture: Option<CaptureProvenance>,
 }
 
 impl VaultFile {
@@ -87,7 +104,53 @@ impl VaultFile {
             relationships: Vec::new(),
             ai_metadata: ScribbleAiMetadata::default(),
             linked_scribble_id: None,
+            capture: None,
         })
+    }
+
+    /// Builds a Vault artifact from a normalized web capture.
+    ///
+    /// `content` is already the normalized markdown, and `extraction_status`
+    /// is `"extracted"` on arrival: unlike an imported PDF, a capture's text
+    /// does not have to be recovered from a binary later, so there is no
+    /// pending or failed extraction state to represent.
+    pub fn new_capture(
+        id: String,
+        original_filename: String,
+        vault_relative_path: String,
+        content: String,
+        content_hash: String,
+        provenance: CaptureProvenance,
+    ) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
+        Self {
+            id,
+            original_filename,
+            file_type: CAPTURE_FILE_TYPE.to_string(),
+            mime_type: "application/json".to_string(),
+            size_bytes: content.len() as u64,
+            content_hash,
+            created_at: provenance.captured_at.clone(),
+            updated_at: now,
+            last_known_source_path: provenance.url.clone(),
+            vault_path: vault_relative_path,
+            extraction_status: "extracted".to_string(),
+            processing_status: "ready".to_string(),
+            content,
+            summary: None,
+            tags: Vec::new(),
+            topics: Vec::new(),
+            entities: Vec::new(),
+            relationships: Vec::new(),
+            ai_metadata: ScribbleAiMetadata::default(),
+            linked_scribble_id: None,
+            capture: Some(provenance),
+        }
+    }
+
+    /// Whether this artifact is a capture rather than an imported document.
+    pub fn is_capture(&self) -> bool {
+        self.capture.is_some()
     }
 }
 

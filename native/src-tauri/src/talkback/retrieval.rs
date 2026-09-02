@@ -31,14 +31,17 @@ pub enum SourceType {
     Meeting,
     MeetingFacts,
     File,
+    /// A web page or conversation captured from the browser.
+    Capture,
 }
 
 impl SourceType {
     /// Every source Talkback can retrieve from, in the order they are
     /// reported. Adding a variant here is what makes it searchable.
-    pub const ALL: [SourceType; 5] = [
+    pub const ALL: [SourceType; 6] = [
         SourceType::MeetingFacts,
         SourceType::Scribble,
+        SourceType::Capture,
         SourceType::Meeting,
         SourceType::File,
         SourceType::VoiceNote,
@@ -51,6 +54,7 @@ impl SourceType {
             SourceType::Meeting => "Meeting",
             SourceType::MeetingFacts => "Meeting Intelligence",
             SourceType::File => "Imported File",
+            SourceType::Capture => "Web Capture",
         }
     }
 
@@ -65,6 +69,10 @@ impl SourceType {
         match self {
             SourceType::MeetingFacts => 1.25,
             SourceType::Scribble => 1.10,
+            // Captured pages and conversations are acquired source material,
+            // like an imported document — worth the same as one, and worth
+            // more than verbatim dictation.
+            SourceType::Capture => 1.05,
             SourceType::File => 1.05,
             SourceType::Meeting => 1.00,
             SourceType::VoiceNote => 0.95,

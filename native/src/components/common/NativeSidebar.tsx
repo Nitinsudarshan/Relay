@@ -13,6 +13,7 @@ import {
   Cloud,
   Sparkle,
   Sliders,
+  Globe,
 } from 'lucide-react';
 import { RelayLogo } from '@/components/common/RelayLogo';
 import { Badge } from '@/components/ui/badge';
@@ -38,6 +39,7 @@ export type TabType =
   | 'meetings'
   | 'scribble'
   | 'files'
+  | 'captures'
   | 'talkback'
   | 'settings';
 
@@ -105,6 +107,13 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       label: 'Files',
       icon: FileText,
       color: 'text-blue-500',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+    {
+      id: 'captures' as TabType,
+      label: 'Captures',
+      icon: Globe,
+      color: 'text-sky-500',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {

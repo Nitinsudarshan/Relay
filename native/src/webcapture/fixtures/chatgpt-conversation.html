@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Designing Relay Capture</title>
+    <meta property="og:site_name" content="ChatGPT" />
+  </head>
+  <body>
+    <main>
+      <article data-testid="conversation-turn-2">
+        <h5 class="sr-only">You said:</h5>
+        <div data-message-author-role="user">
+          <div class="whitespace-pre-wrap">Should Relay capture a screenshot or the page itself?</div>
+        </div>
+      </article>
+      <article data-testid="conversation-turn-3">
+        <h6 class="sr-only">ChatGPT said:</h6>
+        <div data-message-author-role="assistant">
+          <div class="markdown">
+            <p>Capture the page itself. A screenshot loses the structure.</p>
+            <ul>
+              <li>Preserve provenance</li>
+              <li>Preserve turn order</li>
+            </ul>
+            <pre><code class="language-json">{ "capture_type": "conversation" }</code></pre>
+          </div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

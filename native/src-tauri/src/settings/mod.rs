@@ -32,6 +32,17 @@ pub struct HotkeySettings {
     /// behavior for anyone who hasn't opted in.
     #[serde(default)]
     pub toggle_to_talk: bool,
+    /// Brings Relay's Captures surface forward from anywhere in the OS.
+    ///
+    /// Deliberately *not* the trigger for reading a web page. Browsers grant
+    /// page access only in response to a gesture made inside the browser
+    /// (`activeTab`), so an OS-level hotkey cannot read the tab a user is
+    /// looking at without asking for permanent access to every site they
+    /// visit — which Relay does not do. The in-browser shortcut owns that
+    /// job; this one opens the surface that explains it and shows what has
+    /// been captured. See `docs/capture.md`.
+    #[serde(default = "default_capture_hotkey")]
+    pub capture_hotkey: String,
 }
 
 fn default_show_hide_hotkey() -> String {
@@ -42,12 +53,21 @@ fn default_dictation_hotkey() -> String {
     "Ctrl+Space".to_string()
 }
 
+/// `Ctrl+Space+C` is not a registrable accelerator — the OS shortcut layer
+/// takes modifiers plus one key, and `Space` is not a modifier — and
+/// `Ctrl+Space` itself is already push-to-talk dictation. `Ctrl+Shift+C` is
+/// the nearest free combination that reads as "capture".
+fn default_capture_hotkey() -> String {
+    "Ctrl+Shift+C".to_string()
+}
+
 impl Default for HotkeySettings {
     fn default() -> Self {
         Self {
             show_hide_hotkey: default_show_hide_hotkey(),
             dictation_hotkey: default_dictation_hotkey(),
             toggle_to_talk: false,
+            capture_hotkey: default_capture_hotkey(),
         }
     }
 }
@@ -254,6 +274,48 @@ impl Default for ClipboardSettings {
         Self {
             auto_paste: default_auto_paste(),
             copy_to_clipboard: default_copy_to_clipboard(),
+        }
+    }
+}
+
+/// Web capture: the local bridge the Relay browser extension talks to.
+///
+/// Off by default. Capture needs a browser extension installed and paired
+/// before it can do anything, so there is no case where opening a listening
+/// socket before the user has asked for capture buys them something — and
+/// every case where not opening one is the better default for a local-first
+/// app.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CaptureSettings {
+    /// Whether Relay listens on loopback for captures from the extension.
+    #[serde(default, alias = "bridgeEnabled")]
+    pub bridge_enabled: bool,
+    /// Preferred loopback port. If it is taken, the bridge binds an
+    /// ephemeral port instead and reports the one it got.
+    #[serde(default = "default_capture_bridge_port", alias = "bridgePort")]
+    pub bridge_port: u16,
+    /// The shared secret the extension must present. Generated the first
+    /// time capture is enabled; replacing it unpairs every browser.
+    #[serde(default, alias = "pairingToken")]
+    pub pairing_token: Option<String>,
+    /// Whether to run Relay's analysis pass automatically once a capture has
+    /// been stored. Storage never depends on it: turning this off costs you
+    /// summaries and topics, never the captured content.
+    #[serde(default = "default_true", alias = "analyzeOnCapture")]
+    pub analyze_on_capture: bool,
+}
+
+fn default_capture_bridge_port() -> u16 {
+    crate::capture::web::bridge::DEFAULT_PORT
+}
+
+impl Default for CaptureSettings {
+    fn default() -> Self {
+        Self {
+            bridge_enabled: false,
+            bridge_port: default_capture_bridge_port(),
+            pairing_token: None,
+            analyze_on_capture: true,
         }
     }
 }
@@ -524,6 +586,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub clipboard: ClipboardSettings,
     #[serde(default)]
+    pub capture: CaptureSettings,
+    #[serde(default)]
     pub startup: StartupSettings,
     #[serde(default)]
     pub audio_input: AudioInputSettings,
@@ -552,6 +616,7 @@ impl Default for AppSettings {
             cloud: CloudSettings::default(),
             sound: SoundSettings::default(),
             clipboard: ClipboardSettings::default(),
+            capture: CaptureSettings::default(),
             startup: StartupSettings::default(),
             audio_input: AudioInputSettings::default(),
             meetings: MeetingSettings::default(),
@@ -563,6 +628,19 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
+    /// Carries the stored capture configuration over a whole-settings save.
+    ///
+    /// `save_settings` writes whatever object the frontend sends. Capture is
+    /// not edited through that path — the bridge, the port, the pairing token
+    /// and the analyse toggle each have their own command — so a settings
+    /// object serialized from a frontend that never loaded the capture
+    /// section would otherwise silently switch capture off and destroy the
+    /// pairing token, unpairing every browser.
+    pub fn preserving_capture(mut self, stored: &CaptureSettings) -> Self {
+        self.capture = stored.clone();
+        self
+    }
+
     pub fn load(path: &Path) -> Result<Self, SettingsError> {
         if !path.exists() {
             let defaults = Self::default();
@@ -653,6 +731,59 @@ mod tests {
         assert_eq!(defaults.audio_input.keep_microphone_warm, "off");
         assert!(defaults.audio_input.auto_learn_words);
         assert!(!defaults.dictionary.is_empty());
+    }
+
+    #[test]
+    fn capture_is_off_until_the_user_turns_it_on() {
+        let defaults = AppSettings::default();
+        assert!(
+            !defaults.capture.bridge_enabled,
+            "a fresh install must not open a listening socket"
+        );
+        assert!(defaults.capture.pairing_token.is_none());
+        assert_eq!(defaults.capture.bridge_port, 8765);
+        assert!(defaults.capture.analyze_on_capture);
+    }
+
+    #[test]
+    fn capture_hotkey_defaults_to_a_registrable_combination() {
+        // `Ctrl+Space+C` cannot be registered — a shortcut is modifiers plus
+        // one key, and Space is not a modifier — and `Ctrl+Space` is already
+        // push-to-talk.
+        assert_eq!(HotkeySettings::default().capture_hotkey, "Ctrl+Shift+C");
+        assert_eq!(HotkeySettings::default().dictation_hotkey, "Ctrl+Space");
+    }
+
+    #[test]
+    fn settings_written_before_capture_existed_still_load() {
+        let json = r#"{
+            "hotkeys": { "dictation_hotkey": "Ctrl+Space" },
+            "clipboard": { "auto_paste": true, "copy_to_clipboard": true }
+        }"#;
+        let loaded: AppSettings = serde_json::from_str(json).unwrap();
+        assert!(!loaded.capture.bridge_enabled);
+        assert_eq!(loaded.capture.bridge_port, 8765);
+        assert!(loaded.capture.analyze_on_capture);
+        assert_eq!(loaded.hotkeys.capture_hotkey, "Ctrl+Shift+C");
+    }
+
+    #[test]
+    fn a_whole_settings_save_cannot_unpair_a_browser() {
+        let stored = CaptureSettings {
+            bridge_enabled: true,
+            bridge_port: 9100,
+            pairing_token: Some("deadbeef".to_string()),
+            ..Default::default()
+        };
+
+        // A frontend that never loaded the capture section sends defaults.
+        let incoming = AppSettings::default();
+        assert!(!incoming.capture.bridge_enabled);
+
+        let merged = incoming.preserving_capture(&stored);
+        assert!(merged.capture.bridge_enabled);
+        assert_eq!(merged.capture.bridge_port, 9100);
+        assert_eq!(merged.capture.pairing_token.as_deref(), Some("deadbeef"));
     }
 
     #[test]

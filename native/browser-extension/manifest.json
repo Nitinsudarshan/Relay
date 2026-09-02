@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Relay Capture",
+  "version": "1.0.0",
+  "description": "Capture the page or conversation you are looking at into your local Relay vault.",
+  "minimum_chrome_version": "116",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Capture this page in Relay"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "commands": {
+    "capture-page": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Capture this page into Relay"
+    }
+  }
+}

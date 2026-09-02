@@ -15,6 +15,11 @@ target/
 .relay/
 *.tsbuildinfo
 
+# Relay Capture browser-extension bundles — produced by
+# `npm --prefix native run build:extension` from native/src/webcapture/.
+# The manifest, options page and README beside them are source and are tracked.
+native/browser-extension/*.js
+
 # Tauri-generated ACL/capability manifests — regenerated from
 # native/src-tauri/capabilities on every build, not hand-edited.
 native/src-tauri/gen/schemas/

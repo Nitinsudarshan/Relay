@@ -7,7 +7,7 @@ state of play. CI runs all of it on every push and pull request —
 
 ## 1. Rust backend (`native/src-tauri/`)
 
-411 tests, `cargo test`.
+825 tests (+4 ignored benchmarks), `cargo test`.
 
 ```bash
 cd native/src-tauri
@@ -36,6 +36,14 @@ Where the coverage sits:
   settings files written by earlier versions.
 - `vault/` — frontmatter parsing, note and scribble CRUD, merge behaviour.
 - `capture/evaluation.rs` — the STT benchmark matrix and VAD behaviour.
+- `capture/web/` — the web capture path, and the second-largest concentration
+  after meetings: URL-based source detection, sanitization (control and
+  bidirectional characters, non-`http(s)` link targets, `mermaid` fence
+  downgrade, fence escaping), coverage downgrade when caps are hit, refusal of
+  an empty capture, the loopback bridge's token comparison / origin refusal /
+  size limits over a real socket, and an end-to-end set that drives a payload
+  into the vault and checks re-capture versioning, Files isolation, promotion
+  provenance, a Trash round-trip and path-traversal refusal.
 - `sync.rs` — mutex poison recovery, including a test that pins the failure
   mode it exists to prevent.
 
@@ -44,7 +52,7 @@ never a live Ollama instance or a cloud API.
 
 ## 2. Native frontend (`native/src/`)
 
-71 tests, Vitest + React Testing Library, jsdom.
+221 tests, Vitest + React Testing Library, jsdom.
 
 ```bash
 cd native
@@ -75,6 +83,28 @@ Where the coverage sits:
   producing `NaN`.
 - `lib/soundEffects.ts` — the only code path behind the `dictation_sounds`
   setting, over a stubbed Web Audio API.
+- `webcapture/` — the browser extension's extraction layer, tested against
+  fixture documents in jsdom: block extraction (headings, lists, code, tables,
+  quotes, images), hidden content, malformed markup, deep nesting, duplicate
+  text, unicode, link resolution, `<head>` metadata, every coverage verdict,
+  and each site extractor's role attribution, turn ordering, fallback
+  strategies and refusal to guess.
+- `components/captures/` — completeness wording (a capture may only claim the
+  whole page when coverage says so), filtering, the bridge-off warning, and
+  deletion behind a confirmation.
+
+### The cross-language contract
+
+`webcapture/contract.test.ts` generates the payload fixtures under
+`native/src-tauri/src/capture/web/fixtures/` from committed HTML, and
+`capture::web::contract_tests` consumes the same bytes. A field renamed on
+either side of the extension↔backend boundary fails one of the two suites
+immediately rather than failing quietly on a user's next capture. Regenerate
+with:
+
+```bash
+cd native && RELAY_UPDATE_CAPTURE_FIXTURES=1 npm test
+```
 
 ## 3. Web dashboard (`web/`)
 
@@ -102,3 +132,13 @@ React Testing Library, a mocked Supabase client, never a real project database.
   highest-value of these, since it owns the capture state machine.
 - No end-to-end test drives a real recording through capture, STT, and
   processing. The eval fixtures cover the processing half of that.
+- **No browser-level test drives web capture in a real browser.** The
+  extraction layer is covered by jsdom fixtures and the wire format by the
+  contract tests above, but a fixture cannot tell you that ChatGPT changed its
+  markup last week. `docs/capture.md` §11 holds the reproducible manual
+  procedure, and it is the only thing that validates the site extractors
+  against live pages.
+- The extension bundle build (`npm run build:extension`) is not a CI step. Its
+  sources live under `native/src/webcapture/`, so they are typechecked and
+  unit-tested with the rest of the frontend; what is unverified in CI is the
+  bundling itself.

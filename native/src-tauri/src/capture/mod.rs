@@ -1,5 +1,6 @@
 pub mod evaluation;
 pub mod stt;
+pub mod web;
 
 use crate::sync::MutexExt;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};

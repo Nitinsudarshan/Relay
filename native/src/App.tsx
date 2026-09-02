@@ -4,6 +4,7 @@ import { ScribbleViewer } from './components/scribble/ScribbleViewer';
 import { MeetingsV2View } from './components/meetings_v2/MeetingsV2View';
 import { TalkbackPage } from './components/talkback/TalkbackPage';
 import { FilesPage } from './components/files/FilesPage';
+import { CapturesPage } from './components/captures/CapturesPage';
 
 import { ProviderSettings, type SettingsSection } from './components/settings/ProviderSettings';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -39,6 +40,7 @@ export type MainTabType =
   | 'meetings'
   | 'scribble'
   | 'files'
+  | 'captures'
   | 'talkback'
   | 'settings';
 
@@ -47,6 +49,7 @@ const TAB_LABELS: Record<MainTabType, string> = {
   meetings: 'Meetings',
   scribble: 'Scribbles',
   files: 'Files',
+  captures: 'Captures',
   talkback: 'Talkback',
   settings: 'Settings',
 };
@@ -375,6 +378,16 @@ export const App: React.FC = () => {
           {activeTab === 'scribble' && <ScribbleViewer />}
 
           {activeTab === 'files' && <FilesPage onNavigateTab={(tab) => setActiveTab(tab as MainTabType)} />}
+
+          {activeTab === 'captures' && (
+            <CapturesPage
+              onNavigateTab={(tab) => setActiveTab(tab as MainTabType)}
+              onOpenCaptureSettings={() => {
+                setSettingsSection('capture');
+                setActiveTab('settings');
+              }}
+            />
+          )}
 
           {activeTab === 'talkback' && <TalkbackPage />}
 

@@ -110,6 +110,9 @@ pub struct AppState {
     /// Set while a voice install is running; cleared when it ends.
     /// Cancellation flips it, which every download and every stage polls.
     pub voice_install: Arc<VoiceInstall>,
+    /// The loopback listener the Relay browser extension posts captures to.
+    /// `None` whenever capture is switched off, which is the default.
+    pub capture_bridge: Mutex<Option<crate::capture::web::bridge::BridgeHandle>>,
 }
 
 /// The state of an in-flight voice setup.
@@ -200,6 +203,7 @@ pub async fn update_hotkeys(
         &app,
         &hotkeys.show_hide_hotkey,
         &hotkeys.dictation_hotkey,
+        &hotkeys.capture_hotkey,
     )
     .map_err(|e| CommandError::new("HOTKEY_REGISTER_FAILED", &e))?;
 
@@ -1298,6 +1302,13 @@ pub async fn save_settings(
     settings: AppSettings,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
+    // Capture is configured through its own commands, never through this one.
+    // Carrying the stored section over means a settings object that predates
+    // it — or one from a frontend that never read it — cannot switch capture
+    // off and throw away the pairing token as a side effect.
+    let stored_capture = state.settings.lock_or_recover().capture.clone();
+    let settings = settings.preserving_capture(&stored_capture);
+
     settings
         .save(&state.settings_path())
         .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
@@ -1311,7 +1322,12 @@ pub async fn save_settings(
         &app,
         &settings.hotkeys.show_hide_hotkey,
         &settings.hotkeys.dictation_hotkey,
+        &settings.hotkeys.capture_hotkey,
     );
+
+    // The bridge's lifetime follows the setting: turning capture off closes
+    // the socket immediately rather than at the next launch.
+    apply_capture_bridge(&app, &state);
 
     let _ = app.emit("settings-changed", &settings);
     Ok(())
@@ -3240,4 +3256,418 @@ mod voice_install_tests {
         install.end();
         assert!(!install.is_running());
     }
+}
+
+// ---------------------------------------------------------------------------
+// Web capture
+// ---------------------------------------------------------------------------
+
+/// Progress for one capture, broadcast so any surface can show it. The stages
+/// are `SAVING`, `SAVED`, `ANALYSING`, `ANALYSED`, `FAILED`.
+pub const CAPTURE_PROGRESS_EVENT: &str = "capture-progress";
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CaptureProgress {
+    pub stage: String,
+    pub capture_id: Option<String>,
+    pub title: Option<String>,
+    pub application: Option<String>,
+    pub message: Option<String>,
+}
+
+/// What the pairing UI needs to show, and what the extension needs to connect.
+#[derive(Debug, Clone, Serialize)]
+pub struct CaptureBridgeStatus {
+    pub enabled: bool,
+    /// Whether a listener is actually bound right now. Differs from `enabled`
+    /// when the port could not be bound at all.
+    pub running: bool,
+    /// The port actually in use, which may differ from the configured one if
+    /// that port was taken.
+    pub port: u16,
+    pub configured_port: u16,
+    /// The pairing secret, shown so the user can paste it into the extension.
+    /// `None` until capture has been enabled for the first time.
+    pub pairing_token: Option<String>,
+    pub protocol_version: u32,
+    pub analyze_on_capture: bool,
+    pub capture_hotkey: String,
+    pub last_error: Option<String>,
+}
+
+fn emit_capture_progress(app: &AppHandle, progress: CaptureProgress) {
+    let _ = app.emit(CAPTURE_PROGRESS_EVENT, progress);
+}
+
+/// Stores one capture payload and, if configured, kicks off analysis.
+///
+/// Storage and interpretation are separated here on purpose: the artifact is
+/// durable the moment `ingest` returns, and the analysis pass runs afterwards
+/// on a background task whose failure is logged and never propagated.
+fn accept_capture(app: &AppHandle, bytes: &[u8]) -> (u16, String) {
+    let state = app.state::<AppState>();
+    emit_capture_progress(
+        app,
+        CaptureProgress {
+            stage: "SAVING".to_string(),
+            capture_id: None,
+            title: None,
+            application: None,
+            message: None,
+        },
+    );
+
+    match crate::capture::web::ingest(&state.vault, bytes) {
+        Ok(artifact) => {
+            let application = artifact.capture.as_ref().map(|c| c.application.clone());
+            emit_capture_progress(
+                app,
+                CaptureProgress {
+                    stage: "SAVED".to_string(),
+                    capture_id: Some(artifact.id.clone()),
+                    title: Some(artifact.original_filename.clone()),
+                    application: application.clone(),
+                    message: None,
+                },
+            );
+
+            let analyze = state.settings.lock_or_recover().capture.analyze_on_capture;
+            if analyze {
+                spawn_capture_analysis(app.clone(), artifact.id.clone());
+            }
+
+            let body = serde_json::json!({
+                "ok": true,
+                "id": artifact.id,
+                "title": artifact.original_filename,
+                "capture_type": artifact.capture.as_ref().map(|c| c.capture_type.clone()),
+                "application": application,
+                "notes": artifact.capture.as_ref().map(|c| c.notes.clone()).unwrap_or_default(),
+            });
+            (200, body.to_string())
+        }
+        Err(e) => {
+            // The message is the user-facing one from `WebCaptureError`; the
+            // payload itself is never logged, because it is page content.
+            tracing::warn!("[Capture] Rejected a capture: {}", e);
+            emit_capture_progress(
+                app,
+                CaptureProgress {
+                    stage: "FAILED".to_string(),
+                    capture_id: None,
+                    title: None,
+                    application: None,
+                    message: Some(e.to_string()),
+                },
+            );
+            let status = match e {
+                crate::capture::web::WebCaptureError::PayloadTooLarge(_) => 413,
+                crate::capture::web::WebCaptureError::EmptyCapture => 422,
+                crate::capture::web::WebCaptureError::Vault(_) => 500,
+                _ => 400,
+            };
+            (
+                status,
+                crate::capture::web::bridge::error_body("CAPTURE_REJECTED", &e.to_string()),
+            )
+        }
+    }
+}
+
+/// Runs Relay's existing analysis contract over a stored capture.
+///
+/// Reuses `enrich_vault_file` rather than introducing a capture-specific
+/// prompt: a capture is a Vault artifact, and it should be summarized and
+/// tagged by exactly the same rules as an imported document.
+fn spawn_capture_analysis(app: AppHandle, capture_id: String) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        emit_capture_progress(
+            &app,
+            CaptureProgress {
+                stage: "ANALYSING".to_string(),
+                capture_id: Some(capture_id.clone()),
+                title: None,
+                application: None,
+                message: None,
+            },
+        );
+
+        let settings = state.settings.lock_or_recover().clone();
+        let llm = LLMClient::new(settings.provider);
+        match crate::pipeline::enrich_vault_file(&llm, &state.vault, &capture_id).await {
+            Ok(_) => emit_capture_progress(
+                &app,
+                CaptureProgress {
+                    stage: "ANALYSED".to_string(),
+                    capture_id: Some(capture_id),
+                    title: None,
+                    application: None,
+                    message: None,
+                },
+            ),
+            Err(e) => {
+                // A failed analysis is a missing summary, not a lost capture.
+                tracing::warn!("[Capture] Analysis failed for {}: {}", capture_id, e);
+                emit_capture_progress(
+                    &app,
+                    CaptureProgress {
+                        stage: "ANALYSED".to_string(),
+                        capture_id: Some(capture_id),
+                        title: None,
+                        application: None,
+                        message: Some(
+                            "Saved, but Relay could not analyse it. The capture is intact — try \
+                             Analyse again from the capture."
+                                .to_string(),
+                        ),
+                    },
+                );
+            }
+        }
+    });
+}
+
+/// Starts or stops the bridge so that it matches the current settings.
+///
+/// Called at startup and after every settings save, so "enabled" in Settings
+/// and "a socket is open" can never drift apart.
+pub fn apply_capture_bridge(app: &AppHandle, state: &AppState) {
+    let (enabled, port, token) = {
+        let settings = state.settings.lock_or_recover();
+        (
+            settings.capture.bridge_enabled,
+            settings.capture.bridge_port,
+            settings.capture.pairing_token.clone(),
+        )
+    };
+
+    let mut bridge = state.capture_bridge.lock_or_recover();
+    if let Some(existing) = bridge.take() {
+        existing.stop();
+    }
+
+    if !enabled {
+        return;
+    }
+
+    let Some(token) = token else {
+        tracing::warn!("[Capture] Bridge enabled without a pairing token; not starting");
+        return;
+    };
+
+    let handler_app = app.clone();
+    match crate::capture::web::bridge::start(port, token, move |bytes| {
+        accept_capture(&handler_app, bytes)
+    }) {
+        Ok(handle) => *bridge = Some(handle),
+        Err(e) => tracing::error!("[Capture] Bridge failed to start: {}", e),
+    }
+}
+
+fn bridge_status(state: &AppState, last_error: Option<String>) -> CaptureBridgeStatus {
+    let settings = state.settings.lock_or_recover().clone();
+    let bridge = state.capture_bridge.lock_or_recover();
+    let running = bridge.as_ref().is_some_and(|b| b.is_running());
+    CaptureBridgeStatus {
+        enabled: settings.capture.bridge_enabled,
+        running,
+        port: bridge
+            .as_ref()
+            .map(|b| b.port)
+            .unwrap_or(settings.capture.bridge_port),
+        configured_port: settings.capture.bridge_port,
+        pairing_token: settings.capture.pairing_token.clone(),
+        protocol_version: crate::capture::web::PROTOCOL_VERSION,
+        analyze_on_capture: settings.capture.analyze_on_capture,
+        capture_hotkey: settings.hotkeys.capture_hotkey.clone(),
+        last_error,
+    }
+}
+
+#[tauri::command]
+pub async fn get_capture_bridge_status(
+    state: State<'_, AppState>,
+) -> Result<CaptureBridgeStatus, CommandError> {
+    Ok(bridge_status(&state, None))
+}
+
+/// Turns the capture bridge on or off, generating a pairing token the first
+/// time it is switched on.
+#[tauri::command]
+pub async fn set_capture_bridge_enabled(
+    app: AppHandle,
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<CaptureBridgeStatus, CommandError> {
+    {
+        let mut settings = state.settings.lock_or_recover();
+        settings.capture.bridge_enabled = enabled;
+        if enabled && settings.capture.pairing_token.is_none() {
+            settings.capture.pairing_token =
+                Some(crate::capture::web::bridge::generate_token());
+        }
+        settings
+            .save(&state.settings_path())
+            .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
+    }
+
+    apply_capture_bridge(&app, &state);
+    let status = bridge_status(&state, None);
+    if enabled && !status.running {
+        return Err(CommandError::new(
+            "CAPTURE_BRIDGE_START_FAILED",
+            "Relay could not open a local port for capture. Another program may be using it — \
+             try a different port in Capture settings.",
+        ));
+    }
+    Ok(status)
+}
+
+/// Issues a new pairing token, which immediately invalidates every browser
+/// that was paired with the old one.
+#[tauri::command]
+pub async fn regenerate_capture_pairing_token(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<CaptureBridgeStatus, CommandError> {
+    {
+        let mut settings = state.settings.lock_or_recover();
+        settings.capture.pairing_token = Some(crate::capture::web::bridge::generate_token());
+        settings
+            .save(&state.settings_path())
+            .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
+    }
+    apply_capture_bridge(&app, &state);
+    Ok(bridge_status(&state, None))
+}
+
+/// Sets the preferred loopback port and rebinds.
+#[tauri::command]
+pub async fn set_capture_bridge_port(
+    app: AppHandle,
+    port: u16,
+    state: State<'_, AppState>,
+) -> Result<CaptureBridgeStatus, CommandError> {
+    if port < 1024 {
+        return Err(CommandError::new(
+            "INVALID_PORT",
+            "Choose a port above 1023 — lower ports are reserved by the operating system.",
+        ));
+    }
+    {
+        let mut settings = state.settings.lock_or_recover();
+        settings.capture.bridge_port = port;
+        settings
+            .save(&state.settings_path())
+            .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
+    }
+    apply_capture_bridge(&app, &state);
+    Ok(bridge_status(&state, None))
+}
+
+/// Whether Relay analyses each capture as soon as it lands.
+#[tauri::command]
+pub async fn set_capture_analyze_on_capture(
+    app: AppHandle,
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<CaptureBridgeStatus, CommandError> {
+    {
+        let mut settings = state.settings.lock_or_recover();
+        settings.capture.analyze_on_capture = enabled;
+        settings
+            .save(&state.settings_path())
+            .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
+        let updated = settings.clone();
+        drop(settings);
+        let _ = app.emit("settings-changed", &updated);
+    }
+    Ok(bridge_status(&state, None))
+}
+
+#[tauri::command]
+pub async fn get_captures(state: State<'_, AppState>) -> Result<Vec<VaultFile>, CommandError> {
+    state
+        .vault
+        .list_captures()
+        .map_err(|e| CommandError::new("LIST_CAPTURES_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn get_capture(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<VaultFile, CommandError> {
+    let artifact = state
+        .vault
+        .get_vault_file(&id)
+        .map_err(|e| CommandError::new("CAPTURE_NOT_FOUND", &e.to_string()))?;
+    if !artifact.is_capture() {
+        return Err(CommandError::new(
+            "CAPTURE_NOT_FOUND",
+            "That artifact is not a capture.",
+        ));
+    }
+    Ok(artifact)
+}
+
+/// Returns the untouched structured payload behind a capture — what the page
+/// actually said, before normalization made it readable.
+#[tauri::command]
+pub async fn get_capture_payload(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::capture::web::WebCapturePayload, CommandError> {
+    state
+        .vault
+        .get_capture_payload(&id)
+        .map_err(|e| CommandError::new("CAPTURE_PAYLOAD_UNAVAILABLE", &e.to_string()))
+}
+
+/// Rebuilds a capture's markdown from its stored payload.
+#[tauri::command]
+pub async fn renormalize_capture(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<VaultFile, CommandError> {
+    state
+        .vault
+        .renormalize_capture(&id)
+        .map_err(|e| CommandError::new("RENORMALIZE_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
+pub async fn delete_capture(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    state
+        .vault
+        .delete_vault_file(&id)
+        .map_err(|e| CommandError::new("DELETE_FAILED", &e.to_string()))
+}
+
+/// Ingests a capture payload from inside the app rather than over the bridge.
+///
+/// Same validation, sanitization and storage as a bridged capture — this is
+/// the seam a future non-browser capture source plugs into, and the path an
+/// end-to-end test drives without opening a socket.
+#[tauri::command]
+pub async fn import_web_capture(
+    app: AppHandle,
+    payload_json: String,
+    state: State<'_, AppState>,
+) -> Result<VaultFile, CommandError> {
+    if payload_json.len() > crate::capture::web::MAX_PAYLOAD_BYTES {
+        return Err(CommandError::new(
+            "PAYLOAD_TOO_LARGE",
+            "That capture is larger than Relay's capture size limit.",
+        ));
+    }
+
+    let artifact = crate::capture::web::ingest(&state.vault, payload_json.as_bytes())
+        .map_err(|e| CommandError::new("CAPTURE_REJECTED", &e.to_string()))?;
+
+    if state.settings.lock_or_recover().capture.analyze_on_capture {
+        spawn_capture_analysis(app, artifact.id.clone());
+    }
+    Ok(artifact)
 }

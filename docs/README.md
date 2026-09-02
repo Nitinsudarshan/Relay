@@ -17,6 +17,7 @@ is right and the document is a bug to be fixed in the same change.
 | [data-model.md](data-model.md) | Vault file layouts, frontmatter schemas, settings shape. |
 | [api.md](api.md) | Tauri command conventions and the `CommandError` contract. |
 | [user-flows.md](user-flows.md) | End-to-end flows through the shipped features. |
+| [capture.md](capture.md) | Web capture: the browser extension, the loopback bridge, the extraction ladder, and what a capture may claim about its own completeness. |
 | [talkback/ARCHITECTURE.md](talkback/ARCHITECTURE.md) | Talkback's pipeline, state machine, retrieval, and what it deliberately does not do. |
 | [testing.md](testing.md) | What is tested, with what, and where the tests live. |
 | [GOOGLE_OAUTH_SETUP.md](GOOGLE_OAUTH_SETUP.md) | The OAuth 2.0 PKCE architecture and Google Cloud setup. |

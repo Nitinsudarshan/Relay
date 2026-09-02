@@ -36,6 +36,10 @@ Relay is architected into three distinct surfaces in a single repository. **Curr
 │  │  │   hotkeys    │  │     tts      │  │       settings         │  │  │
 │  │  │(global+inject│  │   (Piper)    │  │  (settings.json I/O)   │  │  │
 │  │  └──────────────┘  └──────────────┘  └────────────────────────┘  │  │
+│  │  ┌──────────────────────────────────────────────────────────────┐│  │
+│  │  │ capture::web  ◀── loopback (127.0.0.1) ── browser extension  ││  │
+│  │  │ (detect source → sanitize → normalize → Vault artifact)      ││  │
+│  │  └──────────────────────────────────────────────────────────────┘│  │
 │  └──────────────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -43,6 +47,7 @@ Relay is architected into three distinct surfaces in a single repository. **Curr
 ## Rust Backend Module Design (`native/src-tauri/src/`)
 
 - `capture`: Manages audio device input via `cpal` on a dedicated thread (resampled to 16kHz mono), writes WAV files, and (`capture::stt`) transcribes via a local Whisper model (`whisper-rs`).
+- `capture::web`: Web capture. Content arrives from the Relay browser extension over a loopback listener (`bridge.rs`) rather than through Tauri IPC — the browser is the only place a rendered page exists, and the only place a browser will grant access to one. Relay derives provenance from the URL (`source.rs`), sanitizes and normalizes the payload into markdown (`normalize.rs`), and persists it as a Vault artifact before any AI runs. See `docs/capture.md`.
 - `pipeline`: Core prompt engines (all in `mod.rs` except `chat.rs`).
   - `process_meeting`: Extracts structured JSON tasks from raw meeting transcripts.
   - `process_scribble`: Generates structured Markdown documents from unstructured voice scribbles.

@@ -1,5 +1,45 @@
 # Relay — Changelog
 
+## [0.26.0] - 2026-09-02
+
+### Relay Capture — Structured Web & Conversation Capture
+
+**Type**: minor — a new capture domain module, a browser extension, a loopback bridge, capture provenance on the Vault artifact model, and a Captures surface (`native/src-tauri/src/capture/web/ (new)`, `native/src-tauri/src/vault/{file,mod}.rs`, `native/src-tauri/src/{commands,lib,settings/mod,hotkeys/mod}.rs`, `native/src-tauri/src/talkback/{retrieval,sources}.rs`, `native/src/webcapture/ (new)`, `native/browser-extension/ (new)`, `native/src/components/captures/ (new)`, `native/src/components/settings/CaptureSettingsView.tsx (new)`, `docs/capture.md (new)`).
+
+#### Features
+
+- **Structured web capture, not screenshots (`capture/web/`, `native/src/webcapture/`)**: Captures the page or conversation you are looking at as structured text — conversation turns with role attribution from ChatGPT and Claude, repositories, issues and pull requests from GitHub, and headings, paragraphs, lists, code, quotes, tables, images and `<head>` metadata from anything else. Site extractors are independent modules behind a registry with layered selector strategies; the strategy that recognises the most turns wins, and a fallback winning is recorded on the artifact.
+- **A fallback ladder that never lies about which rung it reached (`capture.ts`, `normalize.rs`)**: site extractor → generic article extraction → the page's visible text → refuse. A site extractor that throws costs structure, not the capture. A page with nothing readable produces no artifact at all rather than an empty one.
+- **Honest completeness (`dom.ts`, `normalize.rs`)**: `full_document` requires positive evidence — ~90%+ of the page's visible text recognised as content and no virtualization markers. Everything else DOM-derived is `rendered_dom`; dropped content is `partial`. Conversations are always `rendered_dom`, and note when the thread was not scrolled to its beginning. Every limitation is written on the artifact in plain language and shown in the UI.
+- **Least-privilege browser extension (`native/browser-extension/`, `webcapture/background.ts`)**: Manifest V3 with `activeTab`, `scripting`, `storage` and one host permission (`http://127.0.0.1/*`). No `<all_urls>`, no declared content script, no standing access to any site. A page is read only in response to the extension's own shortcut or toolbar button.
+- **Local capture bridge (`capture/web/bridge.rs`)**: An in-process loopback listener on `127.0.0.1`, off by default, authenticated by a 256-bit pairing token compared in constant time, restricted to browser-extension origins, with header and body size limits enforced while reading and per-connection timeouts. No new crates — hand-rolled on `std::net::TcpListener`, as `oauth/flow.rs` already does.
+- **Captures are Vault artifacts (`vault/file.rs`, `vault/mod.rs`)**: `VaultFile` gained an optional `capture: CaptureProvenance`, stored under `.relay/vault/captures/<id>/` alongside the raw payload it was built from. Analysis, summarisation, promotion to a Scribble, Trash and restore all work through the existing code paths; `list_vault_files` still returns imported documents only, so the Files surface is unchanged.
+- **Acquisition before interpretation (`commands.rs`)**: A capture is persisted, with its source payload preserved, before any model sees it. Analysis runs afterwards on a background task; a failure costs a summary and is reported as such, never the captured content. `renormalize_capture` rebuilds the markdown from the stored payload without touching identity, capture time or version history.
+- **Re-capture and versioning (`vault/mod.rs`)**: Identical content from the same URL bumps a counter on the existing artifact. Changed content becomes a new artifact at `version: n+1` with `previous_capture_id` pointing at the one it supersedes.
+- **Captures surface and pairing UX (`components/captures/`, `CaptureSettingsView.tsx`, `App.tsx`, `NativeSidebar.tsx`)**: A Captures tab listing what was captured, from where, and — as a badge — when a capture is not complete; a detail view with the content, its full provenance, and the raw stored payload; live `Capturing… / Saved / Analysing…` status from backend events; and a Capture settings section that enables the bridge, shows the port and pairing token, and explains why reading a page starts in the browser.
+- **Talkback and knowledge integration (`talkback/{retrieval,sources}.rs`)**: A new `SourceType::Capture` gathered from `list_captures()` and weighted like an imported document, so captured pages are answerable by Talkback immediately; promotion to a Scribble carries the capture's provenance and finally populates the `browser_page` / `browser_conversation` source types that had been declared and unused.
+
+#### Security
+
+- **A webpage is untrusted input (`normalize.rs`)**: Nothing captured is executed and nothing is stored as HTML — the payload has no field that can carry markup. Control and C1 characters, the BOM and the Unicode bidirectional overrides are stripped; non-`http(s)` link and image targets are dropped and counted; code is fenced with a backtick run longer than any inside it; table cells are escaped; every string, list, table and block count is capped.
+- **`mermaid` fences are downgraded to `text` (`normalize.rs`)**: Relay's markdown view renders mermaid to SVG and injects the result with `dangerouslySetInnerHTML`, so captured content must never reach that renderer. The diagram source is still preserved, as text.
+- **Path traversal (`vault/mod.rs`)**: A capture's stored filename is built from a strict allowlist, so a page titled `../../../etc/passwd` cannot produce a path outside its own directory.
+- **Provenance is derived, not accepted (`source.rs`)**: Application, domain and capture type come from the URL on the Rust side — including attributing `https://github.com@evil.example/` to `evil.example` — never from what the payload claimed to be.
+
+#### Improvements
+
+- **Capture hotkey (`hotkeys/mod.rs`, `settings/mod.rs`)**: A third, independent global shortcut (`capture_hotkey`, default `Ctrl+Shift+C`) brings the Captures surface forward. It never fails `apply_hotkeys`: capture's real trigger is the browser's, so a conflict costs convenience rather than the feature.
+- **Talkback source list is now exhaustive (`TalkbackSettingsView.tsx`, `types/index.ts`)**: The source toggles are derived from a `Record` keyed by `TalkbackSourceType`, so a source the backend can search but the UI does not list no longer compiles. `Files` was already in that position — `toggleSource` materializes the full option list before removing one, so the first toggle silently dropped Files from the saved selection; Captures would have joined it.
+- **Version-skew tolerance (`capture/web/mod.rs`)**: Unknown block types, content kinds and coverage values from a newer extension degrade to a skipped-and-counted `Unknown` rather than failing the whole capture.
+- **Documentation (`docs/capture.md`, `docs/{README,api,data-model,architecture,requirements,user-flows,testing}.md`, `docs/decisions.md`, `maybe_later.md`, `README.md`)**: A new architecture document covering the browser research, the transport comparison, the security model, the completeness rules, the limitations and the manual browser-validation procedure; Decisions 57–60; and deferred entries for desktop-initiated capture, screenshot/OCR, and Firefox.
+
+#### Testing
+
+- **Rust (825 tests, +70)**: Source detection and URL parsing; sanitization, fence escaping, the mermaid downgrade, unicode preservation and coverage downgrade; empty-capture refusal; the bridge's token comparison, origin refusal, preflight, size limits and CORS headers, including two tests that drive a real loopback socket; and an end-to-end set covering payload → artifact, raw payload preservation, re-capture versioning, Files isolation, promotion provenance, a Trash round-trip, path-traversal refusal and a 1,200-turn conversation.
+- **Frontend (221 tests, +96)**: DOM extraction over fixture documents (block types, hidden content, malformed markup, deep nesting, duplicates, unicode, links, metadata, every coverage verdict); each site extractor's role attribution, turn ordering, code/tables/lists, fallback strategies and refusal to guess; the generic extractor against articles, docs pages, blogs and navigation-heavy pages; the ladder's strategy selection and caps; and the Captures surface's completeness wording, filtering, bridge-off warning and confirmed deletion.
+- **A cross-language contract test**: payload fixtures generated by the TypeScript suite and consumed by Rust tests, so a field renamed on either side of the extension↔backend boundary fails a test rather than a user's next capture.
+
+
 ## [0.25.3] - 2026-09-02
 
 ### End-to-End Keep Microphone Warm Architecture

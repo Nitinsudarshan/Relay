@@ -139,6 +139,7 @@ pub fn run() {
         talkback: Arc::new(talkback::TalkbackEngine::new()),
         tts_root,
         voice_install: Arc::new(commands::VoiceInstall::default()),
+        capture_bridge: Mutex::new(None),
     };
 
     tauri::Builder::default()
@@ -182,7 +183,12 @@ pub fn run() {
                 handle,
                 &hotkeys_config.show_hide_hotkey,
                 &hotkeys_config.dictation_hotkey,
+                &hotkeys_config.capture_hotkey,
             );
+
+            // Opens the loopback capture listener only when the user has
+            // switched capture on; a fresh install opens no socket.
+            commands::apply_capture_bridge(handle, &handle.state::<commands::AppState>());
             // The dictation pill is now the one, permanent PTT surface — no
             // more docked/floating product-mode choice to hide it behind
             // (see docs/decisions.md Decision 36) — so it's always shown.
@@ -307,6 +313,17 @@ pub fn run() {
             commands::reprocess_vault_file,
             commands::delete_vault_file,
             commands::open_vault_file_location,
+            commands::get_capture_bridge_status,
+            commands::set_capture_bridge_enabled,
+            commands::set_capture_bridge_port,
+            commands::set_capture_analyze_on_capture,
+            commands::regenerate_capture_pairing_token,
+            commands::get_captures,
+            commands::get_capture,
+            commands::get_capture_payload,
+            commands::renormalize_capture,
+            commands::delete_capture,
+            commands::import_web_capture,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

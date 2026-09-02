@@ -43,6 +43,74 @@ export interface VaultFile {
   relationships: ScribbleRelationship[];
   ai_metadata: ScribbleAiMetadata;
   linked_scribble_id?: string | null;
+  /**
+   * Present only on web captures. Provenance — where the content came from
+   * and how completely it was acquired. Semantic fields (`summary`, `tags`,
+   * `topics`, `entities`) are produced later by analysis and are kept out of
+   * here on purpose.
+   */
+  capture?: CaptureProvenance | null;
+}
+
+/** How much of a page a capture can honestly claim to contain. */
+export type CaptureCoverage = 'full_document' | 'rendered_dom' | 'partial' | 'unknown';
+
+/** How the content was obtained, best first. */
+export type CaptureFidelity = 'structured' | 'generic' | 'text_only';
+
+export interface CaptureProvenance {
+  source_type: string;
+  /** `conversation` | `article` | `repository` | `issue` | `pull_request` | `discussion` | `code` | `page` */
+  capture_type: string;
+  application: string;
+  domain: string;
+  url: string;
+  page_title: string;
+  /** Relay's own clock, RFC 3339. Authoritative. */
+  captured_at: string;
+  browser_captured_at?: string | null;
+  browser?: string | null;
+  extractor_id: string;
+  extractor_version: number;
+  fidelity: CaptureFidelity | string;
+  coverage: CaptureCoverage | string;
+  /** Plain-language statements about what was and was not captured. */
+  notes: string[];
+  message_count?: number | null;
+  block_count: number;
+  skipped_block_count: number;
+  truncated: boolean;
+  canonical_url?: string | null;
+  author?: string | null;
+  published_at?: string | null;
+  language?: string | null;
+  version: number;
+  previous_capture_id?: string | null;
+  recapture_count: number;
+}
+
+/** Live state of the local bridge the browser extension talks to. */
+export interface CaptureBridgeStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  configured_port: number;
+  pairing_token?: string | null;
+  protocol_version: number;
+  analyze_on_capture: boolean;
+  capture_hotkey: string;
+  last_error?: string | null;
+}
+
+/** Stages broadcast on the `capture-progress` event. */
+export type CaptureStage = 'SAVING' | 'SAVED' | 'ANALYSING' | 'ANALYSED' | 'FAILED';
+
+export interface CaptureProgress {
+  stage: CaptureStage | string;
+  capture_id?: string | null;
+  title?: string | null;
+  application?: string | null;
+  message?: string | null;
 }
 
 export interface VaultLocationInfo {
@@ -293,12 +361,22 @@ export interface InstallProgress {
   overall: number;
 }
 
+export interface CaptureSettings {
+  bridge_enabled: boolean;
+  bridge_port: number;
+  pairing_token?: string | null;
+  analyze_on_capture: boolean;
+}
+
 export interface HotkeySettings {
   show_hide_hotkey: string;
   dictation_hotkey: string;
   /** One press starts recording, a second press stops it, instead of
    * holding the key down the whole time. Defaults to false (hold-to-talk). */
   toggle_to_talk: boolean;
+  /** Brings the Captures surface forward. Reading a web page is triggered
+   * from inside the browser, not from here — see `docs/capture.md`. */
+  capture_hotkey: string;
 }
 
 export type PillPosition = 'bottom_left' | 'bottom_center' | 'bottom_right' | 'top_center' | 'left_center' | 'right_center';
@@ -1222,11 +1300,19 @@ export interface MeetingTaskPushResult {
 // machine; these types are what it broadcasts and the UI renders.
 
 /** Where a piece of retrieved context came from. */
+/**
+ * Every source Talkback can retrieve from — the serialized form of
+ * `talkback::retrieval::SourceType`. Keep it exhaustive: the settings UI
+ * derives its toggle list from a `Record` keyed by this union, so a source
+ * missing here is a source the user can silently switch off and never back on.
+ */
 export type TalkbackSourceType =
   | 'VOICE_NOTE'
   | 'SCRIBBLE'
   | 'MEETING'
-  | 'MEETING_FACTS';
+  | 'MEETING_FACTS'
+  | 'FILE'
+  | 'CAPTURE';
 
 /** One retrieved piece of context, with its provenance intact. */
 export interface TalkbackContextItem {
