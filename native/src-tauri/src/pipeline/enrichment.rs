@@ -342,9 +342,9 @@ pub const CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS: &str = r#"
 Formatting & Hierarchy Rules for Summary:
 - Keep it short and impactful (under 75 words total).
 - Clear hierarchy:
-  1. Use structured numbered sections for main takeaways (e.g. "1. **Core Insight:** ..." or "1. **Architecture:** ...").
+  1. Use structured numbered sections for main takeaways (e.g. "1. Core Insight: ..." or "1. Architecture: ...").
   2. Sub-bullets under numbered headers MUST be indented with 2-4 spaces (e.g. "   - Detailed action or key context...").
-  3. Bold key takeaways and terms for rapid scanning.
+  3. Bold key takeaways and terms for rapid scanning without raw asterisks in title headers.
 - Flowcharts & Diagrams:
   If the content describes a workflow, sequential steps, state transitions, or system architecture, ALWAYS include a compact 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Input] -->|Process| B[Result]\n```"). Do NOT use trailing '|>' on edge labels (use '-->|label| B', NOT '-->|label|> B') and do NOT put backticks inside bracketed node labels.
 "#;
@@ -358,8 +358,8 @@ Return ONLY a valid JSON object with the following fields:
 - "title": a concise, meaningful concept title (3 to 8 words). Never use transcript conversational prefixes (e.g. 'Yes — this makes a lot', 'I think we should'), brackets, 'Generating title…', or 'Consolidated:'. Derive a clean, insightful title describing the central subject matter (e.g. 'Local Knowledge Layer & Cloud Integration Strategy' or 'Event Pipeline Architecture').
 - "summary": a structured, short summary (under 75 words total) optimized for rapid reading and visual hierarchy.
   Formatting Rules:
-  1. Use structured numbered sections (e.g. "1. **Core Insight:** ..." or "1. **Architecture:**") with sub-bullets indented with 2-4 spaces (e.g. "   - Detailed action or context...").
-  2. Use bold lead-ins for key terms and actionable takeaways.
+  1. Use structured numbered sections (e.g. "1. Core Insight: ..." or "1. Architecture:") with sub-bullets indented with 2-4 spaces (e.g. "   - Detailed action or context...").
+  2. Use bold lead-ins for key terms and actionable takeaways without raw asterisks in title headers.
   3. If the content describes a workflow, state transitions, or system architecture, ALWAYS include a concise 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Capture] -->|Enrich| B[Graph]\n```"). Do NOT use trailing '|>' on edge labels (use '-->|label| B', NOT '-->|label|> B') and do NOT put backticks inside bracketed node labels.
 - "topics": an array of 5 to 7 high-level domain topics and conceptual themes (e.g. ["Local-First Architecture", "Knowledge Management", "Cloud Synchronization", "Google Calendar Integration", "Identity Management"]). Return the top 5-7 most relevant topics based on the complete content.
 - "entities": an array of 5 to 7 specific named entities (technologies, tools, organizations, people, frameworks, platforms, projects) mentioned or central to the text. If fewer than 5 exist, return only the meaningful ones without inventing.
@@ -880,7 +880,7 @@ mod tests {
     #[test]
     fn test_canonical_prompts_integrity() {
         assert!(CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS.contains("under 75 words"));
-        assert!(CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS.contains("1. **Core Insight:**"));
+        assert!(CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS.contains("1. Core Insight:"));
         assert!(CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS.contains("2-4 node Mermaid flowchart"));
 
         assert!(CANONICAL_ANALYSIS_SYSTEM_PROMPT.contains("under 75 words"));

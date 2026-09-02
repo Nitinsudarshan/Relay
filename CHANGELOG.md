@@ -1,5 +1,16 @@
 # Relay — Changelog
 
+## [0.25.1] - 2026-09-02
+
+### Raw Asterisk Stripping & Heading Formatter Fix
+
+**Type**: patch — fixed markdown inline formatter to strip raw `**` literal asterisks from section titles (`**Core Insight:**`, `**Architecture:**`) and format bold text with trailing colons cleanly without displaying literal asterisks (`native/src/components/common/MarkdownView.tsx`, `native/src-tauri/src/pipeline/enrichment.rs`).
+
+#### Fixes
+
+- **Inline Bold Formatting & Asterisk Cleanup (`MarkdownView.tsx`)**: Updated `renderFormattedText` regex to match bold tokens ending with trailing colons/punctuation (`**text:**`), stripping leading/trailing `**` so titles render as clean bold text (`Core Insight:`, `Architecture:`) without literal asterisks.
+- **System Prompt Example Clean Up (`pipeline/enrichment.rs`)**: Updated canonical system prompt instructions to instruct LLMs to emit clean section headers (`1. Core Insight: ...`).
+
 ## [0.23.1] - 2026-09-02
 
 ### Robust Mermaid Diagram LLM Syntax Sanitization

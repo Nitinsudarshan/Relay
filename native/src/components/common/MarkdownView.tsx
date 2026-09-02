@@ -494,42 +494,75 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content, className =
 
 // Inline formatter for bold (**text**), italic (*text*), and code (`code`)
 function renderFormattedText(text: string): React.ReactNode[] {
+  if (!text) return [];
+
+  // Pre-clean escaped asterisks
+  const sanitizedText = text.replace(/\\\*/g, '*');
+
   const parts: React.ReactNode[] = [];
-  const regex = /(\*\*.*?\*\*|\*.*?\*|`.*?`)/g;
+  // Match code (`...`), bold (**...** with optional trailing colons/punctuation), or italic (*...*)
+  const regex = /(`[^`]+`|\*\*[^*]+\*\*:?|\*[^*]+\*)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = regex.exec(text)) !== null) {
+  while ((match = regex.exec(sanitizedText)) !== null) {
     if (match.index > lastIndex) {
-      parts.push(text.substring(lastIndex, match.index));
+      parts.push(sanitizedText.substring(lastIndex, match.index).replace(/\*\*/g, ''));
     }
 
     const token = match[0];
-    if (token.startsWith('**') && token.endsWith('**')) {
-      parts.push(
-        <strong key={`b_${match.index}`} className="font-semibold text-foreground">
-          {token.slice(2, -2)}
-        </strong>
-      );
-    } else if (token.startsWith('`') && token.endsWith('`')) {
+
+    if (token.startsWith('`') && token.endsWith('`')) {
       parts.push(
         <code key={`c_${match.index}`} className="px-1.5 py-0.5 rounded bg-muted font-mono text-[11px] text-primary border border-border/50">
           {token.slice(1, -1)}
         </code>
       );
+    } else if (token.startsWith('**')) {
+      let label = token.slice(2);
+      let suffix = '';
+
+      if (label.endsWith('**:')) {
+        label = label.slice(0, -3);
+        suffix = ':';
+      } else if (label.endsWith('**')) {
+        label = label.slice(0, -2);
+      } else {
+        const closeStar = label.indexOf('**');
+        if (closeStar !== -1) {
+          suffix = label.slice(closeStar + 2);
+          label = label.slice(0, closeStar);
+        }
+      }
+
+      // Strip any residual asterisks defensively
+      label = label.replace(/\*/g, '');
+
+      if (label) {
+        parts.push(
+          <strong key={`b_${match.index}`} className="font-semibold text-foreground">
+            {label}
+          </strong>
+        );
+      }
+      if (suffix) {
+        parts.push(suffix);
+      }
     } else if (token.startsWith('*') && token.endsWith('*')) {
       parts.push(
         <em key={`i_${match.index}`} className="italic text-muted-foreground">
           {token.slice(1, -1)}
         </em>
       );
+    } else {
+      parts.push(token.replace(/\*\*/g, ''));
     }
 
     lastIndex = match.index + token.length;
   }
 
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex));
+  if (lastIndex < sanitizedText.length) {
+    parts.push(sanitizedText.substring(lastIndex).replace(/\*\*/g, ''));
   }
 
   return parts;
