@@ -1,5 +1,17 @@
 # Relay — Changelog
 
+## [0.25.3] - 2026-09-02
+
+### End-to-End Keep Microphone Warm Architecture
+
+**Type**: patch — decoupled CPAL audio stream initialization lifecycle from recording session lifecycle in `AudioRecorder`, supporting zero-latency microphone warm reuse and idle stream expiration (`native/src-tauri/src/capture/mod.rs`, `native/src-tauri/src/settings/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`).
+
+#### Features
+
+- **Keep Microphone Warm State Machine (`capture/mod.rs`)**: Implemented stream decoupling with `Closed`, `WarmIdle`, and `ActiveRecording` stream states. Reuses active CPAL input streams across consecutive sessions while dropping real-time PCM audio in `WarmIdle` mode to maintain strict privacy.
+- **Generation-Matched Idle Expiration (`capture/mod.rs`)**: Introduced generation tracking (`generation: u64`) to ensure background stream closure timers only expire streams that remained continuously idle for the configured grace period (`15s`, `30s`, `1m`, `5m`).
+- **Dynamic Configuration Wiring (`settings/mod.rs`, `commands.rs`, `lib.rs`)**: Added `parse_keep_warm_duration` helper on `AudioInputSettings` and wired dynamic recorder configuration updates into application startup and `save_settings` IPC command.
+
 ## [0.25.2] - 2026-09-02
 
 ### Voice Notes On-Demand Multi-Select & Bulk Delete

@@ -1296,6 +1296,9 @@ pub async fn save_settings(
     settings
         .save(&state.settings_path())
         .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
+    state
+        .recorder
+        .set_keep_warm_duration(settings.audio_input.parse_keep_warm_duration());
     *state.settings.lock_or_recover() = settings.clone();
 
     // Re-register hotkeys dynamically with the OS immediately

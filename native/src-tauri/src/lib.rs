@@ -123,8 +123,11 @@ pub fn run() {
 
     let meeting_processor = Arc::new(meetings_v2::MeetingProcessor::new(meetings_v2.store()));
 
+    let recorder = AudioRecorder::new();
+    recorder.set_keep_warm_duration(settings.audio_input.parse_keep_warm_duration());
+
     let state = AppState {
-        recorder: AudioRecorder::new(),
+        recorder,
         vault: VaultManager::new(vault_dir),
         default_vault_dir,
         config_dir,

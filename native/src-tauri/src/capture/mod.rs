@@ -120,8 +120,19 @@ struct AudioDetectionState {
     frames_above_threshold: u32,
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[derive(Clone)]
 pub struct AudioRecorder {
-    active_session: Arc<Mutex<Option<ActiveSession>>>,
+    inner: Arc<Mutex<RecorderInner>>,
+    keep_warm_duration: Arc<Mutex<Option<Duration>>>,
+}
+
+#[derive(Default)]
+struct RecorderInner {
+    active_session: Option<ActiveSession>,
+    active_stream: Option<ActiveStream>,
+    generation: u64,
 }
 
 struct ActiveSession {
@@ -129,14 +140,24 @@ struct ActiveSession {
     mode: String,
     file_path: PathBuf,
     start_time: std::time::Instant,
-    stop_tx: std_mpsc::Sender<()>,
-    done_rx: std_mpsc::Receiver<Result<CaptureThreadResult, String>>,
 }
 
-struct CaptureThreadResult {
-    samples: Vec<f32>,
+struct ActiveStream {
+    samples: Arc<Mutex<Vec<f32>>>,
+    detection: Arc<Mutex<AudioDetectionState>>,
+    is_recording: Arc<AtomicBool>,
+    app_handle: Arc<Mutex<Option<AppHandle>>>,
+    stop_tx: std_mpsc::Sender<()>,
     input_rate: u32,
-    had_audio: bool,
+    generation: u64,
+    alive: Arc<AtomicBool>,
+}
+
+struct AliveGuard(Arc<AtomicBool>);
+impl Drop for AliveGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 impl Default for AudioRecorder {
@@ -148,20 +169,35 @@ impl Default for AudioRecorder {
 impl AudioRecorder {
     pub fn new() -> Self {
         Self {
-            active_session: Arc::new(Mutex::new(None)),
+            inner: Arc::new(Mutex::new(RecorderInner::default())),
+            keep_warm_duration: Arc::new(Mutex::new(None)),
         }
     }
 
+    pub fn set_keep_warm_duration(&self, duration: Option<Duration>) {
+        *self.keep_warm_duration.lock_or_recover() = duration;
+    }
+
+    pub fn keep_warm_duration(&self) -> Option<Duration> {
+        *self.keep_warm_duration.lock_or_recover()
+    }
+
     pub fn is_active(&self) -> bool {
-        self.active_session.lock_or_recover().is_some()
+        self.inner.lock_or_recover().active_session.is_some()
+    }
+
+    pub fn is_stream_warm(&self) -> bool {
+        let guard = self.inner.lock_or_recover();
+        guard.active_session.is_none() && guard.active_stream.is_some()
     }
 
     /// The `mode` of the in-progress session, if any — lets callers tell a
     /// hotkey-owned ("dictation") session apart from a UI-owned one
     /// ("meeting"/"scribble"/"chat") without a separate ownership field.
     pub fn active_mode(&self) -> Option<String> {
-        self.active_session
+        self.inner
             .lock_or_recover()
+            .active_session
             .as_ref()
             .map(|s| s.mode.clone())
     }
@@ -172,8 +208,8 @@ impl AudioRecorder {
         output_dir: &Path,
         app: Option<AppHandle>,
     ) -> Result<String, CaptureError> {
-        let mut session = self.active_session.lock_or_recover();
-        if session.is_some() {
+        let mut inner = self.inner.lock_or_recover();
+        if inner.active_session.is_some() {
             return Err(CaptureError::SessionAlreadyActive);
         }
 
@@ -182,72 +218,124 @@ impl AudioRecorder {
         let file_name = format!("{}_{}.wav", mode, session_id);
         let file_path = output_dir.join(file_name);
 
-        let (stop_tx, stop_rx) = std_mpsc::channel();
-        let (done_tx, done_rx) = std_mpsc::channel();
-        spawn_capture_thread(stop_rx, done_tx, app);
+        inner.generation += 1;
+        let current_gen = inner.generation;
 
-        *session = Some(ActiveSession {
+        let mut reused = false;
+        if let Some(ref mut stream) = inner.active_stream {
+            if stream.alive.load(Ordering::SeqCst) {
+                stream.samples.lock_or_recover().clear();
+                *stream.detection.lock_or_recover() = AudioDetectionState::default();
+                *stream.app_handle.lock_or_recover() = app.clone();
+                stream.generation = current_gen;
+                stream.is_recording.store(true, Ordering::SeqCst);
+                reused = true;
+            }
+        }
+
+        if !reused {
+            inner.active_stream = None;
+            let (stop_tx, stop_rx) = std_mpsc::channel();
+            let (init_tx, init_rx) = std_mpsc::channel();
+
+            let is_recording = Arc::new(AtomicBool::new(true));
+            let samples = Arc::new(Mutex::new(Vec::new()));
+            let detection = Arc::new(Mutex::new(AudioDetectionState::default()));
+            let app_handle_store = Arc::new(Mutex::new(app));
+            let alive = Arc::new(AtomicBool::new(true));
+
+            spawn_warm_capture_thread(
+                stop_rx,
+                init_tx,
+                is_recording.clone(),
+                samples.clone(),
+                detection.clone(),
+                app_handle_store.clone(),
+                alive.clone(),
+            );
+
+            let input_rate = match init_rx.recv_timeout(Duration::from_secs(10)) {
+                Ok(Ok(rate)) => rate,
+                Ok(Err(e)) => return Err(CaptureError::DeviceError(e)),
+                Err(_) => return Err(CaptureError::DeviceError("CPAL stream init timed out".to_string())),
+            };
+
+            inner.active_stream = Some(ActiveStream {
+                samples,
+                detection,
+                is_recording,
+                app_handle: app_handle_store,
+                stop_tx,
+                input_rate,
+                generation: current_gen,
+                alive,
+            });
+        }
+
+        inner.active_session = Some(ActiveSession {
             session_id: session_id.clone(),
             mode: mode.to_string(),
             file_path,
             start_time: std::time::Instant::now(),
-            stop_tx,
-            done_rx,
         });
 
         tracing::info!(
-            "Started audio capture session {} in mode {}",
+            "Started audio capture session {} in mode {} (reused: {}, gen {})",
             session_id,
-            mode
+            mode,
+            reused,
+            current_gen
         );
         Ok(session_id)
     }
 
     pub async fn stop(&self) -> Result<CapturedAudio, CaptureError> {
-        // TEMP: dictation latency instrumentation
         let t_stop_start = std::time::Instant::now();
 
-        let session = {
-            let mut guard = self.active_session.lock_or_recover();
-            guard.take().ok_or(CaptureError::NoActiveSession)?
+        let (session, session_samples, session_detection, input_rate) = {
+            let mut inner = self.inner.lock_or_recover();
+            let session = inner.active_session.take().ok_or(CaptureError::NoActiveSession)?;
+
+            let (samples, detection, rate, stream_gen) = if let Some(ref mut stream) = inner.active_stream {
+                stream.is_recording.store(false, Ordering::SeqCst);
+                let s = stream.samples.lock_or_recover().split_off(0);
+                let d = std::mem::take(&mut *stream.detection.lock_or_recover());
+                (s, d, stream.input_rate, stream.generation)
+            } else {
+                (Vec::new(), AudioDetectionState::default(), TARGET_SAMPLE_RATE, 0)
+            };
+
+            let keep_warm = *self.keep_warm_duration.lock_or_recover();
+            if let Some(duration) = keep_warm {
+                let recorder_clone = self.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(duration).await;
+                    recorder_clone.close_warm_stream_if_idle(stream_gen);
+                });
+            } else if let Some(stream) = inner.active_stream.take() {
+                let _ = stream.stop_tx.send(());
+            }
+
+            (session, samples, detection, rate)
         };
 
         let duration = session.start_time.elapsed().as_secs_f32();
-        let _ = session.stop_tx.send(());
-
-        let capture_result = session
-            .done_rx
-            .recv_timeout(Duration::from_secs(10))
-            .map_err(|e| {
-                CaptureError::DeviceError(format!("capture thread did not respond: {}", e))
-            })?
-            .map_err(CaptureError::DeviceError)?;
-
-        // TEMP: dictation latency instrumentation
         let t_thread_done = std::time::Instant::now();
 
-        let mono_16k = resample_to_16k_mono(&capture_result.samples, capture_result.input_rate);
-
-        // TEMP: dictation latency instrumentation
+        let mono_16k = resample_to_16k_mono(&session_samples, input_rate);
         let t_resampled = std::time::Instant::now();
 
-        // Apply Voice Activity Detection (VAD) boundary trimming
         let vad_config = VadConfig::default();
         let (processed_samples, vad_result) = vad_config.process(&mono_16k, TARGET_SAMPLE_RATE);
-
-        // TEMP: dictation latency instrumentation
         let t_vad_done = std::time::Instant::now();
 
-        let had_audio = capture_result.had_audio && vad_result.speech_detected;
-        let final_samples = if had_audio {
-            processed_samples
-        } else {
-            Vec::new()
-        };
+        let min_frames_above = (input_rate as u64 * AUDIO_DETECTED_MIN_DURATION_MS / 1000) as u32;
+        let raw_had_audio = session_detection.frames_above_threshold >= min_frames_above;
+
+        let had_audio = raw_had_audio && vad_result.speech_detected;
+        let final_samples = if had_audio { processed_samples } else { Vec::new() };
 
         write_wav(&session.file_path, if final_samples.is_empty() { &mono_16k } else { &final_samples })?;
-
-        // TEMP: dictation latency instrumentation
         let t_wav_done = std::time::Instant::now();
 
         let stats = AudioStats::compute(&final_samples, TARGET_SAMPLE_RATE, 1);
@@ -263,7 +351,6 @@ impl AudioRecorder {
             had_audio
         );
 
-        // TEMP: dictation latency instrumentation
         let timing_metrics = CaptureTimingMetrics {
             thread_stop_ms: t_thread_done.duration_since(t_stop_start).as_millis(),
             resample_ms: t_resampled.duration_since(t_thread_done).as_millis(),
@@ -285,137 +372,161 @@ impl AudioRecorder {
             timing_metrics: Some(timing_metrics),
         })
     }
+
+    pub fn close_warm_stream_if_idle(&self, target_gen: u64) {
+        let mut inner = self.inner.lock_or_recover();
+        if inner.active_session.is_none() {
+            if let Some(ref stream) = inner.active_stream {
+                if stream.generation == target_gen {
+                    if let Some(stream) = inner.active_stream.take() {
+                        let _ = stream.stop_tx.send(());
+                        tracing::info!("[AudioRecorder] Warm idle stream closed after timeout (gen {})", target_gen);
+                    }
+                }
+            }
+        }
+    }
 }
 
-fn spawn_capture_thread(
+fn spawn_warm_capture_thread(
     stop_rx: std_mpsc::Receiver<()>,
-    done_tx: std_mpsc::Sender<Result<CaptureThreadResult, String>>,
-    app: Option<AppHandle>,
+    init_tx: std_mpsc::Sender<Result<u32, String>>,
+    is_recording: Arc<AtomicBool>,
+    samples: Arc<Mutex<Vec<f32>>>,
+    detection: Arc<Mutex<AudioDetectionState>>,
+    app_handle: Arc<Mutex<Option<AppHandle>>>,
+    alive: Arc<AtomicBool>,
 ) {
     std::thread::spawn(move || {
-        let result = (|| -> Result<CaptureThreadResult, String> {
-            let host = cpal::default_host();
-            let device = host
-                .default_input_device()
-                .ok_or_else(|| "No input (microphone) device available".to_string())?;
-            let config = device
-                .default_input_config()
-                .map_err(|e| format!("Could not read default input config: {}", e))?;
+        let _alive_guard = AliveGuard(alive.clone());
 
-            let sample_rate = config.sample_rate().0;
-            let channels = config.channels() as usize;
-            let samples: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
-            let samples_cb = samples.clone();
-            let err_fn =
-                |err: cpal::StreamError| tracing::error!("cpal input stream error: {}", err);
+        let host = cpal::default_host();
+        let device = match host.default_input_device() {
+            Some(d) => d,
+            None => {
+                let _ = init_tx.send(Err("No input (microphone) device available".to_string()));
+                return;
+            }
+        };
+        let config = match device.default_input_config() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = init_tx.send(Err(format!("Could not read default input config: {}", e)));
+                return;
+            }
+        };
 
-            let last_emit = Arc::new(Mutex::new(std::time::Instant::now()));
-            let smoothed_level = Arc::new(Mutex::new(0.0_f32));
-            let detection = Arc::new(Mutex::new(AudioDetectionState::default()));
+        let sample_rate = config.sample_rate().0;
+        let channels = config.channels() as usize;
+        let err_fn = |err: cpal::StreamError| tracing::error!("cpal input stream error: {}", err);
 
-            let stream = match config.sample_format() {
-                cpal::SampleFormat::F32 => {
-                    let app_ref = app.clone();
-                    let emit_ref = last_emit.clone();
-                    let level_ref = smoothed_level.clone();
-                    let detection_ref = detection.clone();
-                    device.build_input_stream(
-                        &config.into(),
-                        move |data: &[f32], _| {
+        let last_emit = Arc::new(Mutex::new(std::time::Instant::now()));
+        let smoothed_level = Arc::new(Mutex::new(0.0_f32));
+
+        let stream_res = match config.sample_format() {
+            cpal::SampleFormat::F32 => {
+                let is_rec = is_recording.clone();
+                let samps = samples.clone();
+                let det = detection.clone();
+                let app_ref = app_handle.clone();
+                let emit_ref = last_emit.clone();
+                let level_ref = smoothed_level.clone();
+                device.build_input_stream(
+                    &config.into(),
+                    move |data: &[f32], _| {
+                        if is_rec.load(Ordering::Relaxed) {
+                            let app_guard = app_ref.lock_or_recover();
                             push_mono_with_level(
-                                &samples_cb, data, channels, |s| s, &app_ref, &emit_ref,
-                                &level_ref, &detection_ref, sample_rate,
-                            )
-                        },
-                        err_fn,
-                        None,
-                    )
-                }
-                cpal::SampleFormat::I16 => {
-                    let app_ref = app.clone();
-                    let emit_ref = last_emit.clone();
-                    let level_ref = smoothed_level.clone();
-                    let detection_ref = detection.clone();
-                    device.build_input_stream(
-                        &config.into(),
-                        move |data: &[i16], _| {
+                                &samps, data, channels, |s| s, &app_guard, &emit_ref,
+                                &level_ref, &det, sample_rate,
+                            );
+                        }
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+            cpal::SampleFormat::I16 => {
+                let is_rec = is_recording.clone();
+                let samps = samples.clone();
+                let det = detection.clone();
+                let app_ref = app_handle.clone();
+                let emit_ref = last_emit.clone();
+                let level_ref = smoothed_level.clone();
+                device.build_input_stream(
+                    &config.into(),
+                    move |data: &[i16], _| {
+                        if is_rec.load(Ordering::Relaxed) {
+                            let app_guard = app_ref.lock_or_recover();
                             push_mono_with_level(
-                                &samples_cb,
+                                &samps,
                                 data,
                                 channels,
                                 |s| s as f32 / i16::MAX as f32,
-                                &app_ref,
+                                &app_guard,
                                 &emit_ref,
                                 &level_ref,
-                                &detection_ref,
+                                &det,
                                 sample_rate,
-                            )
-                        },
-                        err_fn,
-                        None,
-                    )
-                }
-                cpal::SampleFormat::U16 => {
-                    let app_ref = app.clone();
-                    let emit_ref = last_emit.clone();
-                    let level_ref = smoothed_level.clone();
-                    let detection_ref = detection.clone();
-                    device.build_input_stream(
-                        &config.into(),
-                        move |data: &[u16], _| {
+                            );
+                        }
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+            cpal::SampleFormat::U16 => {
+                let is_rec = is_recording.clone();
+                let samps = samples.clone();
+                let det = detection.clone();
+                let app_ref = app_handle.clone();
+                let emit_ref = last_emit.clone();
+                let level_ref = smoothed_level.clone();
+                device.build_input_stream(
+                    &config.into(),
+                    move |data: &[u16], _| {
+                        if is_rec.load(Ordering::Relaxed) {
+                            let app_guard = app_ref.lock_or_recover();
                             push_mono_with_level(
-                                &samples_cb,
+                                &samps,
                                 data,
                                 channels,
                                 |s| (s as f32 - u16::MAX as f32 / 2.0) / (u16::MAX as f32 / 2.0),
-                                &app_ref,
+                                &app_guard,
                                 &emit_ref,
                                 &level_ref,
-                                &detection_ref,
+                                &det,
                                 sample_rate,
-                            )
-                        },
-                        err_fn,
-                        None,
-                    )
-                }
-                other => return Err(format!("Unsupported input sample format: {:?}", other)),
+                            );
+                        }
+                    },
+                    err_fn,
+                    None,
+                )
             }
-            .map_err(|e| format!("Failed to build input stream: {}", e))?;
+            other => {
+                let _ = init_tx.send(Err(format!("Unsupported input sample format: {:?}", other)));
+                return;
+            }
+        };
 
-            stream
-                .play()
-                .map_err(|e| format!("Failed to start input stream: {}", e))?;
+        let stream = match stream_res {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = init_tx.send(Err(format!("Failed to build input stream: {}", e)));
+                return;
+            }
+        };
 
-            let _ = stop_rx.recv();
-            drop(stream);
+        if let Err(e) = stream.play() {
+            let _ = init_tx.send(Err(format!("Failed to start input stream: {}", e)));
+            return;
+        }
 
-            let final_samples = samples.lock_or_recover().clone();
-            // Sustained (not momentary) energy above the *measured* ambient
-            // floor — not a fixed absolute threshold — is what counts as
-            // speech. See AudioDetectionState and the constants above for
-            // why: a fixed threshold can't tell a noisy-but-silent room
-            // apart from someone actually talking, and a single loud
-            // callback isn't proof of speech either.
-            let final_state = detection.lock_or_recover();
-            let min_frames_above =
-                (sample_rate as u64 * AUDIO_DETECTED_MIN_DURATION_MS / 1000) as u32;
-            let audio_detected = final_state.frames_above_threshold >= min_frames_above;
-            tracing::debug!(
-                "Audio detection: noise_floor={:.4}, frames_above={}, min_required={}, had_audio={}",
-                final_state.noise_floor,
-                final_state.frames_above_threshold,
-                min_frames_above,
-                audio_detected
-            );
-            Ok(CaptureThreadResult {
-                samples: final_samples,
-                input_rate: sample_rate,
-                had_audio: audio_detected,
-            })
-        })();
+        let _ = init_tx.send(Ok(sample_rate));
 
-        let _ = done_tx.send(result);
+        let _ = stop_rx.recv();
+        drop(stream);
     });
 }
 
@@ -1350,5 +1461,136 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_keep_warm_off_closes_stream_on_stop() {
+        let dir = std::env::temp_dir().join(format!("relay_warm_test_{}", uuid::Uuid::new_v4()));
+        let recorder = AudioRecorder::new();
+        recorder.set_keep_warm_duration(None);
+
+        if recorder.start("test", &dir, None).is_ok() {
+            assert!(recorder.is_active());
+            assert!(!recorder.is_stream_warm());
+
+            let stopped = recorder.stop().await;
+            assert!(stopped.is_ok());
+            assert!(!recorder.is_active());
+            assert!(!recorder.is_stream_warm());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_keep_warm_on_keeps_stream_alive_after_stop() {
+        let dir = std::env::temp_dir().join(format!("relay_warm_test_{}", uuid::Uuid::new_v4()));
+        let recorder = AudioRecorder::new();
+        recorder.set_keep_warm_duration(Some(Duration::from_millis(300)));
+
+        if recorder.start("test", &dir, None).is_ok() {
+            assert!(recorder.is_active());
+
+            let stopped = recorder.stop().await;
+            assert!(stopped.is_ok());
+            assert!(!recorder.is_active());
+            assert!(recorder.is_stream_warm());
+
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            assert!(!recorder.is_stream_warm());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_keep_warm_start_immediately_reuses_stream() {
+        let dir = std::env::temp_dir().join(format!("relay_warm_test_{}", uuid::Uuid::new_v4()));
+        let recorder = AudioRecorder::new();
+        recorder.set_keep_warm_duration(Some(Duration::from_secs(5)));
+
+        if recorder.start("test1", &dir, None).is_ok() {
+            let _ = recorder.stop().await;
+            assert!(recorder.is_stream_warm());
+
+            let start2 = recorder.start("test2", &dir, None);
+            assert!(start2.is_ok());
+            assert!(recorder.is_active());
+            assert!(!recorder.is_stream_warm());
+
+            let _ = recorder.stop().await;
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_keep_warm_old_timer_cannot_close_new_active_session() {
+        let dir = std::env::temp_dir().join(format!("relay_warm_test_{}", uuid::Uuid::new_v4()));
+        let recorder = AudioRecorder::new();
+        recorder.set_keep_warm_duration(Some(Duration::from_millis(150)));
+
+        if recorder.start("test1", &dir, None).is_ok() {
+            let _ = recorder.stop().await;
+            assert!(recorder.is_stream_warm());
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let _ = recorder.start("test2", &dir, None);
+
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            assert!(recorder.is_active());
+            let _ = recorder.stop().await;
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_keep_warm_repeated_start_stop_resets_deadline() {
+        let dir = std::env::temp_dir().join(format!("relay_warm_test_{}", uuid::Uuid::new_v4()));
+        let recorder = AudioRecorder::new();
+        recorder.set_keep_warm_duration(Some(Duration::from_millis(200)));
+
+        if recorder.start("test1", &dir, None).is_ok() {
+            let _ = recorder.stop().await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let _ = recorder.start("test2", &dir, None);
+            let _ = recorder.stop().await;
+
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            assert!(recorder.is_stream_warm());
+
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            assert!(!recorder.is_stream_warm());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_keep_warm_idle_audio_is_discarded() {
+        let dir = std::env::temp_dir().join(format!("relay_warm_test_{}", uuid::Uuid::new_v4()));
+        let recorder = AudioRecorder::new();
+        recorder.set_keep_warm_duration(Some(Duration::from_secs(2)));
+
+        if recorder.start("test1", &dir, None).is_ok() {
+            let _ = recorder.stop().await;
+            assert!(recorder.is_stream_warm());
+
+            tokio::time::sleep(Duration::from_millis(200)).await;
+
+            let _ = recorder.start("test2", &dir, None);
+            let s2 = recorder.stop().await.unwrap();
+
+            assert!(s2.samples.is_empty() || s2.original_duration_seconds < 0.5);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_meeting_capture_unaffected_by_warm_timer() {
+        let recorder = AudioRecorder::new();
+        recorder.set_keep_warm_duration(Some(Duration::from_millis(50)));
+
+        recorder.close_warm_stream_if_idle(999);
+        assert!(!recorder.is_active());
+        assert!(!recorder.is_stream_warm());
     }
 }

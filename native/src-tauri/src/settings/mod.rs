@@ -309,6 +309,22 @@ impl Default for AudioInputSettings {
     }
 }
 
+impl AudioInputSettings {
+    pub fn parse_keep_warm_duration(&self) -> Option<std::time::Duration> {
+        parse_keep_warm_duration_str(&self.keep_microphone_warm)
+    }
+}
+
+pub fn parse_keep_warm_duration_str(setting: &str) -> Option<std::time::Duration> {
+    match setting {
+        "15s" => Some(std::time::Duration::from_secs(15)),
+        "30s" => Some(std::time::Duration::from_secs(30)),
+        "1m" => Some(std::time::Duration::from_secs(60)),
+        "5m" => Some(std::time::Duration::from_secs(300)),
+        _ => None,
+    }
+}
+
 /// Spoken trigger phrase -> text expansion snippet.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SnippetItem {
