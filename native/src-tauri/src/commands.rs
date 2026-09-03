@@ -3671,3 +3671,78 @@ pub async fn import_web_capture(
     }
     Ok(artifact)
 }
+
+/// Retrieves the derived conversation context for a capture, if already analyzed.
+#[tauri::command]
+pub async fn get_capture_context(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::capture::web::ConversationContext>, CommandError> {
+    state
+        .vault
+        .get_capture_context(&id)
+        .map_err(|e| CommandError::new("CONTEXT_UNAVAILABLE", &e.to_string()))
+}
+
+/// Analyzes a captured AI conversation to extract structured work context.
+#[tauri::command]
+pub async fn analyze_capture_context(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::capture::web::ConversationContext, CommandError> {
+    let file = state
+        .vault
+        .get_vault_file(&id)
+        .map_err(|e| CommandError::new("CAPTURE_NOT_FOUND", &e.to_string()))?;
+
+    let payload = state
+        .vault
+        .get_capture_payload(&id)
+        .map_err(|e| CommandError::new("CAPTURE_PAYLOAD_UNAVAILABLE", &e.to_string()))?;
+
+    let settings = state.settings.lock_or_recover().clone();
+    let llm = LLMClient::new(settings.provider);
+
+    let context = crate::capture::web::context::extract_conversation_context(
+        Some(&llm),
+        &id,
+        &payload,
+        &file.content,
+    )
+    .await;
+
+    state
+        .vault
+        .save_capture_context(&id, &context)
+        .map_err(|e| CommandError::new("SAVE_CONTEXT_FAILED", &e.to_string()))?;
+
+    Ok(context)
+}
+
+/// Inspects an exported AI conversation archive (.zip or .json) from ChatGPT or Claude.
+#[tauri::command]
+pub async fn inspect_ai_conversation_export(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<crate::capture::web::importer::ExportInspection, CommandError> {
+    let p = std::path::PathBuf::from(&path);
+    if !p.exists() {
+        return Err(CommandError::new("FILE_NOT_FOUND", "Selected export file does not exist"));
+    }
+    crate::capture::web::importer::inspect_export_file(&p, &state.vault)
+}
+
+/// Imports a chosen conversation from an AI export archive into Relay's vault.
+#[tauri::command]
+pub async fn import_ai_conversation_export(
+    path: String,
+    conversation_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::vault::VaultFile, CommandError> {
+    let p = std::path::PathBuf::from(&path);
+    if !p.exists() {
+        return Err(CommandError::new("FILE_NOT_FOUND", "Selected export file does not exist"));
+    }
+    let settings = state.settings.lock_or_recover().clone();
+    crate::capture::web::importer::import_export_conversation(&p, &conversation_id, &state.vault, &settings).await
+}

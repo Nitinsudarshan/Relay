@@ -11,11 +11,13 @@ import {
   Settings,
   Sparkles,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import type { CaptureBridgeStatus, CaptureProgress, Scribble, VaultFile } from '../../types';
 import { ConfirmationModal } from '../common/ConfirmationModal';
 import { EmptyState } from '../common/EmptyState';
 import { CaptureDetailModal } from './CaptureDetailModal';
+import { ImportConversationModal } from './ImportConversationModal';
 import {
   captureTypeLabel,
   describeCompleteness,
@@ -58,6 +60,7 @@ export const CapturesPage: React.FC<CapturesPageProps> = ({
   const [pendingDelete, setPendingDelete] = useState<VaultFile | null>(null);
   const [progress, setProgress] = useState<CaptureProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showImport, setShowImport] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -156,6 +159,13 @@ export const CapturesPage: React.FC<CapturesPageProps> = ({
           className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
         >
           <RefreshCw className="h-3.5 w-3.5" /> Refresh
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowImport(true)}
+          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-sm transition-opacity hover:opacity-90"
+        >
+          <Upload className="h-3.5 w-3.5" /> Import AI conversation
         </button>
         <button
           type="button"
@@ -321,6 +331,16 @@ export const CapturesPage: React.FC<CapturesPageProps> = ({
           variant="destructive"
           onConfirm={() => void remove(pendingDelete)}
           onCancel={() => setPendingDelete(null)}
+        />
+      )}
+
+      {showImport && (
+        <ImportConversationModal
+          onClose={() => setShowImport(false)}
+          onSuccess={(imported) => {
+            void load();
+            setSelected(imported);
+          }}
         />
       )}
     </div>

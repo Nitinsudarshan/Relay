@@ -970,6 +970,44 @@ impl VaultManager {
         Ok(artifact)
     }
 
+    /// Reads back the derived conversation context for a capture, if one has been generated.
+    pub fn get_capture_context(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::capture::web::ConversationContext>, VaultError> {
+        let artifact = self.get_vault_file(id)?;
+        if !artifact.is_capture() {
+            return Err(VaultError::NotFound(format!("Capture {}", id)));
+        }
+        let context_path = self.vault_dir().join(CAPTURES_DIR).join(id).join("context.json");
+        if !context_path.exists() {
+            return Ok(None);
+        }
+        let raw = fs::read_to_string(&context_path)?;
+        let context = serde_json::from_str(&raw)
+            .map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
+        Ok(Some(context))
+    }
+
+    /// Saves the derived conversation context for a capture.
+    pub fn save_capture_context(
+        &self,
+        id: &str,
+        context: &crate::capture::web::ConversationContext,
+    ) -> Result<(), VaultError> {
+        let artifact = self.get_vault_file(id)?;
+        if !artifact.is_capture() {
+            return Err(VaultError::NotFound(format!("Capture {}", id)));
+        }
+        let capture_dir = self.vault_dir().join(CAPTURES_DIR).join(id);
+        fs::create_dir_all(&capture_dir)?;
+        let context_path = capture_dir.join("context.json");
+        let raw = serde_json::to_string_pretty(context)
+            .map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
+        fs::write(context_path, raw.as_bytes())?;
+        Ok(())
+    }
+
     /// Where an artifact's directory lives, decided by what the artifact is
     /// rather than by where it happens to be found — captures and imported
     /// files share one model but never one tree.

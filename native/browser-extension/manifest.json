@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Relay Capture",
-  "version": "2.0.0",
+  "version": "2.1.1",
   "description": "Read the page or conversation you are looking at \u2014 including what it loads as you scroll \u2014 into your local Relay vault.",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "scripting", "storage"],

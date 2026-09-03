@@ -176,6 +176,93 @@ export interface CaptureProgress {
   message?: string | null;
 }
 
+export interface ContextDecision {
+  id: string;
+  decision: string;
+  rationale?: string | null;
+  status: 'CURRENT' | 'SUPERSEDED' | 'MODIFIED' | 'REJECTED';
+  source_turn_ordinals: number[];
+}
+
+export interface ContextRequirement {
+  id: string;
+  statement: string;
+  source_turn_ordinals: number[];
+}
+
+export interface ContextConstraint {
+  id: string;
+  statement: string;
+  reason?: string | null;
+  source_turn_ordinals: number[];
+}
+
+export interface RejectedApproach {
+  approach: string;
+  reason_rejected: string;
+  source_turn_ordinals: number[];
+}
+
+export interface ContextOpenQuestion {
+  id: string;
+  question: string;
+  context_note?: string | null;
+  source_turn_ordinals: number[];
+}
+
+export interface ContextActionItem {
+  id: string;
+  description: string;
+  owner?: string | null;
+  status: string;
+  source_turn_ordinals: number[];
+}
+
+export interface ContextArtifact {
+  name: string;
+  kind: string;
+  reference_or_path?: string | null;
+  description?: string | null;
+}
+
+export interface ConversationContext {
+  capture_id: string;
+  title: string;
+  objective: string;
+  background: string[];
+  current_state: string;
+  decisions: ContextDecision[];
+  requirements: ContextRequirement[];
+  constraints: ContextConstraint[];
+  preferences: string[];
+  rejected_approaches: RejectedApproach[];
+  open_questions: ContextOpenQuestion[];
+  action_items: ContextActionItem[];
+  important_facts: string[];
+  key_artifacts: ContextArtifact[];
+  generated_at: string;
+  model?: string | null;
+  deterministic: boolean;
+}
+
+export interface ConversationExportItem {
+  id: string;
+  title: string;
+  message_count: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+  has_assets: boolean;
+  asset_count: number;
+  already_imported_id?: string | null;
+}
+
+export interface ExportInspection {
+  provider: string;
+  provider_display: string;
+  total_conversations: number;
+  conversations: ConversationExportItem[];
+}
+
 export interface VaultLocationInfo {
   /** Absolute path currently in use, whether chosen or defaulted. */
   path: string;

@@ -729,7 +729,7 @@ fn sanitize_traversal(
     s: &mut Sanitizer,
     traversal: Option<&TraversalDiagnostics>,
 ) -> Option<TraversalDiagnostics> {
-    const PLANS: &[&str] = &["chatgpt", "claude", "github", "generic", "none"];
+    const PLANS: &[&str] = &["chatgpt", "claude", "gemini", "github", "generic", "none"];
     const TERMINATIONS: &[&str] = &[
         "not_needed",
         "reached_end",

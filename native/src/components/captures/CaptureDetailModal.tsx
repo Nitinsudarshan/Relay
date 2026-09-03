@@ -16,8 +16,9 @@ import {
   X,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import type { Scribble, VaultFile } from '../../types';
+import type { ConversationContext, Scribble, VaultFile } from '../../types';
 import { MarkdownView } from '../common/MarkdownView';
+import { CaptureContextTab } from './CaptureContextTab';
 import {
   captureTypeLabel,
   describeCompleteness,
@@ -36,7 +37,7 @@ interface CaptureDetailModalProps {
   onNavigateTab?: (tab: string) => void;
 }
 
-type DetailTab = 'content' | 'provenance' | 'source';
+type DetailTab = 'content' | 'context' | 'provenance' | 'source';
 
 /**
  * One capture, in full: what was saved, where it came from, and — the part
@@ -55,7 +56,47 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
   const [busy, setBusy] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const [context, setContext] = useState<ConversationContext | null>(null);
+  const [loadingContext, setLoadingContext] = useState(false);
+  const [analyzingContext, setAnalyzingContext] = useState(false);
+
   const provenance = capture.capture;
+  const isConversation =
+    provenance?.capture_type === 'conversation' ||
+    capture.content.includes('**User**:') ||
+    capture.content.includes('**Assistant**:');
+
+  useEffect(() => {
+    if (!isConversation) return;
+    let cancelled = false;
+    setLoadingContext(true);
+    invoke<ConversationContext | null>('get_capture_context', { id: capture.id })
+      .then((ctx) => {
+        if (!cancelled) setContext(ctx);
+      })
+      .catch((err: unknown) => {
+        console.error('Failed to get capture context', err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingContext(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [capture.id, isConversation]);
+
+  const handleAnalyzeContext = async () => {
+    setAnalyzingContext(true);
+    try {
+      const ctx = await invoke<ConversationContext>('analyze_capture_context', { id: capture.id });
+      setContext(ctx);
+    } catch (err) {
+      console.error('Failed to analyze capture context', err);
+    } finally {
+      setAnalyzingContext(false);
+    }
+  };
+
   const completeness = provenance ? describeCompleteness(provenance) : null;
   const traversal = provenance ? describeTraversal(provenance) : [];
 
@@ -156,6 +197,7 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
           {(
             [
               ['content', 'Content'],
+              ...(isConversation ? [['context', 'Context'] as [DetailTab, string]] : []),
               ['provenance', 'Where it came from'],
               ['source', 'Stored source'],
             ] as [DetailTab, string][]
@@ -189,6 +231,15 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
               )}
               <MarkdownView content={capture.content} />
             </>
+          )}
+
+          {activeTab === 'context' && (
+            <CaptureContextTab
+              context={context}
+              loading={loadingContext}
+              analyzing={analyzingContext}
+              onAnalyze={handleAnalyzeContext}
+            />
           )}
 
           {activeTab === 'provenance' && provenance && (

@@ -324,6 +324,10 @@ pub fn run() {
             commands::renormalize_capture,
             commands::delete_capture,
             commands::import_web_capture,
+            commands::get_capture_context,
+            commands::analyze_capture_context,
+            commands::inspect_ai_conversation_export,
+            commands::import_ai_conversation_export,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

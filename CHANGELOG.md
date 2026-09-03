@@ -1,5 +1,47 @@
 # Relay — Changelog
 
+## [0.28.1] - 2026-09-03
+
+### AI Conversation Import & Capture Stabilization
+
+**Type**: patch — inbound AI conversation import pipeline for official ChatGPT and Claude export packages (.zip or .json), asset extraction and preservation in the local vault, multi-conversation inspection with duplicate detection, removal of outbound handoff implementation, and stabilization of live browser capture across high-DPI displays (`native/src/webcapture/traversal/engine.ts`, `native/src-tauri/src/capture/web/mod.rs`, `native/src-tauri/src/capture/web/importer/* (new)`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`, `native/src/components/captures/ImportConversationModal.tsx (new)`, `native/src/components/captures/CapturesPage.tsx`, `native/src/components/captures/CaptureContextTab.tsx`, `native/src/components/captures/CaptureDetailModal.tsx`, `native/src/types/index.ts`).
+
+#### Features
+
+- **AI Conversation Import (`importer/chatgpt.rs`, `importer/claude.rs`, `importer/mod.rs`)**: Full inbound ingestion pipeline parsing official data export archives from both ChatGPT (`conversations.json` tree linearization following active conversation branches) and Claude (ordered turns and embedded document extracts). Unifies with the canonical `WebCapturePayload` pipeline to store original exports, extract binary assets (code, images, PDFs, text) into `.relay/vault/captures/<id>/assets/`, normalize markdown, and trigger structured `ConversationContext` analysis.
+- **Archive Inspection & Duplicate Detection (`importer/mod.rs`, `commands.rs`)**: Inspection engine that inspects multi-conversation archives without writing to the vault, automatically detecting provider type, title, message count, timestamp, and presence of assets, cross-referencing against existing vault captures to flag already imported conversations.
+- **Import UI Experience (`ImportConversationModal.tsx`, `CapturesPage.tsx`)**: Modal with file picker for `.zip` or `.json` exports, provider badges, conversation filtering, duplicate badges, turn counts, and one-click import with live progress indicator.
+
+#### Fixes
+
+- **Live Capture Deserialization on Fractional Coordinates / Zoom (`engine.ts`, `capture/web/mod.rs`)**: Fixed `scroll_span_px` producing floating-point numbers on pages scrolled via window coordinates or on high-DPI / browser-zoomed displays (e.g., GitHub), which caused Rust serde to reject the entire capture with HTTP 400. `engine.ts` now rounds coordinates at the source, and the Rust backend's payload deserializer flexibly accepts and rounds positive finite numbers for pixel and count fields.
+- **Direction Correction — Removed Outbound Context Handoff (`handoff.rs`, `HandoffModal.tsx`)**: Removed "Continue in AI" buttons, external launcher links, and handoff compiler in favor of the inbound "Capture/Import → Canonical Relay Context" model.
+
+#### Testing
+
+- **Backend Tests (857 tests, +2)**: Added ChatGPT tree linearization unit tests, Claude message/attachment extraction unit tests, and markdown block parsing tests. Verified with `cargo test` (857 passed) and `cargo clippy --all-targets -- -D warnings` (0 warnings).
+- **Frontend Tests (355 tests)**: Verified TypeScript compile (`npx tsc --noEmit`) and all frontend tests (`npm test -- --run`).
+- **Extension Build**: Rebuilt extension bundles (`npm run build:extension`).
+
+## [0.28.0] - 2026-09-03
+
+### AI Conversation Capture & Context Handoff
+
+**Type**: minor — end-to-end support for Gemini conversations, derived canonical conversation context models with source-turn provenance, structured context extraction with prompt-injection isolation and deterministic offline fallback, a context handoff compiler supporting ChatGPT, Claude, and Gemini continuation, and conversation package disk exporter (`native/browser-extension/manifest.json`, `native/src/webcapture/extractors/gemini.ts (new)`, `native/src/webcapture/extractors/gemini.test.ts (new)`, `native/src/webcapture/extractors/index.ts`, `native/src-tauri/src/capture/web/normalize.rs`, `native/src-tauri/src/capture/web/context.rs (new)`, `native/src-tauri/src/capture/web/handoff.rs (new)`, `native/src-tauri/src/capture/web/mod.rs`, `native/src-tauri/src/vault/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`, `native/src/types/index.ts`, `native/src/components/captures/CaptureContextTab.tsx (new)`, `native/src/components/captures/HandoffModal.tsx (new)`, `native/src/components/captures/CaptureDetailModal.tsx`).
+
+#### Features
+
+- **Gemini Conversation Capture (`extractors/gemini.ts`, `manifest.json`)**: Custom element traversal plan and extractor for `gemini.google.com`, recognizing `user-query`, `model-response`, text, attachments, code fences, and progressive multi-turn scroll navigation. Bumped extension manifest to `2.1.0`. Tested against DOM fixtures.
+- **Canonical Derived Conversation Context (`capture/web/context.rs`)**: Introduces the `ConversationContext` contract separating immutable raw source conversations from derived understanding. Stores extracted objectives, current state, decisions (with rationale and status), requirements, boundaries/constraints (with reasons), rejected approaches, open questions, next actions, and key artifacts — each carrying `source_turn_ordinals` linking back to the source turns. Stored in `.relay/vault/captures/<id>/context.json` without touching or risking the raw payload.
+- **Dual Extraction Engine with Prompt-Injection Isolation (`capture/web/context.rs`)**: Structured LLM context extraction using `source_boundary::wrap_external_source` with per-call randomized nonces and `EXTERNAL_SOURCE_RULE` to guarantee captured conversation turns cannot hijack LLM completions. Includes a deterministic cue-based fallback engine that extracts structured context even when offline or when no LLM is configured.
+- **Context Handoff Compiler & Launchers (`capture/web/handoff.rs`)**: Compiles `ConversationContext` into high-signal, recipient-optimized Markdown prompts ready to paste into any AI. Includes one-click launchers for continuing work in ChatGPT, Claude, and Gemini, as well as an export engine bundling `conversation.json`, `context.json`, `handoff.md`, `conversation.md`, and `metadata.json` into a portable package.
+- **Frontend Context Intelligence UI (`CaptureContextTab.tsx`, `HandoffModal.tsx`, `CaptureDetailModal.tsx`)**: New "Context" tab in capture details modal displaying structured decision cards, requirements, constraints, open questions, and next actions with turn badges; and a "Continue in AI" handoff modal featuring quick-launch actions, package export, and instant clipboard copying.
+
+#### Testing
+
+- **Vitest Frontend Tests (355 tests, +5)**: `gemini.test.ts` asserting selector matching, role ordering, block extraction, and fallback markup handling.
+- **Rust Backend Tests (856 tests, +5)**: `capture::web::context::tests` and `capture::web::handoff::tests` testing deterministic turn extraction, cue scanning, Markdown handoff formatting, target launcher URLs, and file package creation. Zero warnings on `cargo clippy --all-targets -- -D warnings`.
+
 ## [0.27.0] - 2026-09-03
 
 ### Capture v2 — Progressive Acquisition, Measured Completeness, and an Untrusted-Source Boundary

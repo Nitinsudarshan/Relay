@@ -27,8 +27,12 @@
 //! HTML, and every URL that survives into the artifact is scheme-checked.
 
 pub mod bridge;
+pub mod context;
+pub mod importer;
 pub mod normalize;
 pub mod source;
+
+pub use context::ConversationContext;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -170,7 +174,7 @@ pub struct CaptureMessage {
     /// The page's own turn number, where it exposes one (ChatGPT's
     /// `conversation-turn-N`). Used to order a reconstructed conversation and
     /// to measure gaps in it; absent rather than invented.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_flexible_opt_u32")]
     pub ordinal: Option<u32>,
 }
 
@@ -227,9 +231,9 @@ pub enum ContentBlock {
         /// the image came from, never emitted as a link target.
         #[serde(default)]
         reference: Option<String>,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "deserialize_flexible_opt_u32")]
         width: Option<u32>,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "deserialize_flexible_opt_u32")]
         height: Option<u32>,
         /// `user_upload` | `assistant_generated` | `page` | `unknown`.
         #[serde(default)]
@@ -363,7 +367,7 @@ pub struct TraversalDiagnostics {
     pub steps: u32,
     #[serde(default)]
     pub samples: u32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_flexible_u32")]
     pub scroll_span_px: u32,
     #[serde(default)]
     pub duration_ms: u64,
@@ -394,7 +398,7 @@ pub struct TraversalDiagnostics {
     #[serde(default)]
     pub messages_captured: u32,
     /// Gaps in the page's own turn numbering. Absent when it exposes none.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_flexible_opt_u32")]
     pub messages_missing: Option<u32>,
     #[serde(default)]
     pub duplicates_dropped: u32,
@@ -510,6 +514,140 @@ pub struct CaptureProvenance {
     /// What the reveal pass did. Absent on artifacts captured before v0.27.0.
     #[serde(default)]
     pub traversal: Option<TraversalDiagnostics>,
+}
+
+/// Deserializes a `u32` flexibly from JSON integer or float, rounding finite floats.
+/// This prevents payload rejections when browsers or subpixel rendering produce numbers like `1245.5`.
+pub fn deserialize_flexible_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct FlexibleU32Visitor;
+
+    impl<'de> serde::de::Visitor<'de> for FlexibleU32Visitor {
+        type Value = u32;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("an integer or floating-point number representing an integer count or pixels")
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(0)
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(0)
+        }
+
+        fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            u32::try_from(v).map_err(serde::de::Error::custom)
+        }
+
+        fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            if v < 0 {
+                Ok(0)
+            } else {
+                u32::try_from(v).map_err(serde::de::Error::custom)
+            }
+        }
+
+        fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            if v.is_nan() || v <= 0.0 {
+                Ok(0)
+            } else if v >= u32::MAX as f64 {
+                Ok(u32::MAX)
+            } else {
+                Ok(v.round() as u32)
+            }
+        }
+    }
+
+    deserializer.deserialize_any(FlexibleU32Visitor)
+}
+
+/// Deserializes an `Option<u32>` flexibly from integer, float, or null.
+pub fn deserialize_flexible_opt_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct FlexibleOptU32Visitor;
+
+    impl<'de> serde::de::Visitor<'de> for FlexibleOptU32Visitor {
+        type Value = Option<u32>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("an optional integer or floating-point number")
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_some<D2>(self, deserializer: D2) -> Result<Self::Value, D2::Error>
+        where
+            D2: serde::Deserializer<'de>,
+        {
+            deserialize_flexible_u32(deserializer).map(Some)
+        }
+
+        fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            u32::try_from(v).map(Some).map_err(serde::de::Error::custom)
+        }
+
+        fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            if v < 0 {
+                Ok(None)
+            } else {
+                u32::try_from(v).map(Some).map_err(serde::de::Error::custom)
+            }
+        }
+
+        fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            if v.is_nan() || v <= 0.0 {
+                Ok(None)
+            } else if v >= u32::MAX as f64 {
+                Ok(Some(u32::MAX))
+            } else {
+                Ok(Some(v.round() as u32))
+            }
+        }
+    }
+
+    deserializer.deserialize_option(FlexibleOptU32Visitor)
 }
 
 fn default_version() -> u32 {
@@ -645,6 +783,24 @@ mod tests {
         let payload = parse_payload(json.as_bytes()).unwrap();
         assert_eq!(payload.content.kind, CaptureContentKind::Unknown);
         assert_eq!(payload.diagnostics.coverage, CaptureCoverage::Unknown);
+    }
+
+    #[test]
+    fn floating_point_pixel_and_count_fields_deserialize_and_round_cleanly() {
+        let json = minimal_payload_json(
+            r#","diagnostics":{"coverage":"rendered_dom","traversal":{"plan":"github","termination":"reached_end","steps":5,"samples":3,"scroll_span_px":1485.3333740234375,"messages_missing":2.4}},"content":{"kind":"conversation","messages":[{"role":"user","ordinal":1.0,"blocks":[{"type":"image","src":"https://example.com/img.png","width":320.75,"height":240.25}]}]}"#,
+        );
+        let payload = parse_payload(json.as_bytes()).unwrap();
+        let traversal = payload.diagnostics.traversal.expect("traversal present");
+        assert_eq!(traversal.scroll_span_px, 1485);
+        assert_eq!(traversal.messages_missing, Some(2));
+        assert_eq!(payload.content.messages[0].ordinal, Some(1));
+        if let ContentBlock::Image { width, height, .. } = &payload.content.messages[0].blocks[0] {
+            assert_eq!(*width, Some(321));
+            assert_eq!(*height, Some(240));
+        } else {
+            panic!("expected image block");
+        }
     }
 
     #[test]

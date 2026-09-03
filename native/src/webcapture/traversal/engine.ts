@@ -438,7 +438,7 @@ export async function traverse(
     diagnostics.termination = 'error';
   } finally {
     interruption.stop();
-    diagnostics.scroll_span_px = Math.max(0, highest - lowest);
+    diagnostics.scroll_span_px = Math.max(0, Math.round(highest - lowest));
     diagnostics.duration_ms = Math.round(deps.now() - started);
 
     try {
