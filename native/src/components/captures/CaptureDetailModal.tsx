@@ -384,16 +384,18 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
           </button>
 
           {provenance && (
-            <a
-              href={provenance.url}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="ml-auto inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            <button
+              type="button"
+              onClick={() => {
+                void invoke('open_external_url', { url: provenance.url });
+              }}
+              title={`Open ${provenance.url} in browser`}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
             >
               <ExternalLink className="h-3.5 w-3.5" />
-              {displayUrl(provenance.url)}
+              <span>{displayUrl(provenance.url)}</span>
               <ArrowUpRight className="h-3 w-3" />
-            </a>
+            </button>
           )}
         </footer>
       </div>

@@ -306,7 +306,16 @@ export const CapturesPage: React.FC<CapturesPageProps> = ({
                           <span aria-hidden>·</span>
                           <span>{formatTimestamp(provenance.captured_at)}</span>
                           <span aria-hidden>·</span>
-                          <span className="truncate">{displayUrl(provenance.url)}</span>
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void invoke('open_external_url', { url: provenance.url });
+                            }}
+                            title={`Open ${provenance.url} in browser`}
+                            className="truncate hover:text-foreground hover:underline cursor-pointer"
+                          >
+                            {displayUrl(provenance.url)}
+                          </span>
                         </p>
                       )}
 

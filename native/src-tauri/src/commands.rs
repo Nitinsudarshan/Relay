@@ -3817,3 +3817,40 @@ pub async fn import_ai_conversation_export_bytes(
     let _ = std::fs::remove_file(temp_file);
     res
 }
+
+/// Opens a validated HTTP or HTTPS URL in the user's default OS browser.
+#[tauri::command]
+pub async fn open_external_url(url: String) -> Result<(), CommandError> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(CommandError::new(
+            "INVALID_URL",
+            "Only HTTP and HTTPS URLs can be opened.",
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| CommandError::new("OPEN_URL_FAILED", &e.to_string()))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| CommandError::new("OPEN_URL_FAILED", &e.to_string()))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| CommandError::new("OPEN_URL_FAILED", &e.to_string()))?;
+    }
+
+    Ok(())
+}
