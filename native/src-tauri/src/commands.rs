@@ -3703,27 +3703,12 @@ pub async fn analyze_capture_context(
     let settings = state.settings.lock_or_recover().clone();
     let llm = LLMClient::new(settings.provider);
 
-    let is_repository = payload.extractor.id == "github"
-        || payload.url.contains("github.com")
-        || file.capture.as_ref().is_some_and(|c| c.application == "github" || c.domain.contains("github.com"));
-
-    let context = if is_repository {
-        crate::capture::web::context::extract_repository_context(
-            Some(&llm),
-            &id,
-            &payload,
-            &file.content,
-        )
-        .await
-    } else {
-        crate::capture::web::context::extract_conversation_context(
-            Some(&llm),
-            &id,
-            &payload,
-            &file.content,
-        )
-        .await
-    };
+    // Which analysis runs is decided from the classification capture already
+    // derived from the URL and stored on the artifact — not re-derived here by
+    // testing the URL for a substring, which matched
+    // `https://evil.example/?ref=github.com` and treated every GitHub issue and
+    // pull request as a repository.
+    let context = crate::capture::web::context::extract_source_context(Some(&llm), &file, &payload).await;
 
     state
         .vault

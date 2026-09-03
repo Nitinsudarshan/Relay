@@ -27,6 +27,7 @@
 //! HTML, and every URL that survives into the artifact is scheme-checked.
 
 pub mod bridge;
+pub mod canonical;
 pub mod context;
 pub mod importer;
 pub mod normalize;

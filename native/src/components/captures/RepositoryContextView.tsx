@@ -16,7 +16,117 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import type { RepositoryContext } from '../../types';
+import type { RepositoryContext, RepositoryIssue } from '../../types';
+
+/**
+ * The three states an issue list can be in, kept apart because collapsing them
+ * is the failure this view exists to avoid.
+ *
+ * `unavailable` means Relay never saw issue data — a partial capture, or a page
+ * that does not carry it. `empty` means Relay saw the evidence and there was
+ * nothing in it. Reporting an empty tracker as "not captured" understates what
+ * Relay knows; reporting an uncaptured one as "none" is a fabricated fact.
+ */
+type IssueEvidence = 'unavailable' | 'empty' | 'present';
+
+function issueEvidence(available: boolean, issues: RepositoryIssue[]): IssueEvidence {
+  if (!available) return 'unavailable';
+  return issues.length > 0 ? 'present' : 'empty';
+}
+
+interface IssueSectionProps {
+  title: string;
+  icon: React.ReactNode;
+  issues: RepositoryIssue[];
+  available: boolean;
+  defaultStatus: string;
+  statusClassName: string;
+  /** What is shown when Relay looked and found nothing. */
+  emptyHeadline: string;
+  /** What is shown when Relay never had the evidence to look at. */
+  unavailableHeadline: string;
+  unavailableDetail: string;
+  /** Rendered instead of `description` for resolved items. */
+  detailField: 'description' | 'resolution';
+}
+
+const IssueSection: React.FC<IssueSectionProps> = ({
+  title,
+  icon,
+  issues,
+  available,
+  defaultStatus,
+  statusClassName,
+  emptyHeadline,
+  unavailableHeadline,
+  unavailableDetail,
+  detailField,
+}) => {
+  const evidence = issueEvidence(available, issues);
+
+  return (
+    <section className="space-y-3">
+      <h4 className="flex items-center gap-1.5 font-semibold text-foreground">
+        {icon}
+        <span>
+          {title} {available ? `(${issues.length})` : ''}
+        </span>
+      </h4>
+
+      {evidence === 'present' && (
+        <div className="space-y-2">
+          {issues.map((issue, idx) => {
+            const detail = detailField === 'resolution' ? issue.resolution : issue.description;
+            return (
+              <div
+                key={`${issue.title}-${idx}`}
+                className="rounded-lg border border-border bg-card p-3 shadow-sm space-y-1"
+              >
+                <div className="flex items-center gap-2">
+                  {issue.number && (
+                    <span className="font-mono text-xs font-semibold text-primary">
+                      #{issue.number}
+                    </span>
+                  )}
+                  <span className="font-medium text-foreground">{issue.title}</span>
+                  {issue.issue_type && (
+                    <span className="rounded bg-muted px-1.5 py-0.2 text-[10px] text-muted-foreground">
+                      {issue.issue_type}
+                    </span>
+                  )}
+                  <span className={`rounded px-1.5 py-0.2 text-[10px] ${statusClassName}`}>
+                    {issue.status ?? defaultStatus}
+                  </span>
+                </div>
+                {detail && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {detailField === 'resolution' ? `Resolution: ${detail}` : detail}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {evidence === 'empty' && (
+        <div className="rounded-lg border border-border/80 bg-muted/20 p-3 text-muted-foreground">
+          <p className="font-medium text-foreground/80">{emptyHeadline}</p>
+          <p className="mt-0.5 text-[11px]">
+            Relay read the issue evidence in this capture and found no matching entries.
+          </p>
+        </div>
+      )}
+
+      {evidence === 'unavailable' && (
+        <div className="rounded-lg border border-dashed border-border/80 bg-muted/20 p-3 text-muted-foreground">
+          <p className="font-medium text-foreground/80">{unavailableHeadline}</p>
+          <p className="mt-0.5 text-[11px]">{unavailableDetail}</p>
+        </div>
+      )}
+    </section>
+  );
+};
 
 interface RepositoryContextViewProps {
   context: RepositoryContext;
@@ -334,98 +444,31 @@ export const RepositoryContextView: React.FC<RepositoryContextViewProps> = ({
         </div>
       </section>
 
-      {/* Open Issues */}
-      <section className="space-y-3">
-        <h4 className="flex items-center gap-1.5 font-semibold text-foreground">
-          <AlertCircle className="h-4 w-4 text-amber-500" />
-          <span>Open Issues {open_issues_available ? `(${open_issues.length})` : ''}</span>
-        </h4>
+      <IssueSection
+        title="Open Issues"
+        icon={<AlertCircle className="h-4 w-4 text-amber-500" />}
+        issues={open_issues}
+        available={open_issues_available}
+        defaultStatus="Open"
+        statusClassName="bg-amber-500/10 text-amber-700 dark:text-amber-400"
+        detailField="description"
+        emptyHeadline="No open issues in the captured evidence."
+        unavailableHeadline="Issue information was not available in the captured repository evidence."
+        unavailableDetail="Relay captured repository metadata and documentation, which does not carry raw GitHub issue records. This is not a claim that the repository has no open issues."
+      />
 
-        {open_issues_available && open_issues.length > 0 ? (
-          <div className="space-y-2">
-            {open_issues.map((issue, idx) => (
-              <div
-                key={`${issue.title}-${idx}`}
-                className="rounded-lg border border-border bg-card p-3 shadow-sm space-y-1"
-              >
-                <div className="flex items-center gap-2">
-                  {issue.number && (
-                    <span className="font-mono text-xs font-semibold text-primary">
-                      #{issue.number}
-                    </span>
-                  )}
-                  <span className="font-medium text-foreground">{issue.title}</span>
-                  {issue.issue_type && (
-                    <span className="rounded bg-muted px-1.5 py-0.2 text-[10px] text-muted-foreground">
-                      {issue.issue_type}
-                    </span>
-                  )}
-                  <span className="rounded bg-amber-500/10 px-1.5 py-0.2 text-[10px] text-amber-700 dark:text-amber-400">
-                    {issue.status ?? 'Open'}
-                  </span>
-                </div>
-                {issue.description && (
-                  <p className="text-[11px] text-muted-foreground">{issue.description}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-lg border border-border/80 bg-muted/20 p-3 text-muted-foreground">
-            <p className="font-medium text-foreground/80">
-              No issue data was available in the captured repository content.
-            </p>
-            <p className="mt-0.5 text-[11px]">
-              Relay captured repository metadata and documentation, which does not contain raw GitHub issue records.
-            </p>
-          </div>
-        )}
-      </section>
-
-      {/* Past Issues */}
-      <section className="space-y-3">
-        <h4 className="flex items-center gap-1.5 font-semibold text-foreground">
-          <GitPullRequest className="h-4 w-4 text-indigo-500" />
-          <span>Past Issues {past_issues_available ? `(${past_issues.length})` : ''}</span>
-        </h4>
-
-        {past_issues_available && past_issues.length > 0 ? (
-          <div className="space-y-2">
-            {past_issues.map((issue, idx) => (
-              <div
-                key={`${issue.title}-${idx}`}
-                className="rounded-lg border border-border bg-card p-3 shadow-sm space-y-1"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-foreground">{issue.title}</span>
-                  {issue.issue_type && (
-                    <span className="rounded bg-muted px-1.5 py-0.2 text-[10px] text-muted-foreground">
-                      {issue.issue_type}
-                    </span>
-                  )}
-                  <span className="rounded bg-emerald-500/10 px-1.5 py-0.2 text-[10px] text-emerald-600 dark:text-emerald-400">
-                    {issue.status ?? 'Resolved'}
-                  </span>
-                </div>
-                {issue.resolution && (
-                  <p className="text-[11px] text-muted-foreground">
-                    Resolution: {issue.resolution}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-lg border border-border/80 bg-muted/20 p-3 text-muted-foreground">
-            <p className="font-medium text-foreground/80">
-              No historical issue information was available in the captured repository evidence.
-            </p>
-            <p className="mt-0.5 text-[11px]">
-              Changelogs, closed pull requests, and release notes were not included in this capture pass.
-            </p>
-          </div>
-        )}
-      </section>
+      <IssueSection
+        title="Past Issues"
+        icon={<GitPullRequest className="h-4 w-4 text-indigo-500" />}
+        issues={past_issues}
+        available={past_issues_available}
+        defaultStatus="Resolved"
+        statusClassName="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+        detailField="resolution"
+        emptyHeadline="No resolved issues in the captured evidence."
+        unavailableHeadline="No historical issue information was available in the captured repository evidence."
+        unavailableDetail="Changelogs, closed pull requests, and release notes were not included in this capture pass. This is not a claim that the repository has no history."
+      />
     </div>
   );
 };

@@ -21,6 +21,12 @@ pub const FILES_DIR: &str = "files";
 /// rules, and its text-extraction path stay exactly as they were.
 pub const CAPTURES_DIR: &str = "captures";
 
+/// Subdirectory of an artifact holding what analysis derived from it.
+///
+/// Beside the source, never inside it: `metadata.json` is the record of what
+/// was captured, and analysis must not be able to rewrite it.
+pub const DERIVED_DIR: &str = "derived";
+
 pub mod scribble;
 pub use scribble::*;
 
@@ -1011,7 +1017,84 @@ impl VaultManager {
         let raw = serde_json::to_string_pretty(context)
             .map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
         fs::write(context_path, raw.as_bytes())?;
+
+        // Also recorded as derived data, so context sits alongside summary and
+        // enrichment under one source → derived relationship rather than being
+        // the one analysis with its own private file. `context.json` stays as
+        // the read path: every existing vault has one, and the frontend reads
+        // it. This is the incremental migration §10 asks for, not a cutover.
+        if let Some(metadata) = context.analysis.clone() {
+            let payload = serde_json::to_value(context)
+                .map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
+            let derived = crate::pipeline::analysis::DerivedData::new(
+                id,
+                crate::pipeline::analysis::DerivedType::Context,
+                metadata,
+                crate::pipeline::analysis::DerivedPayload::Structured(payload),
+            );
+            if let Err(err) = self.save_derived_data(&derived) {
+                tracing::warn!("Could not persist derived context for {}: {}", id, err);
+            }
+        }
         Ok(())
+    }
+
+    /// Reads a derived artifact for a source, if one has been produced.
+    ///
+    /// Derived data lives under `<artifact>/derived/<type>.json`, beside the
+    /// source rather than inside it. That is the whole point: re-analysing can
+    /// never rewrite `metadata.json`, and a source with no analysis is still a
+    /// complete source.
+    ///
+    /// Works for captures and imported files alike, because analysis does not
+    /// care which tree an artifact lives in.
+    pub fn get_derived_data(
+        &self,
+        source_id: &str,
+        derived_type: crate::pipeline::analysis::DerivedType,
+    ) -> Result<Option<crate::pipeline::analysis::DerivedData>, VaultError> {
+        let Some(dir) = self.find_vault_file_dir(source_id) else {
+            return Ok(None);
+        };
+        let path = dir.join(DERIVED_DIR).join(format!("{}.json", derived_type.as_str()));
+        if !path.exists() {
+            return Ok(None);
+        }
+        let raw = fs::read_to_string(&path)?;
+        serde_json::from_str(&raw)
+            .map(Some)
+            .map_err(|e| VaultError::FrontmatterError(e.to_string()))
+    }
+
+    /// Writes a derived artifact, superseding any previous one of the same type.
+    ///
+    /// §12's documented policy: Relay keeps the latest derived representation
+    /// per `(source_id, derived_type)`, not a history. Re-analysis increments
+    /// the record's `version` and replaces its payload; the source is untouched,
+    /// so the analysis can always be run again.
+    pub fn save_derived_data(
+        &self,
+        derived: &crate::pipeline::analysis::DerivedData,
+    ) -> Result<crate::pipeline::analysis::DerivedData, VaultError> {
+        let dir = self
+            .find_vault_file_dir(&derived.source_id)
+            .ok_or_else(|| VaultError::NotFound(format!("Source {}", derived.source_id)))?;
+
+        // A previous record of this type decides the version, so a re-analysis
+        // is visibly the second version of one artifact rather than a first
+        // version that silently replaced another.
+        let to_write = match self.get_derived_data(&derived.source_id, derived.derived_type)? {
+            Some(existing) => existing.supersede(derived.analysis.clone(), derived.payload.clone()),
+            None => derived.clone(),
+        };
+
+        let derived_dir = dir.join(DERIVED_DIR);
+        fs::create_dir_all(&derived_dir)?;
+        let path = derived_dir.join(format!("{}.json", to_write.derived_type.as_str()));
+        let raw = serde_json::to_string_pretty(&to_write)
+            .map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
+        fs::write(path, raw.as_bytes())?;
+        Ok(to_write)
     }
 
     /// Where an artifact's directory lives, decided by what the artifact is
@@ -1938,6 +2021,142 @@ fn capture_payload_filename(title: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipeline::analysis::{
+        AnalysisFailure, AnalysisType, DerivedData, DerivedPayload, DerivedType, MetadataBuilder,
+        PromptId,
+    };
+
+    fn derived_metadata(analysis_type: AnalysisType, prompt: PromptId) -> crate::pipeline::analysis::AnalysisMetadata {
+        MetadataBuilder::new(analysis_type, prompt, 1)
+            .deterministic(AnalysisFailure::NoCompletion("offline".to_string()))
+    }
+
+    /// §53.5 — a source's derived artifacts all reference it, are stored beside
+    /// it rather than inside it, and re-analysis supersedes rather than
+    /// duplicating.
+    #[test]
+    fn derived_data_round_trips_beside_its_source_and_supersedes_on_reanalysis() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+        manager.init().unwrap();
+
+        let mut file = VaultFile::new_capture(
+            "cap_derived".to_string(),
+            "capture.json".to_string(),
+            "captures/cap_derived".to_string(),
+            "# owner/repo\n\nA local-first tool.".to_string(),
+            "hash".to_string(),
+            crate::capture::web::CaptureProvenance {
+                source_type: "web".to_string(),
+                capture_type: "repository".to_string(),
+                application: "GitHub".to_string(),
+                domain: "github.com".to_string(),
+                url: "https://github.com/owner/repo".to_string(),
+                page_title: "owner/repo".to_string(),
+                captured_at: "2026-09-03T10:00:00Z".to_string(),
+                browser_captured_at: None,
+                browser: None,
+                extractor_id: "github".to_string(),
+                extractor_version: 1,
+                trust: "external_untrusted".to_string(),
+                fidelity: "structured".to_string(),
+                coverage: crate::capture::web::CaptureCoverage::FullDocument,
+                notes: Vec::new(),
+                message_count: None,
+                block_count: 2,
+                skipped_block_count: 0,
+                truncated: false,
+                canonical_url: None,
+                author: None,
+                published_at: None,
+                language: None,
+                version: 1,
+                previous_capture_id: None,
+                recapture_count: 0,
+                traversal: None,
+            },
+        );
+        file.summary = None;
+        manager.save_vault_file(&file).unwrap();
+
+        // Three kinds of derived data, one source.
+        for (derived_type, analysis_type, prompt, payload) in [
+            (
+                DerivedType::Summary,
+                AnalysisType::Summary,
+                PromptId::Summary,
+                DerivedPayload::Text("A local-first tool.".to_string()),
+            ),
+            (
+                DerivedType::Context,
+                AnalysisType::Context,
+                PromptId::RepositoryContext,
+                DerivedPayload::Structured(serde_json::json!({"objective": "ship"})),
+            ),
+            (
+                DerivedType::Enrichment,
+                AnalysisType::Enrichment,
+                PromptId::Enrichment,
+                DerivedPayload::Structured(serde_json::json!({"topics": ["Rust"]})),
+            ),
+        ] {
+            let derived = DerivedData::new(
+                &file.id,
+                derived_type,
+                derived_metadata(analysis_type, prompt),
+                payload,
+            );
+            manager.save_derived_data(&derived).unwrap();
+        }
+
+        for derived_type in [DerivedType::Summary, DerivedType::Context, DerivedType::Enrichment] {
+            let loaded = manager
+                .get_derived_data(&file.id, derived_type)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{} should have been written", derived_type.as_str()));
+            assert_eq!(loaded.source_id, file.id);
+            assert_eq!(loaded.derived_type, derived_type);
+            assert_eq!(loaded.version, 1);
+        }
+
+        // Re-analysis: same source, new derived version, no second record.
+        let reanalysed = DerivedData::new(
+            &file.id,
+            DerivedType::Summary,
+            derived_metadata(AnalysisType::Summary, PromptId::Summary),
+            DerivedPayload::Text("A revised summary.".to_string()),
+        );
+        let written = manager.save_derived_data(&reanalysed).unwrap();
+        assert_eq!(written.version, 2, "re-analysis supersedes in place");
+
+        let loaded = manager
+            .get_derived_data(&file.id, DerivedType::Summary)
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.version, 2);
+        assert_eq!(loaded.payload.as_text(), Some("A revised summary."));
+
+        // §53.15 — the source itself was never touched by any of this.
+        let source_after = manager.get_vault_file(&file.id).unwrap();
+        assert_eq!(source_after.content, file.content);
+        assert!(source_after.summary.is_none());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn derived_data_for_an_unknown_source_is_absent_rather_than_an_error() {
+        let temp_dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(temp_dir.clone());
+        manager.init().unwrap();
+
+        assert!(manager
+            .get_derived_data("no_such_source", DerivedType::Summary)
+            .unwrap()
+            .is_none());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 
     #[test]
     fn test_voice_note_saved_and_filtered_by_type() {

@@ -3,6 +3,7 @@ use crate::vault::{VaultManager, VaultNote};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod analysis;
 mod enrichment;
 pub mod source_boundary;
 pub use enrichment::{
@@ -12,6 +13,7 @@ pub use enrichment::{
     extract_deterministic_topics, summarize_content, summarize_content_from,
     summarize_scribble, summarize_vault_file,
     AiEnrichmentResponse, CANONICAL_ANALYSIS_SYSTEM_PROMPT, CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS,
+    CANONICAL_SUMMARY_SYSTEM_PROMPT,
 };
 
 #[derive(Error, Debug)]

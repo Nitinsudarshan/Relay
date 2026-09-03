@@ -52,6 +52,14 @@ Relay is architected into three distinct surfaces in a single repository. **Curr
   - `process_meeting`: Extracts structured JSON tasks from raw meeting transcripts.
   - `process_scribble`: Generates structured Markdown documents from unstructured voice scribbles.
   - `chat.rs` / `process_chat`: Voice chat — retrieves grounding notes from the vault, asks the LLM provider, optionally synthesizes speech via `tts`.
+- `pipeline::analysis`: The shared foundation every analysis runs on, so that adding one does not mean building another capture → normalize → prompt → LLM → parse → persist → provenance pipeline.
+  - `source.rs`: `SourceDescriptor` — a borrowed view over a `VaultFile` answering "what is this, and how much of it does Relay have?". Classification comes from the `capture_type` that `capture::web::source` derived from the URL, not from re-matching the URL later.
+  - `content.rs`: `CanonicalContent` — the analysis-facing contract every source-specific normalizer produces. Preserves turn ordinals and code artifacts, which flat markdown destroyed.
+  - `contract.rs`: `AnalysisRequest` / `AnalysisResult` / `AnalysisStatus`. Keeps "the evidence was not there" apart from "the analysis failed".
+  - `prompts.rs`: The prompt registry — stable ids, versions recorded on every result, and an applicability rule so a repository prompt cannot be run against a conversation.
+  - `service.rs`: `AnalysisService` — the one place a prompt is resolved, the source boundary applied, the provider called, and structured output parsed and validated.
+  - `derived.rs`: `DerivedData` — one record type with typed payloads, keyed by source id. See `docs/data-model.md` §7.
+  - Not yet a consumer: `meetings_v2::processing`, which has its own staged extraction and repair loop. Marked with a `TODO(context):` at that module.
 - `triggers`: Dynamic phrase matching and classification against `triggers.json`. Extracts parameters and dispatches to tool handlers. Skipped for chat mode.
 - `providers`: Unified `LLMClient`.
   - Ollama: Connects to `http://localhost:11434`.

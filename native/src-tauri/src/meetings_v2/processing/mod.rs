@@ -34,6 +34,22 @@
 //! * **Nothing here blocks recording.** The pipeline runs after finalization,
 //!   holds no capture resources, and shares no state with either audio clock.
 
+// TODO(context): migrate this pipeline onto `pipeline::analysis`.
+//
+// The foundation added in the 01-10 convergence (source contract, analysis
+// contract, prompt registry, derived data) covers captures, files and
+// scribbles. Meetings deliberately did not move in that pass: this pipeline
+// has staged extraction, validation and a repair loop that the shared service
+// does not model yet, and destabilising it for architectural symmetry is a bad
+// trade.
+//
+// What it needs before it can migrate: multi-stage requests in
+// `AnalysisRequest`, and prompt-registry entries for the extraction and
+// summary builders (which are computed per call, not constant). What is
+// already shared: the provider layer, and the heuristic-filler marker, which
+// now comes from `providers::HEURISTIC_FALLBACK_MODEL` for both.
+
+
 pub mod context;
 pub mod conversation;
 /// The summary quality evaluation set — fixtures, expectations, and a scorer.
