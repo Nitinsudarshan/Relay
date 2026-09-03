@@ -23,4 +23,7 @@ export function selectExtractor(url: URL): SiteExtractor | null {
 }
 
 export { chatgptExtractor, claudeExtractor, githubExtractor };
-export { extractGeneric, extractVisibleText } from './generic';
+export { chatgptTraversal } from './chatgpt';
+export { claudeTraversal } from './claude';
+export { githubTraversal } from './github';
+export { extractGeneric, extractVisibleText, harvestGeneric } from './generic';

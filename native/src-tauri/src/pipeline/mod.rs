@@ -4,10 +4,13 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod enrichment;
+pub mod source_boundary;
 pub use enrichment::{
-    enrich_content, enrich_scribble, enrich_vault_file, extract_deterministic_entities,
+    enrich_content, enrich_content_from, enrich_scribble, enrich_vault_file,
+    extract_deterministic_entities,
     extract_deterministic_knowledge, extract_deterministic_questions, extract_deterministic_title,
-    extract_deterministic_topics, summarize_content, summarize_scribble, summarize_vault_file,
+    extract_deterministic_topics, summarize_content, summarize_content_from,
+    summarize_scribble, summarize_vault_file,
     AiEnrichmentResponse, CANONICAL_ANALYSIS_SYSTEM_PROMPT, CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS,
 };
 

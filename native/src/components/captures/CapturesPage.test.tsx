@@ -91,7 +91,7 @@ describe('CapturesPage', () => {
     render(<CapturesPage />);
 
     expect(
-      await screen.findByText('Only what the page had loaded was captured'),
+      await screen.findByText('Only what Relay could reach was captured'),
     ).toBeInTheDocument();
   });
 

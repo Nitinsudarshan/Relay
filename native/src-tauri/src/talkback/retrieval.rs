@@ -47,6 +47,19 @@ impl SourceType {
         SourceType::VoiceNote,
     ];
 
+    /// Whether this source is material Relay captured from outside, rather
+    /// than something the user wrote, said or imported.
+    ///
+    /// The distinction that matters downstream: everything else in the vault
+    /// is the user's own record and can be spoken back to them as theirs. A
+    /// capture is a record of what a *website* said, and Talkback has to be
+    /// able to tell the difference — both to attribute it honestly and to
+    /// avoid treating a page's text as an instruction. See
+    /// `pipeline::source_boundary`.
+    pub fn is_external(self) -> bool {
+        matches!(self, SourceType::Capture)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             SourceType::VoiceNote => "Voice Note",

@@ -6,7 +6,7 @@
   "browser": "Relay contract fixture",
   "extractor": {
     "id": "chatgpt",
-    "version": 1,
+    "version": 2,
     "strategy": "site"
   },
   "document": {
@@ -24,7 +24,8 @@
             "type": "paragraph",
             "text": "Should Relay capture a screenshot or the page itself?"
           }
-        ]
+        ],
+        "ordinal": 2
       },
       {
         "role": "assistant",
@@ -46,18 +47,96 @@
             "language": "json",
             "text": "{ \"capture_type\": \"conversation\" }"
           }
-        ]
+        ],
+        "ordinal": 3
+      },
+      {
+        "role": "user",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Draw me the pipeline and give me the numbers as a file."
+          }
+        ],
+        "ordinal": 4
+      },
+      {
+        "role": "assistant",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Here is the pipeline, and the figures are attached."
+          },
+          {
+            "type": "paragraph",
+            "text": "Download it here: capture-figures.csv (12.4 kB)"
+          },
+          {
+            "type": "image",
+            "alt": "Generated image: the capture pipeline",
+            "src": "https://chatgpt.com/backend-api/estuary/content?id=file_0001&ts=1&sig=abc",
+            "width": 1024,
+            "height": 768,
+            "origin": "assistant_generated",
+            "content_captured": false,
+            "content_note": "Relay recorded where this image came from but did not download the image itself."
+          },
+          {
+            "type": "attachment",
+            "name": "capture-figures.csv",
+            "mime": "csv",
+            "reference": "sandbox:/mnt/data/capture-figures.csv",
+            "kind": "assistant_generated",
+            "content_captured": false,
+            "content_note": "Relay recorded this file’s details but did not download the file itself."
+          }
+        ],
+        "ordinal": 5
       }
     ]
   },
   "links": [],
   "diagnostics": {
-    "coverage": "rendered_dom",
+    "coverage": "full_document",
     "notes": [
-      "Only the turns the page had rendered were captured. Long conversations load earlier turns as you scroll up."
+      "Relay read this conversation from its beginning to its end and captured 4 turn(s)."
     ],
-    "dom_text_length": 233,
+    "dom_text_length": 440,
     "truncated": false,
-    "elapsed_ms": 0
+    "elapsed_ms": 0,
+    "traversal": {
+      "performed": true,
+      "plan": "chatgpt",
+      "termination": "reached_end",
+      "steps": 0,
+      "samples": 1,
+      "scroll_span_px": 0,
+      "duration_ms": 0,
+      "scroll_restored": true,
+      "virtualized": false,
+      "settle_timeouts": 0,
+      "expansions_found": 0,
+      "expansions_opened": 0,
+      "expansions_refused": 0,
+      "expansions_failed": 0,
+      "expansions_unnecessary": 0,
+      "messages_discovered": 4,
+      "messages_captured": 4,
+      "duplicates_dropped": 0,
+      "attachments_discovered": 1,
+      "attachments_captured": 1,
+      "images_discovered": 1,
+      "images_captured": 1,
+      "availability": {
+        "outside_viewport": 0,
+        "visually_truncated": 0,
+        "collapsed": 0,
+        "not_loaded": 0,
+        "virtualized": 0,
+        "inaccessible": 0
+      },
+      "inaccessible": [],
+      "messages_missing": 0
+    }
   }
 }

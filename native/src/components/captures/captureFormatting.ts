@@ -56,15 +56,115 @@ export function describeCompleteness(provenance: CaptureProvenance): Completenes
   }
   switch (provenance.coverage) {
     case 'full_document':
-      return { tone: 'complete', headline: 'The whole page was captured' };
+      // Only reachable with evidence behind it, and for a conversation that
+      // evidence is a reveal pass that reached the end with no gaps. The
+      // wording says what was read rather than what was displayed.
+      return {
+        tone: 'complete',
+        headline: provenance.traversal?.performed
+          ? 'Relay read this from beginning to end'
+          : 'The whole page was captured',
+      };
     case 'rendered_dom':
       return {
         tone: 'partial',
-        headline: 'Only what the page had loaded was captured',
+        headline: 'Only what Relay could reach was captured',
+      };
+    case 'failed':
+      return {
+        tone: 'partial',
+        headline: 'Reading this page did not finish',
       };
     default:
       return { tone: 'unknown', headline: 'How much was captured is not known' };
   }
+}
+
+/**
+ * The measurable half of the completeness claim, as lines for the UI.
+ *
+ * Only counted values are returned. A number the browser could not supply is
+ * omitted rather than shown as a zero, because a zero reads as a measurement
+ * and this is the one place in the product where a manufactured measurement
+ * would do real damage.
+ */
+export function describeTraversal(provenance: CaptureProvenance): string[] {
+  const t = provenance.traversal;
+  if (!t?.performed) return [];
+
+  const lines: string[] = [];
+  lines.push(`Read in ${t.steps} step(s) over ${(t.duration_ms / 1000).toFixed(1)}s`);
+
+  if (t.messages_discovered > 0) {
+    lines.push(`${t.messages_captured} of ${t.messages_discovered} turn(s) captured`);
+  }
+  if ((t.messages_missing ?? 0) > 0) {
+    lines.push(`${t.messages_missing} turn(s) missing from the page's own numbering`);
+  }
+  if (t.expansions_opened > 0) {
+    lines.push(`${t.expansions_opened} shortened section(s) opened`);
+  }
+  if (t.expansions_unnecessary > 0) {
+    lines.push(
+      `${t.expansions_unnecessary} shortened section(s) were already present in full, so nothing was clicked`,
+    );
+  }
+  if (t.expansions_failed > 0) {
+    lines.push(`${t.expansions_failed} section(s) did not open`);
+  }
+  if (t.expansions_refused > 0) {
+    lines.push(`${t.expansions_refused} control(s) were refused as unsafe to activate`);
+  }
+  if (t.attachments_discovered > 0) {
+    lines.push(`${t.attachments_discovered} file(s) recorded — details only, no contents downloaded`);
+  }
+  if (t.images_discovered > 0) {
+    lines.push(`${t.images_discovered} image(s) recorded — references only, no image data downloaded`);
+  }
+  if (t.duplicates_dropped > 0) {
+    lines.push(`${t.duplicates_dropped} repeated item(s) recognised and stored once`);
+  }
+  if (t.virtualized) {
+    lines.push('This page unloads content as you scroll, so it was read in passes');
+  }
+  if (!t.scroll_restored) {
+    lines.push('The page’s scroll position could not be restored');
+  }
+  lines.push(`Stopped because ${terminationLabel(t.termination)}`);
+  return [...lines, ...t.inaccessible];
+}
+
+/** Plain-language reasons a reveal pass stopped. */
+export function terminationLabel(termination: string): string {
+  switch (termination) {
+    case 'reached_end':
+      return 'it reached the end of the page';
+    case 'not_needed':
+      return 'there was nothing further to reveal';
+    case 'no_progress':
+      return 'the page stopped yielding new content';
+    case 'step_budget':
+      return 'it reached Relay’s reading limit for one page';
+    case 'time_budget':
+      return 'it reached Relay’s time limit for one page';
+    case 'expansion_budget':
+      return 'it reached Relay’s limit on opening shortened sections';
+    case 'user_interrupted':
+      return 'the page was used while it was being read';
+    case 'navigation_detected':
+      return 'the page navigated away while it was being read';
+    case 'error':
+      return 'reading failed part-way through';
+    default:
+      return 'reading stopped for an unrecognised reason';
+  }
+}
+
+/** How captured content may be used downstream. */
+export function trustLabel(trust: string | undefined): string {
+  return trust === 'external_untrusted' || !trust
+    ? 'External source — evidence, not instructions'
+    : trust;
 }
 
 /** Human label for how the content was obtained. */

@@ -1,3 +1,4 @@
+use super::source_boundary;
 use crate::providers::LLMClient;
 use crate::vault::{Scribble, ScribbleRelationship, VaultFile, VaultManager, REL_SAME_TOPIC};
 use serde::{Deserialize, Serialize};
@@ -374,12 +375,43 @@ pub async fn enrich_content(
     llm: &LLMClient,
     content: &str,
 ) -> Result<AiEnrichmentResponse, String> {
+    enrich_content_from(llm, content, None).await
+}
+
+/// Analysis over content whose origin decides how it may be treated.
+///
+/// `source` names an external source when the content was captured from one.
+/// That is not a formatting detail: `LLMClient::complete` delivers its
+/// argument as the **user** message, so without a frame a captured page's text
+/// arrives in the one role a model is trained to obey. Passing the provenance
+/// here is what keeps a captured web page as material to analyse rather than
+/// a second set of instructions.
+///
+/// Analysis is still free to *describe* what it sees — "this source contains
+/// instruction-like text" is a useful topic — it just may not comply with it.
+pub async fn enrich_content_from(
+    llm: &LLMClient,
+    content: &str,
+    source: Option<&str>,
+) -> Result<AiEnrichmentResponse, String> {
     if content.trim().is_empty() {
         return Err("Content is empty".to_string());
     }
 
+    let (prompt, system) = match source {
+        Some(description) => (
+            source_boundary::wrap_external_source(description, content).framed,
+            format!(
+                "{}\n{}",
+                CANONICAL_ANALYSIS_SYSTEM_PROMPT,
+                source_boundary::EXTERNAL_SOURCE_RULE
+            ),
+        ),
+        None => (content.to_string(), CANONICAL_ANALYSIS_SYSTEM_PROMPT.to_string()),
+    };
+
     let response = llm
-        .complete(content, Some(CANONICAL_ANALYSIS_SYSTEM_PROMPT))
+        .complete(&prompt, Some(&system))
         .await
         .map_err(|e| format!("LLM completion failed: {}", e))?;
 
@@ -413,11 +445,24 @@ pub async fn summarize_content(
     llm: &LLMClient,
     content: &str,
 ) -> Result<String, String> {
+    summarize_content_from(llm, content, None).await
+}
+
+/// Summarisation over content whose origin decides how it may be treated.
+///
+/// Same boundary as [`enrich_content_from`], and needed for the same reason: a
+/// summary is a model reading untrusted text, and a captured page that asks to
+/// be summarised differently is a page making a request, not the user.
+pub async fn summarize_content_from(
+    llm: &LLMClient,
+    content: &str,
+    source: Option<&str>,
+) -> Result<String, String> {
     if content.trim().is_empty() {
         return Err("Content is empty".to_string());
     }
 
-    let prompt = format!(
+    let mut system = format!(
         "You are Relay's Knowledge & Thinking Assistant.\n\
          Summarize this content concisely and structure it for rapid comprehension, clean hierarchy, and high readability.\n\n\
          {}\n\
@@ -425,8 +470,17 @@ pub async fn summarize_content(
         CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS
     );
 
+    let prompt = match source {
+        Some(description) => {
+            system.push('\n');
+            system.push_str(source_boundary::EXTERNAL_SOURCE_RULE);
+            source_boundary::wrap_external_source(description, content).framed
+        }
+        None => content.to_string(),
+    };
+
     let response = llm
-        .complete(content, Some(&prompt))
+        .complete(&prompt, Some(&system))
         .await
         .map_err(|e| format!("LLM summarization failed: {}", e))?;
 
@@ -625,7 +679,14 @@ pub async fn enrich_vault_file(
         return Ok(file);
     }
 
-    let parsed_opt = match enrich_content(llm, &file.content).await {
+    // A capture is external material. Everything else in the vault the user
+    // wrote, dictated or imported deliberately, and is treated as their own.
+    let source = file
+        .capture
+        .as_ref()
+        .map(source_boundary::describe_capture);
+
+    let parsed_opt = match enrich_content_from(llm, &file.content, source.as_deref()).await {
         Ok(parsed) => Some(parsed),
         Err(err) => {
             tracing::warn!("AI enrichment LLM call failed for vault file {}: {}", file_id, err);
@@ -730,7 +791,12 @@ pub async fn summarize_vault_file(
         return Ok(file);
     }
 
-    match summarize_content(llm, &file.content).await {
+    let source = file
+        .capture
+        .as_ref()
+        .map(source_boundary::describe_capture);
+
+    match summarize_content_from(llm, &file.content, source.as_deref()).await {
         Ok(summary_text) => {
             file.summary = Some(summary_text);
         }

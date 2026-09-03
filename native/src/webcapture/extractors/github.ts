@@ -10,7 +10,48 @@
  */
 
 import { extractBlocks, normalizeWhitespace, textOf } from '../dom';
+import { budget } from '../traversal/budget';
+import type { TraversalPlan } from '../traversal/types';
 import type { CaptureMessage, ContentBlock, ExtractionResult, SiteExtractor } from '../types';
+
+/**
+ * How to walk a GitHub page.
+ *
+ * The reason this plan enables expansion at all: GitHub hides the middle of a
+ * long issue or pull-request thread behind "Load more…" controls, and hides
+ * outdated review comments behind disclosure widgets. Both are
+ * content-disclosure controls in the strict sense — they reveal text that is
+ * genuinely not in the DOM — which is exactly the case expansion exists for.
+ */
+export const githubTraversal: TraversalPlan = {
+  id: 'github',
+  scrollerSelectors: [],
+  contentSelectors: ['main', '[role="main"]', 'body'],
+  itemSelectors: [
+    '.js-comment-container',
+    '.timeline-comment',
+    '[data-testid="comment-viewer-outer-box"]',
+    '.js-timeline-item',
+  ],
+  expandSelectors: [
+    'button.ajax-pagination-btn',
+    '.js-timeline-progressive-loader button',
+    'button[aria-label*="Load more" i]',
+    'button.js-details-target[aria-expanded="false"]',
+  ],
+  // Review forms, the comment composer and the merge box: all action surfaces.
+  forbiddenSelectors: [
+    'form',
+    '.js-comment-form',
+    '#partial-pull-merging',
+    '.merge-pr',
+    '[data-testid="merge-box"]',
+  ],
+  loadingSelectors: ['.js-timeline-progressive-loader[aria-busy="true"]', '[aria-busy="true"]'],
+  rewind: true,
+  expand: true,
+  budget: budget({ maxMs: 8_000 }),
+};
 
 const TITLE_SELECTORS = [
   'bdi.js-issue-title',
@@ -152,6 +193,8 @@ function extractCode(doc: Document, url: URL): ExtractionResult | null {
 export const githubExtractor: SiteExtractor = {
   id: 'github',
   version: 1,
+
+  traversal: githubTraversal,
 
   matches(url: URL): boolean {
     return url.hostname.replace(/^www\./, '') === 'github.com';

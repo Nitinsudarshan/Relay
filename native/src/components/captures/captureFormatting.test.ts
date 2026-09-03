@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   captureTypeLabel,
   describeCompleteness,
+  describeTraversal,
   displayUrl,
   fidelityLabel,
   matchesQuery,
+  terminationLabel,
+  trustLabel,
 } from './captureFormatting';
-import type { CaptureProvenance, VaultFile } from '../../types';
+import type { CaptureProvenance, CaptureTraversal, VaultFile } from '../../types';
 
 function provenance(overrides: Partial<CaptureProvenance> = {}): CaptureProvenance {
   return {
@@ -18,7 +21,8 @@ function provenance(overrides: Partial<CaptureProvenance> = {}): CaptureProvenan
     page_title: 'Designing capture',
     captured_at: '2026-02-14T09:30:00Z',
     extractor_id: 'chatgpt',
-    extractor_version: 1,
+    extractor_version: 2,
+    trust: 'external_untrusted',
     fidelity: 'structured',
     coverage: 'rendered_dom',
     notes: [],
@@ -42,7 +46,7 @@ describe('describeCompleteness', () => {
   it('says plainly when only the rendered part was read', () => {
     const result = describeCompleteness(provenance({ coverage: 'rendered_dom' }));
     expect(result.tone).toBe('partial');
-    expect(result.headline).toMatch(/only what the page had loaded/i);
+    expect(result.headline).toMatch(/only what Relay could reach/i);
   });
 
   it('treats truncation as partial even if coverage claims otherwise', () => {
@@ -105,5 +109,132 @@ describe('matchesQuery', () => {
 
   it('treats an empty query as matching everything', () => {
     expect(matchesQuery(capture, '   ')).toBe(true);
+  });
+});
+
+/**
+ * Capture v2: the wording that turns measurements into a claim.
+ *
+ * The product's central promise lives in these strings. v0.26.0 told a user
+ * "the whole page was captured" about a Claude conversation with a visibly
+ * shortened message in it, so these tests assert both directions: what the UI
+ * may say, and what it may not.
+ */
+function traversal(overrides: Partial<CaptureTraversal> = {}): CaptureTraversal {
+  return {
+    performed: true,
+    plan: 'chatgpt',
+    termination: 'reached_end',
+    steps: 74,
+    samples: 76,
+    scroll_span_px: 65_000,
+    duration_ms: 6_000,
+    scroll_restored: true,
+    virtualized: true,
+    settle_timeouts: 0,
+    expansions_found: 0,
+    expansions_opened: 0,
+    expansions_refused: 0,
+    expansions_failed: 0,
+    expansions_unnecessary: 0,
+    messages_discovered: 300,
+    messages_captured: 300,
+    messages_missing: 0,
+    duplicates_dropped: 228,
+    attachments_discovered: 0,
+    attachments_captured: 0,
+    images_discovered: 0,
+    images_captured: 0,
+    availability: {
+      outside_viewport: 0,
+      visually_truncated: 0,
+      collapsed: 0,
+      not_loaded: 0,
+      virtualized: 0,
+      inaccessible: 0,
+    },
+    inaccessible: [],
+    ...overrides,
+  };
+}
+
+describe('describeCompleteness with a reveal pass', () => {
+  it('says what was read rather than what was displayed', () => {
+    const result = describeCompleteness(
+      provenance({ coverage: 'full_document', traversal: traversal() }),
+    );
+    expect(result.tone).toBe('complete');
+    expect(result.headline).toMatch(/read this from beginning to end/i);
+  });
+
+  it('does not claim the whole page when reading did not finish', () => {
+    const result = describeCompleteness(provenance({ coverage: 'failed' }));
+    expect(result.tone).toBe('partial');
+    expect(result.headline).toMatch(/did not finish/i);
+  });
+
+  it('keeps the old wording for a capture made before there was a reveal pass', () => {
+    const result = describeCompleteness(provenance({ coverage: 'full_document' }));
+    expect(result.headline).toBe('The whole page was captured');
+  });
+});
+
+describe('describeTraversal', () => {
+  it('reports the discovered-versus-captured pair', () => {
+    const lines = describeTraversal(provenance({ traversal: traversal() }));
+    expect(lines.join(' | ')).toMatch(/300 of 300 turn\(s\) captured/);
+    expect(lines.join(' | ')).toMatch(/reached the end of the page/);
+  });
+
+  it('says when shortened content was read without being clicked', () => {
+    // The Claude case, in the user's language.
+    const lines = describeTraversal(
+      provenance({
+        traversal: traversal({ expansions_found: 2, expansions_unnecessary: 2 }),
+      }),
+    );
+    expect(lines.join(' | ')).toMatch(/already present in full, so nothing was clicked/i);
+  });
+
+  it('reports files and images as recorded, never as downloaded', () => {
+    const lines = describeTraversal(
+      provenance({ traversal: traversal({ attachments_discovered: 2, images_discovered: 3 }) }),
+    ).join(' | ');
+    expect(lines).toMatch(/2 file\(s\) recorded — details only, no contents downloaded/);
+    expect(lines).toMatch(/3 image\(s\) recorded — references only, no image data downloaded/);
+  });
+
+  it('omits a number the browser could not supply rather than showing a zero', () => {
+    const lines = describeTraversal(provenance({ traversal: traversal() })).join(' | ');
+    expect(lines).not.toMatch(/0 file\(s\)/);
+    expect(lines).not.toMatch(/0 shortened section/);
+    expect(lines).not.toMatch(/0 turn\(s\) missing/);
+  });
+
+  it('returns nothing at all when no reveal pass ran', () => {
+    expect(describeTraversal(provenance({}))).toEqual([]);
+    expect(describeTraversal(provenance({ traversal: traversal({ performed: false }) }))).toEqual([]);
+  });
+
+  it('names the reason reading stopped, in plain language', () => {
+    for (const [termination, pattern] of [
+      ['time_budget', /time limit/i],
+      ['user_interrupted', /page was used/i],
+      ['navigation_detected', /navigated away/i],
+      ['no_progress', /stopped yielding/i],
+      ['error', /failed part-way/i],
+    ] as const) {
+      expect(terminationLabel(termination)).toMatch(pattern);
+    }
+  });
+});
+
+describe('trustLabel', () => {
+  it('says a capture is evidence rather than instructions', () => {
+    expect(trustLabel('external_untrusted')).toMatch(/evidence, not instructions/i);
+  });
+
+  it('treats a capture from before the field existed as external too', () => {
+    expect(trustLabel(undefined)).toMatch(/external source/i);
   });
 });

@@ -216,8 +216,34 @@ This document tracks deferred features, rejected/postponed UI patterns, and arch
 - **Status**: Deferred — structurally compatible, not validated
 - **Area**: `native/browser-extension/manifest.json`, `native/src/webcapture/background.ts`
 - **Original Context**:
-  - The extension targets Chrome and Edge. Firefox supports `scripting.executeScript` under MV3 from Firefox 101 and grants `activeTab` on the same gestures, so nothing in the extraction layer is Chrome-specific — but the manifest ships Chrome shapes and no Firefox testing was done, so it is not claimed as supported (`docs/capture.md` §10).
+  - The extension targets Chrome and Edge. Firefox supports `scripting.executeScript` under MV3 from Firefox 101 and grants `activeTab` on the same gestures, so nothing in the extraction layer is Chrome-specific — but the manifest ships Chrome shapes and no Firefox testing was done, so it is not claimed as supported (`docs/capture.md` §13).
 - **Concept & Implementation Blueprint**:
   - Add `browser_specific_settings.gecko.id` and, on older Firefox, a `background.scripts` event page instead of `background.service_worker`; the build already emits both an ES module and an IIFE, so no new bundling is required.
   - Firefox treats `host_permissions` as optional by default, so pairing must handle "granted later" — the options page's **Save and test** is the natural place to call `permissions.request`.
   - The bridge already accepts `moz-extension://` origins, and there is a test asserting it.
+
+### 16. Capturing File Bytes and Image Data
+
+- **Status**: Deferred — technically possible, deliberately refused for v2
+- **Area**: `native/src/webcapture/dom.ts`, `native/src/webcapture/types.ts`, `native/src-tauri/src/capture/web/`
+- **Original Context**:
+  - Capture v2 records files and images as metadata plus a reference, with `content_captured: false` and a note saying the file itself was not retrieved. It is not a limitation of the browser: a content script's `fetch` runs with the page's cookies, so an authenticated asset URL (ChatGPT's `backend-api/estuary/content`, a GitHub attachment) *would* resolve, and at least one published exporter does exactly that.
+  - Four reasons it was refused rather than postponed by accident, all recorded in `docs/capture/RESEARCH.md` §6.1: the gesture was "capture this page", not "download every file it references"; the payload contract is text-only, which is what lets normalization be a total function over untrusted input, and the 8 MiB body limit would be spent by two screenshots; fetching authenticated asset URLs makes Relay a client of the site's API, a materially larger claim for a least-privilege feature; and metadata-now/bytes-later loses nothing because the reference is preserved, while shipping downloads and retracting them is not available.
+- **Concept & Implementation Blueprint**:
+  - Gate it on an explicit, off-by-default setting with its own consent copy — "download files referenced by captured pages" — rather than folding it into "enable capture".
+  - Do it in the **service worker**, not the content script: the worker already holds the only network permission the extension has, and keeping fetches out of the page context keeps the isolated-world guarantee intact. The content script would hand over a list of references, and the worker would decide what to fetch.
+  - Store bytes beside the artifact (`vault/captures/<id>/files/`) rather than in the payload, so the text-only contract survives; the block gains a `stored_path` and `content_captured` becomes a real measurement instead of a constant.
+  - Needs its own limits (per-file and per-capture ceilings, an allowlist of types, a same-origin-as-the-page rule) and its own honesty: a file that was fetched and rejected by a limit must say so, exactly as `content_note` does now.
+  - `sandbox:/mnt/data/…` references are not fetchable at all and would stay metadata-only regardless.
+
+### 17. A Configurable Traversal Budget
+
+- **Status**: Deferred — the budget is a constant per source, and hitting it is reported
+- **Area**: `native/src/webcapture/traversal/budget.ts`, `native/src-tauri/src/settings/`, `native/src/components/settings/CaptureSettingsView.tsx`
+- **Original Context**:
+  - The reveal pass stops after 10 seconds on a conversation (6 on a document) and reports `time_budget` with `partial` coverage. Measured against the validation fixtures, that covers roughly 450–500 turns (`docs/capture/BENCHMARKS.md`), so a genuinely enormous thread is captured incompletely — honestly, but incompletely — and the user has no way to say "take longer, I'll wait".
+  - It was left constant because the extension cannot read Relay's settings without another round-trip to the bridge, and adding one to the capture path for a value that is right in almost every case is a poor trade.
+- **Concept & Implementation Blueprint**:
+  - The bridge's `/v1/health` response is the natural carrier: the service worker already calls it during pairing, so the budget could ride along and be cached in `chrome.storage.local` rather than fetched per capture.
+  - Expose it as a choice rather than a number — "quick", "thorough", "as long as it takes" — mapping to `maxMs`/`maxSteps` pairs, because a millisecond field invites a value that makes capture feel broken.
+  - Whatever is chosen, `termination` and the completeness verdict must keep working the same way: a longer budget may not change what a capture is *allowed to claim*, only how much it manages to read.

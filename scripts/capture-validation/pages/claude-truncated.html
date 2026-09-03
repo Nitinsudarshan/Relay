@@ -1,0 +1,98 @@
+<!doctype html>
+<!--
+  The real-browser observation that reshaped Capture v2.
+
+  A long prompt was pasted into Claude. Claude shortened it and showed
+  "Show more". Nobody clicked it. Relay captured, and the artifact said
+  "the whole page was captured".
+
+  Two separate questions were tangled up in that, and this page separates them:
+
+  1. Was the text there? Yes. The shortening is CSS (`-webkit-line-clamp`), so
+     `textContent` — which is what Relay's block walk reads — returns all of
+     it, marker and all. `CAPTURE_TEST_MARKER_BANANA_739184` sits at the very
+     end of the clipped message, and a capture that reports it has proved the
+     content was never missing.
+
+  2. Was the claim defensible? No. The `<details>` block below is why: its body
+     is in `textContent` but not in `innerText`, so a coverage ratio computed
+     as extracted/innerText can exceed 1 and clear a 0.9 threshold on an
+     ordinary page.
+
+  So the fix was never "click Show more". It was to stop claiming completeness
+  the capture had not established — and to read, rather than interact, when the
+  content is already here.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Designing Relay Capture - Claude</title>
+    <style>
+      body { font: 14px/1.6 system-ui, sans-serif; margin: 0; }
+      main { max-width: 720px; margin: 0 auto; padding: 24px; }
+      .turn { padding: 16px 0; border-bottom: 1px solid #eee; }
+      /* Claude's shortening of a long pasted message: presentation only. */
+      .clamped {
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div data-test-render-count="1">
+        <div class="turn" data-testid="user-message" data-message-uuid="u-1">
+          <div class="clamped" id="pasted">
+            <p>
+              I want to design a capture system that acquires the underlying source of a page rather
+              than a picture of it. The hard part is not reading the DOM, it is knowing how much of
+              the document the DOM actually represents at the moment you read it. Virtualized lists
+              unmount what scrolls past. Lazily-loaded media has no source until it approaches the
+              viewport. Network-paged history arrives only when you reach a boundary, and reaching
+              the boundary moves it. Collapsed sections may or may not hold their content. Each of
+              those needs a different answer, and treating them as one problem produces either a
+              thin capture or a browser agent that clicks things nobody asked it to click. What I
+              want written down is which mechanism applies where, what the least invasive way to
+              obtain each one is, and — most importantly — what the capture is then allowed to claim
+              about its own completeness. CAPTURE_TEST_MARKER_BANANA_739184
+            </p>
+          </div>
+          <button type="button" aria-expanded="false" aria-controls="pasted">Show more</button>
+        </div>
+
+        <div class="turn font-claude-response">
+          <p>Four mechanisms, four answers. The ordering principle is to inspect before interacting.</p>
+          <details>
+            <summary>Show thinking</summary>
+            <p>
+              THINKING_TEXT_8812 — a closed details element keeps its body in the DOM, so this text
+              is readable without opening anything. It is absent from innerText, which is exactly
+              what made the old coverage ratio unsound.
+            </p>
+          </details>
+          <pre><code class="language-typescript">const availability = classifyAvailability(control, target);</code></pre>
+          <span class="sr-only">Claude said</span>
+        </div>
+
+        <div class="turn" data-testid="user-message" data-message-uuid="u-2">
+          <p>And what should it never do?</p>
+        </div>
+
+        <div class="turn font-claude-response">
+          <p>Act. It reads, it scrolls, and it opens things that only disclose text.</p>
+          <div data-testid="artifact-block-cell">
+            <strong>capture-architecture.md</strong>
+            <span>Document</span>
+          </div>
+          <!-- Action controls that sit inside message content: never activated. -->
+          <button type="button">Copy</button>
+          <button type="button">Retry</button>
+          <button type="button" aria-haspopup="menu" aria-expanded="false">Show more actions</button>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>
