@@ -858,6 +858,7 @@ impl VaultManager {
             if existing.content_hash == content_hash {
                 if let Some(capture) = existing.capture.as_mut() {
                     capture.recapture_count = capture.recapture_count.saturating_add(1);
+                    capture.captured_at = normalized.provenance.captured_at.clone();
                 }
                 existing.updated_at = chrono::Utc::now().to_rfc3339();
                 self.save_vault_file(&existing)?;
@@ -1063,9 +1064,15 @@ impl VaultManager {
         self.read_vault_file_dir(FILES_DIR)
     }
 
-    /// Web captures, newest first.
+    /// Web captures, newest first by latest activity.
     pub fn list_captures(&self) -> Result<Vec<VaultFile>, VaultError> {
-        self.read_vault_file_dir(CAPTURES_DIR)
+        let mut files = self.read_vault_file_dir(CAPTURES_DIR)?;
+        files.sort_by(|a, b| {
+            let a_time = a.capture.as_ref().map(|c| c.captured_at.as_str()).unwrap_or(&a.updated_at);
+            let b_time = b.capture.as_ref().map(|c| c.captured_at.as_str()).unwrap_or(&b.updated_at);
+            b_time.cmp(a_time).then_with(|| b.created_at.cmp(&a.created_at))
+        });
+        Ok(files)
     }
 
     fn read_vault_file_dir(&self, subdir: &str) -> Result<Vec<VaultFile>, VaultError> {

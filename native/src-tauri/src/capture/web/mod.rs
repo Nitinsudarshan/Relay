@@ -367,8 +367,8 @@ pub struct TraversalDiagnostics {
     pub steps: u32,
     #[serde(default)]
     pub samples: u32,
-    #[serde(default, deserialize_with = "deserialize_flexible_u32")]
-    pub scroll_span_px: u32,
+    #[serde(default)]
+    pub scroll_span_px: f64,
     #[serde(default)]
     pub duration_ms: u64,
     /// Whether the user's scroll position was put back where it was.
@@ -792,7 +792,7 @@ mod tests {
         );
         let payload = parse_payload(json.as_bytes()).unwrap();
         let traversal = payload.diagnostics.traversal.expect("traversal present");
-        assert_eq!(traversal.scroll_span_px, 1485);
+        assert!((traversal.scroll_span_px - 1485.3333740234375).abs() < f64::EPSILON);
         assert_eq!(traversal.messages_missing, Some(2));
         assert_eq!(payload.content.messages[0].ordinal, Some(1));
         if let ContentBlock::Image { width, height, .. } = &payload.content.messages[0].blocks[0] {
@@ -800,6 +800,19 @@ mod tests {
             assert_eq!(*height, Some(240));
         } else {
             panic!("expected image block");
+        }
+    }
+
+    #[test]
+    fn observed_high_dpi_floating_point_payload_values_deserialize_successfully() {
+        for sample in [4219.5556640625, 12908.36328125, 3122.9091796875, 69144.7265625] {
+            let json = minimal_payload_json(&format!(
+                r#","diagnostics":{{"coverage":"rendered_dom","traversal":{{"plan":"github","termination":"reached_end","steps":14,"samples":12,"scroll_span_px":{sample}}}}}"#
+            ));
+            let payload = parse_payload(json.as_bytes())
+                .unwrap_or_else(|e| panic!("failed to deserialize with scroll_span_px {sample}: {e}"));
+            let traversal = payload.diagnostics.traversal.expect("traversal present");
+            assert!((traversal.scroll_span_px - sample).abs() < 1e-6);
         }
     }
 
@@ -956,6 +969,35 @@ mod ingest_tests {
         assert_eq!(first.id, second.id, "identical content must not duplicate");
         assert_eq!(second.capture.as_ref().unwrap().recapture_count, 1);
         assert_eq!(vault.manager.list_captures().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn recapturing_unchanged_content_moves_it_to_the_top_of_list_captures() {
+        let vault = TempVault::new();
+        let first_payload = conversation_payload("https://chatgpt.com/c/first", "First conversation");
+        let second_payload = conversation_payload("https://chatgpt.com/c/second", "Second conversation");
+
+        let first = ingest(&vault.manager, first_payload.as_bytes()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let second = ingest(&vault.manager, second_payload.as_bytes()).unwrap();
+
+        // second is newer, so it is first in list_captures
+        let list = vault.manager.list_captures().unwrap();
+        assert_eq!(list[0].id, second.id);
+        assert_eq!(list[1].id, first.id);
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let re_ingested = ingest(
+            &vault.manager,
+            conversation_payload("https://chatgpt.com/c/first", "First conversation").as_bytes(),
+        )
+        .unwrap();
+
+        assert_eq!(re_ingested.id, first.id);
+        let updated_list = vault.manager.list_captures().unwrap();
+        // After recapture, first was updated and should now be at the top!
+        assert_eq!(updated_list[0].id, first.id);
+        assert_eq!(updated_list[1].id, second.id);
     }
 
     #[test]

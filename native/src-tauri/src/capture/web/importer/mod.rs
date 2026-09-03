@@ -162,16 +162,24 @@ fn extract_conversations_json(path: &Path) -> Result<ExtractedArchive, CommandEr
     // Try reading as ZIP
     if let Ok(mut archive) = zip::ZipArchive::new(file) {
         let mut conv_bytes = None;
+        let mut any_json_bytes = None;
         let mut assets = HashMap::new();
 
         for idx in 0..archive.len() {
             let Ok(mut entry) = archive.by_index(idx) else { continue };
             let name = entry.name().to_string();
 
-            if name == "conversations.json" || name.ends_with("/conversations.json") {
-                let mut buf = Vec::new();
-                if entry.read_to_end(&mut buf).is_ok() {
-                    conv_bytes = Some(buf);
+            if name.ends_with(".json") && !name.contains("__MACOSX") {
+                if name == "conversations.json" || name.ends_with("/conversations.json") {
+                    let mut buf = Vec::new();
+                    if entry.read_to_end(&mut buf).is_ok() {
+                        conv_bytes = Some(buf);
+                    }
+                } else if any_json_bytes.is_none() {
+                    let mut buf = Vec::new();
+                    if entry.read_to_end(&mut buf).is_ok() {
+                        any_json_bytes = Some(buf);
+                    }
                 }
             } else if !entry.is_dir() && entry.size() > 0 && entry.size() < 50_000_000 {
                 // Buffer assets (up to 50MB per file)
@@ -183,7 +191,7 @@ fn extract_conversations_json(path: &Path) -> Result<ExtractedArchive, CommandEr
             }
         }
 
-        if let Some(bytes) = conv_bytes {
+        if let Some(bytes) = conv_bytes.or(any_json_bytes) {
             return Ok((bytes, Some(assets)));
         }
     }
@@ -294,6 +302,7 @@ pub fn inspect_export_file(path: &Path, vault: &VaultManager) -> Result<ExportIn
 pub async fn import_export_conversation(
     export_path: &Path,
     target_conversation_id: &str,
+    duplicate_mode: Option<&str>,
     vault: &VaultManager,
     settings: &crate::settings::AppSettings,
 ) -> Result<crate::vault::VaultFile, CommandError> {
@@ -310,6 +319,7 @@ pub async fn import_export_conversation(
                 target.title.as_deref().unwrap_or("ChatGPT Conversation"),
                 |assets_dir| chatgpt::chatgpt_to_capture_payload(&target, Some(assets_dir), &assets),
                 export_path,
+                duplicate_mode,
                 vault,
                 settings,
             )
@@ -324,6 +334,7 @@ pub async fn import_export_conversation(
                 target.name.as_deref().unwrap_or("Claude Conversation"),
                 |assets_dir| claude::claude_to_capture_payload(&target, Some(assets_dir), &assets),
                 export_path,
+                duplicate_mode,
                 vault,
                 settings,
             )
@@ -338,6 +349,7 @@ async fn save_and_analyze_imported<F>(
     _raw_title: &str,
     payload_builder: F,
     _export_path: &Path,
+    duplicate_mode: Option<&str>,
     vault: &VaultManager,
     settings: &crate::settings::AppSettings,
 ) -> Result<crate::vault::VaultFile, CommandError>
@@ -352,7 +364,12 @@ where
         .map_err(|e| CommandError::new("ASSET_DIR_FAILED", &e.to_string()))?;
 
     // Build payload with assets extracted to assets_dir
-    let payload = payload_builder(&assets_dir);
+    let mut payload = payload_builder(&assets_dir);
+
+    // If duplicate_mode == Some("new"), assign unique URL so it doesn't merge/update previous capture
+    if duplicate_mode == Some("new") {
+        payload.url = format!("{}#import-{}", payload.url, uuid::Uuid::new_v4());
+    }
 
     // Normalize
     let normalized = crate::capture::web::normalize::normalize(&payload)

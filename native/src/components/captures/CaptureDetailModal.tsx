@@ -236,6 +236,7 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
           {activeTab === 'context' && (
             <CaptureContextTab
               context={context}
+              provenance={provenance}
               loading={loadingContext}
               analyzing={analyzingContext}
               onAnalyze={handleAnalyzeContext}
@@ -294,9 +295,9 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
                 )}
                 <dt className="text-muted-foreground">Version</dt>
                 <dd className="text-foreground">
-                  {provenance.version}
+                  Version {provenance.version}
                   {provenance.recapture_count > 0 &&
-                    ` · re-captured unchanged ${provenance.recapture_count}×`}
+                    ` · re-captured unchanged ${provenance.recapture_count}× (latest: ${formatTimestamp(provenance.captured_at)})`}
                 </dd>
               </dl>
 

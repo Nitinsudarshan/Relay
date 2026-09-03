@@ -102,10 +102,26 @@ export const CapturesPage: React.FC<CapturesPageProps> = ({
     return () => clearTimeout(timer);
   }, [progress]);
 
-  const visible = useMemo(
-    () => captures.filter((capture) => matchesQuery(capture, query)),
-    [captures, query],
-  );
+  const visible = useMemo(() => {
+    // 1. Identify older superseded capture IDs so only current heads appear in the list
+    const supersededIds = new Set(
+      captures
+        .map((c) => c.capture?.previous_capture_id)
+        .filter((id): id is string => Boolean(id)),
+    );
+
+    // 2. Filter out superseded captures and apply search query
+    const active = captures
+      .filter((capture) => !supersededIds.has(capture.id))
+      .filter((capture) => matchesQuery(capture, query));
+
+    // 3. Sort by latest activity (captured_at -> updated_at -> created_at)
+    return active.sort((a, b) => {
+      const aTime = a.capture?.captured_at || a.updated_at || a.created_at;
+      const bTime = b.capture?.captured_at || b.updated_at || b.created_at;
+      return bTime.localeCompare(aTime);
+    });
+  }, [captures, query]);
 
   const analyse = async (id: string) => {
     const updated = await invoke<VaultFile>('analyze_vault_file', { id });
@@ -275,6 +291,18 @@ export const CapturesPage: React.FC<CapturesPageProps> = ({
                           </span>
                           <span aria-hidden>·</span>
                           <span>{captureTypeLabel(provenance.capture_type)}</span>
+                          {provenance.version > 1 && (
+                            <>
+                              <span aria-hidden>·</span>
+                              <span className="font-semibold text-foreground/90">v{provenance.version}</span>
+                            </>
+                          )}
+                          {provenance.recapture_count > 0 && provenance.version === 1 && (
+                            <>
+                              <span aria-hidden>·</span>
+                              <span>v1 ({provenance.recapture_count + 1}×)</span>
+                            </>
+                          )}
                           <span aria-hidden>·</span>
                           <span>{formatTimestamp(provenance.captured_at)}</span>
                           <span aria-hidden>·</span>

@@ -327,7 +327,10 @@ pub fn run() {
             commands::get_capture_context,
             commands::analyze_capture_context,
             commands::inspect_ai_conversation_export,
+            commands::inspect_ai_conversation_export_bytes,
             commands::import_ai_conversation_export,
+            commands::import_ai_conversation_export_bytes,
+            commands::pick_ai_conversation_export_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,26 @@
 # Relay — Changelog
 
+## [0.28.2] - 2026-09-03
+
+### AI Conversation Capture & Import Stabilization Pass
+
+**Type**: patch — precision fix for high-DPI browser coordinates, native OS export file picker with unified drag-and-drop ingestion, recapture recency ordering and single-source identity consolidation, duplicate import handling, and honest completeness reporting in the context viewer (`native/src-tauri/src/capture/web/mod.rs`, `native/src-tauri/src/capture/web/normalize.rs`, `native/src-tauri/src/capture/web/importer/mod.rs`, `native/src-tauri/src/vault/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`, `native/src/webcapture/extractors/github.ts`, `native/src/components/captures/ImportConversationModal.tsx`, `native/src/components/captures/CapturesPage.tsx`, `native/src/components/captures/CaptureContextTab.tsx`, `native/src/components/captures/CaptureDetailModal.tsx`).
+
+#### Fixes
+
+- **Browser Traversal Subpixel Coordinate Deserialization (`capture/web/mod.rs`, `capture/web/normalize.rs`)**: Resolved `invalid type: floating point ..., expected u32` failures triggered during live capture on Windows high-DPI scaling (125%, 150%) and browser zoom. `scroll_span_px` in `TraversalDiagnostics` now legitimately receives fractional pixel measurements (`f64`) at the true Rust type boundary, with rounded formatting in markdown summaries and regression tests for observed coordinates (`4219.5556640625`, `12908.36328125`, `3122.9091796875`, `69144.7265625`).
+- **Native OS Export File Picker & Drag-and-Drop Ingestion (`commands.rs`, `lib.rs`, `ImportConversationModal.tsx`)**: Replaced broken frontend `@tauri-apps/plugin-dialog` calls with a native Tauri command `pick_ai_conversation_export_file` using `app.dialog().file()`, matching Relay's established backend file picking architecture. Added full HTML5 and WebView2 drag-and-drop support with active hover styling and byte-level staging fallback (`inspect_ai_conversation_export_bytes`, `import_ai_conversation_export_bytes`).
+- **Recapture Recency & Single-Source Identity (`vault/mod.rs`, `CapturesPage.tsx`, `CaptureDetailModal.tsx`)**: When a conversation is re-captured unchanged, `captured_at` is now updated with the newest capture timestamp and `updated_at` records the latest activity. `list_captures()` sorts captures by recency of activity, moving recaptured conversations immediately to the top. Superseded historical captures (`previous_capture_id`) are collapsed so each conversation remains one card showing `Version N` and subsequent check counts.
+- **Duplicate Import Resolution (`importer/mod.rs`, `commands.rs`, `ImportConversationModal.tsx`)**: If an inspected conversation already exists in the vault, the user is explicitly prompted to choose between `[Update Existing]` (supersedes and links under the existing canonical source identity) and `[Import as New]` (generates a unique source fragment), avoiding accidental duplicate clutter without silent overwrites.
+- **Honest Context Completeness Reporting (`CaptureContextTab.tsx`)**: Added prominent amber callout banner to the Context tab whenever source coverage is `partial` or `rendered_dom`, honestly disclosing to the user that the analytical model was derived from incomplete source material where earlier or later turns were beyond reach.
+- **GitHub Traversal Safety & Reach (`extractors/github.ts`)**: Scoped `expandSelectors` to prevent matching hundreds of generic page widgets (which generated thousands of safety refusals), added Markdown body and readme item selectors, and tuned budget timing while retaining strict partial coverage reporting when threads stop early.
+
+#### Testing
+
+- **Backend Tests (858 tests)**: Added regression tests for fractional high-DPI scroll distance deserialization and verified that recapturing unchanged content updates timestamp and moves the item to the top of `list_captures()`. Passed `cargo test --lib capture::web` (101 tests passed) and full CI gates (`cargo clippy --all-targets -- -D warnings`).
+- **Frontend Checks**: Passed `npx tsc --noEmit` and all 355 unit tests (`npm test`).
+- **Extension**: Rebuilt content script and background bundles (`npm run build:extension`).
+
 ## [0.28.1] - 2026-09-03
 
 ### AI Conversation Import & Capture Stabilization

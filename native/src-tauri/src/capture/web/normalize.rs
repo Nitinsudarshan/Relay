@@ -628,9 +628,9 @@ fn render_completeness(t: &TraversalDiagnostics) -> String {
     let mut out = String::from("\n---\n\n## How completely this was captured\n\n");
 
     out.push_str(&format!(
-        "- **Reading:** {} step(s) over {}px, {}ms, stopped because {}\n",
+        "- **Reading:** {} step(s) over {:.0}px, {}ms, stopped because {}\n",
         t.steps,
-        t.scroll_span_px,
+        t.scroll_span_px.round(),
         t.duration_ms,
         describe_termination(&t.termination),
     ));
@@ -1518,7 +1518,7 @@ mod v2_tests {
             termination: "reached_end".to_string(),
             steps: 74,
             samples: 76,
-            scroll_span_px: 65_000,
+            scroll_span_px: 65_000.0,
             duration_ms: 6_000,
             scroll_restored: true,
             virtualized: true,

@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
   Ban,
   CheckCircle2,
   Compass,
@@ -11,10 +12,11 @@ import {
   Sparkles,
   Target,
 } from 'lucide-react';
-import type { ConversationContext } from '../../types';
+import type { CaptureProvenance, ConversationContext } from '../../types';
 
 interface CaptureContextTabProps {
   context: ConversationContext | null;
+  provenance?: CaptureProvenance | null;
   loading: boolean;
   analyzing: boolean;
   onAnalyze: () => Promise<void>;
@@ -22,6 +24,7 @@ interface CaptureContextTabProps {
 
 export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
   context,
+  provenance,
   loading,
   analyzing,
   onAnalyze,
@@ -68,8 +71,24 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
     );
   }
 
+  const isPartial = provenance?.coverage === 'partial' || provenance?.coverage === 'rendered_dom';
+
   return (
     <div className="space-y-6 text-xs leading-relaxed">
+      {/* Honesty Banner: Incomplete / Partial Source Material */}
+      {isPartial && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="space-y-0.5">
+            <p className="font-semibold">Context based on a partial capture</p>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Relay stopped reading before reaching the full document or conversation thread.
+              This analytical model was derived only from the turns that Relay could reach; earlier or later turns may be absent from this record.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Overview & Objective Banner */}
       <section className="rounded-lg border border-border bg-muted/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-3">

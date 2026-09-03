@@ -32,12 +32,16 @@ export const githubTraversal: TraversalPlan = {
     '.timeline-comment',
     '[data-testid="comment-viewer-outer-box"]',
     '.js-timeline-item',
+    'article.markdown-body',
+    '#readme',
+    '.Box-row',
   ],
   expandSelectors: [
     'button.ajax-pagination-btn',
     '.js-timeline-progressive-loader button',
     'button[aria-label*="Load more" i]',
-    'button.js-details-target[aria-expanded="false"]',
+    'details.js-details-container:not([open]) > summary',
+    '.outdated-comment button',
   ],
   // Review forms, the comment composer and the merge box: all action surfaces.
   forbiddenSelectors: [
@@ -50,7 +54,7 @@ export const githubTraversal: TraversalPlan = {
   loadingSelectors: ['.js-timeline-progressive-loader[aria-busy="true"]', '[aria-busy="true"]'],
   rewind: true,
   expand: true,
-  budget: budget({ maxMs: 8_000 }),
+  budget: budget({ maxMs: 12_000 }),
 };
 
 const TITLE_SELECTORS = [
