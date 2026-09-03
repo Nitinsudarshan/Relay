@@ -529,6 +529,12 @@ fn render_block(out: &mut String, block: &ContentBlock, heading_offset: u8) {
             ..
         } => {
             let label = name.as_deref().unwrap_or("file");
+            // TODO(markdown-links): `MarkdownView` renders bold, italic, code,
+            // images and tables, but not `[text](url)` — so this link shows as
+            // literal markdown in the Captures and Scribbles views. Pre-existing
+            // (the Links section has always rendered that way) and left as-is
+            // rather than widening this change into a shared component, but
+            // attachments make it far more visible than a trailing link list did.
             match href {
                 Some(href) => out.push_str(&format!("**File:** [{}]({})\n", escape_cell(label), href)),
                 None => out.push_str(&format!("**File:** {}\n", escape_cell(label))),
