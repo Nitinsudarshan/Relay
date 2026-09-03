@@ -219,3 +219,19 @@ export function matchesQuery(capture: VaultFile, query: string): boolean {
     .toLowerCase();
   return trimmed.split(/\s+/).every((term) => haystack.includes(term));
 }
+
+/**
+ * Evaluates the newest timestamp among capture.captured_at, updated_at, and created_at.
+ * Guarantees that recaptured or modified captures sort to the top regardless of historical metadata.
+ */
+export function getLatestCaptureActivity(capture: VaultFile): string {
+  const times = [
+    capture.capture?.captured_at,
+    capture.updated_at,
+    capture.created_at,
+  ].filter((t): t is string => Boolean(t && t.trim()));
+
+  if (times.length === 0) return '';
+  times.sort();
+  return times[times.length - 1];
+}

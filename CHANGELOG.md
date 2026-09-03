@@ -1,5 +1,26 @@
 # Relay — Changelog
 
+## [0.28.3] - 2026-09-03
+
+### GitHub Context Support, External Source Link Opener & Recapture Recency Fix
+
+**Type**: patch — generalized `SourceContext` abstraction establishing the `Source -> Analyse -> Context` architecture for all capture types (including GitHub repositories and documents), robust external URL shell launcher with URL scheme validation and error handling, and strict recapture recency ordering evaluating the maximum activity timestamp (`native/src-tauri/src/capture/web/context.rs`, `native/src-tauri/src/capture/web/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/vault/mod.rs`, `native/src/types/index.ts`, `native/src/components/captures/CaptureContextTab.tsx`, `native/src/components/captures/CaptureDetailModal.tsx`, `native/src/components/captures/CapturesPage.tsx`, `native/src/components/captures/captureFormatting.ts`, `native/src/components/captures/captureFormatting.test.ts`).
+
+#### Features & Architecture
+
+- **Generalized Source Context Pipeline (`context.rs`, `types/index.ts`, `CaptureContextTab.tsx`, `CaptureDetailModal.tsx`)**: Replaced the hardcoded `isConversation` gate with a generalized `supportsContext` check. The Context tab is now available for any source that has or can support derived structured context (covering AI conversations and GitHub repositories). For sources without derived context, displays an honest empty state with clear next actions ("Structured Context Unavailable", with a button to extract structured context), without fabricating fake data.
+- **Robust External URL Opener (`commands.rs`, `CaptureDetailModal.tsx`, `CapturesPage.tsx`)**: Added `validate_external_url` with unit test coverage, enforcing strict HTTP/HTTPS schemes and disallowing control characters or unhandled protocols. Uses OS-level handlers (`rundll32 url.dll,FileProtocolHandler` on Windows, `open`/`xdg-open` on Unix) with client-side try/catch logging so clicking source URLs (e.g. `github.com/stablyai/orca ↗`) opens immediately in the user's default browser.
+
+#### Fixes
+
+- **Recapture Recency & Max Timestamp Ordering (`vault/mod.rs`, `CapturesPage.tsx`, `captureFormatting.ts`)**: Fixed an issue where recaptured conversations did not move to the top of the captures list because older records had stale `captured_at` timestamps that masked newer `updated_at` values. Implemented `capture_activity_timestamp` in Rust and `getLatestCaptureActivity` in TypeScript, evaluating `max(captured_at, updated_at, created_at)`. Added unit and regression tests proving that recapturing `A` in sequence `[A, B, C]` moves `A` to the top yielding `[A, C, B]`.
+
+#### Testing
+
+- **Backend Tests (861 tests, +3)**: Added regression tests for `validate_external_url` (valid schemes, malformed schemes, control characters) and `recapturing_a_in_sequence_a_b_c_moves_it_to_the_top_yielding_a_c_b`. Passed `cargo test --lib capture::web` (102 passed) and `cargo test --lib commands::tests` (2 passed). Passed `cargo clippy --all-targets -- -D warnings` (0 warnings).
+- **Frontend Tests (357 tests, +2)**: Added unit tests for `getLatestCaptureActivity` and recency ordering `[A, B, C] -> recapture A -> [A, C, B]`. Passed `npx tsc --noEmit` and `npm test` (357 passed across 25 suites).
+- **Web Dashboard**: Verified `npx tsc --noEmit` in `web` (0 errors).
+
 ## [0.28.2] - 2026-09-03
 
 ### AI Conversation Capture & Import Stabilization Pass

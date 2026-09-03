@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import type { ConversationContext, Scribble, VaultFile } from '../../types';
+import type { Scribble, SourceContext, VaultFile } from '../../types';
 import { MarkdownView } from '../common/MarkdownView';
 import { CaptureContextTab } from './CaptureContextTab';
 import {
@@ -56,21 +56,24 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
   const [busy, setBusy] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const [context, setContext] = useState<ConversationContext | null>(null);
+  const [context, setContext] = useState<SourceContext | null>(null);
   const [loadingContext, setLoadingContext] = useState(false);
   const [analyzingContext, setAnalyzingContext] = useState(false);
 
   const provenance = capture.capture;
-  const isConversation =
+  const supportsContext = Boolean(
+    context !== null ||
     provenance?.capture_type === 'conversation' ||
+    provenance?.application === 'github' ||
+    provenance?.url?.toLowerCase().includes('github.com') ||
     capture.content.includes('**User**:') ||
-    capture.content.includes('**Assistant**:');
+    capture.content.includes('**Assistant**:')
+  );
 
   useEffect(() => {
-    if (!isConversation) return;
     let cancelled = false;
     setLoadingContext(true);
-    invoke<ConversationContext | null>('get_capture_context', { id: capture.id })
+    invoke<SourceContext | null>('get_capture_context', { id: capture.id })
       .then((ctx) => {
         if (!cancelled) setContext(ctx);
       })
@@ -83,12 +86,12 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [capture.id, isConversation]);
+  }, [capture.id]);
 
   const handleAnalyzeContext = async () => {
     setAnalyzingContext(true);
     try {
-      const ctx = await invoke<ConversationContext>('analyze_capture_context', { id: capture.id });
+      const ctx = await invoke<SourceContext>('analyze_capture_context', { id: capture.id });
       setContext(ctx);
     } catch (err) {
       console.error('Failed to analyze capture context', err);
@@ -197,7 +200,7 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
           {(
             [
               ['content', 'Content'],
-              ...(isConversation ? [['context', 'Context'] as [DetailTab, string]] : []),
+              ...(supportsContext ? [['context', 'Context'] as [DetailTab, string]] : []),
               ['provenance', 'Where it came from'],
               ['source', 'Stored source'],
             ] as [DetailTab, string][]
@@ -386,8 +389,12 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
           {provenance && (
             <button
               type="button"
-              onClick={() => {
-                void invoke('open_external_url', { url: provenance.url });
+              onClick={async () => {
+                try {
+                  await invoke('open_external_url', { url: provenance.url });
+                } catch (err) {
+                  console.error('Failed to open source URL', err);
+                }
               }}
               title={`Open ${provenance.url} in browser`}
               className="ml-auto inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"

@@ -23,6 +23,7 @@ import {
   describeCompleteness,
   displayUrl,
   formatTimestamp,
+  getLatestCaptureActivity,
   matchesQuery,
 } from './captureFormatting';
 
@@ -115,10 +116,10 @@ export const CapturesPage: React.FC<CapturesPageProps> = ({
       .filter((capture) => !supersededIds.has(capture.id))
       .filter((capture) => matchesQuery(capture, query));
 
-    // 3. Sort by latest activity (captured_at -> updated_at -> created_at)
-    return active.sort((a, b) => {
-      const aTime = a.capture?.captured_at || a.updated_at || a.created_at;
-      const bTime = b.capture?.captured_at || b.updated_at || b.created_at;
+    // 3. Sort by latest activity (max of captured_at, updated_at, created_at)
+    return [...active].sort((a, b) => {
+      const aTime = getLatestCaptureActivity(a);
+      const bTime = getLatestCaptureActivity(b);
       return bTime.localeCompare(aTime);
     });
   }, [captures, query]);

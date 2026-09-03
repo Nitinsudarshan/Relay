@@ -3672,24 +3672,24 @@ pub async fn import_web_capture(
     Ok(artifact)
 }
 
-/// Retrieves the derived conversation context for a capture, if already analyzed.
+/// Retrieves the derived structured context for a capture, if already analyzed.
 #[tauri::command]
 pub async fn get_capture_context(
     id: String,
     state: State<'_, AppState>,
-) -> Result<Option<crate::capture::web::ConversationContext>, CommandError> {
+) -> Result<Option<crate::capture::web::SourceContext>, CommandError> {
     state
         .vault
         .get_capture_context(&id)
         .map_err(|e| CommandError::new("CONTEXT_UNAVAILABLE", &e.to_string()))
 }
 
-/// Analyzes a captured AI conversation to extract structured work context.
+/// Analyzes a captured source to extract structured work context.
 #[tauri::command]
 pub async fn analyze_capture_context(
     id: String,
     state: State<'_, AppState>,
-) -> Result<crate::capture::web::ConversationContext, CommandError> {
+) -> Result<crate::capture::web::SourceContext, CommandError> {
     let file = state
         .vault
         .get_vault_file(&id)
@@ -3818,20 +3818,31 @@ pub async fn import_ai_conversation_export_bytes(
     res
 }
 
+/// Validates that a string is a safe HTTP or HTTPS URL before delegating to the OS.
+pub fn validate_external_url(raw: &str) -> Result<String, &'static str> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("URL cannot be empty.");
+    }
+    if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+        return Err("Only HTTP and HTTPS URLs can be opened.");
+    }
+    if trimmed.chars().any(|c| c.is_control()) {
+        return Err("URL contains invalid control characters.");
+    }
+    Ok(trimmed.to_string())
+}
+
 /// Opens a validated HTTP or HTTPS URL in the user's default OS browser.
 #[tauri::command]
 pub async fn open_external_url(url: String) -> Result<(), CommandError> {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(CommandError::new(
-            "INVALID_URL",
-            "Only HTTP and HTTPS URLs can be opened.",
-        ));
-    }
+    let validated = validate_external_url(&url)
+        .map_err(|e| CommandError::new("INVALID_URL", e))?;
 
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer")
-            .arg(&url)
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", &validated])
             .spawn()
             .map_err(|e| CommandError::new("OPEN_URL_FAILED", &e.to_string()))?;
     }
@@ -3839,7 +3850,7 @@ pub async fn open_external_url(url: String) -> Result<(), CommandError> {
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
-            .arg(&url)
+            .arg(&validated)
             .spawn()
             .map_err(|e| CommandError::new("OPEN_URL_FAILED", &e.to_string()))?;
     }
@@ -3847,10 +3858,37 @@ pub async fn open_external_url(url: String) -> Result<(), CommandError> {
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
-            .arg(&url)
+            .arg(&validated)
             .spawn()
             .map_err(|e| CommandError::new("OPEN_URL_FAILED", &e.to_string()))?;
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_external_url_accepts_valid_http_and_https_urls() {
+        assert_eq!(
+            validate_external_url("https://github.com/stablyai/orca").unwrap(),
+            "https://github.com/stablyai/orca"
+        );
+        assert_eq!(
+            validate_external_url("  http://localhost:3000/path?query=1#hash  ").unwrap(),
+            "http://localhost:3000/path?query=1#hash"
+        );
+    }
+
+    #[test]
+    fn validate_external_url_refuses_unsafe_schemes_and_control_characters() {
+        assert!(validate_external_url("").is_err());
+        assert!(validate_external_url("   ").is_err());
+        assert!(validate_external_url("file:///C:/secrets.txt").is_err());
+        assert!(validate_external_url("javascript:alert(1)").is_err());
+        assert!(validate_external_url("data:text/html,hello").is_err());
+        assert!(validate_external_url("https://example.com\n\revil").is_err());
+    }
 }

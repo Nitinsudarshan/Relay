@@ -5,6 +5,7 @@ import {
   describeTraversal,
   displayUrl,
   fidelityLabel,
+  getLatestCaptureActivity,
   matchesQuery,
   terminationLabel,
   trustLabel,
@@ -236,5 +237,68 @@ describe('trustLabel', () => {
 
   it('treats a capture from before the field existed as external too', () => {
     expect(trustLabel(undefined)).toMatch(/external source/i);
+  });
+});
+
+describe('getLatestCaptureActivity & recapture recency', () => {
+  it('prefers the newest activity timestamp among captured_at, updated_at, and created_at', () => {
+    const file = {
+      created_at: '2026-09-01T10:00:00Z',
+      updated_at: '2026-09-03T12:00:00Z',
+      capture: {
+        captured_at: '2026-09-02T10:00:00Z',
+      },
+    } as unknown as VaultFile;
+
+    expect(getLatestCaptureActivity(file)).toBe('2026-09-03T12:00:00Z');
+  });
+
+  it('moves recaptured item A from [C, B, A] to the top yielding [A, C, B]', () => {
+    const itemA = {
+      id: 'a',
+      created_at: '2026-09-01T10:00:00Z',
+      updated_at: '2026-09-01T10:00:00Z',
+      capture: { captured_at: '2026-09-01T10:00:00Z', recapture_count: 0 },
+    } as unknown as VaultFile;
+
+    const itemB = {
+      id: 'b',
+      created_at: '2026-09-02T10:00:00Z',
+      updated_at: '2026-09-02T10:00:00Z',
+      capture: { captured_at: '2026-09-02T10:00:00Z', recapture_count: 0 },
+    } as unknown as VaultFile;
+
+    const itemC = {
+      id: 'c',
+      created_at: '2026-09-03T10:00:00Z',
+      updated_at: '2026-09-03T10:00:00Z',
+      capture: { captured_at: '2026-09-03T10:00:00Z', recapture_count: 0 },
+    } as unknown as VaultFile;
+
+    const list = [itemA, itemB, itemC];
+    const initialSorted = [...list].sort((x, y) =>
+      getLatestCaptureActivity(y).localeCompare(getLatestCaptureActivity(x)),
+    );
+    // Initial order: C, B, A
+    expect(initialSorted.map((i) => i.id)).toEqual(['c', 'b', 'a']);
+
+    // Recapture A at T=Sept 4
+    const recapturedA = {
+      ...itemA,
+      updated_at: '2026-09-04T10:00:00Z',
+      capture: {
+        ...itemA.capture,
+        captured_at: '2026-09-04T10:00:00Z',
+        recapture_count: 1,
+      },
+    } as unknown as VaultFile;
+
+    const updatedList = [recapturedA, itemB, itemC];
+    const afterRecaptureSorted = [...updatedList].sort((x, y) =>
+      getLatestCaptureActivity(y).localeCompare(getLatestCaptureActivity(x)),
+    );
+
+    // Invariant: [A, C, B]
+    expect(afterRecaptureSorted.map((i) => i.id)).toEqual(['a', 'c', 'b']);
   });
 });

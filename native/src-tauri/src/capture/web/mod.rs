@@ -32,7 +32,7 @@ pub mod importer;
 pub mod normalize;
 pub mod source;
 
-pub use context::ConversationContext;
+pub use context::{ConversationContext, SourceContext};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -998,6 +998,38 @@ mod ingest_tests {
         // After recapture, first was updated and should now be at the top!
         assert_eq!(updated_list[0].id, first.id);
         assert_eq!(updated_list[1].id, second.id);
+    }
+
+    #[test]
+    fn recapturing_a_in_sequence_a_b_c_moves_it_to_the_top_yielding_a_c_b() {
+        let vault = TempVault::new();
+        let payload_a = conversation_payload("https://chatgpt.com/c/item_a", "Conversation A");
+        let payload_b = conversation_payload("https://chatgpt.com/c/item_b", "Conversation B");
+        let payload_c = conversation_payload("https://chatgpt.com/c/item_c", "Conversation C");
+
+        let a = ingest(&vault.manager, payload_a.as_bytes()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let b = ingest(&vault.manager, payload_b.as_bytes()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let c = ingest(&vault.manager, payload_c.as_bytes()).unwrap();
+
+        // Initially sorted newest first: C, B, A
+        let initial_list = vault.manager.list_captures().unwrap();
+        assert_eq!(initial_list[0].id, c.id);
+        assert_eq!(initial_list[1].id, b.id);
+        assert_eq!(initial_list[2].id, a.id);
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        // Recapture A unchanged
+        let re_a = ingest(&vault.manager, payload_a.as_bytes()).unwrap();
+        assert_eq!(re_a.id, a.id);
+        assert_eq!(re_a.capture.as_ref().unwrap().recapture_count, 1);
+
+        // Invariant: list_captures is now A, C, B
+        let updated_list = vault.manager.list_captures().unwrap();
+        assert_eq!(updated_list[0].id, a.id, "Recaptured A must be first");
+        assert_eq!(updated_list[1].id, c.id, "C was previous newest");
+        assert_eq!(updated_list[2].id, b.id, "B was previous middle");
     }
 
     #[test]

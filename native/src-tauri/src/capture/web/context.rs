@@ -132,6 +132,9 @@ pub struct ConversationContext {
     pub deterministic: bool,
 }
 
+/// Canonical derived structured context for any captured source (conversations, repositories, documents).
+pub type SourceContext = ConversationContext;
+
 pub const CONTEXT_EXTRACTION_SYSTEM_PROMPT: &str = r#"
 You are Relay's Conversation Intelligence Engine.
 Your task is to analyze a captured AI conversation and extract structured, high-signal work context to power a Context Handoff.
@@ -586,7 +589,18 @@ pub fn extract_deterministic_context(
     }
 
     if objective.is_empty() {
-        objective = format!("Explore and work on {}", title);
+        for block in &payload.content.blocks {
+            if let super::ContentBlock::Paragraph { text } = block {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    objective = trimmed.chars().take(240).collect();
+                    break;
+                }
+            }
+        }
+        if objective.is_empty() {
+            objective = format!("Explore and work on {}", title);
+        }
     }
 
     if let Some(last_msg) = messages.last() {
@@ -598,6 +612,12 @@ pub fn extract_deterministic_context(
                     break;
                 }
             }
+        }
+    } else if let Some(last_block) = payload.content.blocks.last() {
+        if let super::ContentBlock::Paragraph { text } = last_block {
+            current_state = text.trim().chars().take(220).collect();
+        } else {
+            current_state = format!("Captured document snapshot of {}", title);
         }
     }
 

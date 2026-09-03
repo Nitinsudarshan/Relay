@@ -245,6 +245,11 @@ export interface ConversationContext {
   deterministic: boolean;
 }
 
+/**
+ * General derived structured context for any captured source (conversations, repositories, documents).
+ */
+export type SourceContext = ConversationContext;
+
 export interface ConversationExportItem {
   id: string;
   title: string;

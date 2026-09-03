@@ -856,11 +856,16 @@ impl VaultManager {
 
         if let Some(mut existing) = previous.clone() {
             if existing.content_hash == content_hash {
+                let now = chrono::Utc::now().to_rfc3339();
                 if let Some(capture) = existing.capture.as_mut() {
                     capture.recapture_count = capture.recapture_count.saturating_add(1);
-                    capture.captured_at = normalized.provenance.captured_at.clone();
+                    if !normalized.provenance.captured_at.trim().is_empty() {
+                        capture.captured_at = normalized.provenance.captured_at.clone();
+                    } else {
+                        capture.captured_at = now.clone();
+                    }
                 }
-                existing.updated_at = chrono::Utc::now().to_rfc3339();
+                existing.updated_at = now;
                 self.save_vault_file(&existing)?;
                 tracing::info!(
                     "Capture of {} is unchanged; recorded a re-capture of {}",
@@ -1064,12 +1069,12 @@ impl VaultManager {
         self.read_vault_file_dir(FILES_DIR)
     }
 
-    /// Web captures, newest first by latest activity.
+    /// Web captures, newest first by latest activity (max of captured_at, updated_at, created_at).
     pub fn list_captures(&self) -> Result<Vec<VaultFile>, VaultError> {
         let mut files = self.read_vault_file_dir(CAPTURES_DIR)?;
         files.sort_by(|a, b| {
-            let a_time = a.capture.as_ref().map(|c| c.captured_at.as_str()).unwrap_or(&a.updated_at);
-            let b_time = b.capture.as_ref().map(|c| c.captured_at.as_str()).unwrap_or(&b.updated_at);
+            let a_time = capture_activity_timestamp(a);
+            let b_time = capture_activity_timestamp(b);
             b_time.cmp(a_time).then_with(|| b.created_at.cmp(&a.created_at))
         });
         Ok(files)
@@ -1840,6 +1845,30 @@ fn parse_debug_string_list(raw: &str) -> Vec<String> {
         .map(|s| s.trim().trim_matches('"').to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+/// Returns the latest activity timestamp for a capture.
+///
+/// Evaluates the maximum timestamp string among `capture.captured_at`, `updated_at`,
+/// and `created_at` so that captures that have been recaptured or updated always reflect
+/// their most recent activity, even if historical records on disk carry older formats.
+pub fn capture_activity_timestamp(file: &VaultFile) -> &str {
+    let captured = file
+        .capture
+        .as_ref()
+        .map(|c| c.captured_at.as_str())
+        .unwrap_or("");
+    let updated = file.updated_at.as_str();
+    let created = file.created_at.as_str();
+
+    let mut latest = created;
+    if updated > latest {
+        latest = updated;
+    }
+    if !captured.is_empty() && captured > latest {
+        latest = captured;
+    }
+    latest
 }
 
 /// Content identity for a capture.

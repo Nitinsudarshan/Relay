@@ -12,10 +12,10 @@ import {
   Sparkles,
   Target,
 } from 'lucide-react';
-import type { CaptureProvenance, ConversationContext } from '../../types';
+import type { CaptureProvenance, SourceContext } from '../../types';
 
 interface CaptureContextTabProps {
-  context: ConversationContext | null;
+  context: SourceContext | null;
   provenance?: CaptureProvenance | null;
   loading: boolean;
   analyzing: boolean;
@@ -33,7 +33,7 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-2 text-muted-foreground">
         <RefreshCw className="h-5 w-5 animate-spin text-primary" />
-        <p className="text-xs">Loading conversation context…</p>
+        <p className="text-xs">Loading structured context…</p>
       </div>
     );
   }
@@ -58,7 +58,7 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
           {analyzing ? (
             <>
               <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              <span>Analyzing Conversation…</span>
+              <span>Analyzing Source…</span>
             </>
           ) : (
             <>
@@ -83,7 +83,7 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
             <p className="font-semibold">Context based on a partial capture</p>
             <p className="text-[11px] text-muted-foreground leading-relaxed">
               Relay stopped reading before reaching the full document or conversation thread.
-              This analytical model was derived only from the turns that Relay could reach; earlier or later turns may be absent from this record.
+              This analytical model was derived only from the content Relay could reach; earlier or later parts may be absent from this record.
             </p>
           </div>
         </div>
