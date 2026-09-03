@@ -250,6 +250,18 @@ export const MermaidBlock: React.FC<MermaidBlockProps> = ({ code }) => {
   );
 };
 
+function parseTableRow(line: string): string[] {
+  const trimmed = line.trim();
+  const content = trimmed.replace(/^\|/, '').replace(/\|$/, '');
+  return content.split('|').map((c) => c.trim());
+}
+
+function isTableSeparator(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.includes('-')) return false;
+  return /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?$/.test(trimmed);
+}
+
 export const MarkdownView: React.FC<MarkdownViewProps> = ({ content, className = '' }) => {
   if (!content) return null;
 
@@ -308,8 +320,8 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content, className =
           elements.push(<MermaidBlock key={`mermaid_${i}`} code={code} />);
         } else {
           elements.push(
-            <div key={`code_${i}`} className="my-2 p-3 rounded-lg bg-muted/40 border border-border font-mono text-[11px] overflow-x-auto">
-              <pre className="text-foreground whitespace-pre-wrap">{code}</pre>
+            <div key={`code_${i}`} className="my-2 p-3 rounded-lg bg-muted/40 border border-border font-mono text-[11px] overflow-x-auto max-w-full">
+              <pre className="text-foreground whitespace-pre-wrap break-words">{code}</pre>
             </div>
           );
         }
@@ -361,7 +373,90 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content, className =
       continue;
     }
 
-    // 3. Bullet points: "-", "*", "•"
+    // 3. Markdown Table Detection
+    if (trimmed.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+      flushRawDiagram(`table_${i}`);
+      inNumberedContext = false;
+
+      const headers = parseTableRow(trimmed);
+      i++; // Skip the separator line
+
+      const rows: string[][] = [];
+      while (i + 1 < lines.length) {
+        const nextLine = lines[i + 1].trim();
+        if (!nextLine || !nextLine.includes('|')) {
+          break;
+        }
+        i++;
+        rows.push(parseTableRow(lines[i]));
+      }
+
+      elements.push(
+        <div key={`table_${i}`} className="my-3 overflow-x-auto max-w-full rounded-lg border border-border">
+          <table className="w-full text-xs text-left border-collapse">
+            <thead className="bg-muted/50 text-muted-foreground font-medium border-b border-border">
+              <tr>
+                {headers.map((h, hi) => (
+                  <th key={hi} className="px-3 py-2 text-xs font-semibold text-foreground whitespace-nowrap">
+                    {renderFormattedText(h)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rows.map((row, ri) => (
+                <tr key={ri} className="hover:bg-muted/30 transition-colors">
+                  {row.map((cell, ci) => (
+                    <td key={ci} className="px-3 py-2 text-foreground break-words">
+                      {renderFormattedText(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    // 4. Markdown Image: ![alt](url)
+    const imgMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imgMatch) {
+      flushRawDiagram(`img_${i}`);
+      inNumberedContext = false;
+      const alt = imgMatch[1] || 'image';
+      const src = imgMatch[2];
+      elements.push(
+        <div key={`img_${i}`} className="my-2 max-w-full overflow-hidden rounded-lg">
+          <img src={src} alt={alt} className="max-w-full h-auto rounded-lg object-contain max-h-96" loading="lazy" />
+        </div>
+      );
+      continue;
+    }
+
+    // 5. Horizontal Rule
+    if (trimmed === '---' || trimmed === '***' || trimmed === '___') {
+      flushRawDiagram(`hr_${i}`);
+      inNumberedContext = false;
+      elements.push(<hr key={`hr_${i}`} className="my-3 border-border" />);
+      continue;
+    }
+
+    // 6. Blockquote
+    if (trimmed.startsWith('> ') || trimmed === '>') {
+      flushRawDiagram(`quote_${i}`);
+      inNumberedContext = false;
+      const quoteText = trimmed.replace(/^>\s?/, '');
+      elements.push(
+        <blockquote key={`quote_${i}`} className="my-2 pl-3 border-l-2 border-primary/50 text-xs italic text-muted-foreground break-words">
+          {renderFormattedText(quoteText)}
+        </blockquote>
+      );
+      continue;
+    }
+
+    // 7. Bullet points: "-", "*", "•"
     if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed.startsWith('• ')) {
       const itemText = trimmed.replace(/^[-*•]\s+/, '');
 
@@ -392,44 +487,44 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content, className =
       elements.push(
         <div
           key={`bullet_${i}`}
-          className={`flex items-start gap-2.5 text-xs leading-relaxed text-foreground ${indentClass}`}
+          className={`flex items-start gap-2.5 text-xs leading-relaxed text-foreground min-w-0 ${indentClass}`}
         >
           {isSubBullet ? (
             <span className="w-1.5 h-1.5 rounded-full border border-primary/70 bg-primary/20 mt-1.5 shrink-0" />
           ) : (
             <span className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
           )}
-          <div className="flex-1">{renderFormattedText(itemText)}</div>
+          <div className="flex-1 min-w-0 break-words">{renderFormattedText(itemText)}</div>
         </div>
       );
       continue;
     }
 
-    // 4. Numbered lists: "1. ", "2. ", "3. "
+    // 8. Numbered lists: "1. ", "2. ", "3. "
     const numberedMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
     if (numberedMatch) {
       inNumberedContext = true;
       const num = numberedMatch[1];
       const itemText = numberedMatch[2];
       elements.push(
-        <div key={`num_${i}`} className="flex items-start gap-2 text-xs leading-relaxed text-foreground mt-2 font-medium">
+        <div key={`num_${i}`} className="flex items-start gap-2 text-xs leading-relaxed text-foreground mt-2 font-medium min-w-0">
           <Badge
             variant="outline"
             className="text-[10px] font-mono font-semibold h-4.5 min-w-4.5 px-1 flex items-center justify-center shrink-0 mt-0.5 bg-primary/10 border-primary/30 text-primary"
           >
             {num}
           </Badge>
-          <div className="flex-1">{renderFormattedText(itemText)}</div>
+          <div className="flex-1 min-w-0 break-words">{renderFormattedText(itemText)}</div>
         </div>
       );
       continue;
     }
 
-    // 5. Headings
+    // 9. Headings
     if (trimmed.startsWith('### ')) {
       inNumberedContext = false;
       elements.push(
-        <h4 key={`h3_${i}`} className="text-xs font-bold text-foreground mt-3 mb-1 tracking-tight">
+        <h4 key={`h3_${i}`} className="text-xs font-bold text-foreground mt-3 mb-1 tracking-tight break-words">
           {trimmed.replace(/^###\s+/, '')}
         </h4>
       );
@@ -438,7 +533,7 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content, className =
     if (trimmed.startsWith('## ')) {
       inNumberedContext = false;
       elements.push(
-        <h3 key={`h2_${i}`} className="text-sm font-bold text-foreground mt-3 mb-1 tracking-tight">
+        <h3 key={`h2_${i}`} className="text-sm font-bold text-foreground mt-3 mb-1 tracking-tight break-words">
           {trimmed.replace(/^##\s+/, '')}
         </h3>
       );
@@ -447,7 +542,7 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content, className =
     if (trimmed.startsWith('# ')) {
       inNumberedContext = false;
       elements.push(
-        <h2 key={`h1_${i}`} className="text-base font-bold text-foreground mt-4 mb-1.5 tracking-tight">
+        <h2 key={`h1_${i}`} className="text-base font-bold text-foreground mt-4 mb-1.5 tracking-tight break-words">
           {trimmed.replace(/^#\s+/, '')}
         </h2>
       );
@@ -457,9 +552,9 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content, className =
     // Non-list paragraph resets numbered context
     inNumberedContext = false;
 
-    // 6. Standard paragraph
+    // 10. Standard paragraph
     elements.push(
-      <p key={`p_${i}`} className="text-xs leading-relaxed text-foreground">
+      <p key={`p_${i}`} className="text-xs leading-relaxed text-foreground break-words">
         {renderFormattedText(trimmed)}
       </p>
     );
@@ -482,14 +577,14 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content, className =
       elements.push(<MermaidBlock key="mermaid_end" code={code} />);
     } else {
       elements.push(
-        <div key="code_end" className="my-2 p-3 rounded-lg bg-muted/40 border border-border font-mono text-[11px] overflow-x-auto">
-          <pre className="text-foreground whitespace-pre-wrap">{code}</pre>
+        <div key="code_end" className="my-2 p-3 rounded-lg bg-muted/40 border border-border font-mono text-[11px] overflow-x-auto max-w-full">
+          <pre className="text-foreground whitespace-pre-wrap break-words">{code}</pre>
         </div>
       );
     }
   }
 
-  return <div className={`space-y-1.5 ${className}`}>{elements}</div>;
+  return <div className={`space-y-1.5 min-w-0 max-w-full ${className}`}>{elements}</div>;
 };
 
 // Inline formatter for bold (**text**), italic (*text*), and code (`code`)

@@ -46,6 +46,21 @@
 - **Frontend (347 tests, +126)**: the reveal loop against a simulated virtualized list, a page that mounts everything, a moving boundary, a page that refuses to scroll, user interruption, every termination reason and scroll restoration; 13 disclosure labels activated and 28 action labels refused *with* disclosure markup on them, plus chrome, forms, submit controls, menu openers and navigating links; clipped-but-present content reported as unnecessary and left alone; whole-text fingerprints, richness preference, three ordering strategies, measured gaps and a 1,000-turn reconstruction; the new availability and coverage evidence rules; rich-content blocks; and the Captures surface's wording for every coverage value.
 - **Real Chromium (35 assertions)**: the reported Claude case as a regression test — the marker at the end of a shortened message captured, the control recognised as unnecessary, the container still shortened afterwards; 300/300 virtualized turns in order with the composer's Send button untouched; lazily-loaded sections and a lazy image; and fifteen action controls that record their own activation, so "nothing fired" is an assertion rather than an absence of visible damage.
 
+
+## [0.26.1] - 2026-09-03
+
+### Fix Scribbles Viewport Overflow & Action Button Containment
+
+**Type**: patch — fixes flexbox horizontal blowout on captured content in the Scribble detail editor, adds responsive Markdown table/image rendering, and locks action toolbars within viewport boundaries (`native/src/App.tsx`, `native/src/components/scribble/{ScribbleViewer,ScribbleDetailEditor}.tsx`, `native/src/components/common/MarkdownView.tsx`, `native/src/components/common/MarkdownView.test.tsx (new)`).
+
+#### Fixes
+
+- **Scribble workspace viewport containment (`ScribbleViewer.tsx`, `ScribbleDetailEditor.tsx`, `App.tsx`)**: Added `min-w-0` and `overflow-hidden` constraints across the Scribbles view hierarchy (`<main>`, `<ScribbleViewer>`, workspace pane, and `<ScribbleDetailEditor>`). Flex items previously defaulted to `min-width: auto`, causing wide captured content (markdown tables, wide URLs, repository code blocks) to push the detail pane and its right-aligned action buttons (`Re-analyse`, `Summarise`, `Edit`, and `Move to Trash`) out of the viewport.
+- **Header and footer action toolbar locking (`ScribbleDetailEditor.tsx`)**: Applied `shrink-0` to the action button toolbars and badges, with `truncate` on the title and analysed status, preventing action controls from being displaced or squished.
+- **Markdown table rendering with local scroll (`MarkdownView.tsx`, `MarkdownView.test.tsx`)**: Added parser and structured table renderer for GitHub-Flavored Markdown tables (`<table>`, `<thead>`, `<tbody>`) contained inside an `overflow-x-auto max-w-full` rounded card, ensuring multi-column tables scroll locally rather than expanding parent containers.
+- **Markdown word wrap & asset containment (`MarkdownView.tsx`)**: Added `break-words` on paragraphs, headings, blockquotes, and lists, `max-w-full` on code blocks, and responsive containment on markdown images (`![alt](url)`).
+- **Windows CRLF fixture normalization (`contract.test.ts`)**: Normalized line endings when verifying capture contract fixtures against disk on Windows checkouts.
+
 ## [0.26.0] - 2026-09-02
 
 ### Relay Capture — Structured Web & Conversation Capture
