@@ -116,7 +116,7 @@ export const ScribbleViewer: React.FC = () => {
   const selectedScribble = scribbles.find((s) => s.id === selectedScribbleId) || null;
 
   return (
-    <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden">
+    <div className="flex-1 flex flex-col gap-3 min-h-0 min-w-0 overflow-hidden">
       {/* Top Scribbles Sub-Navigation Bar */}
       <div className="flex items-center justify-between pb-2.5 shrink-0 border-b border-border">
         {/* Sub-Tabs: Capture | Workspace | Knowledge Graph */}
@@ -204,8 +204,8 @@ export const ScribbleViewer: React.FC = () => {
 
       {/* Surface Tab 3: Main Workspace (List + Editor) */}
       {activeSubTab === 'workspace' && (
-        <div className="flex-1 flex min-h-0 overflow-hidden">
-          <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
+        <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden">
+          <div className="flex-1 flex gap-4 min-h-0 min-w-0 overflow-hidden">
             {/* Left: Master Scribbles List */}
             <aside className="w-full md:w-80 lg:w-96 flex flex-col shrink-0 bg-card rounded-lg border border-border overflow-hidden shadow-xs transition-all duration-150">
               <div className="p-3 border-b border-border">
@@ -275,7 +275,7 @@ export const ScribbleViewer: React.FC = () => {
 
             {/* Right: Detail Editor Pane */}
             {selectedScribble ? (
-              <div className="flex-1 flex min-h-0 transition-all duration-150">
+              <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden transition-all duration-150">
                 <ScribbleDetailEditor
                   scribble={selectedScribble}
                   allScribbles={scribbles}
@@ -286,7 +286,7 @@ export const ScribbleViewer: React.FC = () => {
                 />
               </div>
             ) : (
-              <div className="flex-1 flex items-center justify-center p-8 bg-card rounded-lg border border-border">
+              <div className="flex-1 flex min-w-0 items-center justify-center p-8 bg-card rounded-lg border border-border">
                 <EmptyState
                   icon={FileText}
                   title="Select a scribble to inspect"

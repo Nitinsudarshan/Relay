@@ -368,7 +368,7 @@ export const App: React.FC = () => {
         </header>
 
         {/* View Surface Container */}
-        <main className="flex-1 p-4 md:p-6 overflow-y-auto flex flex-col bg-background">
+        <main className="flex-1 min-w-0 p-4 md:p-6 overflow-y-auto flex flex-col bg-background">
           {renderHeroHeader()}
 
           {activeTab === 'capture' && <VoiceNotePage />}

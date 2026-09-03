@@ -305,18 +305,18 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
   const SourceIcon = sourceMeta.icon;
 
   return (
-    <div className="flex-1 flex flex-col bg-card rounded-lg border border-border overflow-hidden min-h-0 shadow-xs">
+    <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-card rounded-lg border border-border overflow-hidden shadow-xs">
       {/* 1. Header Toolbar (Title, Minimal Source Badge, Date, Summarise & Edit Action) */}
-      <div className="p-5 border-b border-border flex flex-wrap items-center justify-between gap-3 shrink-0 bg-card">
+      <div className="p-5 border-b border-border flex items-center justify-between gap-3 shrink-0 bg-card min-w-0">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1.5 flex-wrap">
             {/* Minimal Source Badge */}
-            <Badge variant="outline" className="text-[9px] font-mono px-2 py-0.5 gap-1 bg-muted">
+            <Badge variant="outline" className="text-[9px] font-mono px-2 py-0.5 gap-1 bg-muted shrink-0">
               <SourceIcon className={`w-3 h-3 ${sourceMeta.color}`} />
               <span>{sourceMeta.label}</span>
             </Badge>
 
-            <span className="text-[10px] text-muted-foreground font-mono">
+            <span className="text-[10px] text-muted-foreground font-mono shrink-0">
               {new Date(scribble.created_at).toLocaleString([], {
                 month: 'short',
                 day: 'numeric',
@@ -326,9 +326,9 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
             </span>
 
             {(scribble.ai_metadata?.enrichment_status === 'enriched' || scribble.ai_metadata?.last_enriched_at) && (
-              <Badge variant="outline" className="text-[9px] font-mono text-emerald-500 border-emerald-500/30 gap-1">
+              <Badge variant="outline" className="text-[9px] font-mono text-emerald-500 border-emerald-500/30 gap-1 shrink-0">
                 <Check className="w-2.5 h-2.5" />
-                <span>
+                <span className="truncate">
                   Analysed
                   {scribble.ai_metadata?.last_enriched_at
                     ? ` · ${(() => {
@@ -358,14 +358,14 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
               className="text-lg font-bold text-foreground bg-transparent border-b border-input focus:outline-none w-full"
             />
           ) : (
-            <h2 className="text-lg font-extrabold text-foreground tracking-tight truncate">
+            <h2 className="text-lg font-extrabold text-foreground tracking-tight truncate" title={scribble.title}>
               {scribble.title}
             </h2>
           )}
         </div>
 
         {/* Action Toolbar: Summarise, Analyse & Edit */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           {!isEditing && (
             <Button
               size="sm"
@@ -431,7 +431,7 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
       </div>
 
       {/* Main Scrollable Body */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-5">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 space-y-5 min-w-0">
         {/* 2. AI Summary (Displayed BEFORE Scribble text when 100+ words and present) */}
         {scribble.summary && isLongScribble && !isEditing && (
           <div className="p-4 rounded-lg bg-muted/30 border border-border space-y-2 text-xs">
@@ -851,13 +851,13 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
         )}
 
         {/* 8. Secondary & Destructive Actions Footer */}
-        <div className="pt-4 border-t border-border flex flex-wrap items-center justify-between gap-3">
+        <div className="pt-4 border-t border-border flex items-center justify-between gap-3 shrink-0">
           <Button
             size="sm"
             variant="outline"
             onClick={handleReEnrich}
             disabled={isEnriching}
-            className="h-8 text-xs gap-1.5 text-primary"
+            className="h-8 text-xs gap-1.5 text-primary shrink-0"
             title="Re-run the analysis and refresh its derived knowledge."
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isEnriching ? 'animate-spin' : ''}`} />
@@ -868,7 +868,7 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
             size="sm"
             variant="ghost"
             onClick={() => setConfirmDelete(true)}
-            className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
             title="Move scribble to 30-day Trash"
           >
             <Trash2 className="w-3.5 h-3.5" />

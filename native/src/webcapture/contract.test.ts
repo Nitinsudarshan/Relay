@@ -50,7 +50,8 @@ describe('extension → Relay payload contract', () => {
       }
 
       expect(fs.existsSync(fixturePath)).toBe(true);
-      expect(serialized).toBe(fs.readFileSync(fixturePath, 'utf8'));
+      const expected = fs.readFileSync(fixturePath, 'utf8').replace(/\r\n/g, '\n');
+      expect(serialized).toBe(expected);
     });
   }
 });
