@@ -1,5 +1,31 @@
 # Relay — Changelog
 
+## [0.28.4] - 2026-09-04
+
+### Dedicated GitHub Repository Context Architecture
+
+**Type**: minor/patch — first-class `RepositoryContext` model and tagged `SourceContextKind` union replacing conversation semantics for GitHub repositories, dedicated LLM and deterministic repository extraction pipeline, honest issue/history reporting, and tailored `RepositoryContextView` frontend component with custom empty-state actions (`native/src-tauri/src/capture/web/context.rs`, `native/src-tauri/src/capture/web/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/vault/mod.rs`, `native/src/types/index.ts`, `native/src/components/captures/RepositoryContextView.tsx`, `native/src/components/captures/CaptureContextTab.tsx`, `native/src/components/captures/CaptureContextTab.test.tsx`).
+
+#### Features & Architecture
+
+- **Dedicated `RepositoryContext` Model (`context.rs`, `types/index.ts`)**: Introduced a first-class repository context schema answering the six core dimensions of software repositories:
+  1. **Objective**: Crisp explanation of what the repository is and why it exists.
+  2. **Stack**: Structured categorization of languages, frontend, backend/native, storage, testing, and integrations/tooling.
+  3. **Features**: Granular product capabilities distinguishing core features from supporting functionality.
+  4. **User Base**: Grounded identification of primary and secondary user groups with documented evidence.
+  5. **Open Issues**: Verified open bugs and enhancement requests with status and issue numbers.
+  6. **Past Issues**: Addressed historical problems from changelogs, closed PRs, and release notes with resolution details.
+- **First-Class `SourceContext` Abstraction (`context.rs`, `types/index.ts`)**: Replaced alias with a tagged union `SourceContextKind` (`Conversation(ConversationContext)` vs `Repository(RepositoryContext)`) supported by backward-compatible custom deserialization that losslessly migrates legacy stored `ConversationContext` JSON on disk.
+- **Repository-Specific Extraction Pipeline (`context.rs`, `commands.rs`)**: Implemented `extract_repository_context` with a dedicated `REPOSITORY_CONTEXT_SYSTEM_PROMPT` tailored for software repositories, plus an offline deterministic fallback that extracts stack technologies, features from headings, and grounded user personas from README evidence. Dispatches intelligently in `analyze_capture_context` based on repository source identity.
+- **Honest Missing-Evidence Principle**: If issue data or release history was not captured in the repository content, explicitly flags `open_issues_available: false` and `past_issues_available: false` instead of fabricating issues from general code.
+- **Dedicated Repository Context UI (`RepositoryContextView.tsx`, `CaptureContextTab.tsx`)**: Created `<RepositoryContextView />` displaying structured badge grids, feature tags, and clear notices for unavailable sections. Gated empty states for GitHub captures to display "Extract Repository Context" and "Analyzing Repository…".
+
+#### Testing
+
+- **Backend Tests (106 passed in capture::web, +4)**: Added tests for deterministic repository extraction, LLM JSON parsing, backward-compatible legacy conversation deserialization, and envelope round-trip serialization. Passed `cargo test --lib capture::web` and `cargo clippy --all-targets -- -D warnings` (0 warnings).
+- **Frontend Tests (360 passed across 26 suites, +3)**: Added unit test suite `CaptureContextTab.test.tsx` verifying GitHub-specific empty state, repository context rendering with no conversation headings, and conversation context regression. Passed `npx tsc --noEmit` and `npm test`.
+- **Web Dashboard**: Verified `npx tsc --noEmit` in `web` (0 errors).
+
 ## [0.28.3] - 2026-09-03
 
 ### GitHub Context Support, External Source Link Opener & Recapture Recency Fix

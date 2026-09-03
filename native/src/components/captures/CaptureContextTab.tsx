@@ -12,7 +12,8 @@ import {
   Sparkles,
   Target,
 } from 'lucide-react';
-import type { CaptureProvenance, SourceContext } from '../../types';
+import type { CaptureProvenance, ConversationContext, RepositoryContext, SourceContext } from '../../types';
+import { RepositoryContextView } from './RepositoryContextView';
 
 interface CaptureContextTabProps {
   context: SourceContext | null;
@@ -29,6 +30,10 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
   analyzing,
   onAnalyze,
 }) => {
+  const isGitHub =
+    provenance?.application === 'github' ||
+    Boolean(provenance?.url?.toLowerCase().includes('github.com'));
+
   if (loading) {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-2 text-muted-foreground">
@@ -46,8 +51,9 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
         </div>
         <h3 className="text-sm font-semibold text-foreground">Structured Context Unavailable</h3>
         <p className="mt-1.5 max-w-sm text-xs text-muted-foreground leading-relaxed">
-          Extract objectives, settled decisions, requirements, constraints, open questions, and next
-          actions to preserve this work in Relay.
+          {isGitHub
+            ? 'Relay has captured this repository, but has not yet extracted structured repository context.'
+            : 'Extract objectives, settled decisions, requirements, constraints, open questions, and next actions to preserve this work in Relay.'}
         </p>
         <button
           type="button"
@@ -58,12 +64,12 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
           {analyzing ? (
             <>
               <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              <span>Analyzing Source…</span>
+              <span>{isGitHub ? 'Analyzing Repository…' : 'Analyzing Source…'}</span>
             </>
           ) : (
             <>
               <Sparkles className="h-3.5 w-3.5" />
-              <span>Extract Structured Context</span>
+              <span>{isGitHub ? 'Extract Repository Context' : 'Extract Structured Context'}</span>
             </>
           )}
         </button>
@@ -72,6 +78,37 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
   }
 
   const isPartial = provenance?.coverage === 'partial' || provenance?.coverage === 'rendered_dom';
+  const isRepo = Boolean('kind' in context && context.kind === 'repository');
+
+  if (isRepo) {
+    const repoContext = (context as { kind: 'repository'; data: RepositoryContext }).data;
+    return (
+      <div className="space-y-6 text-xs leading-relaxed">
+        {isPartial && (
+          <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="space-y-0.5">
+              <p className="font-semibold">Context based on a partial capture</p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Relay stopped reading before reaching the full repository contents or documentation.
+                This analytical model was derived only from the content Relay could reach; additional parts may be absent from this record.
+              </p>
+            </div>
+          </div>
+        )}
+        <RepositoryContextView
+          context={repoContext}
+          analyzing={analyzing}
+          onAnalyze={onAnalyze}
+        />
+      </div>
+    );
+  }
+
+  const conv: ConversationContext =
+    'kind' in context && context.kind === 'conversation'
+      ? context.data
+      : (context as unknown as ConversationContext);
 
   return (
     <div className="space-y-6 text-xs leading-relaxed">
@@ -98,7 +135,7 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
           </div>
           <div className="flex items-center gap-2">
             <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-              {context.deterministic ? 'Deterministic Analysis' : `AI: ${context.model ?? 'Enriched'}`}
+              {conv.deterministic ? 'Deterministic Analysis' : `AI: ${conv.model ?? 'Enriched'}`}
             </span>
             <button
               type="button"
@@ -112,28 +149,28 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
             </button>
           </div>
         </div>
-        <p className="mt-2.5 text-foreground font-medium">{context.objective}</p>
+        <p className="mt-2.5 text-foreground font-medium">{conv.objective}</p>
 
-        {context.current_state && (
+        {conv.current_state && (
           <div className="mt-3 rounded border border-border/80 bg-card p-2.5">
             <div className="flex items-center gap-1.5 font-medium text-muted-foreground text-[11px]">
               <Compass className="h-3.5 w-3.5 text-primary" />
               <span>Current State of Work</span>
             </div>
-            <p className="mt-1 text-foreground">{context.current_state}</p>
+            <p className="mt-1 text-foreground">{conv.current_state}</p>
           </div>
         )}
       </section>
 
       {/* Decisions Made */}
-      {context.decisions.length > 0 && (
+      {conv.decisions.length > 0 && (
         <section className="space-y-2">
           <h4 className="flex items-center gap-1.5 font-semibold text-foreground">
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-            <span>Key Decisions Made ({context.decisions.length})</span>
+            <span>Key Decisions Made ({conv.decisions.length})</span>
           </h4>
           <div className="grid gap-2 sm:grid-cols-2">
-            {context.decisions.map((dec) => (
+            {conv.decisions.map((dec) => (
               <div
                 key={dec.id}
                 className="flex flex-col justify-between rounded-lg border border-border bg-card p-3 shadow-sm"
@@ -172,16 +209,16 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
       )}
 
       {/* Requirements & Constraints */}
-      {(context.requirements.length > 0 || context.constraints.length > 0) && (
+      {(conv.requirements.length > 0 || conv.constraints.length > 0) && (
         <div className="grid gap-4 sm:grid-cols-2">
-          {context.requirements.length > 0 && (
+          {conv.requirements.length > 0 && (
             <section className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
               <h4 className="flex items-center gap-1.5 font-semibold text-foreground">
                 <ListChecks className="h-3.5 w-3.5 text-primary" />
-                <span>Requirements ({context.requirements.length})</span>
+                <span>Requirements ({conv.requirements.length})</span>
               </h4>
               <ul className="space-y-1.5 pl-2">
-                {context.requirements.map((req) => (
+                {conv.requirements.map((req) => (
                   <li key={req.id} className="flex items-start gap-1.5 text-muted-foreground">
                     <span className="text-primary">•</span>
                     <span className="text-foreground">{req.statement}</span>
@@ -191,14 +228,14 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
             </section>
           )}
 
-          {context.constraints.length > 0 && (
+          {conv.constraints.length > 0 && (
             <section className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
               <h4 className="flex items-center gap-1.5 font-semibold text-foreground">
                 <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
-                <span>Constraints & Boundaries ({context.constraints.length})</span>
+                <span>Constraints & Boundaries ({conv.constraints.length})</span>
               </h4>
               <ul className="space-y-1.5 pl-2">
-                {context.constraints.map((con) => (
+                {conv.constraints.map((con) => (
                   <li key={con.id} className="flex flex-col gap-0.5 text-muted-foreground">
                     <div className="flex items-start gap-1.5">
                       <span className="text-amber-500">•</span>
@@ -218,14 +255,14 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
       )}
 
       {/* Rejected Approaches */}
-      {context.rejected_approaches.length > 0 && (
+      {conv.rejected_approaches.length > 0 && (
         <section className="space-y-2 rounded-lg border border-rose-500/20 bg-rose-500/5 p-3">
           <h4 className="flex items-center gap-1.5 font-semibold text-rose-600 dark:text-rose-400">
             <Ban className="h-3.5 w-3.5" />
             <span>Rejected Approaches — Do Not Repeat</span>
           </h4>
           <ul className="space-y-1.5 pl-2">
-            {context.rejected_approaches.map((rej, idx) => (
+            {conv.rejected_approaches.map((rej, idx) => (
               <li key={idx} className="flex flex-col gap-0.5">
                 <span className="font-medium text-foreground">{rej.approach}</span>
                 <span className="text-[11px] text-muted-foreground">
@@ -239,14 +276,14 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
 
       {/* Open Questions & Action Items */}
       <div className="grid gap-4 sm:grid-cols-2">
-        {context.open_questions.length > 0 && (
+        {conv.open_questions.length > 0 && (
           <section className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
             <h4 className="flex items-center gap-1.5 font-semibold text-foreground">
               <HelpCircle className="h-3.5 w-3.5 text-primary" />
-              <span>Open Questions ({context.open_questions.length})</span>
+              <span>Open Questions ({conv.open_questions.length})</span>
             </h4>
             <ul className="space-y-1.5 pl-1">
-              {context.open_questions.map((q) => (
+              {conv.open_questions.map((q) => (
                 <li key={q.id} className="flex items-start gap-2">
                   <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
                   <div>
@@ -261,14 +298,14 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
           </section>
         )}
 
-        {context.action_items.length > 0 && (
+        {conv.action_items.length > 0 && (
           <section className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
             <h4 className="flex items-center gap-1.5 font-semibold text-foreground">
               <ListChecks className="h-3.5 w-3.5 text-emerald-500" />
-              <span>Next Actions ({context.action_items.length})</span>
+              <span>Next Actions ({conv.action_items.length})</span>
             </h4>
             <ul className="space-y-1.5 pl-1">
-              {context.action_items.map((act) => (
+              {conv.action_items.map((act) => (
                 <li key={act.id} className="flex items-start gap-2">
                   <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
                   <div className="flex-1">
@@ -287,14 +324,14 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
       </div>
 
       {/* Key Artifacts */}
-      {context.key_artifacts.length > 0 && (
+      {conv.key_artifacts.length > 0 && (
         <section className="space-y-2">
           <h4 className="flex items-center gap-1.5 font-semibold text-foreground">
             <FileCode className="h-3.5 w-3.5 text-primary" />
-            <span>Artifacts & Code Modules ({context.key_artifacts.length})</span>
+            <span>Artifacts & Code Modules ({conv.key_artifacts.length})</span>
           </h4>
           <div className="flex flex-wrap gap-2">
-            {context.key_artifacts.map((art, idx) => (
+            {conv.key_artifacts.map((art, idx) => (
               <div
                 key={idx}
                 className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 shadow-sm"

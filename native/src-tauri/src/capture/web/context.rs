@@ -132,8 +132,169 @@ pub struct ConversationContext {
     pub deterministic: bool,
 }
 
+/// Canonical stack details for a software repository.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RepositoryStack {
+    #[serde(default)]
+    pub languages: Vec<String>,
+    #[serde(default)]
+    pub frontend: Vec<String>,
+    #[serde(default)]
+    pub backend: Vec<String>,
+    #[serde(default)]
+    pub storage: Vec<String>,
+    #[serde(default)]
+    pub testing: Vec<String>,
+    #[serde(default)]
+    pub integrations: Vec<String>,
+}
+
+/// A product or system capability provided by a software repository.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RepositoryFeature {
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub is_core: bool,
+}
+
+/// A GitHub issue or historical issue item.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RepositoryIssue {
+    #[serde(default)]
+    pub number: Option<u32>,
+    pub title: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub issue_type: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub resolution: Option<String>,
+}
+
+/// Grounded user base breakdown for a software repository.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RepositoryUserBase {
+    #[serde(default)]
+    pub primary: Vec<String>,
+    #[serde(default)]
+    pub secondary: Vec<String>,
+    #[serde(default)]
+    pub evidence: Option<String>,
+}
+
+/// The canonical derived context representation for a captured software repository.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RepositoryContext {
+    pub capture_id: String,
+    pub repository_name: String,
+    pub objective: String,
+    #[serde(default)]
+    pub stack: RepositoryStack,
+    #[serde(default)]
+    pub features: Vec<RepositoryFeature>,
+    #[serde(default)]
+    pub user_base: RepositoryUserBase,
+    #[serde(default)]
+    pub open_issues: Vec<RepositoryIssue>,
+    #[serde(default)]
+    pub past_issues: Vec<RepositoryIssue>,
+    #[serde(default)]
+    pub open_issues_available: bool,
+    #[serde(default)]
+    pub past_issues_available: bool,
+    pub generated_at: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub deterministic: bool,
+}
+
+/// Distinguishes the specific kind of source context.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+pub enum SourceContextKind {
+    Conversation(ConversationContext),
+    Repository(RepositoryContext),
+}
+
 /// Canonical derived structured context for any captured source (conversations, repositories, documents).
-pub type SourceContext = ConversationContext;
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SourceContext {
+    pub capture_id: String,
+    pub generated_at: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub deterministic: bool,
+    #[serde(flatten)]
+    pub kind: SourceContextKind,
+}
+
+impl SourceContext {
+    pub fn conversation(&self) -> Option<&ConversationContext> {
+        match &self.kind {
+            SourceContextKind::Conversation(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    pub fn repository(&self) -> Option<&RepositoryContext> {
+        match &self.kind {
+            SourceContextKind::Repository(r) => Some(r),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum RawSourceContextHelper {
+    Envelope {
+        capture_id: String,
+        generated_at: String,
+        #[serde(default)]
+        model: Option<String>,
+        #[serde(default)]
+        deterministic: bool,
+        #[serde(flatten)]
+        kind: SourceContextKind,
+    },
+    LegacyConversation(ConversationContext),
+}
+
+impl<'de> Deserialize<'de> for SourceContext {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let helper = RawSourceContextHelper::deserialize(deserializer)?;
+        match helper {
+            RawSourceContextHelper::Envelope {
+                capture_id,
+                generated_at,
+                model,
+                deterministic,
+                kind,
+            } => Ok(SourceContext {
+                capture_id,
+                generated_at,
+                model,
+                deterministic,
+                kind,
+            }),
+            RawSourceContextHelper::LegacyConversation(conv) => Ok(SourceContext {
+                capture_id: conv.capture_id.clone(),
+                generated_at: conv.generated_at.clone(),
+                model: conv.model.clone(),
+                deterministic: conv.deterministic,
+                kind: SourceContextKind::Conversation(conv),
+            }),
+        }
+    }
+}
 
 pub const CONTEXT_EXTRACTION_SYSTEM_PROMPT: &str = r#"
 You are Relay's Conversation Intelligence Engine.
@@ -309,7 +470,7 @@ pub async fn extract_conversation_context(
     capture_id: &str,
     payload: &WebCapturePayload,
     normalized_markdown: &str,
-) -> ConversationContext {
+) -> SourceContext {
     let now = chrono::Utc::now().to_rfc3339();
     let title = payload
         .title
@@ -331,13 +492,20 @@ pub async fn extract_conversation_context(
         match client.complete(&wrapped.framed, Some(&system_prompt)).await {
             Ok(response) => {
                 if let Some(parsed) = parse_llm_context_response(&response.text) {
-                    return build_context_from_parsed(
+                    let conv = build_context_from_parsed(
                         capture_id,
                         &title,
                         parsed,
-                        now,
+                        now.clone(),
                         Some(format!("{:?}", client.provider_type())),
                     );
+                    return SourceContext {
+                        capture_id: capture_id.to_string(),
+                        generated_at: now,
+                        model: Some(format!("{:?}", client.provider_type())),
+                        deterministic: false,
+                        kind: SourceContextKind::Conversation(conv),
+                    };
                 } else {
                     tracing::warn!(
                         "Failed to parse LLM context JSON for capture {}. Falling back to deterministic extraction.",
@@ -355,7 +523,14 @@ pub async fn extract_conversation_context(
         }
     }
 
-    extract_deterministic_context(capture_id, &title, payload, &now)
+    let conv = extract_deterministic_context(capture_id, &title, payload, &now);
+    SourceContext {
+        capture_id: capture_id.to_string(),
+        generated_at: now,
+        model: None,
+        deterministic: true,
+        kind: SourceContextKind::Conversation(conv),
+    }
 }
 
 fn parse_llm_context_response(raw: &str) -> Option<RawLlmContextResponse> {
@@ -769,6 +944,527 @@ fn extract_sentence_from(slice: &str) -> String {
     first.trim_matches(&[' ', '-', '*', '•', ':'][..]).to_string()
 }
 
+pub const REPOSITORY_CONTEXT_SYSTEM_PROMPT: &str = r#"
+You are Relay's Repository Intelligence Engine.
+Your task is to analyze captured software repository documentation and evidence, and extract structured, high-signal repository context.
+
+The user needs to understand what this repository is, what it is built with, what functionality it provides, who it is for, and open or historical issues.
+
+Do NOT output an essay or conversational preamble.
+Extract specific, concrete, structured elements based STRICTLY on the captured evidence.
+
+CRITICAL EVIDENCE & HONESTY RULES:
+1. Do NOT hallucinate technologies. Only include technologies with reasonable evidence from package manifests (Cargo.toml, package.json), configuration files, source code mentions, or documentation.
+2. Distinguish core features (capabilities clearly supported by the repository) from supporting functionality (internal tooling or utility capabilities).
+3. Ground the user base in stated use cases, documentation, and positioning. If evidence is insufficient, state: "The repository does not provide sufficient evidence to confidently identify a primary user group."
+4. Do NOT fabricate GitHub issues or bugs. If no GitHub issue information was captured in the content, set "open_issues": [] and "open_issues_available": false.
+5. Do NOT fabricate historical issues. If no changelog, release notes, or resolved issue records were captured, set "past_issues": [] and "past_issues_available": false.
+
+Return ONLY a valid JSON object matching this structure:
+{
+  "repository_name": "Name of the repository (e.g. stablyai/orca)",
+  "objective": "A clear statement of what this project is and why it exists. If evidence is insufficient, say 'Insufficient evidence to determine the repository's primary objective.'",
+  "stack": {
+    "languages": ["Rust", "TypeScript"],
+    "frontend": ["React", "Vite", "Tailwind CSS"],
+    "backend": ["Tauri", "Tokio"],
+    "storage": ["SQLite", "Local filesystem"],
+    "testing": ["Vitest", "Cargo test"],
+    "integrations": ["GitHub API"]
+  },
+  "features": [
+    {
+      "name": "Feature name",
+      "description": "What this capability provides",
+      "is_core": true
+    }
+  ],
+  "user_base": {
+    "primary": ["Developers", "DevOps Engineers"],
+    "secondary": ["Open-source contributors"],
+    "evidence": "Grounded evidence from documentation or positioning"
+  },
+  "open_issues": [],
+  "open_issues_available": false,
+  "past_issues": [],
+  "past_issues_available": false
+}
+"#;
+
+#[derive(Debug, Deserialize)]
+struct RawLlmRepositoryResponse {
+    repository_name: Option<String>,
+    objective: Option<String>,
+    #[serde(default)]
+    stack: Option<RawRepositoryStack>,
+    #[serde(default)]
+    features: Option<Vec<RawRepositoryFeature>>,
+    #[serde(default)]
+    user_base: Option<RawRepositoryUserBase>,
+    #[serde(default)]
+    open_issues: Option<Vec<RawRepositoryIssue>>,
+    #[serde(default)]
+    past_issues: Option<Vec<RawRepositoryIssue>>,
+    #[serde(default)]
+    open_issues_available: Option<bool>,
+    #[serde(default)]
+    past_issues_available: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawRepositoryStack {
+    #[serde(default)]
+    languages: Vec<String>,
+    #[serde(default)]
+    frontend: Vec<String>,
+    #[serde(default)]
+    backend: Vec<String>,
+    #[serde(default)]
+    storage: Vec<String>,
+    #[serde(default)]
+    testing: Vec<String>,
+    #[serde(default)]
+    integrations: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawRepositoryFeature {
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    is_core: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawRepositoryIssue {
+    #[serde(default)]
+    number: Option<u32>,
+    title: String,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    issue_type: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    resolution: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawRepositoryUserBase {
+    #[serde(default)]
+    primary: Vec<String>,
+    #[serde(default)]
+    secondary: Vec<String>,
+    #[serde(default)]
+    evidence: Option<String>,
+}
+
+fn parse_llm_repository_response(raw: &str) -> Option<RawLlmRepositoryResponse> {
+    let text = raw.trim();
+    let json_str = if text.contains("```json") {
+        text.split("```json")
+            .nth(1)?
+            .split("```")
+            .next()?
+            .trim()
+    } else if text.contains("```") {
+        text.split("```")
+            .nth(1)?
+            .split("```")
+            .next()?
+            .trim()
+    } else {
+        text
+    };
+
+    serde_json::from_str::<RawLlmRepositoryResponse>(json_str).ok()
+}
+
+fn build_repository_context_from_parsed(
+    capture_id: &str,
+    default_name: &str,
+    parsed: RawLlmRepositoryResponse,
+    generated_at: &str,
+    model: Option<String>,
+) -> RepositoryContext {
+    let repository_name = parsed
+        .repository_name
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| default_name.to_string());
+
+    let objective = parsed
+        .objective
+        .filter(|o| !o.trim().is_empty())
+        .unwrap_or_else(|| "Insufficient evidence to determine the repository's primary objective.".to_string());
+
+    let stack = parsed.stack.map(|s| RepositoryStack {
+        languages: s.languages.into_iter().filter(|x| !x.trim().is_empty()).collect(),
+        frontend: s.frontend.into_iter().filter(|x| !x.trim().is_empty()).collect(),
+        backend: s.backend.into_iter().filter(|x| !x.trim().is_empty()).collect(),
+        storage: s.storage.into_iter().filter(|x| !x.trim().is_empty()).collect(),
+        testing: s.testing.into_iter().filter(|x| !x.trim().is_empty()).collect(),
+        integrations: s.integrations.into_iter().filter(|x| !x.trim().is_empty()).collect(),
+    }).unwrap_or_default();
+
+    let features = parsed
+        .features
+        .unwrap_or_default()
+        .into_iter()
+        .map(|f| RepositoryFeature {
+            name: f.name.trim().to_string(),
+            description: f.description.trim().to_string(),
+            is_core: f.is_core.unwrap_or(true),
+        })
+        .filter(|f| !f.name.is_empty())
+        .collect();
+
+    let user_base = parsed.user_base.map(|ub| RepositoryUserBase {
+        primary: ub.primary.into_iter().filter(|x| !x.trim().is_empty()).collect(),
+        secondary: ub.secondary.into_iter().filter(|x| !x.trim().is_empty()).collect(),
+        evidence: ub.evidence.filter(|e| !e.trim().is_empty()),
+    }).unwrap_or_default();
+
+    let open_issues: Vec<RepositoryIssue> = parsed
+        .open_issues
+        .unwrap_or_default()
+        .into_iter()
+        .map(|i| RepositoryIssue {
+            number: i.number,
+            title: i.title.trim().to_string(),
+            status: i.status.unwrap_or_else(|| "Open".to_string()),
+            issue_type: i.issue_type,
+            description: i.description,
+            resolution: i.resolution,
+        })
+        .filter(|i| !i.title.is_empty())
+        .collect();
+
+    let past_issues: Vec<RepositoryIssue> = parsed
+        .past_issues
+        .unwrap_or_default()
+        .into_iter()
+        .map(|i| RepositoryIssue {
+            number: i.number,
+            title: i.title.trim().to_string(),
+            status: i.status.unwrap_or_else(|| "Resolved".to_string()),
+            issue_type: i.issue_type,
+            description: i.description,
+            resolution: i.resolution,
+        })
+        .filter(|i| !i.title.is_empty())
+        .collect();
+
+    let open_issues_available = parsed.open_issues_available.unwrap_or(!open_issues.is_empty());
+    let past_issues_available = parsed.past_issues_available.unwrap_or(!past_issues.is_empty());
+
+    RepositoryContext {
+        capture_id: capture_id.to_string(),
+        repository_name,
+        objective,
+        stack,
+        features,
+        user_base,
+        open_issues,
+        past_issues,
+        open_issues_available,
+        past_issues_available,
+        generated_at: generated_at.to_string(),
+        model,
+        deterministic: false,
+    }
+}
+
+pub fn derive_repository_name(payload: &WebCapturePayload) -> String {
+    if let Some(ref title) = payload.title {
+        let trimmed = title.trim();
+        if trimmed.contains('/') && !trimmed.contains("://") {
+            let name = trimmed.split(':').next().unwrap_or(trimmed).trim();
+            return name.to_string();
+        }
+    }
+    if let Some(parsed) = super::source::parse_url(&payload.url) {
+        let parts: Vec<&str> = parsed.path.trim_matches('/').split('/').collect();
+        if parts.len() >= 2 {
+            return format!("{}/{}", parts[0], parts[1]);
+        }
+        if !parts.is_empty() && !parts[0].is_empty() {
+            return parts[0].to_string();
+        }
+    }
+    payload.title.clone().unwrap_or_else(|| "Software Repository".to_string())
+}
+
+fn derive_repository_objective(payload: &WebCapturePayload, normalized_markdown: &str) -> String {
+    for block in &payload.content.blocks {
+        if let super::ContentBlock::Paragraph { text } = block {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() && trimmed.len() > 15 {
+                return trimmed.chars().take(280).collect();
+            }
+        }
+    }
+    for line in normalized_markdown.lines() {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() && !trimmed.starts_with('#') && !trimmed.starts_with('>') && trimmed.len() > 20 {
+            return trimmed.chars().take(280).collect();
+        }
+    }
+    format!("Explore and reference {}", derive_repository_name(payload))
+}
+
+fn derive_repository_stack(markdown: &str) -> RepositoryStack {
+    let mut stack = RepositoryStack::default();
+    let lower = markdown.to_lowercase();
+
+    let known_languages = [
+        ("rust", "Rust"),
+        ("typescript", "TypeScript"),
+        ("javascript", "JavaScript"),
+        ("python", "Python"),
+        ("golang", "Go"),
+        ("go language", "Go"),
+        ("c++", "C++"),
+        ("swift", "Swift"),
+        ("kotlin", "Kotlin"),
+        ("ruby", "Ruby"),
+        ("java", "Java"),
+        ("shell", "Shell"),
+        ("bash", "Bash"),
+    ];
+    for (kw, name) in known_languages {
+        if lower.contains(kw) && !stack.languages.contains(&name.to_string()) {
+            stack.languages.push(name.to_string());
+        }
+    }
+
+    let known_frontend = [
+        ("react", "React"),
+        ("next.js", "Next.js"),
+        ("vue", "Vue"),
+        ("svelte", "Svelte"),
+        ("vite", "Vite"),
+        ("tailwind", "Tailwind CSS"),
+    ];
+    for (kw, name) in known_frontend {
+        if lower.contains(kw) && !stack.frontend.contains(&name.to_string()) {
+            stack.frontend.push(name.to_string());
+        }
+    }
+
+    let known_backend = [
+        ("tauri", "Tauri"),
+        ("node.js", "Node.js"),
+        ("tokio", "Tokio"),
+        ("express", "Express"),
+        ("axum", "Axum"),
+        ("django", "Django"),
+        ("fastapi", "FastAPI"),
+        ("flask", "Flask"),
+    ];
+    for (kw, name) in known_backend {
+        if lower.contains(kw) && !stack.backend.contains(&name.to_string()) {
+            stack.backend.push(name.to_string());
+        }
+    }
+
+    let known_storage = [
+        ("sqlite", "SQLite"),
+        ("postgres", "PostgreSQL"),
+        ("mysql", "MySQL"),
+        ("redis", "Redis"),
+        ("filesystem", "Local filesystem"),
+    ];
+    for (kw, name) in known_storage {
+        if lower.contains(kw) && !stack.storage.contains(&name.to_string()) {
+            stack.storage.push(name.to_string());
+        }
+    }
+
+    let known_testing = [
+        ("vitest", "Vitest"),
+        ("jest", "Jest"),
+        ("cargo test", "Cargo test"),
+        ("pytest", "PyTest"),
+        ("playwright", "Playwright"),
+    ];
+    for (kw, name) in known_testing {
+        if lower.contains(kw) && !stack.testing.contains(&name.to_string()) {
+            stack.testing.push(name.to_string());
+        }
+    }
+
+    let known_integrations = [
+        ("github", "GitHub API"),
+        ("openai", "OpenAI"),
+        ("docker", "Docker"),
+    ];
+    for (kw, name) in known_integrations {
+        if lower.contains(kw) && !stack.integrations.contains(&name.to_string()) {
+            stack.integrations.push(name.to_string());
+        }
+    }
+
+    stack
+}
+
+fn derive_repository_features(markdown: &str) -> Vec<RepositoryFeature> {
+    let mut features = Vec::new();
+    let mut in_features_section = false;
+
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            let heading_text = trimmed.trim_start_matches('#').trim().to_lowercase();
+            in_features_section = heading_text.contains("feature")
+                || heading_text.contains("capabilities")
+                || heading_text.contains("what it does")
+                || heading_text.contains("highlights");
+            continue;
+        }
+
+        if in_features_section && (trimmed.starts_with('-') || trimmed.starts_with('*')) {
+            let item_text = trimmed.trim_start_matches(['-', '*']).trim();
+            if !item_text.is_empty() && item_text.len() > 5 {
+                let (name, desc) = if let Some((n, d)) = item_text.split_once(':') {
+                    (n.trim().to_string(), d.trim().to_string())
+                } else if let Some((n, d)) = item_text.split_once(" — ") {
+                    (n.trim().to_string(), d.trim().to_string())
+                } else if let Some((n, d)) = item_text.split_once(" - ") {
+                    (n.trim().to_string(), d.trim().to_string())
+                } else {
+                    (item_text.chars().take(40).collect(), item_text.to_string())
+                };
+
+                features.push(RepositoryFeature {
+                    name,
+                    description: desc,
+                    is_core: true,
+                });
+
+                if features.len() >= 12 {
+                    break;
+                }
+            }
+        }
+    }
+
+    features
+}
+
+fn derive_repository_user_base(markdown: &str) -> RepositoryUserBase {
+    let lower = markdown.to_lowercase();
+    if lower.contains("developer") || lower.contains("api") || lower.contains("cli") || lower.contains("sdk") || lower.contains("code") {
+        RepositoryUserBase {
+            primary: vec!["Developers".to_string(), "Software Engineers".to_string()],
+            secondary: vec!["Technical Teams".to_string(), "Open-Source Contributors".to_string()],
+            evidence: Some("Inferred from repository documentation, development tools, and code workflows.".to_string()),
+        }
+    } else {
+        RepositoryUserBase {
+            primary: Vec::new(),
+            secondary: Vec::new(),
+            evidence: Some("The repository does not provide sufficient evidence to confidently identify a primary user group.".to_string()),
+        }
+    }
+}
+
+pub fn extract_deterministic_repository_context(
+    capture_id: &str,
+    payload: &WebCapturePayload,
+    normalized_markdown: &str,
+    generated_at: &str,
+) -> RepositoryContext {
+    let repo_name = derive_repository_name(payload);
+    let objective = derive_repository_objective(payload, normalized_markdown);
+    let stack = derive_repository_stack(normalized_markdown);
+    let features = derive_repository_features(normalized_markdown);
+    let user_base = derive_repository_user_base(normalized_markdown);
+
+    RepositoryContext {
+        capture_id: capture_id.to_string(),
+        repository_name: repo_name,
+        objective,
+        stack,
+        features,
+        user_base,
+        open_issues: Vec::new(),
+        past_issues: Vec::new(),
+        open_issues_available: false,
+        past_issues_available: false,
+        generated_at: generated_at.to_string(),
+        model: None,
+        deterministic: true,
+    }
+}
+
+/// Extracts structured repository context from a captured software repository.
+pub async fn extract_repository_context(
+    llm: Option<&LLMClient>,
+    capture_id: &str,
+    payload: &WebCapturePayload,
+    normalized_markdown: &str,
+) -> SourceContext {
+    let now = chrono::Utc::now().to_rfc3339();
+    let default_name = derive_repository_name(payload);
+
+    if let Some(client) = llm {
+        let source_desc = format!(
+            "Captured GitHub repository from {} ({})",
+            payload.extractor.id, payload.url
+        );
+        let wrapped = source_boundary::wrap_external_source(&source_desc, normalized_markdown);
+        let system_prompt = format!(
+            "{}\n{}",
+            REPOSITORY_CONTEXT_SYSTEM_PROMPT,
+            source_boundary::EXTERNAL_SOURCE_RULE
+        );
+
+        match client.complete(&wrapped.framed, Some(&system_prompt)).await {
+            Ok(response) => {
+                if let Some(parsed) = parse_llm_repository_response(&response.text) {
+                    let repo = build_repository_context_from_parsed(
+                        capture_id,
+                        &default_name,
+                        parsed,
+                        &now,
+                        Some(format!("{:?}", client.provider_type())),
+                    );
+                    return SourceContext {
+                        capture_id: capture_id.to_string(),
+                        generated_at: now,
+                        model: Some(format!("{:?}", client.provider_type())),
+                        deterministic: false,
+                        kind: SourceContextKind::Repository(repo),
+                    };
+                } else {
+                    tracing::warn!(
+                        "Failed to parse LLM repository context JSON for capture {}. Falling back to deterministic extraction.",
+                        capture_id
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "LLM repository context extraction failed for capture {}: {}. Falling back to deterministic extraction.",
+                    capture_id,
+                    err
+                );
+            }
+        }
+    }
+
+    let repo = extract_deterministic_repository_context(capture_id, payload, normalized_markdown, &now);
+    SourceContext {
+        capture_id: capture_id.to_string(),
+        generated_at: now,
+        model: None,
+        deterministic: true,
+        kind: SourceContextKind::Repository(repo),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -877,5 +1573,192 @@ mod tests {
         assert_eq!(parsed.objective.as_deref(), Some("Build context handoff"));
         assert_eq!(parsed.decisions.len(), 1);
         assert_eq!(parsed.decisions[0].decision, "Use SQLite for local storage");
+    }
+
+    #[test]
+    fn deterministic_repository_extraction_extracts_stack_features_and_honest_issues() {
+        let payload = WebCapturePayload {
+            protocol_version: 1,
+            captured_at: Some("2026-09-03T10:00:00Z".to_string()),
+            url: "https://github.com/stablyai/orca".to_string(),
+            title: Some("stablyai/orca: Local-first agentic workspace".to_string()),
+            browser: Some("Chrome".to_string()),
+            extractor: ExtractorInfo {
+                id: "github".to_string(),
+                version: 2,
+                strategy: "site".to_string(),
+            },
+            document: Default::default(),
+            content: CaptureContent {
+                kind: CaptureContentKind::Article,
+                blocks: vec![
+                    ContentBlock::Paragraph {
+                        text: "Orca is an agentic workspace built with Rust, Tauri, and React. It gives developers full local autonomy.".to_string(),
+                    },
+                ],
+                messages: vec![],
+            },
+            links: Default::default(),
+            diagnostics: Default::default(),
+        };
+
+        let markdown = r#"# stablyai/orca
+Orca is an agentic workspace built with Rust, Tauri, and React. It gives developers full local autonomy.
+
+## Features
+- Universal voice dictation: Real-time whisper transcription.
+- Local memory vault: SQLite-backed structured knowledge.
+- GitHub integration: Repository capture and context extraction.
+"#;
+
+        let repo = extract_deterministic_repository_context(
+            "cap_repo_1",
+            &payload,
+            markdown,
+            "2026-09-03T10:00:00Z",
+        );
+
+        assert_eq!(repo.capture_id, "cap_repo_1");
+        assert_eq!(repo.repository_name, "stablyai/orca");
+        assert!(repo.objective.contains("agentic workspace"));
+        assert!(repo.stack.languages.contains(&"Rust".to_string()));
+        assert!(repo.stack.frontend.contains(&"React".to_string()));
+        assert!(repo.stack.backend.contains(&"Tauri".to_string()));
+        assert_eq!(repo.features.len(), 3);
+        assert_eq!(repo.features[0].name, "Universal voice dictation");
+        assert!(repo.user_base.primary.contains(&"Developers".to_string()));
+        // Honesty: No issues were in the captured content
+        assert_eq!(repo.open_issues.len(), 0);
+        assert!(!repo.open_issues_available);
+        assert_eq!(repo.past_issues.len(), 0);
+        assert!(!repo.past_issues_available);
+    }
+
+    #[test]
+    fn repository_llm_json_parsing_and_context_construction() {
+        let raw = r#"```json
+{
+  "repository_name": "stablyai/orca",
+  "objective": "Local-first AI assistant for Windows",
+  "stack": {
+    "languages": ["Rust", "TypeScript"],
+    "frontend": ["React", "Vite"],
+    "backend": ["Tauri", "Tokio"],
+    "storage": ["SQLite"],
+    "testing": ["Vitest"],
+    "integrations": ["GitHub API"]
+  },
+  "features": [
+    {
+      "name": "Live Capture",
+      "description": "Captures conversations and repositories",
+      "is_core": true
+    }
+  ],
+  "user_base": {
+    "primary": ["Software Engineers"],
+    "secondary": ["Knowledge Workers"],
+    "evidence": "Grounded in README developer tooling section"
+  },
+  "open_issues": [],
+  "open_issues_available": false,
+  "past_issues": [],
+  "past_issues_available": false
+}
+```"#;
+
+        let parsed = parse_llm_repository_response(raw).expect("should parse repository response");
+        let repo = build_repository_context_from_parsed(
+            "cap_123",
+            "stablyai/orca",
+            parsed,
+            "2026-09-04T00:00:00Z",
+            Some("Anthropic".to_string()),
+        );
+
+        assert_eq!(repo.repository_name, "stablyai/orca");
+        assert_eq!(repo.objective, "Local-first AI assistant for Windows");
+        assert_eq!(repo.stack.languages, vec!["Rust", "TypeScript"]);
+        assert_eq!(repo.features.len(), 1);
+        assert_eq!(repo.features[0].name, "Live Capture");
+        assert!(!repo.open_issues_available);
+        assert!(!repo.past_issues_available);
+    }
+
+    #[test]
+    fn source_context_deserialization_is_backward_compatible_with_legacy_conversation() {
+        let legacy_json = r#"{
+  "capture_id": "legacy_cap_1",
+  "title": "ChatGPT Chat",
+  "objective": "Discuss Relay Architecture",
+  "background": [],
+  "current_state": "Completed discussion",
+  "decisions": [
+    {
+      "id": "dec_1",
+      "decision": "Use SQLite",
+      "rationale": "Reliable local DB",
+      "status": "CURRENT",
+      "source_turn_ordinals": [1]
+    }
+  ],
+  "requirements": [],
+  "constraints": [],
+  "preferences": [],
+  "rejected_approaches": [],
+  "open_questions": [],
+  "action_items": [],
+  "important_facts": [],
+  "key_artifacts": [],
+  "generated_at": "2026-09-01T12:00:00Z",
+  "model": null,
+  "deterministic": true
+}"#;
+
+        let source_ctx: SourceContext = serde_json::from_str(legacy_json)
+            .expect("should deserialize legacy conversation context into SourceContext");
+
+        assert_eq!(source_ctx.capture_id, "legacy_cap_1");
+        match source_ctx.kind {
+            SourceContextKind::Conversation(conv) => {
+                assert_eq!(conv.objective, "Discuss Relay Architecture");
+                assert_eq!(conv.decisions.len(), 1);
+                assert_eq!(conv.decisions[0].decision, "Use SQLite");
+            }
+            SourceContextKind::Repository(_) => panic!("Expected Conversation kind"),
+        }
+    }
+
+    #[test]
+    fn source_context_envelope_roundtrips_repository_context() {
+        let repo = RepositoryContext {
+            capture_id: "cap_roundtrip".to_string(),
+            repository_name: "relay".to_string(),
+            objective: "Voice assistant".to_string(),
+            stack: RepositoryStack::default(),
+            features: vec![],
+            user_base: RepositoryUserBase::default(),
+            open_issues: vec![],
+            past_issues: vec![],
+            open_issues_available: false,
+            past_issues_available: false,
+            generated_at: "2026-09-04T00:00:00Z".to_string(),
+            model: None,
+            deterministic: true,
+        };
+
+        let src = SourceContext {
+            capture_id: "cap_roundtrip".to_string(),
+            generated_at: "2026-09-04T00:00:00Z".to_string(),
+            model: None,
+            deterministic: true,
+            kind: SourceContextKind::Repository(repo),
+        };
+
+        let serialized = serde_json::to_string(&src).expect("should serialize");
+        assert!(serialized.contains(r#""kind":"repository""#));
+
+        let deserialized: SourceContext = serde_json::from_str(&serialized).expect("should deserialize");
+        assert_eq!(src, deserialized);
     }
 }

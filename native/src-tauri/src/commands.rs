@@ -3703,13 +3703,27 @@ pub async fn analyze_capture_context(
     let settings = state.settings.lock_or_recover().clone();
     let llm = LLMClient::new(settings.provider);
 
-    let context = crate::capture::web::context::extract_conversation_context(
-        Some(&llm),
-        &id,
-        &payload,
-        &file.content,
-    )
-    .await;
+    let is_repository = payload.extractor.id == "github"
+        || payload.url.contains("github.com")
+        || file.capture.as_ref().is_some_and(|c| c.application == "github" || c.domain.contains("github.com"));
+
+    let context = if is_repository {
+        crate::capture::web::context::extract_repository_context(
+            Some(&llm),
+            &id,
+            &payload,
+            &file.content,
+        )
+        .await
+    } else {
+        crate::capture::web::context::extract_conversation_context(
+            Some(&llm),
+            &id,
+            &payload,
+            &file.content,
+        )
+        .await
+    };
 
     state
         .vault

@@ -32,7 +32,10 @@ pub mod importer;
 pub mod normalize;
 pub mod source;
 
-pub use context::{ConversationContext, SourceContext};
+pub use context::{
+    ConversationContext, RepositoryContext, RepositoryFeature, RepositoryIssue, RepositoryStack,
+    RepositoryUserBase, SourceContext, SourceContextKind,
+};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

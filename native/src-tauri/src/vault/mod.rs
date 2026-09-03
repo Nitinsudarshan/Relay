@@ -980,7 +980,7 @@ impl VaultManager {
     pub fn get_capture_context(
         &self,
         id: &str,
-    ) -> Result<Option<crate::capture::web::ConversationContext>, VaultError> {
+    ) -> Result<Option<crate::capture::web::SourceContext>, VaultError> {
         let artifact = self.get_vault_file(id)?;
         if !artifact.is_capture() {
             return Err(VaultError::NotFound(format!("Capture {}", id)));
@@ -995,11 +995,11 @@ impl VaultManager {
         Ok(Some(context))
     }
 
-    /// Saves the derived conversation context for a capture.
+    /// Saves the derived context for a capture.
     pub fn save_capture_context(
         &self,
         id: &str,
-        context: &crate::capture::web::ConversationContext,
+        context: &crate::capture::web::SourceContext,
     ) -> Result<(), VaultError> {
         let artifact = self.get_vault_file(id)?;
         if !artifact.is_capture() {
