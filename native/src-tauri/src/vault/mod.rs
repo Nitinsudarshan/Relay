@@ -1161,6 +1161,11 @@ impl VaultManager {
                     "url": capture.url,
                     "captured_at": capture.captured_at,
                     "fidelity": capture.fidelity,
+                    // The trust level travels with the promotion. A Scribble
+                    // made from a capture is still a record of what a website
+                    // said, and the knowledge graph it joins has to be able to
+                    // tell that from a fact the user asserted.
+                    "trust": capture.trust,
                     "promoted_at": chrono::Utc::now().to_rfc3339(),
                 }),
             ),

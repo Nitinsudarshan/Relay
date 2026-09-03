@@ -52,8 +52,65 @@ export interface VaultFile {
   capture?: CaptureProvenance | null;
 }
 
-/** How much of a page a capture can honestly claim to contain. */
-export type CaptureCoverage = 'full_document' | 'rendered_dom' | 'partial' | 'unknown';
+/**
+ * How much of a page a capture can honestly claim to contain.
+ *
+ * Relay's four completeness states, in the vocabulary stored on artifacts:
+ * `full_document` is FULL, `partial` is PARTIAL, `rendered_dom` is
+ * LOADED_ONLY, and `failed` is FAILED. `unknown` means nothing measurable —
+ * which is not the same as a failure.
+ */
+export type CaptureCoverage =
+  | 'full_document'
+  | 'rendered_dom'
+  | 'partial'
+  | 'failed'
+  | 'unknown';
+
+/** How many elements the reveal pass saw in each availability state. */
+export interface AvailabilityCounts {
+  outside_viewport: number;
+  visually_truncated: number;
+  collapsed: number;
+  not_loaded: number;
+  virtualized: number;
+  inaccessible: number;
+}
+
+/**
+ * What the reveal pass measured. Absent on captures made before v0.27.0.
+ *
+ * The discovered/captured pairs are the useful part: they are what separates
+ * "this is the whole conversation" from "this is a quarter of it".
+ */
+export interface CaptureTraversal {
+  performed: boolean;
+  plan: string;
+  termination: string;
+  steps: number;
+  samples: number;
+  scroll_span_px: number;
+  duration_ms: number;
+  scroll_restored: boolean;
+  virtualized: boolean;
+  settle_timeouts: number;
+  expansions_found: number;
+  expansions_opened: number;
+  expansions_refused: number;
+  expansions_failed: number;
+  /** Sections whose content was already present, so nothing was clicked. */
+  expansions_unnecessary: number;
+  messages_discovered: number;
+  messages_captured: number;
+  messages_missing?: number | null;
+  duplicates_dropped: number;
+  attachments_discovered: number;
+  attachments_captured: number;
+  images_discovered: number;
+  images_captured: number;
+  availability: AvailabilityCounts;
+  inaccessible: string[];
+}
 
 /** How the content was obtained, best first. */
 export type CaptureFidelity = 'structured' | 'generic' | 'text_only';
@@ -72,6 +129,11 @@ export interface CaptureProvenance {
   browser?: string | null;
   extractor_id: string;
   extractor_version: number;
+  /**
+   * How downstream Relay systems may use this content. Always
+   * `external_untrusted` for a web capture, whatever site it came from.
+   */
+  trust: string;
   fidelity: CaptureFidelity | string;
   coverage: CaptureCoverage | string;
   /** Plain-language statements about what was and was not captured. */
@@ -87,6 +149,7 @@ export interface CaptureProvenance {
   version: number;
   previous_capture_id?: string | null;
   recapture_count: number;
+  traversal?: CaptureTraversal | null;
 }
 
 /** Live state of the local bridge the browser extension talks to. */

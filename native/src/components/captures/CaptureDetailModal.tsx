@@ -21,8 +21,10 @@ import { MarkdownView } from '../common/MarkdownView';
 import {
   captureTypeLabel,
   describeCompleteness,
+  describeTraversal,
   displayUrl,
   fidelityLabel,
+  trustLabel,
   formatTimestamp,
 } from './captureFormatting';
 
@@ -55,6 +57,7 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
 
   const provenance = capture.capture;
   const completeness = provenance ? describeCompleteness(provenance) : null;
+  const traversal = provenance ? describeTraversal(provenance) : [];
 
   useEffect(() => {
     if (activeTab !== 'source' || rawPayload !== null) return;
@@ -218,6 +221,8 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
                   {fidelityLabel(provenance.fidelity)} · {provenance.extractor_id} v
                   {provenance.extractor_version}
                 </dd>
+                <dt className="text-muted-foreground">Trust</dt>
+                <dd className="text-foreground">{trustLabel(provenance.trust)}</dd>
                 {provenance.author && (
                   <>
                     <dt className="text-muted-foreground">Author</dt>
@@ -243,6 +248,19 @@ export const CaptureDetailModal: React.FC<CaptureDetailModalProps> = ({
                     ` · re-captured unchanged ${provenance.recapture_count}×`}
                 </dd>
               </dl>
+
+              {traversal.length > 0 && (
+                <section className="rounded-lg border border-border bg-muted/30 p-3">
+                  <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                    <Info className="h-3.5 w-3.5 text-primary" /> What reading this page measured
+                  </h3>
+                  <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
+                    {traversal.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
 
               {provenance.notes.length > 0 && (
                 <section className="rounded-lg border border-border bg-muted/30 p-3">

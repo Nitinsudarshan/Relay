@@ -18,7 +18,7 @@ import {
   stripNoise,
   textOf,
 } from '../dom';
-import type { ExtractionResult } from '../types';
+import type { CapturedLink, ContentBlock, ExtractionResult } from '../types';
 
 export const GENERIC_EXTRACTOR_ID = 'generic';
 export const GENERIC_EXTRACTOR_VERSION = 1;
@@ -89,15 +89,30 @@ function documentTitle(doc: Document, region: Element): string | undefined {
  * Never returns `null`: this is the floor of the ladder for anything with a
  * body, and a capture with an honest coverage label beats no capture at all.
  */
-export function extractGeneric(doc: Document, baseUrl?: string): ExtractionResult {
+/**
+ * One pass of document-shaped content, without any coverage judgement.
+ *
+ * Split out because the reveal engine calls it once per sample: a page that
+ * loads content as you scroll gives up a little more of itself each time, and
+ * the merge step is what turns those overlapping reads back into a document.
+ * A page that needs one sample simply gets one, which is the same code path.
+ */
+export function harvestGeneric(
+  doc: Document,
+  baseUrl?: string,
+): { blocks: ContentBlock[]; truncated: boolean; links: CapturedLink[]; region: Element } {
   const region = findMainRegion(doc);
   const cleaned = stripNoise(region);
   const { blocks, truncated } = extractBlocks(cleaned);
-  const { coverage, notes } = assessCoverage(doc, blocksTextLength(blocks), truncated);
   // Links come from the cleaned content region, so a capture's link list is
   // the article's references rather than the site's navigation menu.
   const links = baseUrl ? collectLinks(cleaned, baseUrl) : [];
+  return { blocks, truncated, links, region };
+}
 
+export function extractGeneric(doc: Document, baseUrl?: string): ExtractionResult {
+  const { blocks, truncated, links, region } = harvestGeneric(doc, baseUrl);
+  const { coverage, notes } = assessCoverage(doc, blocksTextLength(blocks), truncated);
   return {
     kind: 'article',
     strategy: 'article',

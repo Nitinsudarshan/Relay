@@ -26,7 +26,15 @@ function stabilize(payload: CapturePayload): CapturePayload {
     ...payload,
     captured_at: '2026-02-14T09:30:00.000Z',
     browser: 'Relay contract fixture',
-    diagnostics: { ...payload.diagnostics, elapsed_ms: 0 },
+    diagnostics: {
+      ...payload.diagnostics,
+      elapsed_ms: 0,
+      // The reveal pass's own timings are wall-clock; the counts it reports
+      // are what the contract is about.
+      traversal: payload.diagnostics.traversal
+        ? { ...payload.diagnostics.traversal, duration_ms: 0 }
+        : undefined,
+    },
   };
 }
 
@@ -37,10 +45,10 @@ const CASES = [
 
 describe('extension → Relay payload contract', () => {
   for (const testCase of CASES) {
-    it(`${testCase.name} matches the fixture the Rust backend is tested against`, () => {
+    it(`${testCase.name} matches the fixture the Rust backend is tested against`, async () => {
       const html = fs.readFileSync(path.join(HTML_DIR, `${testCase.name}.html`), 'utf8');
       const doc = new DOMParser().parseFromString(html, 'text/html');
-      const payload = stabilize(buildPayload(doc, testCase.url));
+      const payload = stabilize(await buildPayload(doc, testCase.url));
       const serialized = `${JSON.stringify(payload, null, 2)}\n`;
       const fixturePath = path.join(JSON_DIR, `${testCase.name}.json`);
 

@@ -25,6 +25,33 @@
           </div>
         </div>
       </article>
+      <article data-testid="conversation-turn-4">
+        <h5 class="sr-only">You said:</h5>
+        <div data-message-author-role="user">
+          <div class="whitespace-pre-wrap">Draw me the pipeline and give me the numbers as a file.</div>
+        </div>
+      </article>
+      <!--
+        Turn 5 is the case v1 could not capture: the generated image is inside
+        the turn wrapper but *outside* the element carrying
+        `data-message-author-role`, so an extractor anchored on the role
+        attribute never sees it.
+      -->
+      <article data-testid="conversation-turn-5">
+        <h6 class="sr-only">ChatGPT said:</h6>
+        <div data-message-author-role="assistant">
+          <div class="markdown">
+            <p>Here is the pipeline, and the figures are attached.</p>
+            <p>Download it here: <a href="sandbox:/mnt/data/capture-figures.csv" download>capture-figures.csv</a> (12.4 kB)</p>
+          </div>
+        </div>
+        <img
+          alt="Generated image: the capture pipeline"
+          src="https://chatgpt.com/backend-api/estuary/content?id=file_0001&amp;ts=1&amp;sig=abc"
+          width="1024"
+          height="768"
+        />
+      </article>
     </main>
   </body>
 </html>

@@ -17,7 +17,7 @@ is right and the document is a bug to be fixed in the same change.
 | [data-model.md](data-model.md) | Vault file layouts, frontmatter schemas, settings shape. |
 | [api.md](api.md) | Tauri command conventions and the `CommandError` contract. |
 | [user-flows.md](user-flows.md) | End-to-end flows through the shipped features. |
-| [capture.md](capture.md) | Web capture: the browser extension, the loopback bridge, the extraction ladder, and what a capture may claim about its own completeness. |
+| [capture.md](capture.md) | Web capture: the browser extension, the loopback bridge, the reveal-and-extract architecture, what a capture may claim about its own completeness, and why captured content is never an instruction. |
 | [talkback/ARCHITECTURE.md](talkback/ARCHITECTURE.md) | Talkback's pipeline, state machine, retrieval, and what it deliberately does not do. |
 | [testing.md](testing.md) | What is tested, with what, and where the tests live. |
 | [GOOGLE_OAUTH_SETUP.md](GOOGLE_OAUTH_SETUP.md) | The OAuth 2.0 PKCE architecture and Google Cloud setup. |
@@ -49,6 +49,8 @@ version it was traced from; read them as history, not as instructions.
 | [meetings/MEETINGS_INTELLIGENCE_AUDIT.md](meetings/MEETINGS_INTELLIGENCE_AUDIT.md) | Stage-by-stage trace of the meetings pipeline (phase A audit). |
 | [meetings/SUMMARY_QUALITY_REBUILD.md](meetings/SUMMARY_QUALITY_REBUILD.md) | Why v0.15.1 summaries were poor and what replaced the pipeline. |
 | [meetings/MEETINGS_LEGACY_REMOVAL.md](meetings/MEETINGS_LEGACY_REMOVAL.md) | Archaeological record of the legacy meetings system (v0.1.0–v0.10.1). |
+| [capture/RESEARCH.md](capture/RESEARCH.md) | The research pass behind Capture v2's progressive traversal: how browsers hide content, what was verified in a real browser and what was not, the traversal and expansion designs, and the architectures rejected. |
+| [capture/BENCHMARKS.md](capture/BENCHMARKS.md) | What the reveal pass costs, measured — and, explicitly, what has not been measured. |
 | [talkback/RESEARCH.md](talkback/RESEARCH.md) | The research pass behind Talkback: competitive matrix, open-source technology matrix with licences, and the architectures rejected. |
 | [talkback/BENCHMARKS.md](talkback/BENCHMARKS.md) | What Talkback's latency actually measures at, and — explicitly — what has not been measured. |
 

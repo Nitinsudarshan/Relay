@@ -1,0 +1,116 @@
+<!doctype html>
+<!--
+  A ChatGPT-shaped conversation that behaves the way the published record says
+  the real one does on a long thread:
+
+  - turns wrapped in `article[data-testid="conversation-turn-N"]`, with the role
+    on a descendant `[data-message-author-role]`;
+  - **virtualized**: only a window of turns is mounted, and turns that scroll
+    out are removed from the DOM. This is what makes harvesting-during-traversal
+    mandatory rather than an optimisation;
+  - **network-paged history**: the first two attempts to reach the top load
+    older turns and push the boundary down, so a single seek lands mid-thread;
+  - a generated image inside the turn wrapper but *outside* the role element —
+    the arrangement that made v1 miss generated images entirely;
+  - a `sandbox:/mnt/data/…` file reference, which is not a fetchable URL;
+  - a composer, whose Send button must never be activated.
+
+  Turn ordinals start at 2 and are contiguous, so a complete capture can be
+  checked exactly: 300 turns, no gaps.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Capture architecture - ChatGPT</title>
+    <style>
+      body { font: 14px/1.6 system-ui, sans-serif; margin: 0; }
+      #thread { height: 100vh; overflow-y: auto; }
+      #spacer { position: relative; }
+      article { position: absolute; width: 100%; box-sizing: border-box; padding: 12px; border-bottom: 1px solid #eee; }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+      #composer { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; padding: 8px; border-top: 1px solid #ccc; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div id="thread" class="overflow-y-auto">
+        <div id="spacer"></div>
+      </div>
+    </main>
+
+    <div id="composer" data-testid="composer">
+      <form onsubmit="return false">
+        <div id="prompt-textarea" contenteditable="true">Ask anything</div>
+        <button type="submit" aria-label="Send prompt">Send</button>
+        <button type="button" aria-expanded="false">Show more</button>
+      </form>
+    </div>
+
+    <script>
+      const TOTAL = 300;
+      const HEIGHT = 220;
+      const WINDOW = 7;
+      /** Turns that exist but have not been fetched yet. */
+      let loadedFrom = 120;
+
+      const thread = document.getElementById('thread');
+      const spacer = document.getElementById('spacer');
+
+      function turnHtml(index) {
+        const ordinal = index + 2;
+        const role = index % 2 === 0 ? 'user' : 'assistant';
+        const label = role === 'user' ? 'You said:' : 'ChatGPT said:';
+        const body =
+          role === 'user'
+            ? `<div class="whitespace-pre-wrap">Question ${index}: what happens to turn ${index}?</div>`
+            : `<div class="markdown"><p>Answer ${index}: it is captured while it is mounted.</p></div>`;
+
+        // One assistant turn carries the rich content: an image rendered
+        // outside the role element, and a file the model produced.
+        const rich =
+          index === 199
+            ? `<img alt="Generated image: the reveal loop"
+                    src="https://chatgpt.com/backend-api/estuary/content?id=file_9001&ts=1&sig=zz"
+                    width="1024" height="768" />`
+            : '';
+        const file =
+          index === 199
+            ? `<p><a href="sandbox:/mnt/data/turn-counts.csv" download>turn-counts.csv</a></p>`
+            : '';
+
+        return `
+          <article data-testid="conversation-turn-${ordinal}" style="top:${index * HEIGHT}px">
+            <h6 class="sr-only">${label}</h6>
+            <div data-message-author-role="${role}" data-message-id="msg-${index}">
+              ${body}
+              ${file}
+            </div>
+            ${rich}
+          </article>`;
+      }
+
+      function render() {
+        spacer.style.height = TOTAL * HEIGHT + 'px';
+        const first = Math.max(loadedFrom, Math.floor(thread.scrollTop / HEIGHT) - 1);
+        const last = Math.min(TOTAL - 1, first + WINDOW - 1);
+        let html = '';
+        for (let i = first; i <= last; i++) html += turnHtml(i);
+        spacer.innerHTML = html;
+      }
+
+      thread.addEventListener('scroll', () => {
+        // Reaching the top fetches older history, which grows the thread
+        // upward and moves the boundary — so one seek to the top is not enough.
+        if (thread.scrollTop < HEIGHT && loadedFrom > 0) {
+          loadedFrom = Math.max(0, loadedFrom - 60);
+          render();
+          thread.scrollTop = HEIGHT;
+          return;
+        }
+        render();
+      });
+
+      render();
+    </script>
+  </body>
+</html>

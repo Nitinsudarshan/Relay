@@ -17,6 +17,14 @@ import type { ContentCaptureResult } from './content';
 const CONTENT_BUNDLE = 'relay-extract.js';
 const DEFAULT_PORT = 8765;
 const REQUEST_TIMEOUT_MS = 20_000;
+/**
+ * Ceiling on the in-page reveal pass.
+ *
+ * The engine has its own wall-clock budget per source (10s by default), so
+ * this is the outer guard for the case where the page never returns at all —
+ * generous enough not to cut a legitimate long-conversation read short.
+ */
+const EXTRACT_TIMEOUT_MS = 30_000;
 
 interface RelaySettings {
   port: number;
@@ -132,15 +140,24 @@ export async function captureTab(tab: chrome.tabs.Tab | undefined): Promise<void
     // security policy forbids `eval`/`new Function` in a service worker, and
     // the function is serialized by `toString()` before it is evaluated in
     // the page, so it cannot close over anything from this module either.
-    const [injection] = await chrome.scripting.executeScript<ContentCaptureResult>({
+    // Chrome awaits a promise returned from an injected function, which is how
+    // an asynchronous reveal pass reports back without the worker polling.
+    const injected = chrome.scripting.executeScript<Promise<ContentCaptureResult>>({
       target: { tabId },
       func: () =>
-        (globalThis as unknown as Record<string, () => ContentCaptureResult>)[
+        (globalThis as unknown as Record<string, () => Promise<ContentCaptureResult>>)[
           '__relayCaptureRun'
         ]?.(),
     });
 
-    const result = injection?.result;
+    const [injection] = await Promise.race([
+      injected,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Reading this page took too long.')), EXTRACT_TIMEOUT_MS),
+      ),
+    ]);
+
+    const result = (await injection?.result) as ContentCaptureResult | undefined;
     if (!result?.ok || !result.payload) {
       await flash(tabId, '✕', '#ef4444', result?.error ?? 'Nothing readable on this page.');
       await clearBadgeLater(tabId);

@@ -1,0 +1,62 @@
+<!doctype html>
+<!--
+  A page built to be activated by mistake.
+
+  Every button here sits inside message-shaped content, wears disclosure
+  markup (`aria-expanded="false"`, `aria-controls`), and does something a
+  reader must never do. Each one records itself in `window.__fired` when it is
+  activated, so the validation run can assert an empty list rather than
+  inferring safety from nothing having visibly broken.
+
+  The two genuine disclosure controls at the bottom are the control group: a
+  run where nothing fires and nothing expands has proved the classifier is
+  merely broken, not safe.
+-->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Controls that must not be activated</title></head>
+  <body>
+    <main>
+      <article>
+        <p>A message with an action row, as every chat interface has.</p>
+        <div id="body-1">The visible text of this message.</div>
+
+        <button type="button" aria-expanded="false" aria-controls="body-1" onclick="fire('delete')">Delete</button>
+        <button type="button" aria-expanded="false" aria-controls="body-1" onclick="fire('regenerate')">Regenerate</button>
+        <button type="button" aria-expanded="false" aria-controls="body-1" onclick="fire('share')">Share</button>
+        <button type="button" aria-expanded="false" aria-controls="body-1" onclick="fire('download')">Download</button>
+        <button type="button" aria-expanded="false" aria-controls="body-1" onclick="fire('approve')">Approve</button>
+        <button type="button" aria-expanded="false" aria-controls="body-1" onclick="fire('authorize')">Authorize</button>
+        <button type="button" aria-expanded="false" aria-controls="body-1" onclick="fire('purchase')">Purchase</button>
+        <button type="button" aria-expanded="false" aria-controls="body-1" onclick="fire('install')">Install</button>
+        <button type="button" aria-expanded="false" aria-controls="body-1" onclick="fire('execute')">Execute</button>
+        <button type="button" aria-expanded="false" aria-controls="body-1" onclick="fire('retry')">Retry</button>
+        <button type="button" aria-expanded="false" aria-controls="body-1" onclick="fire('settings')">Settings</button>
+        <button type="button" aria-haspopup="menu" aria-expanded="false" onclick="fire('more-actions')">Show more actions</button>
+        <a href="/somewhere-else" role="button" aria-expanded="false" onclick="fire('navigate')">Show more</a>
+
+        <form onsubmit="fire('submit'); return false">
+          <input name="q" value="x" />
+          <button type="submit" aria-expanded="false" aria-controls="body-1">Show more</button>
+        </form>
+
+        <div contenteditable="true">
+          <button type="button" aria-expanded="false" aria-controls="body-1" onclick="fire('composer')">Show more</button>
+        </div>
+
+        <!-- The control group: these two are safe, and one of them is needed. -->
+        <div id="body-2">short</div>
+        <button type="button" id="safe" aria-expanded="false" aria-controls="body-2">Show more</button>
+        <details><summary>Show details</summary><p>Already in the DOM.</p></details>
+      </article>
+    </main>
+
+    <script>
+      window.__fired = [];
+      function fire(name) { window.__fired.push(name); }
+      document.getElementById('safe').addEventListener('click', (event) => {
+        document.getElementById('body-2').textContent = 'SAFE_EXPANSION_MARKER_5521 the full text';
+        event.currentTarget.setAttribute('aria-expanded', 'true');
+      });
+    </script>
+  </body>
+</html>
