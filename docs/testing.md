@@ -7,7 +7,7 @@ state of play. CI runs all of it on every push and pull request —
 
 ## 1. Rust backend (`native/src-tauri/`)
 
-1054 tests (+4 ignored benchmarks), `cargo test`.
+1060 tests (+4 ignored benchmarks), `cargo test`.
 
 ```bash
 cd native/src-tauri
@@ -51,6 +51,10 @@ Where the coverage sits:
   header, name inference from self-introductions and direct address, applying
   typed notes to the speaker registry, and composing a shareable document
   including its own disclosures.
+- `meetings_v2/processing/validate.rs` — among the rest, that a summary
+  omitting a section the facts have content for is rejected, that headings are
+  matched on their words rather than byte-identically, and that a meeting which
+  settled nothing is not failed for having no Decisions section.
 - `settings/` — schema defaults, serde aliases, and backward compatibility with
   settings files written by earlier versions.
 - `vault/` — frontmatter parsing, note and scribble CRUD, merge behaviour.

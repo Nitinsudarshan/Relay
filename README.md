@@ -95,7 +95,7 @@ flowchart TD
 ## Tests
 
 ```bash
-# Rust backend — 1054 tests (+4 ignored benchmarks)
+# Rust backend — 1060 tests (+4 ignored benchmarks)
 cd native/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 
 # Native frontend — 409 tests

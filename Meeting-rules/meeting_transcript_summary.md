@@ -32,6 +32,19 @@
 > `processing/context.rs::windows` and runs Stage A per window with Stage B once
 > over the merged result, exactly as §8 requires. See
 > `docs/meetings/SUMMARY_QUALITY_REBUILD.md`.
+>
+> **§5 became enforced in v0.31.0.** It was *implemented* in 0.16.0 — the
+> prompt states the structure and the deterministic renderer produces it — but
+> only the leading `## Overview` was ever *validated*. A model that answered
+> with that heading and a paragraph underneath passed, however many decisions
+> and commitments the facts carried, which is a summary in the shape §0's
+> failures were meant to rule out: nothing to scan, and no way for a reader to
+> find what they own. `validate::missing_sections` now compares the prose
+> against the facts and reports a missing section as an error, which routes
+> into the repair pass; if repair fails the deterministic renderer takes over,
+> so the reader gets the structure either way. `## Discussion` is deliberately
+> *not* required, because folding topics into the overview is legitimate at
+> Concise length.
 
 
 ---
