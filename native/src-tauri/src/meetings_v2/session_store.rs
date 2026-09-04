@@ -230,6 +230,7 @@ impl SessionStore {
         fs::create_dir_all(&dir).map_err(|e| format!("Failed to create meeting dir: {}", e))?;
 
         let stored = MeetingNotes {
+            directives: notes.directives.clone(),
             during: notes.during.clone(),
             before: notes.before.clone(),
             updated_at: Some(chrono::Utc::now().to_rfc3339()),

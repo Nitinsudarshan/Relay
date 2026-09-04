@@ -2707,6 +2707,7 @@ async fn conflicting_notes_and_transcript_are_left_conflicting() {
 async fn a_meetings_notes_are_never_written_by_the_pipeline() {
     let harness = Harness::new(&fixture_a());
     let notes = crate::meetings_v2::types::MeetingNotes {
+        directives: Vec::new(),
         during: "budget is the blocker".to_string(),
         before: "agenda: budget".to_string(),
         updated_at: None,

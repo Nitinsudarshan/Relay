@@ -2361,6 +2361,7 @@ pub async fn save_meeting_v2_notes(
     let sessions = state.meetings_v2.store();
     let existing = sessions.get_notes(&session_id).unwrap_or_default();
     let notes = crate::meetings_v2::MeetingNotes {
+        directives: existing.directives,
         during: during.unwrap_or(existing.during),
         before: before.unwrap_or(existing.before),
         updated_at: None,
@@ -2369,6 +2370,150 @@ pub async fn save_meeting_v2_notes(
     sessions
         .save_notes(&session_id, &notes)
         .map_err(|e| CommandError::new("SAVE_MEETING_NOTES_FAILED", &e))
+}
+
+/// Adds one typed directive to a meeting's notes.
+///
+/// Separate from `save_meeting_v2_notes` because a directive is not a text
+/// edit: it is an instruction with a kind, and the pipeline stage that acts on
+/// it depends on that kind. Adding one re-prepares the meeting so the
+/// correction takes effect immediately — a name correction the user has to hit
+/// "regenerate" to see is a name correction they will assume did not work.
+#[tauri::command]
+pub async fn add_meeting_v2_directive(
+    app: AppHandle,
+    session_id: String,
+    kind: String,
+    subject: Option<String>,
+    value: String,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingNotes, CommandError> {
+    use crate::meetings_v2::types::{DirectiveKind, MeetingDirective};
+
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+
+    let kind = match kind.trim().to_uppercase().as_str() {
+        "SPEAKER_NAME" => DirectiveKind::SpeakerName,
+        "PARTICIPANT" => DirectiveKind::Participant,
+        "TERM" => DirectiveKind::Term,
+        "AGENDA" => DirectiveKind::Agenda,
+        "NOTE" => DirectiveKind::Note,
+        other => {
+            return Err(CommandError::new(
+                "INVALID_DIRECTIVE_KIND",
+                &format!("{other} is not a kind of directive"),
+            ))
+        }
+    };
+
+    let directive = MeetingDirective::new(kind, subject.as_deref(), &value).ok_or_else(|| {
+        CommandError::new(
+            "INVALID_DIRECTIVE",
+            if kind.needs_subject() {
+                "This kind of note needs both a subject and a value"
+            } else {
+                "This note is empty"
+            },
+        )
+    })?;
+
+    let sessions = state.meetings_v2.store();
+    let mut notes = sessions.get_notes(&session_id).unwrap_or_default();
+    notes.directives.push(directive);
+    let saved = sessions
+        .save_notes(&session_id, &notes)
+        .map_err(|e| CommandError::new("SAVE_MEETING_NOTES_FAILED", &e))?;
+
+    reprepare_after_directive_change(&app, &state, &session_id);
+    Ok(saved)
+}
+
+/// Removes one directive by id. Unknown ids are a no-op, not an error: the row
+/// the user wanted gone is gone either way.
+#[tauri::command]
+pub async fn remove_meeting_v2_directive(
+    app: AppHandle,
+    session_id: String,
+    directive_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingNotes, CommandError> {
+    if session_id.trim().is_empty() || directive_id.trim().is_empty() {
+        return Err(CommandError::new(
+            "INVALID_DIRECTIVE",
+            "A meeting id and a directive id are required",
+        ));
+    }
+
+    let sessions = state.meetings_v2.store();
+    let mut notes = sessions.get_notes(&session_id).unwrap_or_default();
+    notes.directives.retain(|d| d.id != directive_id);
+    let saved = sessions
+        .save_notes(&session_id, &notes)
+        .map_err(|e| CommandError::new("SAVE_MEETING_NOTES_FAILED", &e))?;
+
+    reprepare_after_directive_change(&app, &state, &session_id);
+    Ok(saved)
+}
+
+/// Re-runs the deterministic stages so a directive's effect is visible at once.
+///
+/// Best effort: a failure here leaves the directive saved and the derived data
+/// as it was, which is recoverable. Failing the save because re-preparation
+/// failed would lose the user's correction, which is not.
+fn reprepare_after_directive_change(app: &AppHandle, state: &AppState, session_id: &str) {
+    let options = {
+        let settings = state.settings.lock_or_recover();
+        meeting_processing_options(&settings, None, None)
+    };
+    match state.meeting_processor.prepare(session_id, &options) {
+        Ok(processing) => {
+            let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
+        }
+        Err(e) => tracing::info!(
+            meeting_id = %session_id,
+            "meeting_processing: directive saved but re-preparation failed ({}); \
+the correction applies on the next run",
+            e
+        ),
+    }
+}
+
+/// Renders a meeting as one Markdown document, for sharing.
+///
+/// The header is counted rather than generated — date, duration, participants,
+/// and what became of the recording — so a summary that leaves the app carries
+/// its own provenance instead of arriving as a wall of unattributed claims.
+#[tauri::command]
+pub async fn share_meeting_v2(
+    session_id: String,
+    include_summary: Option<bool>,
+    include_action_items: Option<bool>,
+    include_decisions: Option<bool>,
+    include_conversation: Option<bool>,
+    include_notes: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::processing::SharedDocument, CommandError> {
+    use crate::meetings_v2::processing::share::ShareOptions;
+
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+
+    let defaults = ShareOptions::default();
+    let options = ShareOptions {
+        summary: include_summary.unwrap_or(defaults.summary),
+        action_items: include_action_items.unwrap_or(defaults.action_items),
+        decisions: include_decisions.unwrap_or(defaults.decisions),
+        conversation: include_conversation.unwrap_or(defaults.conversation),
+        notes: include_notes.unwrap_or(defaults.notes),
+    };
+
+    state
+        .meeting_processor
+        .share_document(&session_id, options)
+        .map_err(|e| CommandError::new("SHARE_MEETING_FAILED", &e))
 }
 
 /// Renames a speaker. Updates the registry only — the raw transcript is

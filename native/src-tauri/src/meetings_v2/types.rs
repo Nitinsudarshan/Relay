@@ -108,6 +108,98 @@ impl MeetingSession {
     }
 }
 
+/// What a directive is telling Relay.
+///
+/// Every kind here is something the user knows and the recording does not, and
+/// each one changes the pipeline's behaviour in a specific way. That is the
+/// test for belonging in this list: a kind that only ends up in a prompt is a
+/// [`DirectiveKind::Note`], not a kind of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DirectiveKind {
+    /// "Speaker 2 is Pranjali." Renames a speaker in the registry.
+    SpeakerName,
+    /// "Ayush was on this call." Adds a participant, whether or not they spoke.
+    Participant,
+    /// "It is LanceDB, not Lance TV." Adds a term to this meeting's glossary,
+    /// which the normalizer applies to the derived transcript.
+    Term,
+    /// What the meeting was for. Read as context, never as evidence that
+    /// something was decided.
+    Agenda,
+    /// Anything else worth remembering. The escape hatch, and what the old free
+    /// paragraph box became.
+    Note,
+}
+
+impl DirectiveKind {
+    /// Whether this kind needs a subject as well as a value.
+    ///
+    /// `SpeakerName` needs to know *which* speaker, and `Term` needs to know
+    /// what was misheard. The rest are a single value.
+    pub fn needs_subject(self) -> bool {
+        matches!(self, Self::SpeakerName | Self::Term)
+    }
+}
+
+/// One short, typed instruction a person gave about a meeting.
+///
+/// This replaces the paragraph box as the *primary* way of correcting a
+/// meeting. A paragraph is the wrong shape for "the recogniser heard my name
+/// as Nithin": the user has to write a sentence, and the pipeline has to hope a
+/// model notices it and acts on it. A directive is read by the stage that can
+/// actually act on it — the registry, the glossary, the participant list — so a
+/// name correction takes effect without a model being involved at all.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeetingDirective {
+    pub id: String,
+    pub kind: DirectiveKind,
+    /// For `SpeakerName`, which speaker (an id, a display name, or a
+    /// `Speaker N` label). For `Term`, the misheard spelling. Unused otherwise.
+    #[serde(default)]
+    pub subject: Option<String>,
+    /// For `SpeakerName`, the person's name. For `Term`, the correct spelling.
+    /// Otherwise the whole content of the directive.
+    pub value: String,
+    pub created_at: String,
+}
+
+impl MeetingDirective {
+    /// Builds a directive, generating its id. Returns `None` when the content
+    /// is empty or a required subject is missing, so an empty row can never be
+    /// stored.
+    pub fn new(kind: DirectiveKind, subject: Option<&str>, value: &str) -> Option<Self> {
+        let value = value.trim();
+        let subject = subject.map(str::trim).filter(|s| !s.is_empty());
+        if value.is_empty() {
+            return None;
+        }
+        if kind.needs_subject() && subject.is_none() {
+            return None;
+        }
+        Some(Self {
+            id: format!("dir_{}", uuid::Uuid::new_v4().simple()),
+            kind,
+            subject: subject.map(str::to_string),
+            value: value.to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+    }
+
+    /// One line, for a shared summary or a log.
+    pub fn describe(&self) -> String {
+        match (self.kind, self.subject.as_deref()) {
+            (DirectiveKind::SpeakerName, Some(subject)) => {
+                format!("{subject} is {}", self.value)
+            }
+            (DirectiveKind::Term, Some(subject)) => {
+                format!("\"{subject}\" should read \"{}\"", self.value)
+            }
+            _ => self.value.clone(),
+        }
+    }
+}
+
 /// Notes a person wrote about a meeting.
 ///
 /// A **source** artifact, not derived: nothing in the processing pipeline may
@@ -115,15 +207,26 @@ impl MeetingSession {
 /// `session.json` and `transcript.jsonl` for the same reason those do — it is
 /// something a human produced, and the pipeline's job is to read it.
 ///
-/// Two fields, because they answer different questions and the model is told to
-/// treat them differently. `during` is what the user captured while the meeting
-/// was happening, and is the single cheapest quality signal Relay has: three
-/// bullets a person typed outrank any amount of prompt tuning at saying which
-/// part of ninety minutes mattered. `before` is a rare enrichment — an agenda or
-/// a set of questions written in advance — and the pipeline is built so that its
-/// absence changes nothing at all.
+/// Three fields, answering different questions.
+///
+/// `directives` are short typed instructions — a name correction, a
+/// participant, a misheard term. They are the primary surface, because most of
+/// what a person wants to tell Relay about a meeting is a correction of a
+/// specific thing, and a correction expressed as a sentence in a paragraph
+/// depends on a model noticing it. A directive is read by the stage that can
+/// act on it.
+///
+/// `during` is prose the user captured while the meeting was happening, and is
+/// still the cheapest quality signal Relay has: three bullets a person typed
+/// outrank any amount of prompt tuning at saying which part of ninety minutes
+/// mattered. `before` is a rare enrichment — an agenda or a set of questions
+/// written in advance — and the pipeline is built so that its absence changes
+/// nothing at all.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct MeetingNotes {
+    /// Short typed instructions. Read by the stage each one concerns.
+    #[serde(default)]
+    pub directives: Vec<MeetingDirective>,
     /// Written during or after the meeting. Markdown, as the user typed it.
     #[serde(default)]
     pub during: String,
@@ -138,7 +241,9 @@ pub struct MeetingNotes {
 impl MeetingNotes {
     /// True when there is nothing here worth sending to a model.
     pub fn is_empty(&self) -> bool {
-        self.during.trim().is_empty() && self.before.trim().is_empty()
+        self.directives.is_empty()
+            && self.during.trim().is_empty()
+            && self.before.trim().is_empty()
     }
 
     pub fn has_during(&self) -> bool {
@@ -147,6 +252,50 @@ impl MeetingNotes {
 
     pub fn has_before(&self) -> bool {
         !self.before.trim().is_empty()
+    }
+
+    /// Directives of one kind, in the order they were added.
+    pub fn directives_of(&self, kind: DirectiveKind) -> Vec<&MeetingDirective> {
+        self.directives.iter().filter(|d| d.kind == kind).collect()
+    }
+
+    /// The prose a model is shown as "notes taken during the meeting".
+    ///
+    /// Free-text directives are folded in here rather than given a section of
+    /// their own: to a summarizer, "remember that the vault rewrite is blocked"
+    /// typed as a directive and the same sentence typed in the paragraph box
+    /// are the same kind of evidence, and splitting them would only invite the
+    /// model to weigh one above the other.
+    pub fn during_for_model(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if self.has_during() {
+            parts.push(self.during.trim().to_string());
+        }
+        for note in self.directives_of(DirectiveKind::Note) {
+            parts.push(format!("- {}", note.value.trim()));
+        }
+        parts.join("\n")
+    }
+
+    /// The prose a model is shown as "written before the meeting".
+    pub fn before_for_model(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if self.has_before() {
+            parts.push(self.before.trim().to_string());
+        }
+        for agenda in self.directives_of(DirectiveKind::Agenda) {
+            parts.push(format!("- {}", agenda.value.trim()));
+        }
+        parts.join("\n")
+    }
+
+    /// Terms the user says were misheard, as glossary entries.
+    pub fn glossary_terms(&self) -> Vec<String> {
+        self.directives_of(DirectiveKind::Term)
+            .iter()
+            .map(|d| d.value.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect()
     }
 }
 

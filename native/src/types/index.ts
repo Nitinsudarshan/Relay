@@ -1122,8 +1122,44 @@ export interface Conversation {
  * A source artifact, not derived: generating or regenerating a summary reads
  * them and never writes them.
  */
+/**
+ * What a directive is telling Relay.
+ *
+ * Each kind is read by the pipeline stage that can act on it, which is the
+ * point: a name correction typed as a sentence in a paragraph only works if a
+ * model notices it, whereas `SPEAKER_NAME` renames the speaker in the registry
+ * and every derived view picks it up at read time.
+ */
+export type DirectiveKind =
+  /** "Speaker 2 is Pranjali." Renames a speaker. Needs a subject. */
+  | 'SPEAKER_NAME'
+  /** "Ayush was on this call." Adds a participant whether or not they spoke. */
+  | 'PARTICIPANT'
+  /** "It is LanceDB, not Lance TV." Adds a glossary term. Needs a subject. */
+  | 'TERM'
+  /** What the meeting was for. Context, never evidence of a decision. */
+  | 'AGENDA'
+  /** Anything else worth remembering. */
+  | 'NOTE';
+
+/** One short, typed instruction a person gave about a meeting. */
+export interface MeetingDirective {
+  id: string;
+  kind: DirectiveKind;
+  /**
+   * For `SPEAKER_NAME`, which speaker (id, display name, or `Speaker N`).
+   * For `TERM`, the misheard spelling. Unused otherwise.
+   */
+  subject?: string | null;
+  /** For `SPEAKER_NAME` the name, for `TERM` the correct spelling, else the content. */
+  value: string;
+  created_at: string;
+}
+
 export interface MeetingNotes {
-  /** Written during or after the meeting. The common case. */
+  /** Short typed instructions. The primary surface for correcting a meeting. */
+  directives: MeetingDirective[];
+  /** Written during or after the meeting. The common case for prose. */
   during: string;
   /** Written before it, if anything was. Optional enrichment, roughly 1 in 100. */
   before: string;
@@ -1406,6 +1442,116 @@ export interface Diarization {
   assignments: VoiceAssignment[];
 }
 
+/** How a participant came to be on the list. */
+export type ParticipantOrigin =
+  | 'LOCAL_USER'
+  | 'CHANNEL'
+  | 'DIARIZATION'
+  | 'SELF_INTRODUCED'
+  | 'MENTIONED'
+  | 'STATED';
+
+/** One person the meeting involved, whether or not they were heard. */
+export interface Participant {
+  speaker_id?: string | null;
+  /** Never invented: a name somebody supplied, or a `Speaker N` label. */
+  label: string;
+  is_named: boolean;
+  /** True when a person confirmed the name, false when it was inferred. */
+  is_confirmed: boolean;
+  origin: ParticipantOrigin;
+  is_local_user: boolean;
+  speaking_seconds: number;
+  turn_count: number;
+  /** Share of attributed talking time, 0..1. */
+  share_of_talk: number;
+}
+
+/**
+ * What became of every recorded chunk.
+ *
+ * The numbers that explain a thin summary: nine rejected chunks is four and a
+ * half minutes of the meeting that never reached the model.
+ */
+export interface TranscriptHealth {
+  chunk_count: number;
+  decoded_chunk_count: number;
+  empty_chunk_count: number;
+  rejected_chunk_count: number;
+  failed_chunk_count: number;
+  voiced_seconds: number;
+  rejected_seconds: number;
+  rejection_reasons: Record<string, number>;
+  /** Spans withheld at read time, recorded before hallucination screening existed. */
+  withheld_on_read: Record<string, number>;
+  withheld_word_count: number;
+}
+
+/** What established the speaker roster. */
+export type SpeakerMethod = 'NONE' | 'CHANNEL' | 'DIARIZATION';
+
+/**
+ * Everything about a meeting that is counted rather than inferred.
+ *
+ * Distinct from `MeetingFacts`, which is what a model read out of the
+ * transcript and can be wrong. Nothing here can be wrong the way a generated
+ * sentence can.
+ */
+export interface MeetingMetadata {
+  title: string;
+  date_iso: string;
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_seconds: number;
+  paused_seconds: number;
+  speaking_participant_count: number;
+  participants: Participant[];
+  chunk_count: number;
+  word_count: number;
+  turn_count: number;
+  health: TranscriptHealth;
+  speaker_method: SpeakerMethod;
+}
+
+export type NameEvidence = 'SELF_INTRODUCTION' | 'DIRECT_ADDRESS';
+
+/** A name the transcript offered, and what it was offered for. */
+export interface NameCandidate {
+  name: string;
+  evidence: NameEvidence;
+  /** Set only for a self-introduction. */
+  speaker_id?: string | null;
+  source_segment_ids: string[];
+  mentions: number;
+}
+
+export interface NameFindings {
+  /** Speaker id to the name that speaker gave for themselves. */
+  self_introductions: Record<string, NameCandidate>;
+  /** Names addressed in the meeting but not bound to any voice. */
+  mentioned: NameCandidate[];
+}
+
+/**
+ * An instruction that could not be applied — a name correction naming a
+ * speaker this meeting does not have, say. Surfaced rather than swallowed, or
+ * the user assumes the correction took.
+ */
+export interface UnresolvedDirective {
+  directive_id: string;
+  kind: DirectiveKind;
+  summary: string;
+  reason: string;
+}
+
+/** A meeting rendered as one Markdown document, for sharing. */
+export interface SharedDocument {
+  filename: string;
+  contents: string;
+  /** What went in, for the confirmation shown after copying. */
+  includes: string;
+}
+
 export interface MeetingProcessing {
   meeting_id: string;
   processing_version: number;
@@ -1418,6 +1564,11 @@ export interface MeetingProcessing {
   /** The acoustic separation the roster was built from. Null means channel only. */
   diarization?: Diarization | null;
   conversation?: Conversation | null;
+  /** Counted facts: participants, timing, transcript health. */
+  metadata?: MeetingMetadata | null;
+  /** Names the transcript itself offered. Never treated as confirmed. */
+  names?: NameFindings | null;
+  unresolved_directives?: UnresolvedDirective[];
   facts?: MeetingFacts | null;
   summary?: SummaryArtifact | null;
   scribble_ref?: ScribbleRef | null;

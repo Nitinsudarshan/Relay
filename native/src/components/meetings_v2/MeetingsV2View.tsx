@@ -22,6 +22,7 @@ import { ConfirmationModal } from '../common/ConfirmationModal';
 import {
   ActionItem,
   AppSettings,
+  DirectiveKind,
   LiveTranscriptUpdate,
   MeetingExtension,
   MeetingNotes,
@@ -30,10 +31,12 @@ import {
   MeetingSession,
   MeetingTaskPushResult,
   RelatedMeeting,
+  SharedDocument,
   SummaryMode,
   TranscriptSegment,
 } from '../../types';
 import { MeetingConversationTab } from './MeetingConversationTab';
+import { MeetingMetadataHeader } from './MeetingMetadataHeader';
 import { MeetingProcessingStatus } from './MeetingProcessingStatus';
 import {
   MeetingRawTranscriptTab,
@@ -347,7 +350,7 @@ export const MeetingsV2View: React.FC = () => {
       })
       .catch((err) => {
         console.error('Failed to load meeting notes:', err);
-        if (!cancelled) setNotes({ during: '', before: '' });
+        if (!cancelled) setNotes({ directives: [], during: '', before: '' });
       });
     return () => {
       cancelled = true;
@@ -513,6 +516,57 @@ export const MeetingsV2View: React.FC = () => {
     } finally {
       setIsRenamingSpeaker(false);
     }
+  };
+
+  /**
+   * Adds one typed directive.
+   *
+   * Errors propagate to the tab, which shows them inline: a rejected name
+   * correction the user cannot see is a correction they will assume worked.
+   */
+  /** Builds the shareable document for the selected meeting. */
+  const handleShareMeeting = async (
+    sessionId: string,
+    selection: {
+      summary: boolean;
+      actionItems: boolean;
+      decisions: boolean;
+      conversation: boolean;
+      notes: boolean;
+    },
+  ) =>
+    invoke<SharedDocument>('share_meeting_v2', {
+      sessionId,
+      includeSummary: selection.summary,
+      includeActionItems: selection.actionItems,
+      includeDecisions: selection.decisions,
+      includeConversation: selection.conversation,
+      includeNotes: selection.notes,
+    });
+
+  const handleAddDirective = async (
+    sessionId: string,
+    kind: DirectiveKind,
+    subject: string | null,
+    value: string,
+  ) => {
+    setNotes(
+      await invoke<MeetingNotes>('add_meeting_v2_directive', {
+        sessionId,
+        kind,
+        subject,
+        value,
+      }),
+    );
+  };
+
+  const handleRemoveDirective = async (sessionId: string, directiveId: string) => {
+    setNotes(
+      await invoke<MeetingNotes>('remove_meeting_v2_directive', {
+        sessionId,
+        directiveId,
+      }),
+    );
   };
 
   /**
@@ -913,16 +967,14 @@ export const MeetingsV2View: React.FC = () => {
                 <h2 className="text-lg font-extrabold text-foreground tracking-tight truncate">
                   {meetingTitle(selectedSession, processing)}
                 </h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Recorded on {new Date(selectedSession.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} • Duration:{' '}
-                  {formatDuration(
-                    isSelectedActive ? activeElapsedSec : selectedSession.duration_seconds
-                  )}{' '}
-                  • Chunks: {selectedSession.chunk_count} • Words: {selectedSessionWords}
-                  {selectedSession.paused_seconds > 1
-                    ? ` • Paused: ${formatDuration(selectedSession.paused_seconds)}`
-                    : ''}
-                </p>
+                <div className="mt-1.5">
+                  <MeetingMetadataHeader
+                    metadata={processing?.metadata}
+                    session={selectedSession}
+                    liveElapsedSeconds={isSelectedActive ? activeElapsedSec : null}
+                    wordCount={selectedSessionWords}
+                  />
+                </div>
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
@@ -1071,14 +1123,25 @@ export const MeetingsV2View: React.FC = () => {
                 busyActionItemId={busyActionItemId}
                 isAddingAllTasks={isAddingAllTasks}
                 onSelectRelated={handleSelectSession}
+                onShare={(selection) =>
+                  handleShareMeeting(selectedSession.id, selection)
+                }
               />
             )}
 
             {activeMeetingTab === 'notes' && (
               <MeetingNotesTab
                 notes={notes}
+                speakers={processing?.speakers ?? []}
+                unresolved={processing?.unresolved_directives ?? []}
                 isLoaded={notes !== null}
                 onSave={(next) => handleSaveNotes(selectedSession.id, next)}
+                onAddDirective={(kind, subject, value) =>
+                  handleAddDirective(selectedSession.id, kind, subject, value)
+                }
+                onRemoveDirective={(directiveId) =>
+                  handleRemoveDirective(selectedSession.id, directiveId)
+                }
               />
             )}
 

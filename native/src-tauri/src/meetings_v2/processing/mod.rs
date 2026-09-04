@@ -52,16 +52,28 @@
 
 pub mod context;
 pub mod conversation;
+/// Applies the typed instructions a user attached to a meeting.
+pub mod directives;
 /// The summary quality evaluation set — fixtures, expectations, and a scorer.
 pub mod eval;
 pub mod extract;
 pub mod length;
 pub mod llm;
+/// The meeting's counted facts: participants, timing, and how much of the
+/// recording survived transcription. Never inferred, so never wrong the way a
+/// generated sentence can be.
+pub mod metadata;
 pub mod model;
 pub mod modes;
+/// Rung 5 of the speaker-identification ladder: names the meeting said out
+/// loud. Deterministic patterns, never a model — a model asked who someone is
+/// always answers.
+pub mod names;
 pub mod normalize;
 pub mod qualify;
 pub mod related;
+/// Assembles a meeting into one document somebody else can read.
+pub mod share;
 pub mod speakers;
 pub mod store;
 pub mod summarize;
@@ -167,8 +179,16 @@ impl MeetingProcessor {
             .map(|p| p.speakers)
             .unwrap_or_default();
 
+        // Notes are a source artifact, read here and never written. The typed
+        // directives in them are instructions for specific stages: a misheard
+        // term joins this run's glossary, and a name correction is applied to
+        // the roster below.
+        let notes = self.read_notes(meeting_id);
+
         let started = Instant::now();
-        let mut normalized = normalize::normalize_transcript(raw, &options.glossary);
+        let mut glossary = options.glossary.clone();
+        glossary.extend(notes.glossary_terms());
+        let mut normalized = normalize::normalize_transcript(raw, &glossary);
         let normalize_ms = started.elapsed().as_millis() as u64;
 
         if raw_read.total_rejections() > 0 {
@@ -188,12 +208,23 @@ impl MeetingProcessor {
         // every WAV on each prepare, unless the transcript has changed under it.
         let diarization = self.resolve_diarization(meeting_id, options, &normalized.segments);
 
-        let roster = speakers::attribute_speakers_with_voices(
+        let mut roster = speakers::attribute_speakers_with_voices(
             &mut normalized.segments,
             &existing_speakers,
             options.speaker_identification,
             diarization.as_ref(),
         );
+
+        // Rung 6: a name the user typed wins over anything found automatically.
+        // Applied after attribution because a directive can only name a speaker
+        // that attribution produced.
+        let unresolved_names = directives::apply_speaker_names(&mut roster, &notes);
+
+        // Rung 5: names the meeting itself offered. Kept separate from the
+        // roster — they label a participant without claiming the user confirmed
+        // them — so `Speaker 2` never silently becomes a name nobody approved.
+        let name_findings = names::find_names(&normalized.segments, &roster);
+
         let speaker_report = validate::validate_speakers(&roster);
         let speaker_ms = speaker_started.elapsed().as_millis() as u64;
 
@@ -202,6 +233,32 @@ impl MeetingProcessor {
             .generate_conversation
             .then(|| conversation::build_conversation(&normalized.segments));
         let conversation_ms = conversation_started.elapsed().as_millis() as u64;
+
+        // Metadata is counted, not inferred, so it is rebuilt on every prepare
+        // rather than cached: a rename or a new directive changes it, and a
+        // stale participant list is worse than none.
+        let session = self
+            .sessions
+            .get_session(meeting_id)
+            .map_err(|e| format!("Meeting not found: {}", e))?;
+        let raw_segments = self
+            .sessions
+            .get_transcript_segments(meeting_id)
+            .unwrap_or_default();
+        let meeting_metadata = metadata::build(metadata::MetadataInput {
+            session: &session,
+            raw_segments: &raw_segments,
+            normalized: Some(&normalized),
+            conversation: conversation.as_ref(),
+            speakers: &roster,
+            names: &name_findings,
+            notes: &notes,
+            diarized: diarization
+                .as_ref()
+                .is_some_and(|d| d.report.cluster_count > 0),
+            withheld_on_read: raw_read.retro_rejections.clone(),
+            withheld_word_count: raw_read.retro_dropped_words,
+        });
 
         let source_chars = normalized.source_char_count;
         let output_chars = normalized.output_char_count;
@@ -272,6 +329,9 @@ impl MeetingProcessor {
             };
 
             processing.normalized = Some(normalized.clone());
+            processing.metadata = Some(meeting_metadata.clone());
+            processing.names = Some(name_findings.clone());
+            processing.unresolved_directives = unresolved_names.clone();
             // Compared before the roster is replaced: existing prose is only
             // stale if the labels it was written against have actually changed.
             // Flagging it on every prepare would put a "regenerate" banner on
@@ -953,6 +1013,62 @@ attributing by capture channel alone",
         self.prepare(meeting_id, options)
     }
 
+    /// Assembles a meeting into one Markdown document somebody else can read.
+    ///
+    /// Composes only: the header is counted, the prose was already generated
+    /// and validated, and the conversation is transcript text. Nothing here
+    /// writes, and a meeting that has never been summarized still produces a
+    /// readable header rather than an error.
+    pub fn share_document(
+        &self,
+        meeting_id: &str,
+        options: share::ShareOptions,
+    ) -> Result<SharedDocument, String> {
+        let processing = self
+            .store
+            .load(meeting_id)
+            .ok_or_else(|| "This meeting has not been processed yet.".to_string())?;
+
+        let metadata = processing
+            .metadata
+            .clone()
+            .ok_or_else(|| "This meeting has no metadata yet. Open it once to build it.".to_string())?;
+        let notes = self.read_notes(meeting_id);
+
+        let markdown = share::render(
+            &share::ShareInput {
+                metadata: &metadata,
+                summary: processing.summary.as_ref(),
+                facts: processing.facts.as_ref(),
+                conversation: processing.conversation.as_ref(),
+                speakers: &processing.speakers,
+                notes: &notes.during_for_model(),
+            },
+            options,
+        );
+
+        Ok(SharedDocument {
+            filename: share::suggested_filename(&metadata),
+            contents: markdown,
+            includes: share::describe(options),
+        })
+    }
+
+    /// Reads the user's notes, treating an unreadable file as no notes.
+    ///
+    /// A meeting with no notes is the common case, so absence is not an error;
+    /// and a corrupt notes file must not stop a meeting being processed.
+    fn read_notes(&self, meeting_id: &str) -> MeetingNotes {
+        self.sessions.get_notes(meeting_id).unwrap_or_else(|e| {
+            tracing::warn!(
+                meeting_id = %meeting_id,
+                "meeting_processing: notes unreadable ({}); processing without them",
+                e
+            );
+            MeetingNotes::default()
+        })
+    }
+
     /// Reads the raw transcript. The only source-artifact access the pipeline
     /// makes, and it is read-only.
     fn read_raw_segments(&self, meeting_id: &str) -> Result<RawTranscriptRead, String> {
@@ -1104,6 +1220,16 @@ mod tests;
 ///
 /// A chunk with no utterances — recorded before v2.5, or one Whisper returned no
 /// timed spans for — becomes a single whole-chunk input, exactly as before.
+/// A meeting rendered for sharing.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SharedDocument {
+    /// A dated, slugged filename for a saved copy.
+    pub filename: String,
+    pub contents: String,
+    /// What went in, for the confirmation the UI shows.
+    pub includes: String,
+}
+
 /// What a read of the raw transcript found, including what it refused to pass
 /// on.
 #[derive(Debug, Default, Clone)]
