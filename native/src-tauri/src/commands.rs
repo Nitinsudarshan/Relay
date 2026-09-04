@@ -2213,6 +2213,8 @@ fn meeting_processing_options(
             SpeakerIdentification::Automatic => SpeakerIdentificationMode::Automatic,
             SpeakerIdentification::Off => SpeakerIdentificationMode::Off,
         },
+        diarize_speakers: settings.meetings.identify_individual_speakers,
+        expected_speakers: settings.meetings.expected_speakers.filter(|&n| n > 0),
         summary_mode: summary_mode.map(SummaryMode::parse).unwrap_or(default_mode),
         extension_id: extension_id
             .filter(|id| !id.trim().is_empty())
@@ -2390,6 +2392,48 @@ pub async fn rename_meeting_v2_speaker(
         .meeting_processor
         .rename_speaker(&session_id, &speaker_id, display_name.as_deref())
         .map_err(|e| CommandError::new("RENAME_SPEAKER_FAILED", &e))?;
+
+    let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
+    Ok(processing)
+}
+
+/// Separates the recorded audio into distinct voices, then re-attributes.
+///
+/// §3 of `Meeting-rules/meeting_speaker_identification.md` requires this to be
+/// a command the user can invoke rather than only a background step: people
+/// usually decide they need speakers once they have read the notes. It runs
+/// post-hoc over the stored chunk WAVs and never touches the raw transcript.
+#[tauri::command]
+pub async fn identify_meeting_v2_speakers(
+    app: AppHandle,
+    session_id: String,
+    expected_speakers: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingProcessing, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+
+    let mut options = {
+        let settings = state.settings.lock_or_recover();
+        meeting_processing_options(&settings, None, None)
+    };
+    options.diarize_speakers = true;
+    // An explicit request carries its own hint; the stored default is only a
+    // default.
+    if let Some(count) = expected_speakers.filter(|&n| n > 0) {
+        options.expected_speakers = Some(count);
+    }
+
+    let processor = state.meeting_processor.clone();
+    // Reading and characterising every chunk WAV is CPU-bound, so it does not
+    // belong on the async runtime's worker threads.
+    let processing = tauri::async_runtime::spawn_blocking(move || {
+        processor.identify_speakers(&session_id, &options)
+    })
+    .await
+    .map_err(|e| CommandError::new("IDENTIFY_SPEAKERS_FAILED", &e.to_string()))?
+    .map_err(|e| CommandError::new("IDENTIFY_SPEAKERS_FAILED", &e))?;
 
     let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
     Ok(processing)

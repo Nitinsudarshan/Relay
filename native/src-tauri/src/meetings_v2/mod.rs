@@ -1,4 +1,7 @@
 pub mod capture;
+/// Rung 4 of the speaker-identification ladder: separating recorded audio into
+/// distinct voices. Reads the recorder's chunk WAVs, never writes them.
+pub mod diarize;
 pub mod engine;
 pub mod live_stt;
 /// Derived meeting intelligence: normalization, speakers, conversation,
@@ -15,6 +18,7 @@ pub mod worker;
 pub use engine::MeetingsV2Engine;
 pub use processing::{MeetingProcessing, MeetingProcessor, ProcessingOptions};
 pub use session_store::SessionStore;
+pub use diarize::{Diarization, DiarizationReport, VoiceAssignment};
 pub use transcript_health::{HallucinationReason, SpeechProfile, TranscriptRejection};
 pub use types::{
     AudioLevels, LiveTranscriptUpdate, MeetingDiagnostics, MeetingNotes, MeetingSession,

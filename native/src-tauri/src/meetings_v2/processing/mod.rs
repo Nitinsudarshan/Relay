@@ -70,6 +70,7 @@ pub mod tasks;
 pub mod validate;
 
 use super::session_store::SessionStore;
+use super::diarize::{diarize_session, Diarization};
 use super::transcript_health::{self, DecodeEvidence};
 use super::types::{MeetingNotes, TranscriptSegment, TranscriptSegmentStatus};
 use llm::MeetingLlm;
@@ -97,6 +98,11 @@ pub struct ProcessingOptions {
     pub glossary: Vec<String>,
     pub generate_conversation: bool,
     pub speaker_identification: SpeakerIdentificationMode,
+    /// Whether to separate individual voices acoustically (rung 4). Without
+    /// this, attribution has two outcomes — the local user and everyone else.
+    pub diarize_speakers: bool,
+    /// Clustering hint. `None` means "work it out from the audio".
+    pub expected_speakers: Option<usize>,
     pub summary_mode: SummaryMode,
     pub extension_id: String,
     pub user_extensions: Vec<MeetingExtension>,
@@ -112,6 +118,8 @@ impl Default for ProcessingOptions {
             glossary: Vec::new(),
             generate_conversation: true,
             speaker_identification: SpeakerIdentificationMode::Automatic,
+            diarize_speakers: true,
+            expected_speakers: None,
             summary_mode: SummaryMode::Standard,
             extension_id: modes::DEFAULT_EXTENSION_ID.to_string(),
             user_extensions: Vec::new(),
@@ -175,10 +183,16 @@ impl MeetingProcessor {
         }
 
         let speaker_started = Instant::now();
-        let roster = speakers::attribute_speakers(
+
+        // Rung 4. Reuses whatever a previous run found rather than re-reading
+        // every WAV on each prepare, unless the transcript has changed under it.
+        let diarization = self.resolve_diarization(meeting_id, options, &normalized.segments);
+
+        let roster = speakers::attribute_speakers_with_voices(
             &mut normalized.segments,
             &existing_speakers,
             options.speaker_identification,
+            diarization.as_ref(),
         );
         let speaker_report = validate::validate_speakers(&roster);
         let speaker_ms = speaker_started.elapsed().as_millis() as u64;
@@ -274,6 +288,9 @@ impl MeetingProcessor {
 
             processing.speakers = roster.clone();
             processing.conversation = conversation.clone();
+            if diarization.is_some() {
+                processing.diarization = diarization.clone();
+            }
 
             if labels_changed {
                 if let Some(summary) = processing.summary.as_mut() {
@@ -869,6 +886,71 @@ audio are unaffected."
             facts,
             labels,
         ))
+    }
+
+    /// The diarization to attribute with: a cached run when one still matches
+    /// the transcript, a fresh run otherwise, or `None` when it is switched off
+    /// or the audio is gone.
+    ///
+    /// Cached rather than re-run on every prepare because reading and
+    /// characterising every chunk WAV is the one genuinely expensive step in an
+    /// otherwise model-free stage, and `prepare` runs on open. The cache is
+    /// keyed on how many utterances the transcript holds and on the hint,
+    /// because those are the two things that make a previous run wrong.
+    fn resolve_diarization(
+        &self,
+        meeting_id: &str,
+        options: &ProcessingOptions,
+        segments: &[model::NormalizedSegment],
+    ) -> Option<Diarization> {
+        if !options.diarize_speakers
+            || options.speaker_identification == SpeakerIdentificationMode::Off
+        {
+            return None;
+        }
+
+        let cached = self.store.load(meeting_id).and_then(|p| p.diarization);
+        if let Some(existing) = cached {
+            let same_hint = existing.report.expected_speakers == options.expected_speakers;
+            let same_size = existing.assignments.len() == segments.len();
+            if same_hint && same_size {
+                return Some(existing);
+            }
+        }
+
+        match diarize_session(&self.sessions, meeting_id, options.expected_speakers) {
+            Ok(diarization) => Some(diarization),
+            Err(e) => {
+                // Not a failure of the meeting: attribution falls back to the
+                // channel, which is what it did before rung 4 existed.
+                tracing::info!(
+                    meeting_id = %meeting_id,
+                    "meeting_processing: speakers not separated acoustically ({}); \
+attributing by capture channel alone",
+                    e
+                );
+                None
+            }
+        }
+    }
+
+    /// Re-runs diarization for one meeting, ignoring any cached result.
+    ///
+    /// Exposed because §3 of the speaker rules requires identification to be a
+    /// command the user can invoke: they usually decide they need speakers only
+    /// once they have seen the notes.
+    pub fn identify_speakers(
+        &self,
+        meeting_id: &str,
+        options: &ProcessingOptions,
+    ) -> Result<MeetingProcessing, String> {
+        let diarization = diarize_session(&self.sessions, meeting_id, options.expected_speakers)?;
+        self.store.update(meeting_id, |processing| {
+            processing.diarization = Some(diarization.clone());
+        })?;
+        // Re-attributing is what turns the run into a roster; the cache now
+        // holds this run, so prepare reuses it rather than doing the work twice.
+        self.prepare(meeting_id, options)
     }
 
     /// Reads the raw transcript. The only source-artifact access the pipeline

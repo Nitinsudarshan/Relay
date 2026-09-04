@@ -280,6 +280,7 @@ pub fn run() {
             commands::prepare_meeting_v2,
             commands::generate_meeting_v2_summary,
             commands::rename_meeting_v2_speaker,
+            commands::identify_meeting_v2_speakers,
             commands::get_meeting_v2_notes,
             commands::save_meeting_v2_notes,
             commands::set_meeting_v2_action_item_status,

@@ -107,6 +107,8 @@ export const MeetingsV2View: React.FC = () => {
     DEFAULT_MEETING_UI_SETTINGS,
   );
   const [isRenamingSpeaker, setIsRenamingSpeaker] = useState<boolean>(false);
+  const [isIdentifyingSpeakers, setIsIdentifyingSpeakers] = useState<boolean>(false);
+  const [speakerError, setSpeakerError] = useState<string | null>(null);
   const [busyActionItemId, setBusyActionItemId] = useState<string | null>(null);
   const [isAddingAllTasks, setIsAddingAllTasks] = useState<boolean>(false);
   const [isPromoting, setIsPromoting] = useState<boolean>(false);
@@ -510,6 +512,41 @@ export const MeetingsV2View: React.FC = () => {
       console.error('Failed to rename speaker:', err);
     } finally {
       setIsRenamingSpeaker(false);
+    }
+  };
+
+  /**
+   * Separates the recorded audio into distinct voices, then re-attributes.
+   *
+   * Offered as an explicit action, not only as a background step: people
+   * usually decide they need speakers once they have read the notes, and by
+   * then the automatic pass has already run with whatever hint was in settings.
+   */
+  const handleIdentifySpeakers = async (
+    sessionId: string,
+    expectedSpeakers: number | null,
+  ) => {
+    if (isIdentifyingSpeakers) return;
+    setIsIdentifyingSpeakers(true);
+    setSpeakerError(null);
+    try {
+      setProcessing(
+        await invoke<MeetingProcessing>('identify_meeting_v2_speakers', {
+          sessionId,
+          expectedSpeakers,
+        }),
+      );
+    } catch (err) {
+      // The common failure is discarded audio, and the backend's message says
+      // what still works. Showing it beats a console line nobody reads.
+      const message =
+        typeof err === 'object' && err !== null && 'message' in err
+          ? String((err as { message: unknown }).message)
+          : String(err);
+      console.error('Failed to identify speakers:', err);
+      setSpeakerError(message);
+    } finally {
+      setIsIdentifyingSpeakers(false);
     }
   };
 
@@ -940,6 +977,19 @@ export const MeetingsV2View: React.FC = () => {
               </div>
             </div>
 
+            {speakerError && (
+              <div className="mx-5 mt-3 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-800 dark:text-amber-200 flex items-center gap-2 shrink-0">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span className="flex-1 min-w-0">{speakerError}</span>
+                <button
+                  onClick={() => setSpeakerError(null)}
+                  className="hover:underline font-medium cursor-pointer shrink-0"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
             {promotedScribbleTitle && (
               <div className="mx-5 mt-3 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[11px] text-emerald-700 dark:text-emerald-300 flex items-center gap-2 shrink-0">
                 <NotebookPen className="w-3.5 h-3.5 shrink-0" />
@@ -1036,7 +1086,12 @@ export const MeetingsV2View: React.FC = () => {
               <MeetingConversationTab
                 conversation={processing?.conversation}
                 speakers={processing?.speakers ?? []}
+                diarization={processing?.diarization}
                 isRenaming={isRenamingSpeaker}
+                isIdentifying={isIdentifyingSpeakers}
+                onIdentifySpeakers={(expected) =>
+                  handleIdentifySpeakers(selectedSession.id, expected)
+                }
                 isDisabled={!meetingSettings.generateConversationTranscript}
                 onRenameSpeaker={(speakerId, displayName) =>
                   handleRenameSpeaker(selectedSession.id, speakerId, displayName)

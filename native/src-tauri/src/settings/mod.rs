@@ -509,6 +509,24 @@ pub struct MeetingSettings {
     pub default_extension_id: String,
     #[serde(default, alias = "speakerIdentification")]
     pub speaker_identification: SpeakerIdentification,
+    /// Whether individual speakers are separated acoustically (rung 4 of
+    /// `Meeting-rules/meeting_speaker_identification.md`).
+    ///
+    /// On by default, unlike the rules' original draft. That draft defaulted it
+    /// off because it costs CPU; the cost turned out to be a few hundred
+    /// milliseconds over a whole meeting, run once after recording ends, and
+    /// the alternative default is a meeting of twenty people reporting one
+    /// remote speaker. It creates no biometric data: features live for the
+    /// duration of the run and are never stored or matched across meetings.
+    #[serde(default = "default_true", alias = "identifyIndividualSpeakers")]
+    pub identify_individual_speakers: bool,
+    /// A clustering hint: how many people are expected to speak.
+    ///
+    /// `None` means "work it out", which is the normal case. Setting it cannot
+    /// invent a speaker the audio does not support — twenty in the room and
+    /// three on the recording still yields three.
+    #[serde(default, alias = "expectedSpeakers")]
+    pub expected_speakers: Option<usize>,
     /// The user's own extensions. The shipped ones live in code and are always
     /// available; this list only adds to them.
     #[serde(default)]
@@ -543,6 +561,8 @@ impl Default for MeetingSettings {
             default_summary_mode: DefaultSummaryMode::default(),
             default_extension_id: default_extension_id(),
             speaker_identification: SpeakerIdentification::default(),
+            identify_individual_speakers: true,
+            expected_speakers: None,
             extensions: Vec::new(),
             summary_instructions: String::new(),
         }

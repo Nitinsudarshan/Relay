@@ -730,6 +730,19 @@ export interface MeetingSettings {
   default_summary_mode: DefaultSummaryModeSetting;
   default_extension_id: string;
   speaker_identification: SpeakerIdentificationSetting;
+  /**
+   * Whether individual speakers are separated acoustically, rather than only
+   * split into "me" and everyone else.
+   *
+   * Creates no biometric data: voice features live for the duration of one run
+   * and are never stored or matched across meetings.
+   */
+  identify_individual_speakers: boolean;
+  /**
+   * A clustering hint: how many people are expected to speak. Null means work
+   * it out. Setting it cannot invent a speaker the audio does not support.
+   */
+  expected_speakers?: number | null;
   extensions: MeetingExtensionSetting[];
   /**
    * Standing instructions for how summaries should read. Presentation only —
@@ -1021,6 +1034,15 @@ export interface MeetingSession {
   /** @deprecated See `summary`. Superseded by `MeetingFacts.action_items`. */
   action_items?: string[];
   pending_transcription_chunks: number;
+  /**
+   * Chunks whose decode was thrown away as something other than speech.
+   *
+   * The number that explains a thin summary: nine rejected chunks is four
+   * minutes of the meeting that never reached the model.
+   */
+  rejected_chunk_count?: number;
+  /** Voiced seconds across the whole recording. Against `duration_seconds`, the talk-to-silence ratio. */
+  voiced_seconds?: number;
   error_message?: string | null;
 }
 
@@ -1354,6 +1376,36 @@ export interface ScribbleRef {
 }
 
 /** A meeting's complete derived artifact (`processing.json`). */
+/**
+ * How an acoustic speaker-separation run turned out.
+ *
+ * `well_separated` is the field the UI must respect: false means the clusters
+ * sit no further from each other than their own members do, so the roster is
+ * provisional and must not be presented as fact.
+ */
+export interface DiarizationReport {
+  cluster_count: number;
+  placed_count: number;
+  unplaced_count: number;
+  skipped_count: number;
+  well_separated: boolean;
+  mean_within_distance: number;
+  min_between_distance: number;
+  expected_speakers?: number | null;
+  duration_ms: number;
+}
+
+export interface VoiceAssignment {
+  segment_id: string;
+  cluster?: number | null;
+  distance: number;
+}
+
+export interface Diarization {
+  report: DiarizationReport;
+  assignments: VoiceAssignment[];
+}
+
 export interface MeetingProcessing {
   meeting_id: string;
   processing_version: number;
@@ -1363,6 +1415,8 @@ export interface MeetingProcessing {
   stages: StageStates;
   normalized?: NormalizedTranscript | null;
   speakers: Speaker[];
+  /** The acoustic separation the roster was built from. Null means channel only. */
+  diarization?: Diarization | null;
   conversation?: Conversation | null;
   facts?: MeetingFacts | null;
   summary?: SummaryArtifact | null;
@@ -1414,7 +1468,56 @@ export interface MeetingProcessingIndexEntry {
   action_item_count: number;
 }
 
-export type TranscriptSegmentStatus = 'SUCCESS' | 'EMPTY' | 'FAILED';
+/**
+ * `REJECTED` is distinct from `EMPTY` on purpose. `EMPTY` means the recorder
+ * heard no speech in the chunk and never decoded it; `REJECTED` means Whisper
+ * decoded it and the result was thrown away as something other than speech —
+ * a decoder loop, subtitle filler over silence, or more words than the voiced
+ * time could hold. Conflating them hides the failure.
+ */
+export type TranscriptSegmentStatus = 'SUCCESS' | 'EMPTY' | 'FAILED' | 'REJECTED';
+
+/** Why a decode was rejected as something other than speech. */
+export type HallucinationReason =
+  | { kind: 'REPETITION_LOOP'; phrase: string; repeats: number }
+  | { kind: 'FILLER_OVER_SILENCE'; phrase: string; voiced_seconds: number; voiced_ratio: number }
+  | { kind: 'NO_SPEECH'; probability: number }
+  | {
+      kind: 'IMPLAUSIBLE_RATE';
+      words: number;
+      voiced_seconds: number;
+      words_per_second: number;
+    };
+
+/**
+ * A rejected decode, kept on the segment in place of text.
+ *
+ * The discarded text is retained so the rejection is auditable from the
+ * artifact — a transcript that silently drops a chunk is not a diagnostic
+ * source.
+ */
+export interface TranscriptRejection {
+  reason: HallucinationReason;
+  discarded_text: string;
+  truncated: boolean;
+  discarded_word_count: number;
+}
+
+/**
+ * How much of a chunk's audio was actually voice, measured at 20 ms resolution
+ * against the chunk's own noise floor.
+ *
+ * `rms` is the measurement the old silence gate used on its own, kept because
+ * comparing it against `voiced_seconds` is what makes the old failure legible:
+ * steady room tone has a healthy RMS and no voiced time at all.
+ */
+export interface SpeechProfile {
+  voiced_seconds: number;
+  total_seconds: number;
+  peak_amplitude: number;
+  rms: number;
+  noise_floor_rms: number;
+}
 
 export interface TranscriptSegment {
   chunk_index: number;
@@ -1436,6 +1539,10 @@ export interface TranscriptSegment {
    * recorded before v2.5, which are still read from the chunk-level flags above.
    */
   utterances?: TranscriptUtterance[];
+  /** Null for transcripts recorded before the speech gate existed. */
+  speech?: SpeechProfile | null;
+  /** Present exactly when `status` is `REJECTED`. */
+  rejection?: TranscriptRejection | null;
 }
 
 /**

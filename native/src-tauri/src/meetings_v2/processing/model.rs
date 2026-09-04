@@ -884,6 +884,13 @@ pub struct MeetingProcessing {
     pub normalized: Option<NormalizedTranscript>,
     #[serde(default)]
     pub speakers: Vec<Speaker>,
+    /// The acoustic speaker separation the roster was built from, when one ran.
+    ///
+    /// Kept so the UI can say how a speaker was found and how confident the
+    /// separation was, and so `prepare` need not re-read every chunk WAV on
+    /// each open. `None` means attribution used the capture channel alone.
+    #[serde(default)]
+    pub diarization: Option<crate::meetings_v2::diarize::Diarization>,
     #[serde(default)]
     pub conversation: Option<Conversation>,
     #[serde(default)]
@@ -905,6 +912,7 @@ impl MeetingProcessing {
             stages: StageStates::default(),
             normalized: None,
             speakers: Vec::new(),
+            diarization: None,
             conversation: None,
             facts: None,
             summary: None,
