@@ -56,9 +56,13 @@ describe('CaptureContextTab', () => {
     requirements: [{ id: 'req_1', statement: 'Must work offline', source_turn_ordinals: [1] }],
     constraints: [{ id: 'con_1', statement: 'Zero telemetry', reason: 'Privacy', source_turn_ordinals: [1] }],
     preferences: [],
-    rejected_approaches: [{ approach: 'Cloud sync', reason_rejected: 'Privacy risk', source_turn_ordinals: [1] }],
+    rejected_approaches: [
+      { approach: 'Cloud sync', reason_rejected: 'Privacy risk', source_turn_ordinals: [2] },
+    ],
     open_questions: [],
-    action_items: [{ id: 'act_1', description: 'Write unit tests', status: 'OPEN', source_turn_ordinals: [1] }],
+    action_items: [
+      { id: 'act_1', description: 'Write unit tests', status: 'OPEN', source_turn_ordinals: [3] },
+    ],
     important_facts: [],
     key_artifacts: [],
     generated_at: '2026-09-04T00:00:00Z',
@@ -66,27 +70,33 @@ describe('CaptureContextTab', () => {
     deterministic: false,
   };
 
+  // `application` is `"GitHub"` because that is what `capture/web/source.rs`
+  // actually writes. The empty state must key off `capture_type`, which is
+  // the classification Relay already derived from the URL, not off a
+  // case-sensitive name match the detector never produces.
+  const gitHubProvenanceFixture: CaptureProvenance = {
+    source_type: 'web',
+    capture_type: 'repository',
+    application: 'GitHub',
+    domain: 'github.com',
+    url: 'https://github.com/stablyai/orca',
+    page_title: 'stablyai/orca',
+    captured_at: '2026-09-03T10:00:00Z',
+    extractor_id: 'github',
+    extractor_version: 1,
+    coverage: 'full',
+    fidelity: 'structured',
+    trust: 'external_untrusted',
+    notes: [],
+    block_count: 12,
+    skipped_block_count: 0,
+    truncated: false,
+    version: 1,
+    recapture_count: 0,
+  };
+
   it('renders GitHub-specific empty state with "Extract Repository Context" button', () => {
-    const gitHubProvenance: CaptureProvenance = {
-      source_type: 'web',
-      capture_type: 'repository',
-      application: 'github',
-      domain: 'github.com',
-      url: 'https://github.com/stablyai/orca',
-      page_title: 'stablyai/orca',
-      captured_at: '2026-09-03T10:00:00Z',
-      coverage: 'full',
-      fidelity: 'structural',
-      trust: 'external_untrusted',
-      extractor_id: 'github',
-      extractor_version: 1,
-      notes: [],
-      block_count: 5,
-      skipped_block_count: 0,
-      truncated: false,
-      version: 1,
-      recapture_count: 0,
-    };
+    const gitHubProvenance = gitHubProvenanceFixture;
 
     render(
       <CaptureContextTab
@@ -164,6 +174,33 @@ describe('CaptureContextTab', () => {
     expect(screen.queryByText(/Constraints & Boundaries/i)).toBeNull();
     expect(screen.queryByText(/Rejected Approaches/i)).toBeNull();
     expect(screen.queryByText(/Next Actions/i)).toBeNull();
+  });
+
+  it('keys the repository empty state off capture_type, not the URL or application name', () => {
+    // A page that merely mentions github.com in a query string. The old check
+    // matched this substring and offered to extract "repository context" from
+    // an arbitrary web page.
+    const lookalike: CaptureProvenance = {
+      ...gitHubProvenanceFixture,
+      capture_type: 'page',
+      application: 'evil.example',
+      domain: 'evil.example',
+      url: 'https://evil.example/?ref=github.com',
+      page_title: 'Not a repository',
+    };
+
+    render(
+      <CaptureContextTab
+        context={null}
+        provenance={lookalike}
+        loading={false}
+        analyzing={false}
+        onAnalyze={mockOnAnalyze}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /extract repository context/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /extract structured context/i })).toBeDefined();
   });
 
   it('renders ConversationContext with conversation dimensions and no repository Stack heading', () => {

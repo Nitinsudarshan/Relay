@@ -9,7 +9,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use crate::pipeline::source_boundary;
+use crate::pipeline::analysis::{
+    context_request, AnalysisFailure, AnalysisService, AnalysisType, MetadataBuilder, PromptId,
+    SourceDescriptor,
+};
 use super::WebCapturePayload;
 use crate::providers::LLMClient;
 
@@ -153,6 +156,19 @@ pub struct RepositoryContext {
     pub deterministic: bool,
 }
 
+/// What a context says when the evidence did not support a value.
+///
+/// Kept as constants, and phrased as statements about the *evidence* rather
+/// than about the source, because these strings are the difference between
+/// "Relay read this and could not tell" and a fabricated finding. Tests assert
+/// on them, and the frontend can recognise them.
+pub const INSUFFICIENT_OBJECTIVE_EVIDENCE: &str =
+    "The captured conversation does not state an objective clearly enough to extract one.";
+pub const INSUFFICIENT_STATE_EVIDENCE: &str =
+    "The captured conversation does not establish where the work currently stands.";
+pub const INSUFFICIENT_REPOSITORY_OBJECTIVE_EVIDENCE: &str =
+    "Insufficient evidence to determine the repository's primary objective.";
+
 /// Distinguishes the specific kind of source context.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
@@ -170,6 +186,15 @@ pub struct SourceContext {
     pub model: Option<String>,
     #[serde(default)]
     pub deterministic: bool,
+    /// Full analysis provenance: status, prompt id and version, the model that
+    /// actually answered, and why a fallback ran when one did.
+    ///
+    /// `Option` because every context written before the analysis contract
+    /// existed has none, and a vault must stay readable. `model` and
+    /// `deterministic` above are kept as the flattened summary the frontend
+    /// already reads, so this is additive on the wire.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<crate::pipeline::analysis::AnalysisMetadata>,
     #[serde(flatten)]
     pub kind: SourceContextKind,
 }
@@ -190,6 +215,14 @@ impl SourceContext {
     }
 }
 
+/// Deserialization-only shim that accepts both the current envelope and the
+/// pre-v0.28.4 bare-`ConversationContext` shape.
+///
+/// `large_enum_variant` is allowed rather than fixed: the `Envelope` variant is
+/// large because it inlines a whole context, boxing it would change the public
+/// `SourceContext` shape, and a value of this type exists only for the duration
+/// of one `from_str` call.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum RawSourceContextHelper {
@@ -200,6 +233,8 @@ enum RawSourceContextHelper {
         model: Option<String>,
         #[serde(default)]
         deterministic: bool,
+        #[serde(default)]
+        analysis: Option<crate::pipeline::analysis::AnalysisMetadata>,
         #[serde(flatten)]
         kind: SourceContextKind,
     },
@@ -218,12 +253,14 @@ impl<'de> Deserialize<'de> for SourceContext {
                 generated_at,
                 model,
                 deterministic,
+                analysis,
                 kind,
             } => Ok(SourceContext {
                 capture_id,
                 generated_at,
                 model,
                 deterministic,
+                analysis,
                 kind,
             }),
             RawSourceContextHelper::LegacyConversation(conv) => Ok(SourceContext {
@@ -231,6 +268,10 @@ impl<'de> Deserialize<'de> for SourceContext {
                 generated_at: conv.generated_at.clone(),
                 model: conv.model.clone(),
                 deterministic: conv.deterministic,
+                // A context written before the analysis contract existed says
+                // nothing about how it was produced, and inventing metadata for
+                // it would be a claim Relay cannot support.
+                analysis: None,
                 kind: SourceContextKind::Conversation(conv),
             }),
         }
@@ -309,7 +350,7 @@ Return ONLY a valid JSON object with the following fields:
 Ensure all arrays contain only meaningful items explicitly grounded in the conversation. Do not hallucinate facts.
 "#;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct RawLlmContextResponse {
     #[serde(default)]
     objective: Option<String>,
@@ -402,98 +443,147 @@ fn default_artifact_kind() -> String {
     "code".to_string()
 }
 
-/// Extracts structured conversation context from a captured payload.
+/// Extracts structured context for a captured source.
 ///
-/// Uses the LLM client when available with source-boundary isolation; falls back
-/// to deterministic extraction if the LLM is unreachable or disabled.
-pub async fn extract_conversation_context(
+/// One entry point for every source type. Which analysis runs is decided by the
+/// prompt registry from the source's own classification — the one capture
+/// already derived from the URL and stored on the artifact — rather than by a
+/// conditional here. Adding a `DocumentContext` later means adding a prompt and
+/// a builder, not another branch.
+pub async fn extract_source_context(
     llm: Option<&LLMClient>,
-    capture_id: &str,
+    file: &crate::vault::VaultFile,
     payload: &WebCapturePayload,
-    normalized_markdown: &str,
 ) -> SourceContext {
-    let now = chrono::Utc::now().to_rfc3339();
-    let title = payload
-        .title
-        .clone()
-        .unwrap_or_else(|| "AI Conversation".to_string());
+    let source = SourceDescriptor::from_vault_file(file);
+    let content = super::canonical::to_canonical(payload, &file.content);
+    let service = match llm {
+        Some(client) => AnalysisService::new(client),
+        None => AnalysisService::offline(),
+    };
 
-    if let Some(client) = llm {
-        let source_desc = format!(
-            "Captured AI conversation from {} ({})",
-            payload.extractor.id, payload.url
+    let Some(request) = context_request(&source) else {
+        // No context schema for this source type. Producing a conversation
+        // context for a plain web page because that branch happened to be last
+        // is exactly what this dispatch exists to stop.
+        tracing::info!(
+            "No structured context schema for {} source {}",
+            source.source_type.as_str(),
+            source.id
         );
-        let wrapped = source_boundary::wrap_external_source(&source_desc, normalized_markdown);
-        let system_prompt = format!(
-            "{}\n{}",
-            CONTEXT_EXTRACTION_SYSTEM_PROMPT,
-            source_boundary::EXTERNAL_SOURCE_RULE
-        );
+        return deterministic_source_context(file, payload);
+    };
 
-        match client.complete(&wrapped.framed, Some(&system_prompt)).await {
-            Ok(response) => {
-                if let Some(parsed) = parse_llm_context_response(&response.text) {
-                    let conv = build_context_from_parsed(
-                        capture_id,
-                        &title,
-                        parsed,
-                        now.clone(),
-                        Some(format!("{:?}", client.provider_type())),
-                    );
-                    return SourceContext {
-                        capture_id: capture_id.to_string(),
-                        generated_at: now,
-                        model: Some(format!("{:?}", client.provider_type())),
-                        deterministic: false,
-                        kind: SourceContextKind::Conversation(conv),
-                    };
-                } else {
-                    tracing::warn!(
-                        "Failed to parse LLM context JSON for capture {}. Falling back to deterministic extraction.",
-                        capture_id
-                    );
-                }
+    match request.prompt_id {
+        PromptId::RepositoryContext => {
+            let default_name = derive_repository_name(payload);
+            let result = service
+                .run_structured(
+                    &request,
+                    &source,
+                    &content,
+                    |json| {
+                        serde_json::from_value::<RawLlmRepositoryResponse>(json.clone())
+                            .ok()
+                            .map(|parsed| (parsed, default_name.clone()))
+                    },
+                    || (RawLlmRepositoryResponse::default(), default_name.clone()),
+                )
+                .await;
+
+            let metadata = result.metadata;
+            let repo = match result.payload {
+                Some((parsed, name)) if !metadata.deterministic => build_repository_context_from_parsed(
+                    &file.id,
+                    &name,
+                    parsed,
+                    &metadata.generated_at,
+                    metadata.model.clone(),
+                ),
+                _ => extract_deterministic_repository_context(
+                    &file.id,
+                    payload,
+                    &file.content,
+                    &metadata.generated_at,
+                ),
+            };
+            SourceContext {
+                capture_id: file.id.clone(),
+                generated_at: metadata.generated_at.clone(),
+                model: metadata.model.clone(),
+                deterministic: metadata.deterministic,
+                kind: SourceContextKind::Repository(repo),
+                analysis: Some(metadata),
             }
-            Err(err) => {
-                tracing::warn!(
-                    "LLM context extraction failed for capture {}: {}. Falling back to deterministic extraction.",
-                    capture_id,
-                    err
-                );
+        }
+        _ => {
+            let title = payload
+                .title
+                .clone()
+                .unwrap_or_else(|| "AI Conversation".to_string());
+            let result = service
+                .run_structured(
+                    &request,
+                    &source,
+                    &content,
+                    |json| serde_json::from_value::<RawLlmContextResponse>(json.clone()).ok(),
+                    RawLlmContextResponse::default,
+                )
+                .await;
+
+            let metadata = result.metadata;
+            let conv = match result.payload {
+                Some(parsed) if !metadata.deterministic => build_context_from_parsed(
+                    &file.id,
+                    &title,
+                    parsed,
+                    metadata.generated_at.clone(),
+                    metadata.model.clone(),
+                ),
+                _ => extract_deterministic_context(&file.id, &title, payload, &metadata.generated_at),
+            };
+            SourceContext {
+                capture_id: file.id.clone(),
+                generated_at: metadata.generated_at.clone(),
+                model: metadata.model.clone(),
+                deterministic: metadata.deterministic,
+                kind: SourceContextKind::Conversation(conv),
+                analysis: Some(metadata),
             }
         }
     }
+}
 
-    let conv = extract_deterministic_context(capture_id, &title, payload, &now);
+/// The context a source gets when no model was involved at all.
+fn deterministic_source_context(
+    file: &crate::vault::VaultFile,
+    payload: &WebCapturePayload,
+) -> SourceContext {
+    let now = chrono::Utc::now().to_rfc3339();
+    let source = SourceDescriptor::from_vault_file(file);
+    let metadata = MetadataBuilder::new(AnalysisType::Context, PromptId::ConversationContext, 0)
+        .with_coverage(source.coverage)
+        .deterministic(AnalysisFailure::PromptNotApplicable(format!(
+            "no context schema for a {} source",
+            source.source_type.as_str()
+        )));
+
+    let title = payload
+        .title
+        .clone()
+        .unwrap_or_else(|| "Captured Source".to_string());
+    let conv = extract_deterministic_context(&file.id, &title, payload, &now);
+
     SourceContext {
-        capture_id: capture_id.to_string(),
+        capture_id: file.id.clone(),
         generated_at: now,
         model: None,
         deterministic: true,
         kind: SourceContextKind::Conversation(conv),
+        analysis: Some(metadata),
     }
 }
 
-fn parse_llm_context_response(raw: &str) -> Option<RawLlmContextResponse> {
-    let text = raw.trim();
-    let json_str = if text.contains("```json") {
-        text.split("```json")
-            .nth(1)?
-            .split("```")
-            .next()?
-            .trim()
-    } else if text.contains("```") {
-        text.split("```")
-            .nth(1)?
-            .split("```")
-            .next()?
-            .trim()
-    } else {
-        text
-    };
-
-    serde_json::from_str::<RawLlmContextResponse>(json_str).ok()
-}
 
 fn build_context_from_parsed(
     capture_id: &str,
@@ -505,12 +595,12 @@ fn build_context_from_parsed(
     let objective = parsed
         .objective
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| format!("Work on {}", title));
+        .unwrap_or_else(|| INSUFFICIENT_OBJECTIVE_EVIDENCE.to_string());
 
     let current_state = parsed
         .current_state
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "Discussion captured and ready for handoff.".to_string());
+        .unwrap_or_else(|| INSUFFICIENT_STATE_EVIDENCE.to_string());
 
     let decisions = parsed
         .decisions
@@ -935,7 +1025,7 @@ Return ONLY a valid JSON object matching this structure:
 }
 "#;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct RawLlmRepositoryResponse {
     repository_name: Option<String>,
     objective: Option<String>,
@@ -949,26 +1039,6 @@ struct RawLlmRepositoryResponse {
     licensing: Option<String>,
 }
 
-fn parse_llm_repository_response(raw: &str) -> Option<RawLlmRepositoryResponse> {
-    let text = raw.trim();
-    let json_str = if text.contains("```json") {
-        text.split("```json")
-            .nth(1)?
-            .split("```")
-            .next()?
-            .trim()
-    } else if text.contains("```") {
-        text.split("```")
-            .nth(1)?
-            .split("```")
-            .next()?
-            .trim()
-    } else {
-        text
-    };
-
-    serde_json::from_str::<RawLlmRepositoryResponse>(json_str).ok()
-}
 
 fn build_repository_context_from_parsed(
     capture_id: &str,
@@ -985,7 +1055,7 @@ fn build_repository_context_from_parsed(
     let objective = parsed
         .objective
         .filter(|o| !o.trim().is_empty())
-        .unwrap_or_else(|| "Insufficient evidence to determine the repository's primary objective.".to_string());
+        .unwrap_or_else(|| INSUFFICIENT_REPOSITORY_OBJECTIVE_EVIDENCE.to_string());
 
     let stack = parsed.stack.into_iter().filter(|x| !x.trim().is_empty()).collect();
     let features = parsed.features.into_iter().filter(|x| !x.trim().is_empty()).collect();
@@ -1211,75 +1281,125 @@ pub fn extract_deterministic_repository_context(
 }
 
 /// Extracts structured repository context from a captured software repository.
-pub async fn extract_repository_context(
-    llm: Option<&LLMClient>,
-    capture_id: &str,
-    payload: &WebCapturePayload,
-    normalized_markdown: &str,
-) -> SourceContext {
-    let now = chrono::Utc::now().to_rfc3339();
-    let default_name = derive_repository_name(payload);
-
-    if let Some(client) = llm {
-        let source_desc = format!(
-            "Captured GitHub repository from {} ({})",
-            payload.extractor.id, payload.url
-        );
-        let wrapped = source_boundary::wrap_external_source(&source_desc, normalized_markdown);
-        let system_prompt = format!(
-            "{}\n{}",
-            REPOSITORY_CONTEXT_SYSTEM_PROMPT,
-            source_boundary::EXTERNAL_SOURCE_RULE
-        );
-
-        match client.complete(&wrapped.framed, Some(&system_prompt)).await {
-            Ok(response) => {
-                if let Some(parsed) = parse_llm_repository_response(&response.text) {
-                    let repo = build_repository_context_from_parsed(
-                        capture_id,
-                        &default_name,
-                        parsed,
-                        &now,
-                        Some(format!("{:?}", client.provider_type())),
-                    );
-                    return SourceContext {
-                        capture_id: capture_id.to_string(),
-                        generated_at: now,
-                        model: Some(format!("{:?}", client.provider_type())),
-                        deterministic: false,
-                        kind: SourceContextKind::Repository(repo),
-                    };
-                } else {
-                    tracing::warn!(
-                        "Failed to parse LLM repository context JSON for capture {}. Falling back to deterministic extraction.",
-                        capture_id
-                    );
-                }
-            }
-            Err(err) => {
-                tracing::warn!(
-                    "LLM repository context extraction failed for capture {}: {}. Falling back to deterministic extraction.",
-                    capture_id,
-                    err
-                );
-            }
-        }
-    }
-
-    let repo = extract_deterministic_repository_context(capture_id, payload, normalized_markdown, &now);
-    SourceContext {
-        capture_id: capture_id.to_string(),
-        generated_at: now,
-        model: None,
-        deterministic: true,
-        kind: SourceContextKind::Repository(repo),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::capture::web::{CaptureContent, CaptureContentKind, CaptureMessage, ContentBlock, ExtractorInfo};
+
+    fn capture_file_for(capture_type: &str, url: &str, markdown: &str) -> crate::vault::VaultFile {
+        crate::vault::VaultFile::new_capture(
+            "cap_dispatch".to_string(),
+            "capture.json".to_string(),
+            "captures/cap_dispatch".to_string(),
+            markdown.to_string(),
+            "hash".to_string(),
+            crate::capture::web::CaptureProvenance {
+                source_type: "web".to_string(),
+                capture_type: capture_type.to_string(),
+                application: "GitHub".to_string(),
+                domain: "github.com".to_string(),
+                url: url.to_string(),
+                page_title: "owner/repo".to_string(),
+                captured_at: "2026-09-03T10:00:00Z".to_string(),
+                browser_captured_at: None,
+                browser: None,
+                extractor_id: "github".to_string(),
+                extractor_version: 1,
+                trust: "external_untrusted".to_string(),
+                fidelity: "structured".to_string(),
+                coverage: crate::capture::web::CaptureCoverage::FullDocument,
+                notes: Vec::new(),
+                message_count: None,
+                block_count: 3,
+                skipped_block_count: 0,
+                truncated: false,
+                canonical_url: None,
+                author: None,
+                published_at: None,
+                language: None,
+                version: 1,
+                previous_capture_id: None,
+                recapture_count: 0,
+                traversal: None,
+            },
+        )
+    }
+
+    /// The dispatch, end to end and offline. A repository capture gets the
+    /// repository schema, and the result says which prompt produced it and that
+    /// no model did.
+    #[tokio::test]
+    async fn a_repository_capture_gets_repository_context_and_honest_metadata() {
+        let file = capture_file_for(
+            "repository",
+            "https://github.com/owner/repo",
+            "# owner/repo\n\nA local-first tool built with Rust and TypeScript.",
+        );
+        let payload = WebCapturePayload {
+            url: "https://github.com/owner/repo".to_string(),
+            title: Some("owner/repo".to_string()),
+            ..Default::default()
+        };
+
+        let context = extract_source_context(None, &file, &payload).await;
+
+        assert!(context.repository().is_some(), "a repository must not get conversation semantics");
+        assert!(context.conversation().is_none());
+        assert!(context.deterministic, "no model answered, so this is not a model's work");
+        assert!(context.model.is_none(), "no model answered, so none may be named");
+
+        let analysis = context.analysis.expect("analysis metadata is recorded");
+        assert_eq!(analysis.prompt_id, "repository.context");
+        assert_eq!(analysis.prompt_version, 1);
+        assert_eq!(
+            analysis.status,
+            crate::pipeline::analysis::AnalysisStatus::InsufficientEvidence
+        );
+        assert!(analysis.failure.is_some(), "why no model answered is recorded");
+    }
+
+    /// The distinction the substring router could not make: an issue page is on
+    /// github.com and is not a repository. Analysing it with the repository
+    /// prompt would produce a tech stack for a bug report.
+    #[tokio::test]
+    async fn a_github_issue_capture_is_not_analysed_as_a_repository() {
+        let file = capture_file_for(
+            "issue",
+            "https://github.com/owner/repo/issues/42",
+            "# Crash on startup\n\nRelay exits immediately on launch.",
+        );
+        let payload = WebCapturePayload {
+            url: "https://github.com/owner/repo/issues/42".to_string(),
+            title: Some("Crash on startup".to_string()),
+            ..Default::default()
+        };
+
+        let context = extract_source_context(None, &file, &payload).await;
+
+        assert!(
+            context.repository().is_none(),
+            "an issue is not a repository, whatever host it lives on"
+        );
+        assert!(context.conversation().is_some());
+        let analysis = context.analysis.expect("analysis metadata is recorded");
+        assert_eq!(analysis.prompt_id, "conversation.context");
+    }
+
+    /// §45 — a missing objective reads as a missing objective, not as
+    /// "Work on <title>", which was indistinguishable from an extracted one.
+    #[test]
+    fn an_unextractable_objective_says_so_rather_than_restating_the_title() {
+        let conv = build_context_from_parsed(
+            "cap_1",
+            "Some Page Title",
+            RawLlmContextResponse::default(),
+            "2026-09-04T00:00:00Z".to_string(),
+            None,
+        );
+        assert_eq!(conv.objective, INSUFFICIENT_OBJECTIVE_EVIDENCE);
+        assert_eq!(conv.current_state, INSUFFICIENT_STATE_EVIDENCE);
+        assert!(!conv.objective.contains("Some Page Title"));
+    }
 
     fn sample_conversation_payload() -> WebCapturePayload {
         WebCapturePayload {
@@ -1380,7 +1500,10 @@ mod tests {
 }
 ```
 "#;
-        let parsed = parse_llm_context_response(raw).expect("should parse json from markdown fence");
+        let json = crate::pipeline::analysis::parse_json_response(raw)
+            .expect("the shared parser should read json out of a markdown fence");
+        let parsed: RawLlmContextResponse =
+            serde_json::from_value(json).expect("should deserialize into the context contract");
         assert_eq!(parsed.objective.as_deref(), Some("Build context handoff"));
         assert_eq!(parsed.decisions.len(), 1);
         assert_eq!(parsed.decisions[0].decision, "Use SQLite for local storage");
@@ -1470,7 +1593,10 @@ MIT License
 }
 ```"#;
 
-        let parsed = parse_llm_repository_response(raw).expect("should parse repository response");
+        let json = crate::pipeline::analysis::parse_json_response(raw)
+            .expect("the shared parser should read json out of a markdown fence");
+        let parsed: RawLlmRepositoryResponse =
+            serde_json::from_value(json).expect("should deserialize into the repository contract");
         let repo = build_repository_context_from_parsed(
             "cap_123",
             "stablyai/orca",
@@ -1551,6 +1677,7 @@ MIT License
             generated_at: "2026-09-04T00:00:00Z".to_string(),
             model: None,
             deterministic: true,
+            analysis: None,
             kind: SourceContextKind::Repository(repo),
         };
 

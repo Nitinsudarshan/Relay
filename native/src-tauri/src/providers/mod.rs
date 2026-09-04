@@ -17,7 +17,22 @@ pub enum ProviderError {
 
     #[error("Invalid configuration: {0}")]
     ConfigError(String),
+
+    /// The request completed, but nothing a model produced came back — the
+    /// client substituted filler, or the provider answered with nothing.
+    /// Separate from the transport errors above because the network was fine;
+    /// what is missing is the completion.
+    #[error("No completion available: {0}")]
+    NoCompletion(String),
 }
+
+/// The `model` value [`LLMClient::complete`] reports when it has silently
+/// substituted its own canned text for a real completion.
+///
+/// Public because it is a property of this layer that callers must be able to
+/// detect. Filler is the right answer for dictation, where some output beats
+/// none, and the wrong one for anything persisted as understanding.
+pub const HEURISTIC_FALLBACK_MODEL: &str = "heuristic-fallback";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LLMResponse {
@@ -479,6 +494,36 @@ impl LLMClient {
         }
     }
 
+    /// Completes, and fails when no model actually answered.
+    ///
+    /// [`complete_with`](Self::complete_with) already reports a transport
+    /// failure honestly, but that is only half the problem: a caller that built
+    /// its own [`LLMClient`] elsewhere, or a future path that routes through
+    /// [`complete`](Self::complete), can still be handed filler tagged
+    /// [`HEURISTIC_FALLBACK_MODEL`]. This is the one entry point analysis code
+    /// should use, because for analysis the two cases are the same case —
+    /// nothing was understood, and saying otherwise puts invented content into
+    /// the vault under a model's name.
+    pub async fn complete_verified(
+        &self,
+        prompt: &str,
+        system_prompt: Option<&str>,
+        options: CompletionOptions,
+    ) -> Result<LLMResponse, ProviderError> {
+        let response = self.complete_with(prompt, system_prompt, options).await?;
+        if response.model == HEURISTIC_FALLBACK_MODEL {
+            return Err(ProviderError::NoCompletion(
+                "provider unreachable; the client substituted heuristic filler".to_string(),
+            ));
+        }
+        if response.text.trim().is_empty() {
+            return Err(ProviderError::NoCompletion(
+                "provider returned an empty completion".to_string(),
+            ));
+        }
+        Ok(response)
+    }
+
     pub fn heuristic_fallback(prompt: &str, system_prompt: Option<&str>) -> LLMResponse {
         let is_json = system_prompt.map(|s| s.contains("JSON")).unwrap_or(false);
         if is_json {
@@ -488,7 +533,7 @@ impl LLMClient {
                 let json_text = serde_json::to_string_pretty(&structured).unwrap_or_else(|_| "{}".to_string());
                 return LLMResponse {
                     text: json_text,
-                    model: "heuristic-fallback".to_string(),
+                    model: HEURISTIC_FALLBACK_MODEL.to_string(),
                     prompt_tokens: None,
                     completion_tokens: None,
                 };
@@ -513,7 +558,7 @@ impl LLMClient {
 
             LLMResponse {
                 text: json_text,
-                model: "heuristic-fallback".to_string(),
+                model: HEURISTIC_FALLBACK_MODEL.to_string(),
                 prompt_tokens: None,
                 completion_tokens: None,
             }
@@ -525,7 +570,7 @@ impl LLMClient {
 
             LLMResponse {
                 text: markdown,
-                model: "heuristic-fallback".to_string(),
+                model: HEURISTIC_FALLBACK_MODEL.to_string(),
                 prompt_tokens: None,
                 completion_tokens: None,
             }

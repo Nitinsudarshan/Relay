@@ -30,9 +30,12 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
   analyzing,
   onAnalyze,
 }) => {
-  const isGitHub =
-    provenance?.application === 'github' ||
-    Boolean(provenance?.url?.toLowerCase().includes('github.com'));
+  // The classification Relay derived from the URL at capture time, not a name
+  // or substring match here. `application` is `"GitHub"`, so the old
+  // `=== 'github'` test never matched, and the URL fallback treated any address
+  // containing "github.com" — including `https://evil.example/?ref=github.com`
+  // — as a repository.
+  const isRepository = provenance?.capture_type === 'repository';
 
   if (loading) {
     return (
@@ -51,7 +54,7 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
         </div>
         <h3 className="text-sm font-semibold text-foreground">Structured Context Unavailable</h3>
         <p className="mt-1.5 max-w-sm text-xs text-muted-foreground leading-relaxed">
-          {isGitHub
+          {isRepository
             ? 'Relay has captured this repository, but has not yet extracted structured repository context.'
             : 'Extract objectives, settled decisions, requirements, constraints, open questions, and next actions to preserve this work in Relay.'}
         </p>
@@ -64,12 +67,12 @@ export const CaptureContextTab: React.FC<CaptureContextTabProps> = ({
           {analyzing ? (
             <>
               <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              <span>{isGitHub ? 'Analyzing Repository…' : 'Analyzing Source…'}</span>
+              <span>{isRepository ? 'Analyzing Repository…' : 'Analyzing Source…'}</span>
             </>
           ) : (
             <>
               <Sparkles className="h-3.5 w-3.5" />
-              <span>{isGitHub ? 'Extract Repository Context' : 'Extract Structured Context'}</span>
+              <span>{isRepository ? 'Extract Repository Context' : 'Extract Structured Context'}</span>
             </>
           )}
         </button>

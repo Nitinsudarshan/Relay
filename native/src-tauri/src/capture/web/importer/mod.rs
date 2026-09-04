@@ -382,13 +382,12 @@ where
 
     // Run context analysis
     let llm = LLMClient::new(settings.provider.clone());
-    let context = crate::capture::web::context::extract_conversation_context(
-        Some(&llm),
-        &vault_file.id,
-        &payload,
-        &vault_file.content,
-    )
-    .await;
+    // An imported export is a conversation capture, so this resolves to the
+    // conversation prompt through the same dispatch a live capture uses —
+    // §36's requirement that imports do not depend on the repository path.
+    let context =
+        crate::capture::web::context::extract_source_context(Some(&llm), &vault_file, &payload)
+            .await;
 
     let _ = vault.save_capture_context(&vault_file.id, &context);
 

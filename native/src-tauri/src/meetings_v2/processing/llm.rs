@@ -131,7 +131,10 @@ const CHARS_PER_TOKEN: usize = 3;
 
 /// The marker `providers::LLMClient` returns when it has silently substituted
 /// its own canned text for a real completion.
-const HEURISTIC_MODEL_MARKER: &str = "heuristic-fallback";
+///
+/// Re-exported from the provider layer rather than restated here: it describes
+/// that layer's behaviour, and a second copy is a second thing to get wrong.
+use crate::providers::HEURISTIC_FALLBACK_MODEL as HEURISTIC_MODEL_MARKER;
 
 /// Adapts the app's shared `LLMClient` to the pipeline's contract.
 ///

@@ -1,3 +1,7 @@
+use super::analysis::{
+    AnalysisFailure, AnalysisRequest, AnalysisService, AnalysisType, CanonicalContent, DerivedData,
+    DerivedPayload, DerivedType, PromptId, SourceDescriptor,
+};
 use super::source_boundary;
 use crate::providers::LLMClient;
 use crate::vault::{Scribble, ScribbleRelationship, VaultFile, VaultManager, REL_SAME_TOPIC};
@@ -350,6 +354,27 @@ Formatting & Hierarchy Rules for Summary:
   If the content describes a workflow, sequential steps, state transitions, or system architecture, ALWAYS include a compact 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Input] -->|Process| B[Result]\n```"). Do NOT use trailing '|>' on edge labels (use '-->|label| B', NOT '-->|label|> B') and do NOT put backticks inside bracketed node labels.
 "#;
 
+/// The full canonical summary system prompt.
+///
+/// Promoted from a `format!` inside `summarize_content_from` so the prompt
+/// registry can reference the exact text that is sent. A prompt the registry
+/// can name but not read is a prompt whose recorded version means nothing.
+pub const CANONICAL_SUMMARY_SYSTEM_PROMPT: &str = r#"
+You are Relay's Knowledge & Thinking Assistant.
+Summarize this content concisely and structure it for rapid comprehension, clean hierarchy, and high readability.
+
+Formatting & Hierarchy Rules for Summary:
+- Keep it short and impactful (under 75 words total).
+- Clear hierarchy:
+  1. Use structured numbered sections for main takeaways (e.g. "1. Core Insight: ..." or "1. Architecture: ...").
+  2. Sub-bullets under numbered headers MUST be indented with 2-4 spaces (e.g. "   - Detailed action or key context...").
+  3. Bold key takeaways and terms for rapid scanning without raw asterisks in title headers.
+- Flowcharts & Diagrams:
+  If the content describes a workflow, sequential steps, state transitions, or system architecture, ALWAYS include a compact 2-4 node Mermaid flowchart wrapped in a ```mermaid code block (e.g. "```mermaid\ngraph LR\nA[Input] -->|Process| B[Result]\n```"). Do NOT use trailing '|>' on edge labels (use '-->|label| B', NOT '-->|label|> B') and do NOT put backticks inside bracketed node labels.
+
+Return ONLY the clean markdown summary text without conversational preamble.
+"#;
+
 /// Canonical Relay Analysis system prompt used across Scribbles and Vault Files.
 pub const CANONICAL_ANALYSIS_SYSTEM_PROMPT: &str = r#"
 You are Relay's Knowledge & Thinking Assistant.
@@ -411,7 +436,7 @@ pub async fn enrich_content_from(
     };
 
     let response = llm
-        .complete(&prompt, Some(&system))
+        .complete_verified(&prompt, Some(&system), llm.default_options())
         .await
         .map_err(|e| format!("LLM completion failed: {}", e))?;
 
@@ -462,13 +487,7 @@ pub async fn summarize_content_from(
         return Err("Content is empty".to_string());
     }
 
-    let mut system = format!(
-        "You are Relay's Knowledge & Thinking Assistant.\n\
-         Summarize this content concisely and structure it for rapid comprehension, clean hierarchy, and high readability.\n\n\
-         {}\n\
-         Return ONLY the clean markdown summary text without conversational preamble.",
-        CANONICAL_SUMMARY_PROMPT_INSTRUCTIONS
-    );
+    let mut system = CANONICAL_SUMMARY_SYSTEM_PROMPT.to_string();
 
     let prompt = match source {
         Some(description) => {
@@ -479,8 +498,14 @@ pub async fn summarize_content_from(
         None => content.to_string(),
     };
 
+    // `complete_verified`, not `complete`: the summary prompt asks for prose, so
+    // the client's filler for a non-JSON prompt is a plausible-looking markdown
+    // document that claims the content was "recorded via Relay push-to-talk
+    // voice capture". Stored on a captured GitHub repository, that is a
+    // fabricated fact about where the source came from, and Talkback then reads
+    // it back as retrieval context.
     let response = llm
-        .complete(&prompt, Some(&system))
+        .complete_verified(&prompt, Some(&system), llm.default_options())
         .await
         .map_err(|e| format!("LLM summarization failed: {}", e))?;
 
@@ -679,18 +704,48 @@ pub async fn enrich_vault_file(
         return Ok(file);
     }
 
-    // A capture is external material. Everything else in the vault the user
-    // wrote, dictated or imported deliberately, and is treated as their own.
-    let source = file
-        .capture
-        .as_ref()
-        .map(source_boundary::describe_capture);
+    // Runs on the shared service so the derived record can state honestly
+    // whether a model produced this enrichment or a fallback did. The source
+    // boundary is applied by the service from the source's own trust level — a
+    // capture is external material — rather than by each caller remembering to
+    // describe it, which is one fewer thing to forget.
+    let (parsed_opt, enrichment_metadata) = {
+        let descriptor = SourceDescriptor::from_vault_file(&file);
+        let content = CanonicalContent::from_markdown(descriptor.title, &file.content);
+        let request =
+            AnalysisRequest::new(&descriptor, AnalysisType::Enrichment, PromptId::Enrichment);
+        let result = AnalysisService::new(llm)
+            .run_structured(
+                &request,
+                &descriptor,
+                &content,
+                |json| {
+                    serde_json::from_value::<AiEnrichmentResponse>(json.clone())
+                        .ok()
+                        .map(Some)
+                },
+                || None,
+            )
+            .await;
 
-    let parsed_opt = match enrich_content_from(llm, &file.content, source.as_deref()).await {
-        Ok(parsed) => Some(parsed),
-        Err(err) => {
-            tracing::warn!("AI enrichment LLM call failed for vault file {}: {}", file_id, err);
-            None
+        match result.metadata.deterministic {
+            // A fallback ran: no model answered, or its answer failed to
+            // validate. `parsed_opt` stays `None` so the deterministic
+            // knowledge below fills the fields, exactly as before.
+            true => {
+                tracing::warn!(
+                    "Enrichment analysis for vault file {} did not complete ({}); using deterministic knowledge",
+                    file_id,
+                    result
+                        .metadata
+                        .failure
+                        .as_ref()
+                        .map(|f| f.to_string())
+                        .unwrap_or_else(|| "unknown reason".to_string())
+                );
+                (None, result.metadata)
+            }
+            false => (result.payload.flatten(), result.metadata),
         }
     };
 
@@ -771,6 +826,29 @@ pub async fn enrich_vault_file(
     }
 
     file.updated_at = chrono::Utc::now().to_rfc3339();
+
+    // Recorded as derived data alongside summary and context, so all three
+    // kinds of understanding Relay holds about a source point back at it and
+    // carry how they were produced. The legacy fields above stay populated —
+    // the Files UI, the knowledge graph and Talkback all read them.
+    {
+        let payload = serde_json::json!({
+            "summary": file.summary,
+            "topics": file.topics,
+            "entities": file.entities,
+            "questions": file.ai_metadata.suggested_questions,
+        });
+        let derived = DerivedData::new(
+            file_id,
+            DerivedType::Enrichment,
+            enrichment_metadata,
+            DerivedPayload::Structured(payload),
+        );
+        if let Err(err) = vault.save_derived_data(&derived) {
+            tracing::warn!("Could not persist derived enrichment for {}: {}", file_id, err);
+        }
+    }
+
     vault
         .save_vault_file(&file)
         .map_err(|e| format!("Failed to save enriched file: {}", e))?;
@@ -791,19 +869,59 @@ pub async fn summarize_vault_file(
         return Ok(file);
     }
 
-    let source = file
-        .capture
-        .as_ref()
-        .map(source_boundary::describe_capture);
+    // Runs on the shared analysis contract, so the result records which prompt
+    // and model produced it, and whether a fallback did. The legacy
+    // `file.summary` field is still written below: existing vaults, the Files
+    // UI and Talkback retrieval all read it, and §10 says migrate consumers
+    // incrementally rather than deleting the field underneath them.
+    // Scoped so the borrow of `file` ends before the legacy field is written.
+    let (summary_text, metadata) = {
+        let descriptor = SourceDescriptor::from_vault_file(&file);
+        let content = CanonicalContent::from_markdown(descriptor.title, &file.content);
+        let request = AnalysisRequest::new(&descriptor, AnalysisType::Summary, PromptId::Summary);
+        let result = AnalysisService::new(llm)
+            .run_prose(&request, &descriptor, &content)
+            .await;
 
-    match summarize_content_from(llm, &file.content, source.as_deref()).await {
-        Ok(summary_text) => {
-            file.summary = Some(summary_text);
+        match result.payload {
+            Some(text) => (Some(text), result.metadata),
+            None => {
+                // No model answered. A deterministic summary derived from the
+                // content is an honest substitute; the client's filler — which
+                // claims the source was "recorded via Relay push-to-talk voice
+                // capture" — is not, and no longer reaches here.
+                let failure = result
+                    .metadata
+                    .failure
+                    .clone()
+                    .unwrap_or_else(|| AnalysisFailure::NoCompletion("unknown".to_string()));
+                tracing::warn!(
+                    "Summary analysis for vault file {} did not complete ({}); using deterministic summary",
+                    file_id,
+                    failure
+                );
+                let metadata =
+                    AnalysisService::metadata_builder(&request, &descriptor).deterministic(failure);
+                (
+                    extract_deterministic_knowledge(&file.content).summary,
+                    metadata,
+                )
+            }
         }
-        Err(err) => {
-            tracing::warn!("AI summarization LLM call failed for vault file {}: {}", file_id, err);
-            let fallback = extract_deterministic_knowledge(&file.content);
-            file.summary = fallback.summary;
+    };
+
+    if let Some(text) = summary_text {
+        file.summary = Some(text.clone());
+        let derived = DerivedData::new(
+            file_id,
+            DerivedType::Summary,
+            metadata,
+            DerivedPayload::Text(text),
+        );
+        if let Err(err) = vault.save_derived_data(&derived) {
+            // A derived record that cannot be written is not a reason to lose
+            // the summary the user asked for.
+            tracing::warn!("Could not persist derived summary for {}: {}", file_id, err);
         }
     }
 
@@ -953,6 +1071,18 @@ mod tests {
         assert!(CANONICAL_ANALYSIS_SYSTEM_PROMPT.contains("5 to 7 high-level domain topics"));
         assert!(CANONICAL_ANALYSIS_SYSTEM_PROMPT.contains("5 to 7 specific named entities"));
         assert!(CANONICAL_ANALYSIS_SYSTEM_PROMPT.contains("3 to 4 insightful AI exploration questions"));
+
+        // The full summary system prompt is what the registry names and what
+        // `summarize_content_from` sends. It must keep carrying the same
+        // formatting contract the instructions block states, or the registry's
+        // recorded version describes a prompt nobody sent.
+        for rule in ["under 75 words", "1. Core Insight:", "2-4 node Mermaid flowchart"] {
+            assert!(
+                CANONICAL_SUMMARY_SYSTEM_PROMPT.contains(rule),
+                "the summary system prompt dropped: {rule}"
+            );
+        }
+        assert!(CANONICAL_SUMMARY_SYSTEM_PROMPT.contains("Knowledge & Thinking Assistant"));
     }
 
     #[test]

@@ -261,11 +261,42 @@ export interface RepositoryContext {
 /**
  * General derived structured context for any captured source (conversations, repositories, documents).
  */
+/**
+ * How a derived artifact was produced. Mirrors the Rust `AnalysisMetadata`.
+ *
+ * `status` is the field that matters: `insufficient_evidence` means Relay ran
+ * the analysis and the source did not carry what was asked for — a successful,
+ * honest outcome, and not the same as `failed`.
+ */
+export interface AnalysisMetadata {
+  analysis_type: 'summary' | 'context' | 'enrichment' | 'extraction';
+  status:
+    | 'requested'
+    | 'running'
+    | 'succeeded'
+    | 'insufficient_evidence'
+    | 'failed'
+    | 'cancelled';
+  prompt_id: string;
+  prompt_version: number;
+  provider?: string | null;
+  /** The model that actually answered, not the configured provider. */
+  model?: string | null;
+  deterministic?: boolean;
+  source_coverage?: string | null;
+  generated_at: string;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  failure?: { kind: string; detail?: unknown } | null;
+}
+
 export type SourceContext = {
   capture_id: string;
   generated_at: string;
   model?: string | null;
   deterministic: boolean;
+  /** Absent on contexts written before the analysis contract existed. */
+  analysis?: AnalysisMetadata | null;
 } & (
   | { kind: 'conversation'; data: ConversationContext }
   | { kind: 'repository'; data: RepositoryContext }
