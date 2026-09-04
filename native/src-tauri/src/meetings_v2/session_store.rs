@@ -457,6 +457,8 @@ mod tests {
             mic_had_audio: true,
             sys_had_audio: false,
             utterances: Vec::new(),
+            speech: None,
+            rejection: None,
         };
         let seg2 = TranscriptSegment {
             chunk_index: 1,
@@ -468,6 +470,8 @@ mod tests {
             mic_had_audio: true,
             sys_had_audio: false,
             utterances: Vec::new(),
+            speech: None,
+            rejection: None,
         };
 
         store.append_transcript_segment(&session.id, &seg1).unwrap();
@@ -613,6 +617,8 @@ mod tests {
             mic_had_audio: true,
             sys_had_audio: false,
             utterances: Vec::new(),
+            speech: None,
+            rejection: None,
         };
         store.append_transcript_segment(&session.id, &seg).unwrap();
 

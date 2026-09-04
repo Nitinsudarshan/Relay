@@ -52,6 +52,8 @@ impl Harness {
                         mic_had_audio: *mic,
                         sys_had_audio: *sys,
                         utterances: Vec::new(),
+            speech: None,
+            rejection: None,
                     },
                 )
                 .unwrap();
@@ -1088,6 +1090,8 @@ async fn related_meetings_are_found_through_shared_metadata() {
                         mic_had_audio: *mic,
                         sys_had_audio: *sys,
                         utterances: Vec::new(),
+            speech: None,
+            rejection: None,
                     },
                 )
                 .unwrap();

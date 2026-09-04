@@ -70,6 +70,7 @@ pub mod tasks;
 pub mod validate;
 
 use super::session_store::SessionStore;
+use super::transcript_health::{self, DecodeEvidence};
 use super::types::{MeetingNotes, TranscriptSegment, TranscriptSegmentStatus};
 use llm::MeetingLlm;
 pub use model::MeetingProcessing;
@@ -83,6 +84,7 @@ use length::summary_budget;
 use normalize::RawSegmentInput;
 use related::{find_related, MeetingIndexEntry, RelatedMeeting};
 use speakers::SpeakerIdentificationMode;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 use store::ProcessingStore;
@@ -149,7 +151,8 @@ impl MeetingProcessor {
         meeting_id: &str,
         options: &ProcessingOptions,
     ) -> Result<MeetingProcessing, String> {
-        let raw = self.read_raw_segments(meeting_id)?;
+        let raw_read = self.read_raw_segments(meeting_id)?;
+        let raw = raw_read.inputs.as_slice();
         let existing_speakers = self
             .store
             .load(meeting_id)
@@ -157,8 +160,19 @@ impl MeetingProcessor {
             .unwrap_or_default();
 
         let started = Instant::now();
-        let mut normalized = normalize::normalize_transcript(&raw, &options.glossary);
+        let mut normalized = normalize::normalize_transcript(raw, &options.glossary);
         let normalize_ms = started.elapsed().as_millis() as u64;
+
+        if raw_read.total_rejections() > 0 {
+            tracing::info!(
+                meeting_id = %meeting_id,
+                stage = "normalization",
+                recorded_rejections = ?raw_read.recorded_rejections,
+                retro_rejections = ?raw_read.retro_rejections,
+                retro_dropped_words = raw_read.retro_dropped_words,
+                "meeting_processing: transcript spans withheld as non-speech"
+            );
+        }
 
         let speaker_started = Instant::now();
         let roster = speakers::attribute_speakers(
@@ -859,18 +873,13 @@ audio are unaffected."
 
     /// Reads the raw transcript. The only source-artifact access the pipeline
     /// makes, and it is read-only.
-    fn read_raw_segments(&self, meeting_id: &str) -> Result<Vec<RawSegmentInput>, String> {
+    fn read_raw_segments(&self, meeting_id: &str) -> Result<RawTranscriptRead, String> {
         let segments = self
             .sessions
             .get_transcript_segments(meeting_id)
             .map_err(|e| format!("Failed to read the raw transcript: {}", e))?;
 
-        Ok(segments
-            .into_iter()
-            .filter(|s| s.status == TranscriptSegmentStatus::Success)
-            .filter(|s| !s.text.trim().is_empty())
-            .flat_map(raw_inputs_from_segment)
-            .collect())
+        Ok(screen_raw_segments(segments))
     }
 
     /// Writes one stage record to the processing log.
@@ -1013,6 +1022,93 @@ mod tests;
 ///
 /// A chunk with no utterances — recorded before v2.5, or one Whisper returned no
 /// timed spans for — becomes a single whole-chunk input, exactly as before.
+/// What a read of the raw transcript found, including what it refused to pass
+/// on.
+#[derive(Debug, Default, Clone)]
+pub struct RawTranscriptRead {
+    pub inputs: Vec<RawSegmentInput>,
+    /// Segments the recorder already rejected, by reason key.
+    pub recorded_rejections: BTreeMap<String, usize>,
+    /// Segments this read rejected because they were recorded before the
+    /// recorder screened for hallucination.
+    pub retro_rejections: BTreeMap<String, usize>,
+    /// Words dropped by `retro_rejections`. The number that explains why an old
+    /// meeting's summary changes when it is regenerated.
+    pub retro_dropped_words: usize,
+}
+
+impl RawTranscriptRead {
+    /// Every rejection, recorded and retroactive together.
+    pub fn total_rejections(&self) -> usize {
+        self.recorded_rejections.values().sum::<usize>()
+            + self.retro_rejections.values().sum::<usize>()
+    }
+}
+
+/// Screens raw transcript segments for text that is not speech.
+///
+/// The recorder screens every chunk as it is written, so for anything recorded
+/// from v2.6 on this only counts what the recorder already rejected. It runs
+/// again here for the meetings that already exist: thirteen sessions were
+/// recorded before the gate existed, and their `transcript.jsonl` holds runs of
+/// "Thank you." stored with `Success`. Rewriting those files is not an option —
+/// the raw transcript is immutable by design and is the evidence that the
+/// failure happened — so the screen runs on the way *out* instead, and the
+/// derived transcript comes out clean without a single byte of source data
+/// changing.
+///
+/// Screening is per utterance where the recorder resolved utterances, so one
+/// hallucinated span at the end of a chunk no longer costs the sentence in
+/// front of it.
+fn screen_raw_segments(segments: Vec<TranscriptSegment>) -> RawTranscriptRead {
+    let mut read = RawTranscriptRead::default();
+
+    for segment in segments {
+        if let Some(rejection) = segment.rejection.as_ref() {
+            *read
+                .recorded_rejections
+                .entry(rejection.reason.key().to_string())
+                .or_insert(0) += 1;
+            continue;
+        }
+        if segment.status != TranscriptSegmentStatus::Success || segment.text.trim().is_empty() {
+            continue;
+        }
+
+        // Without a measured profile there is no voiced time to compare against,
+        // which is the case for every pre-v2.6 transcript. Assuming the whole
+        // span was voiced is the conservative choice: it disables the rules that
+        // need audio evidence and leaves only the self-evident ones — a decoder
+        // loop is a decoder loop whatever the audio was.
+        let span_s = (segment.end_time_s - segment.start_time_s).max(0.001);
+        let (voiced_seconds, total_seconds) = match segment.speech {
+            Some(profile) => (profile.voiced_seconds, profile.total_seconds.max(0.001)),
+            None => (span_s, span_s),
+        };
+
+        for input in raw_inputs_from_segment(segment) {
+            let input_span = (input.end_time_s - input.start_time_s).max(0.001);
+            let evidence = DecodeEvidence {
+                voiced_seconds: voiced_seconds.min(input_span),
+                total_seconds: total_seconds.min(input_span).max(0.001),
+                mean_no_speech_prob: 0.0,
+            };
+            match transcript_health::assess(&input.text, evidence) {
+                Some(reason) => {
+                    *read
+                        .retro_rejections
+                        .entry(reason.key().to_string())
+                        .or_insert(0) += 1;
+                    read.retro_dropped_words += input.text.split_whitespace().count();
+                }
+                None => read.inputs.push(input),
+            }
+        }
+    }
+
+    read
+}
+
 fn raw_inputs_from_segment(segment: TranscriptSegment) -> Vec<RawSegmentInput> {
     if segment.utterances.is_empty() {
         return vec![RawSegmentInput {

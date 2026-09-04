@@ -56,6 +56,18 @@ pub struct MeetingSession {
     #[serde(default)]
     pub action_items: Vec<String>,
     pub pending_transcription_chunks: usize,
+    /// Chunks whose decode was thrown away as something other than speech.
+    ///
+    /// Surfaced on the session rather than left in the transcript because it is
+    /// the number that explains a thin summary: nine rejected chunks is four
+    /// minutes of the meeting that never reached the model, and the user is
+    /// entitled to see that rather than wonder why the notes are short.
+    #[serde(default)]
+    pub rejected_chunk_count: usize,
+    /// Total voiced seconds measured across every chunk. Compared against
+    /// `duration_seconds` this is the meeting's talk-to-silence ratio.
+    #[serde(default)]
+    pub voiced_seconds: f64,
     pub error_message: Option<String>,
 }
 
@@ -89,6 +101,8 @@ impl MeetingSession {
             summary: None,
             action_items: Vec::new(),
             pending_transcription_chunks: 0,
+            rejected_chunk_count: 0,
+            voiced_seconds: 0.0,
             error_message: None,
         }
     }
@@ -172,6 +186,23 @@ pub struct TranscriptSegment {
     /// read exactly as they were.
     #[serde(default)]
     pub utterances: Vec<TranscriptUtterance>,
+    /// How much of this chunk's audio was actually voice, measured at 20 ms
+    /// resolution against the chunk's own noise floor.
+    ///
+    /// Recorded on every segment because it is the measurement that decides
+    /// whether the chunk was decoded at all, and therefore the first thing
+    /// worth looking at when a transcript is thinner or stranger than the
+    /// meeting was. `None` for transcripts written before v2.6.
+    #[serde(default)]
+    pub speech: Option<crate::meetings_v2::transcript_health::SpeechProfile>,
+    /// Set when a decode was rejected as something other than speech, carrying
+    /// the reason and the text that was discarded.
+    ///
+    /// Present exactly when `status` is [`TranscriptSegmentStatus::Rejected`].
+    /// The text is kept so the rejection is auditable from the artifact — a
+    /// transcript that silently drops a chunk is not a diagnostic source.
+    #[serde(default)]
+    pub rejection: Option<crate::meetings_v2::transcript_health::TranscriptRejection>,
 }
 
 /// One utterance inside a chunk, with the channel that was audible while it was
@@ -198,8 +229,24 @@ pub struct TranscriptUtterance {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TranscriptSegmentStatus {
     Success,
+    /// The chunk contained no speech, so it was never decoded.
     Empty,
     Failed,
+    /// The chunk was decoded and the result was not speech — a decoder loop,
+    /// subtitle filler over silence, or text the voiced time could not hold.
+    ///
+    /// Deliberately distinct from `Empty`: `Empty` means the recorder heard
+    /// nothing, `Rejected` means Whisper produced something and it was thrown
+    /// away. Conflating them hides the failure that this change exists to make
+    /// visible.
+    Rejected,
+}
+
+impl TranscriptSegmentStatus {
+    /// Whether this segment contributes text to the derived transcript.
+    pub fn has_text(self) -> bool {
+        matches!(self, Self::Success)
+    }
 }
 
 /// A low-latency live transcript update emitted during recording.
