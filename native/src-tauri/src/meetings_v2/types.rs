@@ -64,6 +64,13 @@ pub struct MeetingSession {
     /// entitled to see that rather than wonder why the notes are short.
     #[serde(default)]
     pub rejected_chunk_count: usize,
+    /// Distinct voices the recorder had heard by the time it last wrote this.
+    ///
+    /// Live, not final: it is what the incremental registry knew mid-recording,
+    /// and the post-hoc pass may revise it. Surfaced so the recording pill can
+    /// show speakers appearing during the meeting rather than only afterwards.
+    #[serde(default)]
+    pub live_speaker_count: usize,
     /// Total voiced seconds measured across every chunk. Compared against
     /// `duration_seconds` this is the meeting's talk-to-silence ratio.
     #[serde(default)]
@@ -102,6 +109,7 @@ impl MeetingSession {
             action_items: Vec::new(),
             pending_transcription_chunks: 0,
             rejected_chunk_count: 0,
+            live_speaker_count: 0,
             voiced_seconds: 0.0,
             error_message: None,
         }
@@ -372,6 +380,43 @@ pub struct TranscriptUtterance {
     /// decoder hallucination over silence.
     #[serde(default)]
     pub no_speech_prob: f32,
+    /// Loudness of each source over exactly this utterance's span.
+    ///
+    /// The booleans above are this measurement already reduced to a verdict,
+    /// and the reduction throws away what the local-user decision needs. On a
+    /// laptop using speakers rather than headphones the microphone picks up the
+    /// remote party, so almost every utterance registers both sources and
+    /// resolves to neither — and the user's own voice ends up labelled
+    /// `Speaker 1` because nothing could prove it was theirs. Keeping the
+    /// energies lets that decision be made by *comparison* between utterances,
+    /// which always has an answer, rather than by a threshold that may never be
+    /// crossed. Both default to zero for transcripts written before v2.7.
+    #[serde(default)]
+    pub mic_rms: f32,
+    #[serde(default)]
+    pub sys_rms: f32,
+    /// The speaker the recorder assigned while the meeting was still running.
+    ///
+    /// Diarization used to run only after a recording finished, which meant a
+    /// 30-second chunk carried no speaker information at all and the readable
+    /// conversation could not exist until the end. This is the live answer,
+    /// refined by the global pass afterwards; `None` where the recorder had no
+    /// model or too little voice to place the span.
+    #[serde(default)]
+    pub live_speaker: Option<usize>,
+}
+
+impl TranscriptUtterance {
+    /// Share of this utterance's energy that came from the microphone,
+    /// `0.0..=1.0`, or `None` when neither source was measured.
+    ///
+    /// The comparison that identifies the local user. A value near 1 is
+    /// somebody speaking into this machine's microphone; near 0 is somebody
+    /// arriving through the call.
+    pub fn mic_share(&self) -> Option<f32> {
+        let total = self.mic_rms + self.sys_rms;
+        (total > 0.0).then(|| self.mic_rms / total)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,4 +1,6 @@
-use super::capture::{resolve_utterance_channel, AudioChunk};
+use super::capture::{resolve_utterance_channel, utterance_channel_energy, AudioChunk};
+use super::diarize::features as voice_features;
+use super::diarize::incremental::IncrementalDiarizer;
 use super::session_store::SessionStore;
 use super::transcript_health::{
     self, DecodeEvidence, SpeechProfile, TranscriptRejection, MIN_VOICED_SECONDS,
@@ -15,6 +17,13 @@ use tauri::{AppHandle, Emitter};
 /// Shortest chunk worth decoding at all, in samples. Half a second; below this
 /// there is not a word to find.
 const MIN_DECODABLE_SAMPLES: usize = 16_000 / 2;
+
+/// Shortest utterance worth identifying a speaker from, in seconds.
+///
+/// Below this the cepstral statistics describe whichever phoneme happened to
+/// fall in the window rather than the voice, and a wrong speaker is worse than
+/// none — it puts words in somebody's mouth in the conversation view.
+const MIN_LIVE_UTTERANCE_SECONDS: f64 = 0.8;
 
 /// How much of the previous chunk's text is carried into the next chunk's
 /// decode as context.
@@ -89,8 +98,10 @@ fn context_tail(text: &str) -> String {
 fn attribute_utterances(
     utterances: &[SttUtterance],
     chunk: &AudioChunk,
+    voices: Option<&mut IncrementalDiarizer>,
 ) -> Vec<TranscriptUtterance> {
     let chunk_duration_s = (chunk.end_time_s - chunk.start_time_s).max(0.0);
+    let mut voices = voices;
 
     utterances
         .iter()
@@ -114,6 +125,20 @@ fn attribute_utterances(
                 }
             };
 
+            let (mic_rms, sys_rms) =
+                utterance_channel_energy(&chunk.channel_track, start_offset_s, end_offset_s);
+
+            // Who spoke, decided now rather than after the meeting. The chunk
+            // carries the answer, so the readable conversation and the summary
+            // are built from text that already says who said it.
+            let live_speaker = voices.as_deref_mut().and_then(|registry| {
+                let slice = utterance_samples(&chunk.samples, start_offset_s, end_offset_s)?;
+                let features = voice_features::extract(slice, 16_000)?;
+                let total = mic_rms + sys_rms;
+                let mic_share = (total > 0.0).then(|| mic_rms / total);
+                registry.assign(&features, mic_share).map(|a| a.speaker)
+            });
+
             TranscriptUtterance {
                 index,
                 start_time_s: chunk.start_time_s + start_offset_s,
@@ -122,9 +147,27 @@ fn attribute_utterances(
                 mic_had_audio,
                 sys_had_audio,
                 no_speech_prob: utterance.no_speech_prob,
+                mic_rms,
+                sys_rms,
+                live_speaker,
             }
         })
         .collect()
+}
+
+/// The samples covering one utterance within its chunk.
+///
+/// `None` when the span falls outside the audio actually captured, or is too
+/// short to characterise a voice from — the same bound the post-hoc pass uses,
+/// so a span left unattributed after the meeting is also unattributed during it.
+fn utterance_samples(samples: &[f32], start_s: f64, end_s: f64) -> Option<&[f32]> {
+    let start = (start_s * 16_000.0) as usize;
+    let end = ((end_s * 16_000.0) as usize).min(samples.len());
+    if start >= end {
+        return None;
+    }
+    let slice = &samples[start..end];
+    (slice.len() as f64 / 16_000.0 >= MIN_LIVE_UTTERANCE_SECONDS).then_some(slice)
 }
 
 /// Utterances Whisper returned, minus the ones that are not speech.
@@ -216,6 +259,7 @@ fn resolve_decode(
     decoded: &[SttUtterance],
     chunk: &AudioChunk,
     profile: &SpeechProfile,
+    voices: Option<&mut IncrementalDiarizer>,
 ) -> DecodeOutcome {
     let (kept, dropped) = keep_spoken_utterances(decoded, profile);
     if dropped > 0 {
@@ -264,7 +308,7 @@ fn resolve_decode(
 
     DecodeOutcome {
         carry: carry_forward(&joined),
-        utterances: attribute_utterances(&kept, chunk),
+        utterances: attribute_utterances(&kept, chunk, voices),
         text: joined,
         status: TranscriptSegmentStatus::Success,
         rejection: None,
@@ -333,6 +377,11 @@ impl TranscriptionWorker {
             // prompted with it *plus* the tail of the previous chunk.
             let vocabulary_prompt = decoding_config.initial_prompt.clone();
             let mut previous_tail = String::new();
+
+            // The speaker registry for this recording. It grows as chunks land,
+            // so by the third chunk the meeting already knows how many people
+            // are in it rather than waiting for the recording to end.
+            let mut voices = IncrementalDiarizer::new();
 
             while let Ok(chunk) = chunk_rx.recv() {
                 let chunk_idx = chunk.chunk_index;
@@ -407,7 +456,9 @@ peak {:.3}); below the {:.1}s gate",
                         &effective_lang_config,
                         &chunk_config,
                     ) {
-                        Ok((decoded, _diag)) => resolve_decode(&decoded, &chunk, &profile),
+                        Ok((decoded, _diag)) => {
+                            resolve_decode(&decoded, &chunk, &profile, Some(&mut voices))
+                        }
                         Err(e) => {
                             tracing::warn!(
                                 "Worker: STT transcription error on chunk #{}: {}",
@@ -464,9 +515,11 @@ peak {:.3}); below the {:.1}s gate",
                 let segment_words = text.split_whitespace().count();
                 let rejected = segment.status == TranscriptSegmentStatus::Rejected;
                 let voiced_seconds = profile.voiced_seconds;
+                let live_speaker_count = voices.speaker_count();
                 let _ = store.update_session(&session_id, |session| {
                     session.transcript_segment_count += 1;
                     session.word_count += segment_words;
+                    session.live_speaker_count = live_speaker_count;
                     if rejected {
                         session.rejected_chunk_count += 1;
                     }
@@ -582,7 +635,7 @@ mod tests {
             })
             .collect();
 
-        let outcome = resolve_decode(&decoded, &chunk, &near_silent());
+        let outcome = resolve_decode(&decoded, &chunk, &near_silent(), None);
 
         assert_eq!(outcome.status, TranscriptSegmentStatus::Rejected);
         assert!(outcome.text.is_empty(), "rejected text must not be stored as speech");
@@ -599,7 +652,7 @@ mod tests {
     fn a_rejected_chunk_never_prompts_the_next_one() {
         let chunk = chunk_with_track(track(&[(QUIET, QUIET); 30]), 330.0, 30.0);
         let decoded = vec![utterance(0.0, 30.0, "Thank you. Thank you. Thank you. Thank you.")];
-        let outcome = resolve_decode(&decoded, &chunk, &near_silent());
+        let outcome = resolve_decode(&decoded, &chunk, &near_silent(), None);
         assert_eq!(
             outcome.carry, None,
             "carrying a loop forward is what turned one bad chunk into nine"
@@ -614,7 +667,7 @@ mod tests {
             utterance(6.0, 12.0, "That is ahead of the plan we set in July."),
         ];
 
-        let outcome = resolve_decode(&decoded, &chunk, &voiced(11.0));
+        let outcome = resolve_decode(&decoded, &chunk, &voiced(11.0), None);
 
         assert_eq!(outcome.status, TranscriptSegmentStatus::Success);
         assert!(outcome.text.contains("forty-one"));
@@ -641,7 +694,7 @@ mod tests {
             });
         }
 
-        let outcome = resolve_decode(&decoded, &chunk, &voiced(5.0));
+        let outcome = resolve_decode(&decoded, &chunk, &voiced(5.0), None);
 
         assert_eq!(outcome.status, TranscriptSegmentStatus::Success);
         assert!(outcome.text.contains("placement sheet"));
@@ -656,7 +709,7 @@ mod tests {
     #[test]
     fn a_decode_that_produced_nothing_at_all_is_empty_not_rejected() {
         let chunk = chunk_with_track(track(&[(QUIET, QUIET); 30]), 0.0, 30.0);
-        let outcome = resolve_decode(&[], &chunk, &near_silent());
+        let outcome = resolve_decode(&[], &chunk, &near_silent(), None);
         assert_eq!(outcome.status, TranscriptSegmentStatus::Empty);
         assert!(outcome.rejection.is_none());
     }
@@ -689,7 +742,7 @@ mod tests {
     fn a_polite_closing_thank_you_over_real_speech_is_not_thrown_away() {
         let chunk = chunk_with_track(track(&[(LOUD, QUIET); 30]), 0.0, 30.0);
         let decoded = vec![utterance(0.0, 2.0, "Thank you.")];
-        let outcome = resolve_decode(&decoded, &chunk, &voiced(1.8));
+        let outcome = resolve_decode(&decoded, &chunk, &voiced(1.8), None);
         assert_eq!(outcome.status, TranscriptSegmentStatus::Success);
         assert_eq!(outcome.text, "Thank you.");
     }
@@ -706,7 +759,7 @@ mod tests {
             utterance(2.0, 4.0, "Great, thanks."),
         ];
 
-        let attributed = attribute_utterances(&decoded, &chunk);
+        let attributed = attribute_utterances(&decoded, &chunk, None);
 
         assert_eq!(attributed.len(), 2);
         assert_eq!(
@@ -724,7 +777,7 @@ mod tests {
     #[test]
     fn utterance_timings_are_rebased_onto_the_session_clock() {
         let chunk = chunk_with_track(track(&[(LOUD, QUIET), (LOUD, QUIET)]), 120.0, 2.0);
-        let attributed = attribute_utterances(&[utterance(0.5, 1.5, "somewhere in the middle")], &chunk);
+        let attributed = attribute_utterances(&[utterance(0.5, 1.5, "somewhere in the middle")], &chunk, None);
         assert_eq!(attributed[0].start_time_s, 120.5);
         assert_eq!(attributed[0].end_time_s, 121.5);
         assert_eq!(attributed[0].index, 0);
@@ -733,7 +786,7 @@ mod tests {
     #[test]
     fn a_span_whisper_reports_past_the_audio_is_clamped() {
         let chunk = chunk_with_track(track(&[(LOUD, QUIET)]), 0.0, 1.0);
-        let attributed = attribute_utterances(&[utterance(0.0, 30.0, "overrun")], &chunk);
+        let attributed = attribute_utterances(&[utterance(0.0, 30.0, "overrun")], &chunk, None);
         assert_eq!(attributed[0].end_time_s, 1.0);
     }
 
@@ -744,7 +797,7 @@ mod tests {
         chunk.mic_had_audio = true;
         chunk.sys_had_audio = false;
 
-        let attributed = attribute_utterances(&[utterance(0.0, 3.0, "legacy chunk")], &chunk);
+        let attributed = attribute_utterances(&[utterance(0.0, 3.0, "legacy chunk")], &chunk, None);
         assert_eq!(
             (attributed[0].mic_had_audio, attributed[0].sys_had_audio),
             (true, false)
@@ -756,7 +809,7 @@ mod tests {
         // Whisper decoded words here, so reporting "no channel" would be worse
         // than reporting the chunk's own flags.
         let chunk = chunk_with_track(track(&[(QUIET, QUIET), (LOUD, QUIET)]), 0.0, 2.0);
-        let attributed = attribute_utterances(&[utterance(0.0, 1.0, "quiet but decoded")], &chunk);
+        let attributed = attribute_utterances(&[utterance(0.0, 1.0, "quiet but decoded")], &chunk, None);
         assert_eq!(
             (attributed[0].mic_had_audio, attributed[0].sys_had_audio),
             (true, false)

@@ -29,6 +29,12 @@
 
 pub mod cluster;
 pub mod features;
+/// Speaker assignment while a meeting is still being recorded.
+pub mod incremental;
+/// Synthetic voices that behave like real ones. Test-only, and the reason the
+/// first calibration of this module was wrong.
+#[cfg(test)]
+pub mod fixtures;
 
 use super::session_store::SessionStore;
 use super::types::{TranscriptSegment, TranscriptSegmentStatus};
@@ -42,7 +48,20 @@ use std::path::Path;
 /// Below this the MFCC statistics are dominated by whichever phoneme happened
 /// to be in the window rather than by the voice, and a wrong attribution is
 /// worse than none.
-const MIN_UTTERANCE_SECONDS: f64 = 1.0;
+const MIN_UTTERANCE_SECONDS: f64 = 0.8;
+
+/// Share of an utterance's energy that must come from the microphone before a
+/// cluster can be the local user.
+///
+/// Half, so the microphone is genuinely the dominant source for that voice
+/// rather than merely the loudest among quiet ones.
+const LOCAL_MIC_SHARE_MINIMUM: f32 = 0.5;
+
+/// How far ahead of the next cluster the local user's must sit.
+///
+/// Without a margin, two clusters differing in the third decimal would still
+/// produce a confident "Me", and the wrong one half the time.
+const LOCAL_MIC_SHARE_MARGIN: f32 = 0.15;
 
 /// How a diarization run turned out, kept alongside the derived model so the UI
 /// can explain the roster it is showing.
@@ -57,12 +76,40 @@ pub struct DiarizationReport {
     pub unplaced_count: usize,
     /// Utterances skipped because their audio was missing or too short.
     pub skipped_count: usize,
+    /// Which cluster is the person using this machine, when the recording says.
+    ///
+    /// Decided by comparing microphone share *between* clusters rather than by
+    /// testing any one utterance against a threshold. That distinction is the
+    /// fix for a reported failure: with speakers rather than headphones the
+    /// microphone picks up the remote party, so no utterance is ever cleanly
+    /// microphone-only, no threshold is ever crossed, and the user's own voice
+    /// came back labelled `Speaker 1`. A comparison always has an answer.
+    ///
+    /// `None` when no cluster stands out — an in-person meeting through one
+    /// microphone, or a recording where the user never spoke.
+    #[serde(default)]
+    pub local_cluster: Option<usize>,
     /// True when the clusters are further from each other than their members
     /// are from their own centre. False means the roster is provisional and the
     /// UI must say so.
     pub well_separated: bool,
     pub mean_within_distance: f32,
     pub min_between_distance: f32,
+    /// Speakers heard exactly once. A person who spoke once is real, and so is
+    /// a stray utterance that looked like one; the number is surfaced so the UI
+    /// can say "heard once" rather than Relay deciding which it was.
+    #[serde(default)]
+    pub singleton_speaker_count: usize,
+    /// How well the roster actually describes the recording, as a mean
+    /// silhouette in `-1.0..=1.0`.
+    ///
+    /// The number the speaker count was decided on, and therefore the number to
+    /// look at when a roster is wrong. Above 0.7 the groups are clearly
+    /// separate voices; between 0.5 and 0.7 the split is worth making and worth
+    /// checking; below 0.5 no split is made at all. Zero means one speaker,
+    /// where a silhouette is undefined.
+    #[serde(default)]
+    pub silhouette: f32,
     /// The hint the run was given, if any.
     pub expected_speakers: Option<usize>,
     pub duration_ms: u64,
@@ -117,6 +164,21 @@ pub fn diarize_session(
     session_id: &str,
     expected_speakers: Option<usize>,
 ) -> Result<Diarization, String> {
+    diarize_session_with(store, session_id, expected_speakers, false)
+}
+
+/// Runs diarization, optionally treating the meeting as in-person.
+///
+/// `assume_in_person` says everybody shared one microphone. It disables the
+/// local-user inference, because the channel split that identifies the person
+/// at this machine is meaningless when every voice arrives through the same
+/// input — and a guess there mislabels whoever it lands on.
+pub fn diarize_session_with(
+    store: &SessionStore,
+    session_id: &str,
+    expected_speakers: Option<usize>,
+    assume_in_person: bool,
+) -> Result<Diarization, String> {
     let started = std::time::Instant::now();
 
     let segments = store
@@ -136,6 +198,7 @@ The transcript and summary are unaffected."
 
     let spans = collect_spans(&segments);
     let mut utterances: Vec<cluster::Utterance> = Vec::new();
+    let mut mic_shares: HashMap<String, Option<f32>> = HashMap::new();
     let mut skipped = 0usize;
 
     // One WAV read per chunk, however many utterances it holds. Reading per
@@ -165,12 +228,15 @@ The transcript and summary are unaffected."
                 continue;
             };
             match features::extract(slice, 16_000) {
-                Some(f) => utterances.push(cluster::Utterance {
-                    id: span.segment_id.clone(),
-                    start_time_s: span.start_time_s,
-                    end_time_s: span.end_time_s,
-                    features: f,
-                }),
+                Some(f) => {
+                    mic_shares.insert(span.segment_id.clone(), span.mic_share);
+                    utterances.push(cluster::Utterance {
+                        id: span.segment_id.clone(),
+                        start_time_s: span.start_time_s,
+                        end_time_s: span.end_time_s,
+                        features: f,
+                    });
+                }
                 None => skipped += 1,
             }
         }
@@ -182,15 +248,26 @@ The transcript and summary are unaffected."
         .iter()
         .filter(|a| a.cluster.is_some())
         .count();
+    let local_cluster = if assume_in_person {
+        // One microphone carrying everybody. There is no channel evidence to
+        // separate the person holding it from the people around them, and
+        // picking the loudest would be a guess dressed as a finding.
+        None
+    } else {
+        local_cluster_from_mic_share(&clustering, &mic_shares)
+    };
 
     let report = DiarizationReport {
         cluster_count: clustering.cluster_count,
         placed_count: placed,
         unplaced_count: clustering.unplaced_count,
         skipped_count: skipped,
+        local_cluster,
         well_separated: clustering.is_well_separated(),
         mean_within_distance: clustering.mean_within_distance,
         min_between_distance: clustering.min_between_distance,
+        singleton_speaker_count: clustering.singleton_cluster_count,
+        silhouette: clustering.silhouette,
         expected_speakers,
         duration_ms: started.elapsed().as_millis() as u64,
     };
@@ -220,6 +297,48 @@ The transcript and summary are unaffected."
     })
 }
 
+/// The cluster whose utterances the microphone heard most.
+///
+/// Returns `None` unless one cluster is both microphone-dominant in absolute
+/// terms and clearly ahead of the next — a coin flip about which voice belongs
+/// to the user is worse than leaving it unattributed, because a wrong "Me"
+/// attaches the user's name to somebody else's commitments.
+fn local_cluster_from_mic_share(
+    clustering: &cluster::Clustering,
+    mic_shares: &HashMap<String, Option<f32>>,
+) -> Option<usize> {
+    let mut totals: HashMap<usize, (f32, usize)> = HashMap::new();
+    for assignment in &clustering.assignments {
+        let Some(index) = assignment.cluster else {
+            continue;
+        };
+        let Some(Some(share)) = mic_shares.get(&assignment.id) else {
+            continue;
+        };
+        let entry = totals.entry(index).or_insert((0.0, 0));
+        entry.0 += share;
+        entry.1 += 1;
+    }
+
+    let mut ranked: Vec<(usize, f32)> = totals
+        .into_iter()
+        .map(|(index, (sum, count))| (index, sum / count as f32))
+        .collect();
+    if ranked.is_empty() {
+        return None;
+    }
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let (best_index, best_share) = ranked[0];
+    if best_share < LOCAL_MIC_SHARE_MINIMUM {
+        return None;
+    }
+    match ranked.get(1) {
+        Some(&(_, runner_up)) if best_share - runner_up < LOCAL_MIC_SHARE_MARGIN => None,
+        _ => Some(best_index),
+    }
+}
+
 /// One stretch of audio to characterise, located within its chunk.
 #[derive(Debug, Clone, PartialEq)]
 struct UtteranceSpan {
@@ -231,6 +350,9 @@ struct UtteranceSpan {
     /// Offset within the chunk's own audio.
     offset_in_chunk_s: f64,
     duration_s: f64,
+    /// Share of this span's energy that came from the microphone, when the
+    /// recorder measured it. The signal that identifies the local user.
+    mic_share: Option<f32>,
 }
 
 /// Builds the list of spans to characterise from the raw transcript.
@@ -259,6 +381,7 @@ fn collect_spans(segments: &[TranscriptSegment]) -> Vec<UtteranceSpan> {
                 end_time_s: segment.end_time_s,
                 offset_in_chunk_s: 0.0,
                 duration_s: duration,
+                mic_share: None,
             });
             continue;
         }
@@ -275,6 +398,7 @@ fn collect_spans(segments: &[TranscriptSegment]) -> Vec<UtteranceSpan> {
                 end_time_s: utterance.end_time_s,
                 offset_in_chunk_s: (utterance.start_time_s - segment.start_time_s).max(0.0),
                 duration_s: duration,
+                mic_share: utterance.mic_share(),
             });
         }
     }
@@ -319,6 +443,9 @@ mod tests {
             mic_had_audio: true,
             sys_had_audio: false,
             no_speech_prob: 0.01,
+            mic_rms: 0.08,
+            sys_rms: 0.002,
+            live_speaker: None,
         }
     }
 
@@ -343,6 +470,7 @@ mod tests {
         }
     }
 
+// Probe: how far apart do *realistic* voices sit in the current feature space?
     #[test]
     fn spans_come_from_whispers_own_utterance_timings() {
         let segments = vec![segment(
@@ -425,6 +553,7 @@ mod tests {
             end_time_s: 9.0,
             offset_in_chunk_s: 4.0,
             duration_s: 5.0,
+            mic_share: Some(0.9),
         };
         let slice = slice_for(&samples, &span).unwrap();
         assert_eq!(slice.len(), 16_000 * 5);
@@ -441,6 +570,7 @@ mod tests {
             end_time_s: 25.0,
             offset_in_chunk_s: 20.0,
             duration_s: 5.0,
+            mic_share: Some(0.9),
         };
         assert!(slice_for(&samples, &span).is_none());
     }
@@ -457,6 +587,7 @@ mod tests {
             end_time_s: 5.0,
             offset_in_chunk_s: 0.0,
             duration_s: 5.0,
+            mic_share: Some(0.9),
         };
         assert!(slice_for(&samples, &span).is_none());
     }
@@ -589,6 +720,203 @@ mod tests {
         assert_ne!(cluster_of(1), cluster_of(2));
     }
 
+    /// Builds a meeting from realistic voices, with per-utterance channel
+    /// energies as the recorder would have measured them.
+    fn realistic_vault(
+        voices: &[(fixtures::VoiceProfile, f32)],
+        turns: usize,
+    ) -> VaultHarness {
+        let vault =
+            std::env::temp_dir().join(format!("relay_test_diarize_{}", uuid::Uuid::new_v4()));
+        let store = SessionStore::new(vault.clone());
+        let meeting_id = "meet_realistic".to_string();
+
+        let mut session = MeetingSession::new(meeting_id.clone(), None);
+        session.state = MeetingState::Completed;
+        store.init_session(&session).unwrap();
+
+        let mut chunk = 0usize;
+        for turn in 0..turns {
+            for (voice, mic_share) in voices {
+                let samples = fixtures::utterance_audio(voice, turn, 6.0);
+                store
+                    .write_chunk_wav(&meeting_id, chunk, &samples, 16_000)
+                    .unwrap();
+                // The energies the mixer would have recorded for this span.
+                let loudness = 0.08f32;
+                store
+                    .append_transcript_segment(
+                        &meeting_id,
+                        &TranscriptSegment {
+                            chunk_index: chunk,
+                            start_time_s: chunk as f64 * 30.0,
+                            end_time_s: chunk as f64 * 30.0 + 6.0,
+                            text: format!("turn {chunk}"),
+                            created_at: "2026-09-04T10:00:00Z".to_string(),
+                            status: TranscriptSegmentStatus::Success,
+                            // Both sources audible on every utterance, which is
+                            // what a call taken on speakers actually looks like.
+                            mic_had_audio: true,
+                            sys_had_audio: true,
+                            utterances: vec![TranscriptUtterance {
+                                index: 0,
+                                start_time_s: chunk as f64 * 30.0,
+                                end_time_s: chunk as f64 * 30.0 + 6.0,
+                                text: format!("turn {chunk}"),
+                                mic_had_audio: true,
+                                sys_had_audio: true,
+                                no_speech_prob: 0.01,
+                                mic_rms: loudness * mic_share,
+                                sys_rms: loudness * (1.0 - mic_share),
+                                live_speaker: None,
+                            }],
+                            speech: None,
+                            rejection: None,
+                        },
+                    )
+                    .unwrap();
+                chunk += 1;
+            }
+        }
+
+        VaultHarness { vault, store, meeting_id }
+    }
+
+    #[test]
+    fn the_reported_failure_is_fixed_end_to_end() {
+        // Three real-shaped voices on a call taken over speakers: every
+        // utterance registers both sources, which is why the shipped build
+        // reported "1 spoke · Speaker 1 100%" for a meeting of three.
+        let harness = realistic_vault(
+            &[
+                (fixtures::THREE_SPEAKERS[0], 0.80), // the local user
+                (fixtures::THREE_SPEAKERS[1], 0.30),
+                (fixtures::THREE_SPEAKERS[2], 0.25),
+            ],
+            3,
+        );
+
+        let diarization =
+            diarize_session(&harness.store, &harness.meeting_id, None).expect("audio is present");
+
+        assert_eq!(
+            diarization.report.cluster_count, 3,
+            "three people must come back as three speakers — silhouette {:.3}, between {:.3}",
+            diarization.report.silhouette,
+            diarization.report.min_between_distance
+        );
+        assert_eq!(
+            diarization.report.local_cluster,
+            Some(0),
+            "the voice the microphone heard most is the person using the machine"
+        );
+        assert_eq!(diarization.report.unplaced_count, 0);
+    }
+
+    #[test]
+    fn probe_vault_distances() {
+        // Six turns each so the same-speaker population is worth reading.
+        let harness = realistic_vault(
+            &[
+                (fixtures::THREE_SPEAKERS[0], 0.85),
+                (fixtures::THREE_SPEAKERS[2], 0.20),
+            ],
+            6,
+        );
+        let segments = harness.store.get_transcript_segments(&harness.meeting_id).unwrap();
+        let spans = collect_spans(&segments);
+        let mut feats: Vec<(usize, crate::meetings_v2::diarize::features::VoiceFeatures)> =
+            Vec::new();
+        for span in &spans {
+            let samples =
+                read_chunk_samples(&harness.store.chunk_path(&harness.meeting_id, span.chunk_index))
+                    .unwrap();
+            let slice = slice_for(&samples, span).unwrap();
+            let f = crate::meetings_v2::diarize::features::extract(slice, 16_000).unwrap();
+            // Voices alternate chunk by chunk in `realistic_vault`.
+            feats.push((span.chunk_index % 2, f));
+        }
+
+        let mut same = Vec::new();
+        let mut diff = Vec::new();
+        for i in 0..feats.len() {
+            for j in i + 1..feats.len() {
+                let d = crate::meetings_v2::diarize::cluster::feature_distance(
+                    &feats[i].1,
+                    &feats[j].1,
+                );
+                if feats[i].0 == feats[j].0 { same.push(d) } else { diff.push(d) }
+            }
+        }
+        let mx = |v: &Vec<f32>| v.iter().cloned().fold(0.0f32, f32::max);
+        let mn = |v: &Vec<f32>| v.iter().cloned().fold(f32::MAX, f32::min);
+        println!(
+            "VAULT PATH: same [{:.3}..{:.3}]  different [{:.3}..{:.3}]",
+            mn(&same), mx(&same), mn(&diff), mx(&diff)
+        );
+    }
+
+    #[test]
+    fn probe_vault_clustering() {
+        let harness = realistic_vault(
+            &[
+                (fixtures::THREE_SPEAKERS[0], 0.85),
+                (fixtures::THREE_SPEAKERS[2], 0.20),
+            ],
+            3,
+        );
+        let d = diarize_session(&harness.store, &harness.meeting_id, None).unwrap();
+        println!(
+            "clusters={} silhouette={:.4} within={:.4} between={:.4}",
+            d.report.cluster_count,
+            d.report.silhouette,
+            d.report.mean_within_distance,
+            d.report.min_between_distance
+        );
+        for a in &d.assignments {
+            println!("  {} -> {:?} d={:.4}", a.segment_id, a.cluster, a.distance);
+        }
+    }
+
+    #[test]
+    fn a_two_person_call_over_speakers_is_separated() {
+        let harness = realistic_vault(
+            &[
+                (fixtures::THREE_SPEAKERS[0], 0.85),
+                (fixtures::THREE_SPEAKERS[2], 0.20),
+            ],
+            3,
+        );
+        let diarization = diarize_session(&harness.store, &harness.meeting_id, None).unwrap();
+        assert_eq!(diarization.report.cluster_count, 2);
+        assert_eq!(diarization.report.local_cluster, Some(0));
+    }
+
+    #[test]
+    fn an_in_person_meeting_claims_no_local_user() {
+        // One microphone carrying everybody. Every voice has the same share, so
+        // naming one of them "Me" would mislabel whoever it landed on.
+        let harness = realistic_vault(
+            &[
+                (fixtures::THREE_SPEAKERS[0], 0.95),
+                (fixtures::THREE_SPEAKERS[1], 0.95),
+                (fixtures::THREE_SPEAKERS[2], 0.95),
+            ],
+            3,
+        );
+
+        let automatic = diarize_session(&harness.store, &harness.meeting_id, None).unwrap();
+        assert_eq!(
+            automatic.report.local_cluster, None,
+            "no voice stands out, so none may be claimed as the user's"
+        );
+
+        let marked =
+            diarize_session_with(&harness.store, &harness.meeting_id, None, true).unwrap();
+        assert_eq!(marked.report.local_cluster, None);
+        assert_eq!(marked.report.cluster_count, 3, "the voices still separate");
+    }
+
     #[test]
     fn one_voice_on_disk_comes_back_as_one_cluster() {
         let harness = VaultHarness::new(&[
@@ -666,9 +994,12 @@ mod tests {
                 placed_count: 2,
                 unplaced_count: 1,
                 skipped_count: 0,
+                local_cluster: Some(0),
                 well_separated: true,
                 mean_within_distance: 0.1,
                 min_between_distance: 0.8,
+                singleton_speaker_count: 0,
+                silhouette: 0.82,
                 expected_speakers: None,
                 duration_ms: 12,
             },

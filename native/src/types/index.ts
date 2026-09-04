@@ -1043,6 +1043,12 @@ export interface MeetingSession {
   rejected_chunk_count?: number;
   /** Voiced seconds across the whole recording. Against `duration_seconds`, the talk-to-silence ratio. */
   voiced_seconds?: number;
+  /**
+   * Distinct voices the recorder had heard by the time it last wrote this.
+   * Live rather than final — the post-hoc pass may revise it — so the recording
+   * pill can show speakers appearing during the meeting.
+   */
+  live_speaker_count?: number;
   error_message?: string | null;
 }
 
@@ -1424,9 +1430,26 @@ export interface DiarizationReport {
   placed_count: number;
   unplaced_count: number;
   skipped_count: number;
+  /**
+   * Which cluster is the person using this machine, decided by comparing
+   * microphone share between clusters rather than by any single threshold.
+   * Null when no voice stands out — an in-person meeting through one mic, or a
+   * recording where the user never spoke.
+   */
+  local_cluster?: number | null;
   well_separated: boolean;
   mean_within_distance: number;
   min_between_distance: number;
+  /** Speakers heard exactly once — real, or a stray utterance that looked like one. */
+  singleton_speaker_count?: number;
+  /**
+   * How well the roster describes the recording, as a mean silhouette in
+   * -1..1. The number the speaker count was decided on, so the number to look
+   * at when a roster is wrong. Above 0.8 the voices are clearly separate;
+   * 0.7-0.8 is worth checking; below 0.7 no split is made. Zero means one
+   * speaker, where a silhouette is undefined.
+   */
+  silhouette?: number;
   expected_speakers?: number | null;
   duration_ms: number;
 }
@@ -1782,6 +1805,20 @@ export interface TranscriptUtterance {
   sys_had_audio: boolean;
   /** Whisper's own no-speech probability for the span, for diagnostics. */
   no_speech_prob?: number;
+  /**
+   * Loudness of each source over this utterance's span. The booleans above are
+   * this measurement already reduced to a verdict, and the reduction throws
+   * away what identifying the local user needs: on speakers rather than
+   * headphones both sources register on nearly every utterance.
+   */
+  mic_rms?: number;
+  sys_rms?: number;
+  /**
+   * The speaker the recorder assigned while the meeting was still running.
+   * Refined by the global pass afterwards; null where there was too little
+   * voice to place the span.
+   */
+  live_speaker?: number | null;
 }
 
 /** The outcome of adding one meeting to-do to the Kanban board. */
