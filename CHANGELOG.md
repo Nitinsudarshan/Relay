@@ -1,5 +1,29 @@
 # Relay — Changelog
 
+## [0.34.0] - 2026-09-04
+
+### Google Calendar: the Meeting's Name, Its Invitees, and Its Agenda — Plus a Summary That Stops Coming Back Blank
+
+**Type**: minor — closes the two remaining gaps in the meetings rebuild: a calendar integration that existed in the backend and never reached the interface, and a summary that fell back to the deterministic renderer whenever a small local model answered with nothing (`native/src-tauri/src/calendar/*`, `native/src-tauri/src/meetings_v2/session_store.rs`, `native/src-tauri/src/meetings_v2/processing/context.rs`, `native/src-tauri/src/meetings_v2/processing/metadata.rs`, `native/src-tauri/src/meetings_v2/processing/mod.rs`, `native/src-tauri/src/meetings_v2/processing/summarize.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`, `native/src/types/index.ts`, `native/src/components/meetings_v2/MeetingCalendarLink.tsx`, `native/src/components/meetings_v2/MeetingsV2View.tsx`, `native/src/components/meetings_v2/MeetingMetadataHeader.tsx`, `native/src/components/settings/MeetingsSettings.tsx`).
+
+#### Features
+
+- **Google Calendar, read-only (`calendar/google.rs`, `calendar/model.rs`)**: a separate OAuth grant from the identity sign-in, on `calendar.events.readonly` alone — reading somebody's schedule is a bigger ask than knowing their email, and bundling the two would hand it over with every sign-in. Relay cannot create, move or delete an event. Tokens refresh ahead of expiry and keep their refresh token; a stored grant that cannot renew itself says so before it fails.
+- **Matching a recording to the event it was (`calendar/match_event.rs`)**: events overlapping the recording are scored rather than the first one containing its start time being taken, and two that fit equally well are refused rather than guessed between — a wrong match retitles the meeting and populates its participants with people who were not in the room. Where it declines, the candidates are shown for one click instead of the word "no".
+- **What the calendar supplies that audio cannot (`processing/context.rs`, `processing/metadata.rs`)**: the title the meeting was scheduled under, who was invited, and the agenda it was convened against. Invitees join the participant list as `INVITED` — distinct from a voice actually heard and from a name the user typed, because people are invited to meetings they do not attend, and anyone who declined is left out entirely. The agenda reaches the summarizer labelled as intent rather than outcome, for the same reason pre-meeting notes are: an agenda item nobody reached is not a thing that happened.
+- **An invitation is data, never an instruction**: titles and descriptions are written by whoever sent the invite, which means anyone who can put an event in your calendar can put text in a prompt. They are rendered inside the same evidence-not-instructions boundary as the transcript, and the invitee list carries the rule that being invited is not evidence of having spoken.
+- **Connect and disconnect in Settings › Meetings (`MeetingsSettings.tsx`)**: the backend commands existed and had no control; the reported complaint was precisely that it "does not reflect on" the interface. Disconnecting forgets the grant and leaves already-matched events alone — they are a record of what happened, not live data.
+
+#### Fixes
+
+- **A summary that came back blank now gets a second, shorter contract (`processing/summarize.rs`)**: the reported failure was "Summary unavailable — model returned an empty response" on a one-minute meeting, with the summary written by the deterministic renderer instead. Extraction had succeeded; the prose stage was handed a sixteen-section contract that a 3B local model answered with nothing. An empty answer is not a refusal and not an opinion about the facts, so the same facts go back behind a contract short enough to follow — shorter, not laxer: the invention rules, the proposal-is-not-a-decision rule, the output shape, the chosen extension, and the user's own instructions all survive the retry. Only an empty answer earns it; a provider that could not be reached will not be reached by a shorter prompt, and retrying there only doubles the wait.
+- **The fallback says what actually happened**: "model returned an empty response" alone reads as a fault in Relay. Where both attempts come back blank, the recorded reason says so in words.
+
+#### Testing
+
+- **Backend — 1150 tests (from 1117), `cargo clippy --all-targets -- -D warnings` clean.** Calendar covers attendee names recovered from addresses, declined invitees excluded, an agenda surviving while dial-in furniture does not, a description that is only a dial-in block not counting as an agenda, overlap scoring, refusal on ambiguity, and token refresh preserving the refresh token. `processing::context` covers the invitation block reaching the model labelled as evidence, invitees listed without being credited with speaking, and no block at all when nothing was matched. `processing::summarize` covers the empty-answer retry succeeding, the compact contract keeping the accuracy rules and the user's instructions, an unreachable provider not being retried, and two empty answers still producing an honest summary.
+- **Frontend — 424 tests (from 417), `tsc --noEmit` clean.** New suite for the calendar panel: pointing at Settings when nothing is connected rather than offering a control that cannot work, counting who was invited without counting who declined, clearing a wrong match, and offering the candidates when Relay refused to choose.
+
 ## [0.33.0] - 2026-09-04
 
 ### Speaker Separation Rebuilt — Realistic Calibration, Live Speakers, and Three Comparable Engines

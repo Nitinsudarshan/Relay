@@ -252,6 +252,11 @@ impl MeetingProcessor {
             .sessions
             .get_transcript_segments(meeting_id)
             .unwrap_or_default();
+        // The calendar's answer to what this meeting was called and who was
+        // invited, when a recording was matched to an event.
+        let calendar_link = self.sessions.get_calendar_link(meeting_id);
+        let calendar_event = calendar_link.as_ref().and_then(|link| link.event());
+
         let meeting_metadata = metadata::build(metadata::MetadataInput {
             session: &session,
             raw_segments: &raw_segments,
@@ -260,6 +265,7 @@ impl MeetingProcessor {
             speakers: &roster,
             names: &name_findings,
             notes: &notes,
+            calendar: calendar_event,
             diarized: diarization
                 .as_ref()
                 .is_some_and(|d| d.report.cluster_count > 0),
@@ -423,6 +429,12 @@ audio are unaffected."
         // Step 3 — speaker data, however incomplete. An empty roster is valid.
         let roster = processing.speakers.clone();
 
+        // What the invitation said this meeting was: its scheduled title, who
+        // was invited, and the agenda. Absent whenever no event was matched,
+        // which is the common case and changes nothing else.
+        let summary_calendar_link = self.sessions.get_calendar_link(meeting_id);
+        let calendar_event = summary_calendar_link.as_ref().and_then(|link| link.event());
+
         // Step 4 — the canonical meeting context: everything a model is told
         // about this meeting, assembled in one place.
         //
@@ -457,6 +469,7 @@ audio are unaffected."
             speakers: &roster,
             segments: &normalized.segments,
             notes: &notes,
+            calendar: calendar_event,
             glossary: &options.glossary,
         };
 

@@ -246,6 +246,52 @@ impl SessionStore {
         Ok(stored)
     }
 
+    /// Reads the calendar link for a meeting, if one was made.
+    ///
+    /// Absent is the normal case — no calendar connected, or nothing scheduled
+    /// — so it is not an error.
+    pub fn get_calendar_link(
+        &self,
+        session_id: &str,
+    ) -> Option<crate::calendar::MeetingCalendarLink> {
+        let path = self.session_dir(session_id).join("calendar.json");
+        let content = fs::read_to_string(path).ok()?;
+        serde_json::from_str(&content).ok()
+    }
+
+    /// Writes the calendar link beside the session's other source artifacts.
+    ///
+    /// Its own file rather than a field on `session.json` so a wrong match can
+    /// be cleared by deleting it, without touching the recording's own record.
+    pub fn save_calendar_link(
+        &self,
+        session_id: &str,
+        link: &crate::calendar::MeetingCalendarLink,
+    ) -> Result<(), String> {
+        let _guard = self.write_lock.lock_or_recover();
+        let dir = self.session_dir(session_id);
+        fs::create_dir_all(&dir).map_err(|e| format!("Failed to create meeting dir: {}", e))?;
+
+        let json = serde_json::to_string_pretty(link)
+            .map_err(|e| format!("Failed to serialize the calendar link: {}", e))?;
+        let tmp = dir.join("calendar.json.tmp");
+        fs::write(&tmp, json).map_err(|e| format!("Failed to write calendar.json.tmp: {}", e))?;
+        fs::rename(&tmp, dir.join("calendar.json"))
+            .map_err(|e| format!("Failed to commit calendar.json: {}", e))?;
+        Ok(())
+    }
+
+    /// Removes a calendar link. Missing is success — the link the user wanted
+    /// gone is gone either way.
+    pub fn clear_calendar_link(&self, session_id: &str) -> Result<(), String> {
+        let path = self.session_dir(session_id).join("calendar.json");
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("Failed to remove the calendar link: {}", e)),
+        }
+    }
+
     pub fn append_transcript_segment(
         &self,
         session_id: &str,

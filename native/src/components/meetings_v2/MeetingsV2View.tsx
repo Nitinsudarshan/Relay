@@ -29,6 +29,8 @@ import {
   MeetingProcessing,
   MeetingProcessingIndexEntry,
   MeetingSession,
+  CalendarConnection,
+  MeetingCalendarLink,
   MeetingTaskPushResult,
   RelatedMeeting,
   SharedDocument,
@@ -36,6 +38,7 @@ import {
   TranscriptSegment,
 } from '../../types';
 import { MeetingConversationTab } from './MeetingConversationTab';
+import { MeetingCalendarLinkPanel } from './MeetingCalendarLink';
 import { MeetingMetadataHeader } from './MeetingMetadataHeader';
 import { MeetingProcessingStatus } from './MeetingProcessingStatus';
 import {
@@ -112,6 +115,8 @@ export const MeetingsV2View: React.FC = () => {
   const [isRenamingSpeaker, setIsRenamingSpeaker] = useState<boolean>(false);
   const [isIdentifyingSpeakers, setIsIdentifyingSpeakers] = useState<boolean>(false);
   const [speakerError, setSpeakerError] = useState<string | null>(null);
+  const [calendar, setCalendar] = useState<CalendarConnection | null>(null);
+  const [calendarLink, setCalendarLink] = useState<MeetingCalendarLink | null>(null);
   const [busyActionItemId, setBusyActionItemId] = useState<string | null>(null);
   const [isAddingAllTasks, setIsAddingAllTasks] = useState<boolean>(false);
   const [isPromoting, setIsPromoting] = useState<boolean>(false);
@@ -357,6 +362,32 @@ export const MeetingsV2View: React.FC = () => {
     };
   }, [selectedSessionId]);
 
+  // Whether a calendar is connected at all. Asked once: it changes in Settings,
+  // not while somebody is reading a meeting.
+  useEffect(() => {
+    invoke<CalendarConnection>('get_calendar_connection')
+      .then(setCalendar)
+      .catch((err) => console.error('Failed to read the calendar connection:', err));
+  }, []);
+
+  // The calendar link is source data like the notes: it exists for a meeting
+  // that has never been processed, and must stay readable when processing failed.
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    let cancelled = false;
+    setCalendarLink(null);
+    invoke<MeetingCalendarLink | null>('get_meeting_v2_calendar_link', {
+      sessionId: selectedSessionId,
+    })
+      .then((loaded) => {
+        if (!cancelled) setCalendarLink(loaded);
+      })
+      .catch((err) => console.error('Failed to load the calendar link:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSessionId]);
+
   // The backend emits this whenever derived data changes — including from the
   // automatic run after a recording stops — so the view stays current without
   // polling the pipeline.
@@ -524,6 +555,26 @@ export const MeetingsV2View: React.FC = () => {
    * Errors propagate to the tab, which shows them inline: a rejected name
    * correction the user cannot see is a correction they will assume worked.
    */
+  /** Matches the selected recording to the calendar event it was. */
+  const handleMatchCalendar = async (sessionId: string) => {
+    setCalendarLink(
+      await invoke<MeetingCalendarLink>('link_meeting_v2_to_calendar', { sessionId }),
+    );
+  };
+
+  /** Pins a meeting to an event the user chose, or clears the link. */
+  const handleChooseCalendarEvent = async (
+    sessionId: string,
+    eventId: string | null,
+  ) => {
+    setCalendarLink(
+      await invoke<MeetingCalendarLink | null>('set_meeting_v2_calendar_event', {
+        sessionId,
+        eventId,
+      }),
+    );
+  };
+
   /** Builds the shareable document for the selected meeting. */
   const handleShareMeeting = async (
     sessionId: string,
@@ -974,6 +1025,18 @@ export const MeetingsV2View: React.FC = () => {
                     liveElapsedSeconds={isSelectedActive ? activeElapsedSec : null}
                     wordCount={selectedSessionWords}
                   />
+                  {!isSelectedActive && (
+                    <div className="mt-1.5">
+                      <MeetingCalendarLinkPanel
+                        link={calendarLink}
+                        isConnected={calendar?.connected ?? false}
+                        onMatch={() => handleMatchCalendar(selectedSession.id)}
+                        onChoose={(eventId) =>
+                          handleChooseCalendarEvent(selectedSession.id, eventId)
+                        }
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 

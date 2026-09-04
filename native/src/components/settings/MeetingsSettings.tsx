@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { CalendarDays, Plus, Trash2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import type {
   AppSettings,
+  CalendarConnection,
   DefaultSummaryModeSetting,
   DiarizationEngineId,
   MeetingExtensionSetting,
@@ -59,6 +61,51 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
     instructions: '',
   });
   const [extensionError, setExtensionError] = useState<string | null>(null);
+  const [calendar, setCalendar] = useState<CalendarConnection | null>(null);
+  const [calendarBusy, setCalendarBusy] = useState(false);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
+
+  const loadCalendar = useCallback(async () => {
+    try {
+      setCalendar(await invoke<CalendarConnection>('get_calendar_connection'));
+    } catch {
+      // A connection that cannot be read is reported as disconnected rather
+      // than as an error: nothing is broken until someone tries to use it.
+      setCalendar({ connected: false });
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCalendar();
+  }, [loadCalendar]);
+
+  const connectCalendar = async () => {
+    setCalendarBusy(true);
+    setCalendarError(null);
+    try {
+      setCalendar(await invoke<CalendarConnection>('connect_google_calendar'));
+    } catch (error) {
+      setCalendarError(
+        error instanceof Error ? error.message : String(error ?? 'Connecting failed.'),
+      );
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
+
+  const disconnectCalendar = async () => {
+    setCalendarBusy(true);
+    setCalendarError(null);
+    try {
+      setCalendar(await invoke<CalendarConnection>('disconnect_google_calendar'));
+    } catch (error) {
+      setCalendarError(
+        error instanceof Error ? error.message : String(error ?? 'Disconnecting failed.'),
+      );
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
 
   const update = (patch: Partial<MeetingSettings>) =>
     onChange({ ...settings, meetings: { ...meetings, ...patch } });
@@ -301,6 +348,56 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
               />
             </div>
           )}
+      </div>
+
+      <div className="flex flex-col gap-3 p-4 rounded-lg border border-border/60 bg-card/40">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+              <CalendarDays className="w-3.5 h-3.5" />
+              Google Calendar
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Read-only. Gives a recording the name it was invited under, the
+              people who were invited to it, and whatever the agenda said —
+              three things audio alone cannot supply. Relay cannot create, move
+              or delete anything on your calendar.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={calendar?.connected ? disconnectCalendar : connectCalendar}
+            disabled={calendarBusy}
+            className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-opacity disabled:opacity-50 ${
+              calendar?.connected
+                ? 'border border-border text-foreground hover:bg-muted'
+                : 'bg-primary text-primary-foreground hover:opacity-90'
+            }`}
+          >
+            {calendarBusy
+              ? 'Working…'
+              : calendar?.connected
+                ? 'Disconnect'
+                : 'Connect'}
+          </button>
+        </div>
+
+        {calendar?.connected && (
+          <p className="text-[11px] text-muted-foreground">
+            Connected as{' '}
+            <span className="text-foreground">
+              {calendar.account_email ?? calendar.account_name ?? 'your Google account'}
+            </span>
+            . Open a finished meeting and choose “Match to calendar” to attach
+            its event.
+          </p>
+        )}
+        {calendar?.problem && (
+          <p className="text-[11px] text-destructive">{calendar.problem}</p>
+        )}
+        {calendarError && (
+          <p className="text-[11px] text-destructive">{calendarError}</p>
+        )}
       </div>
 
       <div className="flex flex-col gap-3 p-4 rounded-lg border border-border/60 bg-card/40">

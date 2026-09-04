@@ -1514,7 +1514,9 @@ export type ParticipantOrigin =
   | 'DIARIZATION'
   | 'SELF_INTRODUCED'
   | 'MENTIONED'
-  | 'STATED';
+  | 'STATED'
+  /** Invited, per the calendar event. Weaker evidence than a voice actually heard. */
+  | 'INVITED';
 
 /** One person the meeting involved, whether or not they were heard. */
 export interface Participant {
@@ -1641,6 +1643,76 @@ export interface MeetingSelfTestReport {
    * machine.
    */
   whisper_on_silence?: string | null;
+}
+
+// =========================================================================
+// CALENDAR
+// =========================================================================
+
+/** Whether somebody said they were coming. */
+export type AttendanceResponse = 'ACCEPTED' | 'DECLINED' | 'TENTATIVE' | 'NO_RESPONSE';
+
+export interface CalendarAttendee {
+  /** A display name, or one recovered from the address. Never a bare email. */
+  name: string;
+  email?: string | null;
+  response: AttendanceResponse;
+  is_organizer: boolean;
+  /** True for the account that authorized Relay — the person recording. */
+  is_self: boolean;
+}
+
+/**
+ * One event, reduced to what a meeting record needs: what it was called, who
+ * was invited, and what it was for.
+ *
+ * External content. Titles and descriptions are written by whoever sent the
+ * invitation, and are shown as data rather than followed as instructions.
+ */
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  starts_at: string;
+  ends_at: string;
+  description?: string | null;
+  location?: string | null;
+  attendees: CalendarAttendee[];
+  conference_url?: string | null;
+  organizer?: string | null;
+}
+
+export interface EventMatch {
+  event: CalendarEvent;
+  /** Share of the recording that fell inside the event, 0..1. */
+  overlap: number;
+}
+
+/**
+ * Why no event was matched. Three reasons rather than a bare null, because
+ * "nothing was scheduled" and "two things fit equally" need different responses
+ * from the user.
+ */
+export type NoMatchReason = 'NOTHING_SCHEDULED' | 'TOO_LITTLE_OVERLAP' | 'AMBIGUOUS';
+
+export type MatchOutcome =
+  | ({ kind: 'MATCHED' } & EventMatch)
+  | { kind: 'NONE'; reason: NoMatchReason; candidates: EventMatch[] };
+
+/** What the calendar had to say about one recording. */
+export interface MeetingCalendarLink {
+  outcome: MatchOutcome;
+  linked_at: string;
+  /** True when a person chose this event rather than Relay matching it. */
+  chosen_by_user: boolean;
+}
+
+/** Whether Relay can read the calendar, and as whom. */
+export interface CalendarConnection {
+  connected: boolean;
+  account_email?: string | null;
+  account_name?: string | null;
+  /** A stored connection that cannot currently be used, in words naming the fix. */
+  problem?: string | null;
 }
 
 /** A meeting rendered as one Markdown document, for sharing. */
