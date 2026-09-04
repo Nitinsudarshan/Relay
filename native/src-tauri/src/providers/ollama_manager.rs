@@ -132,3 +132,128 @@ async fn model_is_present(host: &str, model: &str) -> bool {
         })
         .unwrap_or(false)
 }
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OllamaModelDetails {
+    pub name: String,
+    pub model: String,
+    pub size: Option<u64>,
+    pub digest: Option<String>,
+    pub modified_at: Option<String>,
+    pub parameter_size: Option<String>,
+    pub quantization_level: Option<String>,
+    pub format: Option<String>,
+    pub family: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OllamaPromptTestResult {
+    pub success: bool,
+    pub latency_ms: u64,
+    pub response: Option<String>,
+    pub error: Option<String>,
+    pub model: String,
+}
+
+pub async fn list_installed_models(host: &str) -> Result<Vec<OllamaModelDetails>, String> {
+    let res = reqwest::Client::new()
+        .get(format!("{}/api/tags", host))
+        .timeout(Duration::from_secs(4))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to query Ollama at {}: {}", host, e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("Ollama returned HTTP {}", res.status()));
+    }
+
+    let json = res
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("Failed to parse Ollama tags response: {}", e))?;
+
+    let mut list = Vec::new();
+    if let Some(models) = json["models"].as_array() {
+        for m in models {
+            let name = m["name"].as_str().unwrap_or("").to_string();
+            if name.is_empty() {
+                continue;
+            }
+            let details = &m["details"];
+            list.push(OllamaModelDetails {
+                name: name.clone(),
+                model: m["model"].as_str().unwrap_or(&name).to_string(),
+                size: m["size"].as_u64(),
+                digest: m["digest"].as_str().map(|s| s.to_string()),
+                modified_at: m["modified_at"].as_str().map(|s| s.to_string()),
+                parameter_size: details["parameter_size"].as_str().map(|s| s.to_string()),
+                quantization_level: details["quantization_level"].as_str().map(|s| s.to_string()),
+                format: details["format"].as_str().map(|s| s.to_string()),
+                family: details["family"].as_str().map(|s| s.to_string()),
+            });
+        }
+    }
+    Ok(list)
+}
+
+pub async fn test_ollama_prompt(
+    host: &str,
+    model: &str,
+    prompt: &str,
+) -> OllamaPromptTestResult {
+    let start = std::time::Instant::now();
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({
+        "model": model,
+        "prompt": prompt,
+        "stream": false,
+    });
+
+    let res = client
+        .post(format!("{}/api/generate", host))
+        .timeout(Duration::from_secs(15))
+        .json(&body)
+        .send()
+        .await;
+
+    let latency_ms = start.elapsed().as_millis() as u64;
+
+    match res {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(val) => OllamaPromptTestResult {
+                        success: true,
+                        latency_ms,
+                        response: val["response"].as_str().map(|s| s.trim().to_string()),
+                        error: None,
+                        model: model.to_string(),
+                    },
+                    Err(e) => OllamaPromptTestResult {
+                        success: false,
+                        latency_ms,
+                        response: None,
+                        error: Some(format!("Failed to parse response JSON: {}", e)),
+                        model: model.to_string(),
+                    },
+                }
+            } else {
+                OllamaPromptTestResult {
+                    success: false,
+                    latency_ms,
+                    response: None,
+                    error: Some(format!("HTTP error {}", resp.status())),
+                    model: model.to_string(),
+                }
+            }
+        }
+        Err(e) => OllamaPromptTestResult {
+            success: false,
+            latency_ms,
+            response: None,
+            error: Some(e.to_string()),
+            model: model.to_string(),
+        },
+    }
+}
+

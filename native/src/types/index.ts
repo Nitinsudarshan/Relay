@@ -1617,3 +1617,6 @@ export interface TalkbackSettings {
   sources: TalkbackSourceType[];
   end_of_turn_silence_ms: number;
 }
+
+export * from './models';
+

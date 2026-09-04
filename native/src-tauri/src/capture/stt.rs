@@ -1,4 +1,5 @@
 use crate::sync::MutexExt;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "whisper-local")]
 use std::sync::{Arc, Mutex};
@@ -169,6 +170,253 @@ pub async fn resolve_dictation_model_path(
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SttModelInfo {
+    pub name: String,
+    pub filename: String,
+    pub path: String,
+    pub size_bytes: u64,
+    pub exists: bool,
+    pub is_managed: bool,
+    pub profile: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SttModelsOverview {
+    pub active_model_name: String,
+    pub active_model_path: String,
+    pub active_profile: String,
+    pub models_dir: String,
+    pub models: Vec<SttModelInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SttModelTestResult {
+    pub success: bool,
+    pub path: String,
+    pub size_bytes: u64,
+    pub latency_ms: u64,
+    pub error: Option<String>,
+}
+
+pub fn get_stt_models_overview(
+    models_dir: &Path,
+    stt_settings: &crate::settings::SttSettings,
+) -> SttModelsOverview {
+    let mut models = Vec::new();
+
+    // 1. Fast Base Model
+    let fast_path = models_dir.join(FAST_MODEL_FILENAME);
+    let fast_exists = fast_path.is_file();
+    let fast_size = if fast_exists {
+        std::fs::metadata(&fast_path).map(|m| m.len()).unwrap_or(0)
+    } else {
+        0
+    };
+    models.push(SttModelInfo {
+        name: "Whisper Base".to_string(),
+        filename: FAST_MODEL_FILENAME.to_string(),
+        path: fast_path.to_string_lossy().to_string(),
+        size_bytes: fast_size,
+        exists: fast_exists,
+        is_managed: true,
+        profile: Some("fast".to_string()),
+        status: if fast_exists && fast_size > 1_000_000 {
+            "ready".to_string()
+        } else {
+            "missing".to_string()
+        },
+    });
+
+    // 2. Accurate Small Model (Production Default)
+    let default_path = models_dir.join(DEFAULT_MODEL_FILENAME);
+    let default_exists = default_path.is_file();
+    let default_size = if default_exists {
+        std::fs::metadata(&default_path).map(|m| m.len()).unwrap_or(0)
+    } else {
+        0
+    };
+    models.push(SttModelInfo {
+        name: "Whisper Small (Default)".to_string(),
+        filename: DEFAULT_MODEL_FILENAME.to_string(),
+        path: default_path.to_string_lossy().to_string(),
+        size_bytes: default_size,
+        exists: default_exists,
+        is_managed: true,
+        profile: Some("accurate".to_string()),
+        status: if default_exists && default_size > 1_000_000 {
+            "ready".to_string()
+        } else {
+            "missing".to_string()
+        },
+    });
+
+    // 3. Scan models_dir for any other .bin files
+    if let Ok(entries) = std::fs::read_dir(models_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext == "bin" {
+                        let fname = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        if fname != FAST_MODEL_FILENAME && fname != DEFAULT_MODEL_FILENAME {
+                            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                            models.push(SttModelInfo {
+                                name: format!("Custom ({})", fname),
+                                filename: fname,
+                                path: path.to_string_lossy().to_string(),
+                                size_bytes: size,
+                                exists: true,
+                                is_managed: true,
+                                profile: Some("custom".to_string()),
+                                status: if size > 1_000_000 { "ready".to_string() } else { "missing".to_string() },
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Configured custom model path if specified outside or inside models_dir
+    let custom_path_str = stt_settings
+        .whisper_model_path
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+
+    let mut custom_model_active = false;
+    if let Some(cpath) = custom_path_str {
+        let p = Path::new(cpath);
+        let fname = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+        if fname != FAST_MODEL_FILENAME && fname != DEFAULT_MODEL_FILENAME {
+            custom_model_active = true;
+            let already_listed = models.iter().any(|m| m.path == cpath);
+            if !already_listed {
+                let exists = p.is_file();
+                let size = if exists {
+                    std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+                } else {
+                    0
+                };
+                models.push(SttModelInfo {
+                    name: format!("Custom ({})", fname),
+                    filename: fname,
+                    path: cpath.to_string(),
+                    size_bytes: size,
+                    exists,
+                    is_managed: false,
+                    profile: Some("custom".to_string()),
+                    status: if exists && size > 1_000_000 {
+                        "ready".to_string()
+                    } else {
+                        "missing".to_string()
+                    },
+                });
+            }
+        }
+    }
+
+    // Resolve Active Model and Profile
+    let (active_profile, active_model_path, active_model_name) = if custom_model_active {
+        let cpath = custom_path_str.unwrap_or_default();
+        let fname = Path::new(cpath).file_name().unwrap_or_default().to_string_lossy().to_string();
+        ("custom".to_string(), cpath.to_string(), format!("Custom ({})", fname))
+    } else {
+        match stt_settings.dictation_quality {
+            crate::settings::DictationSttQuality::Fast => (
+                "fast".to_string(),
+                fast_path.to_string_lossy().to_string(),
+                "Whisper Base".to_string(),
+            ),
+            crate::settings::DictationSttQuality::Accurate => (
+                "accurate".to_string(),
+                default_path.to_string_lossy().to_string(),
+                "Whisper Small (Default)".to_string(),
+            ),
+        }
+    };
+
+    SttModelsOverview {
+        active_model_name,
+        active_model_path,
+        active_profile,
+        models_dir: models_dir.to_string_lossy().to_string(),
+        models,
+    }
+}
+
+pub fn test_stt_model_file(path_str: &str) -> SttModelTestResult {
+    let start = std::time::Instant::now();
+    let p = Path::new(path_str);
+    if !p.exists() {
+        return SttModelTestResult {
+            success: false,
+            path: path_str.to_string(),
+            size_bytes: 0,
+            latency_ms: start.elapsed().as_millis() as u64,
+            error: Some("File does not exist".to_string()),
+        };
+    }
+    let meta = match std::fs::metadata(p) {
+        Ok(m) => m,
+        Err(e) => {
+            return SttModelTestResult {
+                success: false,
+                path: path_str.to_string(),
+                size_bytes: 0,
+                latency_ms: start.elapsed().as_millis() as u64,
+                error: Some(format!("Could not read metadata: {}", e)),
+            };
+        }
+    };
+
+    let size_bytes = meta.len();
+    if size_bytes < 1_000_000 {
+        return SttModelTestResult {
+            success: false,
+            path: path_str.to_string(),
+            size_bytes,
+            latency_ms: start.elapsed().as_millis() as u64,
+            error: Some(format!(
+                "File too small ({} bytes). Expected a Whisper GGML model (>50MB).",
+                size_bytes
+            )),
+        };
+    }
+
+    match std::fs::File::open(p) {
+        Ok(mut f) => {
+            use std::io::Read;
+            let mut header = [0u8; 16];
+            if let Err(e) = f.read_exact(&mut header) {
+                return SttModelTestResult {
+                    success: false,
+                    path: path_str.to_string(),
+                    size_bytes,
+                    latency_ms: start.elapsed().as_millis() as u64,
+                    error: Some(format!("Could not read header bytes: {}", e)),
+                };
+            }
+            SttModelTestResult {
+                success: true,
+                path: path_str.to_string(),
+                size_bytes,
+                latency_ms: start.elapsed().as_millis() as u64,
+                error: None,
+            }
+        }
+        Err(e) => SttModelTestResult {
+            success: false,
+            path: path_str.to_string(),
+            size_bytes,
+            latency_ms: start.elapsed().as_millis() as u64,
+            error: Some(format!("Failed to open file: {}", e)),
+        },
+    }
+}
+
 use crate::settings::LanguageSettings;
 
 /// Resolved speech-to-text language configuration passed to the STT engine.
@@ -230,8 +478,6 @@ impl SttLanguageConfig {
         }
     }
 }
-
-use serde::{Deserialize, Serialize};
 
 /// Sampling strategies supported by Whisper decoding.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1099,5 +1345,28 @@ mod tests {
         settings.dictation_threads = Some(128);
         let cfg_high = WhisperDecodingConfig::for_dictation(&settings);
         assert_eq!(cfg_high.n_threads, Some(64));
+    }
+
+    #[test]
+    fn test_get_stt_models_overview_and_verification() {
+        let temp_dir = std::env::temp_dir().join("relay_test_models_dir_test");
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let mut settings = crate::settings::SttSettings::default();
+        settings.dictation_quality = crate::settings::DictationSttQuality::Fast;
+
+        let overview = get_stt_models_overview(&temp_dir, &settings);
+        assert_eq!(overview.active_profile, "fast");
+        assert_eq!(overview.active_model_name, "Whisper Base");
+        assert_eq!(overview.models.len(), 2);
+        assert_eq!(overview.models[0].filename, FAST_MODEL_FILENAME);
+        assert_eq!(overview.models[1].filename, DEFAULT_MODEL_FILENAME);
+
+        // Test file verification on nonexistent file
+        let res = test_stt_model_file("nonexistent_model.bin");
+        assert!(!res.success);
+        assert_eq!(res.error, Some("File does not exist".to_string()));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

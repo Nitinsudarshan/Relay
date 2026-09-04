@@ -7,6 +7,8 @@ import {
   VaultLocationInfo,
   RelayAccount,
   AudioDeviceInfo,
+  OllamaModelDetails,
+  SttModelsOverview,
 } from '../../types';
 import {
   Cpu,
@@ -34,13 +36,15 @@ import {
   Power,
   Clipboard,
   MessageCircle,
+  Activity,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { HotkeyRecorder } from './HotkeyRecorder';
-import { SttDiagnosticsView } from './SttDiagnosticsView';
 import { TrashSettings } from './TrashSettings';
 import { AccountSettings } from './AccountSettings';
 import { DeveloperSettingsView } from './DeveloperSettingsView';
@@ -147,10 +151,12 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 interface ProviderSettingsProps {
   initialSection?: SettingsSection;
+  onNavigateTab?: (tab: string) => void;
 }
 
 export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
   initialSection = 'general',
+  onNavigateTab,
 }) => {
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
 
@@ -176,14 +182,51 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
     | { state: 'unreachable'; message: string };
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus>({ state: 'checking' });
 
-  const checkLocalLlm = async () => {
+  // LLM Model discovery state
+  const [ollamaModels, setOllamaModels] = useState<OllamaModelDetails[]>([]);
+  const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
+  const [customLlmMode, setCustomLlmMode] = useState(false);
+
+  // STT Model discovery state
+  const [sttOverview, setSttOverview] = useState<SttModelsOverview | null>(null);
+  const [loadingSttModels, setLoadingSttModels] = useState(false);
+  const [customSttMode, setCustomSttMode] = useState(false);
+
+  const checkLocalLlm = async (overrideHost?: string) => {
     setOllamaStatus({ state: 'checking' });
     try {
       const status = await invoke<OllamaStatus>('ensure_local_llm_ready');
       setOllamaStatus(status);
+      await fetchOllamaModels(overrideHost);
     } catch (err) {
       console.error('Failed to check local Ollama status', err);
       setOllamaStatus({ state: 'unreachable', message: 'Could not reach the backend' });
+    }
+  };
+
+  const fetchOllamaModels = async (host?: string) => {
+    setLoadingOllamaModels(true);
+    try {
+      const models = await invoke<OllamaModelDetails[]>('get_available_llm_models', {
+        host: host || settings.provider.ollama_host || null,
+      });
+      setOllamaModels(models || []);
+    } catch (err) {
+      setOllamaModels([]);
+    } finally {
+      setLoadingOllamaModels(false);
+    }
+  };
+
+  const fetchSttModels = async () => {
+    setLoadingSttModels(true);
+    try {
+      const overview = await invoke<SttModelsOverview>('get_available_stt_models');
+      setSttOverview(overview);
+    } catch (err) {
+      console.error('Failed to query STT models', err);
+    } finally {
+      setLoadingSttModels(false);
     }
   };
 
@@ -201,6 +244,7 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
       if (status.state === 'ready') {
         setSettings((prev) => ({ ...prev, stt: { ...prev.stt, whisper_model_path: status.path } }));
       }
+      await fetchSttModels();
     } catch (err) {
       console.error('Failed to check local Whisper model status', err);
       setSttModelStatus({ state: 'failed', message: 'Could not reach the backend' });
@@ -373,12 +417,13 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
     if (!loading && activeSection === 'general') {
       loadVaultLocation();
     }
-    if (!loading && activeSection === 'dictation') {
-      loadAudioDevices();
-    }
-    if (!loading && activeSection === 'advanced' && settings.provider.active_provider === 'ollama') {
-      checkLocalLlm();
+    if (!loading && activeSection === 'advanced') {
+      if (settings.provider.active_provider === 'ollama') {
+        checkLocalLlm();
+        fetchOllamaModels();
+      }
       checkSttModel();
+      fetchSttModels();
     }
     if (!loading && activeSection === 'privacy') {
       loadAccountState();
@@ -406,6 +451,10 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
       setSaved(true);
       setError('');
       setTimeout(() => setSaved(false), 2000);
+      fetchSttModels();
+      if (settings.provider.active_provider === 'ollama') {
+        fetchOllamaModels();
+      }
     } catch (err) {
       console.error('Failed to save settings', err);
       setError('Failed to save settings');
@@ -1314,120 +1363,336 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
 
         {/* 5. AI MODELS & STT SECTION */}
         {activeSection === 'advanced' && (
-          <div className="space-y-8">
+          <div className="space-y-6 animate-in fade-in-50">
+            {/* Dedicated Diagnostics Redirect Banner */}
+            <div className="p-4 rounded-lg border border-primary/20 bg-primary/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0 mt-0.5 sm:mt-0">
+                  <Activity className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-foreground">Need Technical Testing or Observability?</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                    Live audio telemetry, VAD decisions, decoding diagnostics, and STT accuracy benchmarking have moved to the dedicated Diagnostics page.
+                  </p>
+                </div>
+              </div>
+              {onNavigateTab && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onNavigateTab('diagnostics')}
+                  className="text-xs gap-1.5 shrink-0 self-start sm:self-auto border-primary/30 text-primary hover:bg-primary/10"
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  Open Diagnostics
+                </Button>
+              )}
+            </div>
+
             <form onSubmit={handleSave} className="space-y-6">
               <div>
                 <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">
                   AI INTELLIGENCE & SPEECH ENGINE
                 </p>
-                <h2 className="text-lg font-bold text-foreground">Local Ollama vs Cloud LLM & Whisper STT</h2>
+                <h2 className="text-lg font-bold text-foreground">Model Configuration & Selection</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Configure local or cloud LLM intelligence and universal speech-to-text models.
+                </p>
               </div>
 
-              <div className="space-y-4">
-                {/* Active LLM Backend Toggle */}
-                <div className="py-3 border-b border-border flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold text-foreground">Active LLM Execution Backend</p>
-                    <p className="text-[11px] text-muted-foreground">100% Local Ollama ($0) vs OpenAI / Gemini Cloud API</p>
+              <div className="space-y-6">
+                {/* 1. ACTIVE LLM BACKEND */}
+                <div className="p-4 rounded-lg border border-border bg-card/60 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-border/60">
+                    <div>
+                      <p className="text-xs font-semibold text-foreground">Active LLM Execution Backend</p>
+                      <p className="text-[11px] text-muted-foreground">100% Local Ollama ($0) vs OpenAI / Gemini / Claude Cloud API</p>
+                    </div>
+                    <div className="flex bg-muted p-1 rounded-lg border border-border shrink-0 self-start sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSettings({ ...settings, provider: { ...settings.provider, active_provider: 'ollama' } })
+                        }
+                        className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
+                          settings.provider.active_provider === 'ollama'
+                            ? 'bg-card text-foreground font-semibold shadow-xs'
+                            : 'text-muted-foreground'
+                        }`}
+                      >
+                        Local Ollama
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSettings({ ...settings, provider: { ...settings.provider, active_provider: 'cloud_openai' } })
+                        }
+                        className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
+                          settings.provider.active_provider !== 'ollama'
+                            ? 'bg-card text-foreground font-semibold shadow-xs'
+                            : 'text-muted-foreground'
+                        }`}
+                      >
+                        Cloud API
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex bg-muted p-1 rounded-lg border border-border">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSettings({ ...settings, provider: { ...settings.provider, active_provider: 'ollama' } })
-                      }
-                      className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                        settings.provider.active_provider === 'ollama'
-                          ? 'bg-card text-foreground font-semibold shadow-xs'
-                          : 'text-muted-foreground'
-                      }`}
-                    >
-                      Local Ollama
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSettings({ ...settings, provider: { ...settings.provider, active_provider: 'cloud_openai' } })
-                      }
-                      className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                        settings.provider.active_provider !== 'ollama'
-                          ? 'bg-card text-foreground font-semibold shadow-xs'
-                          : 'text-muted-foreground'
-                      }`}
-                    >
-                      Cloud API
-                    </button>
-                  </div>
-                </div>
 
-                {/* Local Ollama Params */}
-                {settings.provider.active_provider === 'ollama' ? (
-                  <div className="py-3 border-b border-border space-y-4">
-                    <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                      OLLAMA LOCAL CONFIGURATION
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label htmlFor="ollama-host" className="block text-xs font-medium text-foreground mb-1">
+                  {/* Local Ollama Options */}
+                  {settings.provider.active_provider === 'ollama' ? (
+                    <div className="space-y-4">
+                      {/* Host & Health */}
+                      <div className="space-y-2">
+                        <label htmlFor="ollama-host" className="block text-xs font-medium text-foreground">
                           Ollama Host Endpoint
                         </label>
-                        <Input
-                          id="ollama-host"
-                          value={settings.provider.ollama_host}
-                          onChange={(e) =>
-                            setSettings({ ...settings, provider: { ...settings.provider, ollama_host: e.target.value } })
-                          }
-                          placeholder="http://localhost:11434"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="ollama-model" className="block text-xs font-medium text-foreground mb-1">
-                          Target Model Name
-                        </label>
-                        <Input
-                          id="ollama-model"
-                          value={settings.provider.ollama_model}
-                          onChange={(e) =>
-                            setSettings({ ...settings, provider: { ...settings.provider, ollama_model: e.target.value } })
-                          }
-                          placeholder="llama3.2:latest"
-                        />
-                      </div>
-                    </div>
+                        <div className="flex gap-2">
+                          <Input
+                            id="ollama-host"
+                            value={settings.provider.ollama_host}
+                            onChange={(e) =>
+                              setSettings({ ...settings, provider: { ...settings.provider, ollama_host: e.target.value } })
+                            }
+                            placeholder="http://localhost:11434"
+                            className="text-xs"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => checkLocalLlm(settings.provider.ollama_host)}
+                            className="text-xs gap-1.5 shrink-0"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${ollamaStatus.state === 'checking' ? 'animate-spin' : ''}`} />
+                            Scan Models
+                          </Button>
+                        </div>
 
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/40 border border-border">
-                      <div className="flex items-center gap-2 text-xs">
-                        {ollamaStatus.state === 'checking' && (
-                          <Badge variant="outline" className="text-[10px] font-mono">Checking local Ollama…</Badge>
-                        )}
-                        {ollamaStatus.state === 'running' && (
-                          <Badge variant="emerald" className="text-[10px] font-mono">Ollama running ✓</Badge>
-                        )}
-                        {ollamaStatus.state === 'started' && (
-                          <Badge variant="emerald" className="text-[10px] font-mono">Relay started Ollama for you ✓</Badge>
-                        )}
-                        {ollamaStatus.state === 'not_installed' && (
-                          <Badge variant="outline" className="text-[10px] font-mono border-amber-500/50 text-amber-500">
-                            Ollama isn't installed — install it once, Relay handles the rest
-                          </Badge>
-                        )}
-                        {ollamaStatus.state === 'unreachable' && (
-                          <Badge variant="outline" className="text-[10px] font-mono border-destructive/50 text-destructive">
-                            {ollamaStatus.message}
-                          </Badge>
-                        )}
+                        {/* Status readout */}
+                        <div className="flex items-center gap-2 text-xs pt-1">
+                          {ollamaStatus.state === 'checking' && (
+                            <Badge variant="outline" className="text-[10px] font-mono">Checking local Ollama…</Badge>
+                          )}
+                          {ollamaStatus.state === 'running' && (
+                            <Badge variant="emerald" className="text-[10px] font-mono">Ollama running ✓</Badge>
+                          )}
+                          {ollamaStatus.state === 'started' && (
+                            <Badge variant="emerald" className="text-[10px] font-mono">Relay started Ollama for you ✓</Badge>
+                          )}
+                          {ollamaStatus.state === 'not_installed' && (
+                            <Badge variant="outline" className="text-[10px] font-mono border-amber-500/50 text-amber-500">
+                              Ollama isn't installed — install Ollama once to run locally
+                            </Badge>
+                          )}
+                          {ollamaStatus.state === 'unreachable' && (
+                            <Badge variant="outline" className="text-[10px] font-mono border-destructive/50 text-destructive">
+                              {ollamaStatus.message || 'Ollama is unreachable'}
+                            </Badge>
+                          )}
+                        </div>
                       </div>
-                      <Button type="button" size="sm" variant="ghost" onClick={checkLocalLlm} className="text-xs h-7">
-                        Retry
-                      </Button>
+
+                      {/* Active & Available Models */}
+                      <div className="space-y-3 pt-2">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-xs font-semibold text-foreground">
+                            Active LLM Model
+                          </label>
+                          {/* Readiness badge for currently selected model */}
+                          {(() => {
+                            const isInstalled = ollamaModels.some(
+                              (m) => m.name === settings.provider.ollama_model || m.model === settings.provider.ollama_model
+                            );
+                            if (ollamaStatus.state === 'checking') {
+                              return <Badge variant="outline" className="text-[10px] font-mono">↻ Checking</Badge>;
+                            }
+                            if (ollamaStatus.state === 'running' || ollamaStatus.state === 'started') {
+                              if (isInstalled) {
+                                return <Badge variant="emerald" className="text-[10px] font-mono">✓ Ready · Ollama</Badge>;
+                              } else {
+                                return (
+                                  <Badge variant="outline" className="text-[10px] font-mono border-amber-500/50 text-amber-500">
+                                    ⚠ Model not found
+                                  </Badge>
+                                );
+                              }
+                            }
+                            return (
+                              <Badge variant="outline" className="text-[10px] font-mono border-destructive/50 text-destructive">
+                                ✕ Backend unavailable
+                              </Badge>
+                            );
+                          })()}
+                        </div>
+
+                        {/* Active Model Summary Card */}
+                        <div className="p-3 rounded-lg border border-primary/30 bg-primary/5 flex items-center justify-between">
+                          <div className="space-y-0.5">
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground font-semibold">
+                              Current Selection
+                            </span>
+                            <p className="text-sm font-bold text-foreground font-mono">
+                              {settings.provider.ollama_model || 'llama3.2:latest'}
+                            </p>
+                          </div>
+                          {ollamaModels.some((m) => m.name === settings.provider.ollama_model) ? (
+                            <Badge variant="emerald" className="text-[10px] font-mono">
+                              Installed
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] font-mono border-amber-500/50 text-amber-500">
+                              Not in registry
+                            </Badge>
+                          )}
+                        </div>
+
+                        {/* Available Models Picker */}
+                        <div className="space-y-2">
+                          <span className="text-[11px] font-medium text-foreground">
+                            Available Models from Ollama ({ollamaModels.length})
+                          </span>
+
+                          {loadingOllamaModels ? (
+                            <div className="p-4 text-center text-xs text-muted-foreground border border-dashed rounded-lg">
+                              Scanning models from Ollama…
+                            </div>
+                          ) : ollamaModels.length > 0 ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {ollamaModels.map((m) => {
+                                const isSelected = settings.provider.ollama_model === m.name;
+                                return (
+                                  <button
+                                    key={m.name}
+                                    type="button"
+                                    onClick={() =>
+                                      setSettings({
+                                        ...settings,
+                                        provider: { ...settings.provider, ollama_model: m.name },
+                                      })
+                                    }
+                                    className={`p-2.5 rounded-lg border text-left transition-all flex items-start justify-between ${
+                                      isSelected
+                                        ? 'border-primary bg-primary/10 text-foreground shadow-xs'
+                                        : 'border-border bg-muted/20 text-muted-foreground hover:border-border/80 hover:text-foreground'
+                                    }`}
+                                  >
+                                    <div className="space-y-1 min-w-0 pr-2">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-xs font-semibold font-mono truncate">{m.name}</span>
+                                        {isSelected && (
+                                          <Check className="w-3.5 h-3.5 text-primary shrink-0" />
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        {m.parameter_size && (
+                                          <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono">
+                                            {m.parameter_size}
+                                          </Badge>
+                                        )}
+                                        {m.quantization_level && (
+                                          <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono">
+                                            {m.quantization_level}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                                      {m.size ? `${(m.size / (1024 * 1024 * 1024)).toFixed(1)} GB` : ''}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="p-3.5 rounded-lg border border-border bg-muted/20 text-xs text-muted-foreground space-y-1">
+                              <p className="font-semibold text-foreground">No installed models found in Ollama.</p>
+                              <p className="text-[11px]">
+                                Run <code className="px-1.5 py-0.5 rounded bg-muted border border-border font-mono text-foreground">ollama pull llama3.2</code> in your terminal, or enter a model name manually below.
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Manual / Custom Model toggle */}
+                          <div className="pt-2">
+                            <button
+                              type="button"
+                              onClick={() => setCustomLlmMode(!customLlmMode)}
+                              className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
+                            >
+                              {customLlmMode ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              <span>{customLlmMode ? 'Hide advanced model input' : 'Specify custom / unpulled model name manually…'}</span>
+                            </button>
+
+                            {customLlmMode && (
+                              <div className="mt-2 space-y-1 animate-in fade-in-50">
+                                <label htmlFor="custom-ollama-model" className="block text-[11px] text-muted-foreground">
+                                  Manual Model Name
+                                </label>
+                                <Input
+                                  id="custom-ollama-model"
+                                  value={settings.provider.ollama_model}
+                                  onChange={(e) =>
+                                    setSettings({
+                                      ...settings,
+                                      provider: { ...settings.provider, ollama_model: e.target.value },
+                                    })
+                                  }
+                                  placeholder="e.g. qwen2.5:7b, gemma3:4b"
+                                  className="text-xs"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="py-3 border-b border-border space-y-4">
-                    <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                      CLOUD API CREDENTIALS
-                    </p>
-                    <div className="space-y-3">
+                  ) : (
+                    /* Cloud API Options */
+                    <div className="space-y-4">
+                      {/* Cloud Provider Select */}
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-medium text-foreground">
+                          Cloud Provider
+                        </label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { id: 'cloud_openai', label: 'OpenAI' },
+                            { id: 'cloud_gemini', label: 'Google Gemini' },
+                            { id: 'cloud_anthropic', label: 'Anthropic Claude' },
+                          ].map((prov) => (
+                            <button
+                              key={prov.id}
+                              type="button"
+                              onClick={() =>
+                                setSettings({
+                                  ...settings,
+                                  provider: {
+                                    ...settings.provider,
+                                    active_provider: prov.id as any,
+                                    cloud_model:
+                                      prov.id === 'cloud_gemini'
+                                        ? 'gemini-2.0-flash'
+                                        : prov.id === 'cloud_anthropic'
+                                        ? 'claude-3-5-sonnet-20241022'
+                                        : 'gpt-4o-mini',
+                                  },
+                                })
+                              }
+                              className={`p-2 rounded-lg border text-xs font-semibold transition-all ${
+                                settings.provider.active_provider === prov.id
+                                  ? 'border-primary bg-primary/10 text-foreground'
+                                  : 'border-border bg-card/50 text-muted-foreground hover:border-border/80'
+                              }`}
+                            >
+                              {prov.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* API Key */}
                       <div>
                         <label htmlFor="cloud-api-key" className="block text-xs font-medium text-foreground mb-1">
                           API Secret Key
@@ -1440,134 +1705,262 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                             setSettings({ ...settings, provider: { ...settings.provider, cloud_api_key: e.target.value } })
                           }
                           placeholder="sk-..."
+                          className="text-xs"
                         />
                       </div>
-                      <div>
-                        <label htmlFor="cloud-model-name" className="block text-xs font-medium text-foreground mb-1">
+
+                      {/* Cloud Model Selector */}
+                      <div className="space-y-2">
+                        <label className="block text-xs font-medium text-foreground">
                           Cloud Model Selection
                         </label>
-                        <Input
-                          id="cloud-model-name"
-                          value={settings.provider.cloud_model || ''}
-                          onChange={(e) =>
-                            setSettings({ ...settings, provider: { ...settings.provider, cloud_model: e.target.value } })
-                          }
-                          placeholder="gpt-4o-mini"
-                        />
+                        <div className="grid grid-cols-3 gap-2">
+                          {(settings.provider.active_provider === 'cloud_gemini'
+                            ? ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']
+                            : settings.provider.active_provider === 'cloud_anthropic'
+                            ? ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229']
+                            : ['gpt-4o-mini', 'gpt-4o', 'o3-mini']
+                          ).map((mName) => (
+                            <button
+                              key={mName}
+                              type="button"
+                              onClick={() =>
+                                setSettings({
+                                  ...settings,
+                                  provider: { ...settings.provider, cloud_model: mName },
+                                })
+                              }
+                              className={`p-2 rounded-lg border text-xs font-mono transition-all ${
+                                settings.provider.cloud_model === mName
+                                  ? 'border-primary bg-primary/10 text-foreground font-bold'
+                                  : 'border-border bg-card/50 text-muted-foreground hover:border-border/80'
+                              }`}
+                            >
+                              {mName}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div>
+                          <Input
+                            id="cloud-model-custom"
+                            value={settings.provider.cloud_model || ''}
+                            onChange={(e) =>
+                              setSettings({ ...settings, provider: { ...settings.provider, cloud_model: e.target.value } })
+                            }
+                            placeholder="Custom model name..."
+                            className="text-xs mt-1"
+                          />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
 
-                {/* Local Whisper Model Path */}
-                <div className="py-3 border-b border-border space-y-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Mic className="w-4 h-4 text-primary" />
-                    <p className="text-xs font-semibold text-foreground">Speech-to-Text Model (Whisper)</p>
+                {/* 2. SPEECH-TO-TEXT MODEL (WHISPER) */}
+                <div className="p-4 rounded-lg border border-border bg-card/60 space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-border/60">
+                    <div className="flex items-center gap-2">
+                      <Mic className="w-4 h-4 text-primary" />
+                      <div>
+                        <p className="text-xs font-semibold text-foreground">Speech-to-Text Model (Whisper)</p>
+                        <p className="text-[11px] text-muted-foreground">On-device acoustic transcription via GGML Whisper</p>
+                      </div>
+                    </div>
+                    {/* Active STT Model Status Badge */}
+                    {sttOverview?.models.find((m) => m.path === sttOverview.active_model_path)?.status === 'ready' ? (
+                      <Badge variant="emerald" className="text-[10px] font-mono">✓ Model ready · Whisper</Badge>
+                    ) : sttModelStatus.state === 'checking' ? (
+                      <Badge variant="outline" className="text-[10px] font-mono">↻ Checking</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] font-mono border-amber-500/50 text-amber-500">
+                        ⚠ Model missing
+                      </Badge>
+                    )}
                   </div>
 
-                  {/* Dictation Performance Profile */}
-                  <div>
-                    <label className="block text-[11px] font-medium text-foreground mb-1.5">
+                  {/* Active STT Model Readout */}
+                  <div className="p-3 rounded-lg border border-primary/30 bg-primary/5 flex items-center justify-between">
+                    <div className="space-y-0.5 min-w-0 pr-2">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground font-semibold">
+                        Active STT Model
+                      </span>
+                      <p className="text-sm font-bold text-foreground font-mono truncate">
+                        {sttOverview?.active_model_name || 'Whisper Small (Default)'}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground font-mono truncate">
+                        {sttOverview?.active_model_path || '%APPDATA%\\Relay\\models\\ggml-small.bin'}
+                      </p>
+                    </div>
+                    <Badge variant="emerald" className="text-[10px] font-mono shrink-0">
+                      Active
+                    </Badge>
+                  </div>
+
+                  {/* Available STT Models List */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-foreground">
+                        Available STT Models on Disk ({sttOverview?.models.length || 0})
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={fetchSttModels}
+                        disabled={loadingSttModels}
+                        className="text-[11px] h-6 px-2 gap-1"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${loadingSttModels ? 'animate-spin' : ''}`} />
+                        Scan
+                      </Button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {sttOverview?.models.map((m) => {
+                        const isActive = m.path === sttOverview.active_model_path;
+                        return (
+                          <div
+                            key={m.filename}
+                            className={`p-2.5 rounded-lg border text-xs space-y-1 ${
+                              isActive
+                                ? 'border-primary bg-primary/10 text-foreground'
+                                : 'border-border bg-muted/20 text-muted-foreground'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-foreground flex items-center gap-1.5">
+                                {m.name}
+                                {isActive && <Check className="w-3.5 h-3.5 text-primary" />}
+                              </span>
+                              <Badge
+                                variant={m.status === 'ready' ? 'emerald' : 'outline'}
+                                className="text-[9px] font-mono"
+                              >
+                                {m.status === 'ready' ? '✓ Ready' : '⚠ Missing'}
+                              </Badge>
+                            </div>
+                            <div className="text-[10px] font-mono text-muted-foreground flex items-center justify-between">
+                              <span>{m.filename}</span>
+                              <span>{m.size_bytes ? `${(m.size_bytes / (1024 * 1024)).toFixed(0)} MB` : ''}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Performance Profile Toggle */}
+                  <div className="space-y-2 pt-2">
+                    <label className="block text-xs font-semibold text-foreground">
                       Universal Dictation Performance Profile
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
                           setSettings({
                             ...settings,
-                            stt: { ...settings.stt, dictation_quality: 'fast', dictationQuality: 'fast' },
-                          })
-                        }
-                        className={`p-2.5 rounded-lg border text-left transition-all ${
-                          (settings.stt.dictation_quality ?? 'fast') === 'fast'
-                            ? 'border-primary bg-primary/10 text-foreground shadow-sm'
+                            stt: {
+                              ...settings.stt,
+                              dictation_quality: 'fast',
+                              dictationQuality: 'fast',
+                              whisper_model_path: null,
+                            },
+                          });
+                        }}
+                        className={`p-3 rounded-lg border text-left transition-all ${
+                          (settings.stt.dictation_quality ?? 'fast') === 'fast' &&
+                          !settings.stt.whisper_model_path
+                            ? 'border-primary bg-primary/10 text-foreground shadow-xs'
                             : 'border-border bg-card/50 text-muted-foreground hover:border-border/80'
                         }`}
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs font-semibold text-foreground">Fast (Base)</span>
+                          <span className="text-xs font-bold text-foreground">Fast (Base Model)</span>
                           <Badge variant="emerald" className="text-[9px] px-1.5 py-0">~0.8s</Badge>
                         </div>
-                        <p className="text-[10px] text-muted-foreground leading-snug">
-                          3x lower latency using Base model. Recommended for conversational speech.
+                        <p className="text-[11px] text-muted-foreground leading-snug">
+                          3x lower latency using Base model (39M params). Recommended for conversational speech.
                         </p>
                       </button>
 
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
                           setSettings({
                             ...settings,
-                            stt: { ...settings.stt, dictation_quality: 'accurate', dictationQuality: 'accurate' },
-                          })
-                        }
-                        className={`p-2.5 rounded-lg border text-left transition-all ${
-                          settings.stt.dictation_quality === 'accurate'
-                            ? 'border-primary bg-primary/10 text-foreground shadow-sm'
+                            stt: {
+                              ...settings.stt,
+                              dictation_quality: 'accurate',
+                              dictationQuality: 'accurate',
+                              whisper_model_path: null,
+                            },
+                          });
+                        }}
+                        className={`p-3 rounded-lg border text-left transition-all ${
+                          settings.stt.dictation_quality === 'accurate' &&
+                          !settings.stt.whisper_model_path
+                            ? 'border-primary bg-primary/10 text-foreground shadow-xs'
                             : 'border-border bg-card/50 text-muted-foreground hover:border-border/80'
                         }`}
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs font-semibold text-foreground">Accurate (Small)</span>
+                          <span className="text-xs font-bold text-foreground">Accurate (Small Model)</span>
                           <Badge variant="outline" className="text-[9px] px-1.5 py-0">~2.4s</Badge>
                         </div>
-                        <p className="text-[10px] text-muted-foreground leading-snug">
-                          Maximum vocabulary fidelity. Recommended for long technical monologues.
+                        <p className="text-[11px] text-muted-foreground leading-snug">
+                          Maximum vocabulary fidelity (244M params). Recommended for complex technical monologues.
                         </p>
                       </button>
                     </div>
                   </div>
 
-                  <div>
-                    <label htmlFor="whisper-model-path" className="block text-[11px] text-muted-foreground mb-1">
-                      Custom Model Path (optional — leave blank for auto-managed models)
-                    </label>
-                    <Input
-                      id="whisper-model-path"
-                      placeholder="Leave blank for auto-managed models, or point at a custom GGML file"
-                      value={settings.stt.whisper_model_path || ''}
-                      onChange={(e) => setSettings({ ...settings, stt: { ...settings.stt, whisper_model_path: e.target.value } })}
-                    />
-                  </div>
+                  {/* Custom Model Path (Advanced) */}
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setCustomSttMode(!customSttMode)}
+                      className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
+                    >
+                      {customSttMode ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                      <span>{customSttMode ? 'Hide custom model path' : 'Use external or custom GGML model file…'}</span>
+                    </button>
 
-                  <div className="flex items-center justify-between mt-2 p-3 rounded-lg bg-muted/40 border border-border">
-                    <div className="text-xs">
-                      {sttModelStatus.state === 'checking' && (
-                        <Badge variant="outline" className="text-[10px] font-mono">Checking Whisper model…</Badge>
-                      )}
-                      {sttModelStatus.state === 'ready' && (
-                        <Badge variant="emerald" className="text-[10px] font-mono">
-                          Model ready: {sttModelStatus.path.split(/[\\/]/).pop()}
-                        </Badge>
-                      )}
-                      {sttModelStatus.state === 'failed' && (
-                        <Badge variant="outline" className="text-[10px] font-mono border-destructive/50 text-destructive">
-                          {sttModelStatus.message}
-                        </Badge>
-                      )}
-                    </div>
-                    <Button type="button" size="sm" variant="ghost" onClick={checkSttModel} className="text-xs h-7">
-                      Retry Check
-                    </Button>
+                    {customSttMode && (
+                      <div className="mt-2 space-y-1 animate-in fade-in-50">
+                        <label htmlFor="whisper-model-path" className="block text-[11px] text-muted-foreground">
+                          Custom GGML Model Path (leave empty to use Relay managed models)
+                        </label>
+                        <Input
+                          id="whisper-model-path"
+                          placeholder="e.g. C:\models\ggml-medium.bin"
+                          value={settings.stt.whisper_model_path || ''}
+                          onChange={(e) =>
+                            setSettings({
+                              ...settings,
+                              stt: { ...settings.stt, whisper_model_path: e.target.value },
+                            })
+                          }
+                          className="text-xs"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <Button type="submit" size="sm" variant="default" className="mt-2">
-                  Save Engine Settings
-                </Button>
+                <div className="flex items-center justify-between pt-2">
+                  <Button type="submit" size="sm" variant="default" className="text-xs">
+                    Save Engine Settings
+                  </Button>
+                  {saved && (
+                    <span className="text-xs font-medium text-emerald-500 animate-in fade-in-50">
+                      Settings saved successfully ✓
+                    </span>
+                  )}
+                </div>
               </div>
             </form>
-
-            {/* STT Diagnostics & Quality Inspector */}
-            <div className="pt-4 border-t border-border">
-              <SttDiagnosticsView
-                settings={settings}
-                onUpdateSettings={setSettings}
-                onSaveSettings={handleSaveDirect}
-              />
-            </div>
           </div>
         )}
 

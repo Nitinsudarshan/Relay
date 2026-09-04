@@ -41,6 +41,7 @@ export type TabType =
   | 'files'
   | 'captures'
   | 'talkback'
+  | 'diagnostics'
   | 'settings';
 
 interface NativeSidebarProps {
@@ -121,6 +122,13 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       label: 'Talkback',
       icon: MessageCircle,
       color: 'text-emerald-400',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+    {
+      id: 'diagnostics' as TabType,
+      label: 'Diagnostics',
+      icon: Activity,
+      color: 'text-violet-400',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {

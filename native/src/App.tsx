@@ -7,6 +7,7 @@ import { FilesPage } from './components/files/FilesPage';
 import { CapturesPage } from './components/captures/CapturesPage';
 
 import { ProviderSettings, type SettingsSection } from './components/settings/ProviderSettings';
+import { DiagnosticsPage } from './components/diagnostics/DiagnosticsPage';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RelayLogo } from './components/common/RelayLogo';
 import { ChangelogModal } from './components/common/ChangelogModal';
@@ -30,6 +31,7 @@ import {
   Settings,
   Sidebar as SidebarIcon,
   ChevronRight,
+  Activity,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -42,6 +44,7 @@ export type MainTabType =
   | 'files'
   | 'captures'
   | 'talkback'
+  | 'diagnostics'
   | 'settings';
 
 const TAB_LABELS: Record<MainTabType, string> = {
@@ -51,6 +54,7 @@ const TAB_LABELS: Record<MainTabType, string> = {
   files: 'Files',
   captures: 'Captures',
   talkback: 'Talkback',
+  diagnostics: 'Diagnostics',
   settings: 'Settings',
 };
 
@@ -282,6 +286,16 @@ export const App: React.FC = () => {
             glowColor="emerald"
           />
         );
+      case 'diagnostics':
+        return (
+          <PageHeader
+            badge={{ label: 'System Observability', icon: Activity, variant: 'purple' }}
+            title="Inspect & test"
+            highlightText="Relay's engines."
+            description="Real-time telemetry, audio & VAD inspection, speech-to-text accuracy tests, and LLM latency benchmarks."
+            glowColor="purple"
+          />
+        );
       case 'settings':
         return (
           <PageHeader
@@ -391,9 +405,16 @@ export const App: React.FC = () => {
 
           {activeTab === 'talkback' && <TalkbackPage />}
 
+          {activeTab === 'diagnostics' && (
+            <DiagnosticsPage onNavigateTab={(tab) => setActiveTab(tab as MainTabType)} />
+          )}
 
-
-          {activeTab === 'settings' && <ProviderSettings initialSection={settingsSection} />}
+          {activeTab === 'settings' && (
+            <ProviderSettings
+              initialSection={settingsSection}
+              onNavigateTab={(tab) => setActiveTab(tab as MainTabType)}
+            />
+          )}
         </main>
       </div>
     </div>

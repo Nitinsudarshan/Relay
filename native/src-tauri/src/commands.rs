@@ -1292,6 +1292,49 @@ pub async fn ensure_local_llm_ready(state: State<'_, AppState>) -> Result<Ollama
 }
 
 #[tauri::command]
+pub async fn get_available_llm_models(
+    host: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::providers::OllamaModelDetails>, CommandError> {
+    let host = host.unwrap_or_else(|| {
+        state.settings.lock_or_recover().provider.ollama_host.clone()
+    });
+    crate::providers::list_installed_models(&host)
+        .await
+        .map_err(|e| CommandError::new("OLLAMA_QUERY_FAILED", &e))
+}
+
+#[tauri::command]
+pub async fn test_llm_prompt(
+    host: Option<String>,
+    model: String,
+    prompt: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::providers::OllamaPromptTestResult, CommandError> {
+    let host = host.unwrap_or_else(|| {
+        state.settings.lock_or_recover().provider.ollama_host.clone()
+    });
+    let prompt = prompt.unwrap_or_else(|| "Hello! Reply with 'Relay AI ready' in under 5 words.".to_string());
+    Ok(crate::providers::test_ollama_prompt(&host, &model, &prompt).await)
+}
+
+#[tauri::command]
+pub async fn get_available_stt_models(
+    state: State<'_, AppState>,
+) -> Result<crate::capture::stt::SttModelsOverview, CommandError> {
+    let models_dir = state.config_dir.join("models");
+    let stt_settings = state.settings.lock_or_recover().stt.clone();
+    Ok(crate::capture::stt::get_stt_models_overview(&models_dir, &stt_settings))
+}
+
+#[tauri::command]
+pub async fn test_stt_model(
+    model_path: String,
+) -> Result<crate::capture::stt::SttModelTestResult, CommandError> {
+    Ok(crate::capture::stt::test_stt_model_file(&model_path))
+}
+
+#[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, CommandError> {
     Ok(state.settings.lock_or_recover().clone())
 }

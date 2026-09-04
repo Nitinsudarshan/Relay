@@ -1,5 +1,27 @@
 # Relay — Changelog
 
+## [0.30.0] - 2026-09-04
+
+### Data-Driven Model Discovery & Dedicated Diagnostics Hub
+
+**Type**: minor — restructured Relay's AI Models & STT configuration to provide data-driven model selection with verified readiness states, and moved all deep telemetry, audio inspection, VAD decisions, and latency benchmarking into a dedicated Diagnostics hub (`native/src-tauri/src/providers/*`, `native/src-tauri/src/capture/stt.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`, `native/src/types/models.ts`, `native/src/components/settings/ProviderSettings.tsx`, `native/src/components/diagnostics/DiagnosticsPage.tsx`, `native/src/components/common/NativeSidebar.tsx`, `native/src/App.tsx`).
+
+#### Features & Architecture
+
+- **Data-Driven LLM Model Selector (`ProviderSettings.tsx`, `ollama_manager.rs`, `commands.rs`)**: Replaced free-text "Target Model Name" input with an active model readout and available models picker queried dynamically from Ollama (`/api/tags`). Displays parameter sizes (e.g. 3.2B, 7.6B), quantization levels (Q4_K_M), format, and clear model status badges (`✓ Ready · Ollama`, `⚠ Model not found`, `✕ Backend unavailable`). Provides an advanced collapsible toggle for manual/unpulled model names. Supports cloud provider models (OpenAI, Gemini, Anthropic) with provider-specific recommended presets.
+- **Data-Driven STT Model Selection (`ProviderSettings.tsx`, `capture/stt.rs`)**: Refactored STT configuration to clearly distinguish active model, available models on disk (`ggml-base.bin`, `ggml-small.bin`, custom models), and dictation performance profile (Fast vs Accurate). Verified readiness states ensure no model is marked as ready unless verified on disk (>1MB and readable header).
+- **Dedicated Diagnostics Hub (`DiagnosticsPage.tsx`, `NativeSidebar.tsx`, `App.tsx`)**: Created a dedicated top-level and settings-linked Diagnostics view structured into:
+  - *System Status Matrix*: Real-time readiness cards for LLM Backend, Active LLM Model, STT Engine, Active STT Model, and TTS.
+  - *Speech-to-Text Diagnostics*: Hosts full audio telemetry, RMS, peak amplitude, VAD decisions, decoding diagnostics, last transcription inspector, initial prompt domain bias tuning, and WAV evaluation benchmarking.
+  - *LLM Diagnostics*: Interactive prompt test tool measuring live roundtrip latency in ms and response generation, plus detailed table of all installed models in Ollama with parameters, quantization, and disk sizes.
+  - *System & Audio Runtime*: Lists detected OS audio devices with default mic indication and runtime filesystem paths.
+- **Clean Configuration Page**: Removed all raw diagnostics, telemetry, and debugging inspectors from the Settings → AI Models & STT flow so normal configuration remains focused, concise, and clean.
+
+#### Testing
+
+- **Backend**: Added `test_get_stt_models_overview_and_verification` unit test in `capture/stt.rs`. All providers and STT tests pass; `cargo clippy --all-targets -- -D warnings` clean.
+- **Frontend**: Added `ModelSettings.test.tsx` testing dynamic model discovery, model switching, readiness badges, and Diagnostics page tab navigation. All 6 tests passing; `tsc --noEmit` clean.
+
 ## [0.29.0] - 2026-09-04
 
 ### Unified Analysis Foundation (01–10) — Source, Analysis Contract, Prompt Registry, Derived Data
