@@ -1,5 +1,16 @@
 # Relay — Changelog
 
+## [0.35.2] - 2026-09-05
+
+### Fix GitHub Actions CI: Manifest Version Sync and Headless Clipboard Test
+
+**Type**: patch — bug fixes to restore GitHub Actions CI green status across all jobs.
+
+#### Fixes
+
+- **Headless Linux Clipboard Access (`native/src-tauri/src/hotkeys/injection.rs`)**: Updated `test_native_copy_to_clipboard` to check whether an active OS display/clipboard server is available. On headless Linux CI runners without an X11/Wayland display server, `arboard::Clipboard::new()` returns an error; the test now skips gracefully rather than panicking on unwrap. On desktop sessions (e.g. Windows), full clipboard read and write verification continues to execute.
+- **Repository Rules Version Synchronization (`package.json`, `native/package.json`, `native/src-tauri/tauri.conf.json`, `native/src-tauri/Cargo.toml`)**: Synchronized version across all four project manifests to match `VERSION` (`0.35.2`), satisfying `rules/version-and-changelog.md` and enabling `npm run verify:rules` to pass cleanly in the `repo-rules` CI job.
+
 ## [0.35.1] - 2026-09-04
 
 ### Eight Rule Files Distilled From Ponytail and GSD Core

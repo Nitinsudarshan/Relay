@@ -348,11 +348,17 @@ mod tests {
 
     #[test]
     fn test_native_copy_to_clipboard() {
+        // Headless CI environments (e.g. Linux runners without an X11/Wayland display server)
+        // do not have an accessible OS clipboard. Skip when no clipboard backend is available.
+        let mut cb = match arboard::Clipboard::new() {
+            Ok(cb) => cb,
+            Err(_) => return,
+        };
+
         let test_str = "Relay dictation clipboard test string";
         let res = copy_to_clipboard(test_str);
         assert!(res.is_ok(), "Failed to copy to clipboard: {:?}", res);
 
-        let mut cb = arboard::Clipboard::new().expect("Failed to open clipboard");
         let text = cb.get_text().expect("Failed to read text from clipboard");
         assert_eq!(text, test_str);
     }
