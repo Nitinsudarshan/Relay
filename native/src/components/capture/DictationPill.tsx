@@ -429,6 +429,11 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
           }
           if (successTimerRef.current) clearTimeout(successTimerRef.current);
           successTimerRef.current = setTimeout(() => setPhase('collapsed'), 2200);
+        } else if (payload.status === 'FOCUS_CHANGED') {
+          setPhase('success');
+          setSuccessMessage(payload.message || 'Copied to clipboard (focus moved)');
+          if (successTimerRef.current) clearTimeout(successTimerRef.current);
+          successTimerRef.current = setTimeout(() => setPhase('collapsed'), 3200);
         } else if (payload.status === 'ERROR' || payload.message) {
           setPhase('error');
           setErrorMessage(payload.message || 'Capture processing failed');

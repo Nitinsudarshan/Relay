@@ -1,5 +1,17 @@
 # Relay — Changelog
 
+## [0.31.2] - 2026-09-04
+
+### Dictation Focus Restoration & Tab-Switch Safe Injection Guard
+
+**Type**: patch — prevented simulated keystrokes from typing into the wrong browser tab or application if user focus shifted during dictation, added target window focus restoration via Win32 `SetForegroundWindow`/`AttachThreadInput`, and surfaced immediate clipboard paste feedback (`native/src-tauri/src/hotkeys/injection.rs`, `native/src-tauri/src/hotkeys/mod.rs`, `native/src/components/capture/DictationPill.tsx`, `native/src-tauri/Cargo.toml`).
+
+#### Fixes & Improvements
+
+- **Target Window Focus Capture & Restoration (`injection.rs`, `hotkeys/mod.rs`)**: When dictation starts via hotkey, Relay captures the target window context (`HWND`, window title, PID). If the user switched windows during speech or transcription, Relay safely restores focus to the original target window before simulating keystrokes via Windows `SetForegroundWindow` and `AttachThreadInput`.
+- **Tab-Switch Injection Guard (`injection.rs`)**: Because browser tabs share a single top-level OS window handle, simulated keystrokes into a changed tab would corrupt unintended form fields or active web apps. Relay inspects the foreground window's current title (with normalization for unread counts and document dirty flags) right before typing; if the user switched tabs, keystroke simulation is aborted.
+- **Safe Clipboard Fallback & Notification (`hotkeys/mod.rs`, `DictationPill.tsx`)**: When injection is guarded due to a tab change or lost window, Relay verifies the text is secured on the OS clipboard and notifies the user with a distinct `FOCUS_CHANGED` status ("Tab changed — transcription copied to clipboard (Ctrl+V)") in the floating dictation pill.
+
 ## [0.31.1] - 2026-09-04
 
 ### Native OS Clipboard Dictation Copy & Latency Optimization

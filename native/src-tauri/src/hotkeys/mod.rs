@@ -90,6 +90,7 @@ pub struct DictationState {
     pub active: bool,
     pub generation: u64,
     pub key_down: bool,
+    pub target_focus: Option<injection::TargetFocusContext>,
 }
 
 impl DictationState {
@@ -115,6 +116,7 @@ impl DictationState {
 
         self.active = true;
         self.generation += 1;
+        self.target_focus = injection::capture_target_focus_context();
         PressOutcome::StartSession(self.generation)
     }
 
@@ -144,6 +146,15 @@ impl DictationState {
         self.active = false;
         self.key_down = false;
         Some(self.generation)
+    }
+
+    /// Stops session and extracts the target focus context captured at the start of dictation.
+    pub fn try_stop_with_focus(
+        &mut self,
+        expected_generation: Option<u64>,
+    ) -> Option<(u64, Option<injection::TargetFocusContext>)> {
+        let focus = self.target_focus.take();
+        self.try_stop(expected_generation).map(|gen| (gen, focus))
     }
 }
 
@@ -474,10 +485,10 @@ fn stop_dictation_session(
 ) {
     let t_release = t_key_release.unwrap_or_else(std::time::Instant::now);
 
-    let session_generation = {
+    let (session_generation, target_focus) = {
         let mut guard = dictation_state.lock_or_recover();
-        match guard.try_stop(expected_generation) {
-            Some(gen) => gen,
+        match guard.try_stop_with_focus(expected_generation) {
+            Some(res) => res,
             None => return,
         }
     };
@@ -606,13 +617,39 @@ fn stop_dictation_session(
                 let _ = app.emit("dictation-clipboard-copy", &final_text);
             }
 
-            // 2. Inject text into the active field immediately, minimizing delay
+            // 2. Inject text into the active field, guarded against tab or window switching
             let t_injection_start = std::time::Instant::now();
 
             if auto_paste {
-                match injection::inject_text(&final_text) {
-                    Ok(()) => {
+                match injection::inject_text_safely(&final_text, target_focus.as_ref()) {
+                    Ok(injection::InjectionOutcome::Success) => {
                         emit_capture_status_event(&app, false, None, "SUCCESS", None);
+                    }
+                    Ok(injection::InjectionOutcome::TabChanged { target_title, current_title }) => {
+                        tracing::info!(
+                            "[Dictation] Active tab changed from '{}' to '{}'. Prevented typing into wrong tab.",
+                            target_title, current_title
+                        );
+                        emit_capture_status_event(
+                            &app,
+                            false,
+                            None,
+                            "FOCUS_CHANGED",
+                            Some("Tab changed — transcription copied to clipboard (Ctrl+V)".to_string()),
+                        );
+                    }
+                    Ok(injection::InjectionOutcome::AppChanged { target_title, current_title }) => {
+                        tracing::info!(
+                            "[Dictation] Foreground app changed from '{}' to '{}'. Prevented typing into wrong app.",
+                            target_title, current_title
+                        );
+                        emit_capture_status_event(
+                            &app,
+                            false,
+                            None,
+                            "FOCUS_CHANGED",
+                            Some("App changed — transcription copied to clipboard (Ctrl+V)".to_string()),
+                        );
                     }
                     Err(e) => {
                         tracing::error!("Dictation text injection failed: {}", e);

@@ -13,6 +13,192 @@ pub enum InjectionError {
     ClipboardError(String),
 }
 
+/// Represents the active OS window and document context captured when dictation starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetFocusContext {
+    pub hwnd: isize,
+    pub title: String,
+    pub process_id: u32,
+}
+
+/// Detailed outcome of an injection attempt, distinguishing successful insertions
+/// from safely avoided wrong-target insertions (such as switched browser tabs or windows).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InjectionOutcome {
+    /// Text was successfully typed into the active field in the matching window and tab.
+    Success,
+    /// Active tab or document changed in the browser or editor; aborted typing so text
+    /// is never inserted into the wrong tab.
+    TabChanged {
+        target_title: String,
+        current_title: String,
+    },
+    /// Foreground application window changed; aborted typing so text is never
+    /// inserted into the wrong application.
+    AppChanged {
+        target_title: String,
+        current_title: String,
+    },
+}
+
+/// Normalizes titles to detect whether two window titles represent the same tab/document,
+/// ignoring volatile decorations like unread counts `(1) `, dirty indicators `* `, etc.
+pub fn is_same_tab_or_document(title_a: &str, title_b: &str) -> bool {
+    if title_a == title_b {
+        return true;
+    }
+
+    let clean = |s: &str| -> String {
+        let mut s = s.trim();
+        // Strip leading dirty markers (e.g. VS Code "* file.rs" or "● file.rs")
+        if s.starts_with('*') || s.starts_with('●') {
+            s = s[1..].trim();
+        }
+        // Strip leading unread badges like "(1) " or "[2] "
+        if let Some(stripped) = s.strip_prefix('(') {
+            if let Some(idx) = stripped.find(')') {
+                let prefix = &stripped[..idx];
+                if prefix.chars().all(|c| c.is_ascii_digit() || c == '+') {
+                    s = stripped[idx + 1..].trim();
+                }
+            }
+        } else if let Some(stripped) = s.strip_prefix('[') {
+            if let Some(idx) = stripped.find(']') {
+                let prefix = &stripped[..idx];
+                if prefix.chars().all(|c| c.is_ascii_digit() || c == '+') {
+                    s = stripped[idx + 1..].trim();
+                }
+            }
+        }
+        s.to_lowercase()
+    };
+
+    let a = clean(title_a);
+    let b = clean(title_b);
+    !a.is_empty() && a == b
+}
+
+/// Captures the foreground window context (HWND, title, PID) on Windows.
+#[cfg(target_os = "windows")]
+pub fn capture_target_focus_context() -> Option<TargetFocusContext> {
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
+        };
+
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return None;
+        }
+
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+
+        let mut title_buf = [0u16; 512];
+        let len = GetWindowTextW(hwnd, title_buf.as_mut_ptr(), 512) as usize;
+        let title = String::from_utf16_lossy(&title_buf[..len]);
+
+        Some(TargetFocusContext {
+            hwnd: hwnd as isize,
+            title,
+            process_id: pid,
+        })
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn capture_target_focus_context() -> Option<TargetFocusContext> {
+    None
+}
+
+/// Attempts to restore the target window back to the foreground if the user
+/// switched to another window while dictation/transcription was processing.
+#[cfg(target_os = "windows")]
+pub fn restore_foreground_window(target_hwnd: isize) -> bool {
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, SetForegroundWindow, GetWindowThreadProcessId,
+        };
+        use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+
+        #[link(name = "user32")]
+        extern "system" {
+            fn AttachThreadInput(idAttach: u32, idAttachTo: u32, fAttach: i32) -> i32;
+        }
+
+        let current = GetForegroundWindow();
+        if current as isize == target_hwnd {
+            return true;
+        }
+
+        let current_thread = GetCurrentThreadId();
+        let target_thread = GetWindowThreadProcessId(target_hwnd as _, std::ptr::null_mut());
+
+        if target_thread != 0 && current_thread != target_thread {
+            AttachThreadInput(current_thread, target_thread, 1);
+        }
+
+        let ok = SetForegroundWindow(target_hwnd as _) != 0;
+
+        if target_thread != 0 && current_thread != target_thread {
+            AttachThreadInput(current_thread, target_thread, 0);
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(35));
+        ok
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn restore_foreground_window(_target_hwnd: isize) -> bool {
+    true
+}
+
+/// Injects text into the focused element, with protection against tab changes or window shifts.
+/// If the user switched tabs in Chrome/Edge/Firefox or switched apps during transcription,
+/// it prevents injection into the wrong location so text is never typed in the wrong place.
+pub fn inject_text_safely(
+    text: &str,
+    target: Option<&TargetFocusContext>,
+) -> Result<InjectionOutcome, InjectionError> {
+    if text.trim().is_empty() {
+        return Ok(InjectionOutcome::Success);
+    }
+
+    if let Some(target) = target {
+        if let Some(current) = capture_target_focus_context() {
+            if current.hwnd != target.hwnd {
+                // The user switched to another application window. Attempt to restore target window.
+                if restore_foreground_window(target.hwnd) {
+                    if let Some(restored) = capture_target_focus_context() {
+                        if !is_same_tab_or_document(&target.title, &restored.title) {
+                            return Ok(InjectionOutcome::TabChanged {
+                                target_title: target.title.clone(),
+                                current_title: restored.title,
+                            });
+                        }
+                    }
+                } else {
+                    return Ok(InjectionOutcome::AppChanged {
+                        target_title: target.title.clone(),
+                        current_title: current.title,
+                    });
+                }
+            } else if !is_same_tab_or_document(&target.title, &current.title) {
+                // Same window, but the active tab or document changed (e.g. Chrome, Edge, VS Code)!
+                // Abort simulated typing so text is never injected into the wrong tab.
+                return Ok(InjectionOutcome::TabChanged {
+                    target_title: target.title.clone(),
+                    current_title: current.title,
+                });
+            }
+        }
+    }
+
+    inject_text(text)?;
+    Ok(InjectionOutcome::Success)
+}
+
 /// Types `text` into whichever field currently has OS focus, as if the user
 /// had typed it themselves — this is what makes dictation "universal"
 /// instead of confined to Relay's own window.
@@ -83,5 +269,19 @@ mod tests {
         let mut cb = arboard::Clipboard::new().expect("Failed to open clipboard");
         let text = cb.get_text().expect("Failed to read text from clipboard");
         assert_eq!(text, test_str);
+    }
+
+    #[test]
+    fn test_is_same_tab_or_document() {
+        // Exact match
+        assert!(is_same_tab_or_document("ChatGPT - Google Chrome", "ChatGPT - Google Chrome"));
+        // Dirty / unread markers
+        assert!(is_same_tab_or_document("* file.rs - VS Code", "file.rs - VS Code"));
+        assert!(is_same_tab_or_document("(1) Inbox - Gmail", "(2) Inbox - Gmail"));
+        assert!(is_same_tab_or_document("[99+] Slack | Channel", "Slack | Channel"));
+
+        // Different tabs
+        assert!(!is_same_tab_or_document("ChatGPT - Google Chrome", "YouTube - Google Chrome"));
+        assert!(!is_same_tab_or_document("PR #1 - GitHub", "PR #2 - GitHub"));
     }
 }
