@@ -1,5 +1,29 @@
 # Relay — Changelog
 
+## [0.28.5] - 2026-09-04
+
+### Refined Repository Context: 5 Core Dimensions & Grounded Evidence
+
+**Type**: patch — refined `RepositoryContext` to 5 concise semantic dimensions (`Objective`, `Stack`, `Features / Ecosystem`, `User Base`, `Licensing`) strictly grounded in captured repository evidence, removed issue tracking sections, added licensing extraction, and updated extraction prompts and UI briefing layout (`native/src-tauri/src/capture/web/context.rs`, `native/src-tauri/src/capture/web/mod.rs`, `native/src/types/index.ts`, `native/src/components/captures/RepositoryContextView.tsx`, `native/src/components/captures/CaptureContextTab.test.tsx`).
+
+#### Features & Architecture
+
+- **Concise 5-Dimension `RepositoryContext` (`context.rs`, `types/index.ts`)**:
+  - **Objective**: Crisp product-level purpose grounded in repository description and README.
+  - **Stack**: Only surfaces technical details grounded in evidence (e.g. Git worktrees, WebGL terminal, Chromium integration, SSH, CLI-agent ecosystem) without fabricating unverified complete stacks.
+  - **Features / Ecosystem**: Granular product capabilities and broader ecosystem support (e.g. "Supports a broad range of CLI coding agents").
+  - **User Base**: Grounded user groups derived from stated use cases and workflows without speculative persona demographics.
+  - **Licensing**: Explicitly captured license indicator (e.g. "MIT License").
+- **Removal of Issue Tracking Fields**: Removed `open_issues`, `past_issues`, `open_issues_available`, and `past_issues_available` from `RepositoryContext`, extraction prompts, serialization, and UI. No empty issue placeholders are displayed.
+- **Briefing-Oriented UI (`RepositoryContextView.tsx`)**: Refactored the context tab into a clean, concise repository briefing highlighting the 5 primary dimensions with badge indicators and ecosystem callouts.
+- **Deterministic & LLM Extraction Updates (`context.rs`)**: Updated extraction logic and `REPOSITORY_CONTEXT_SYSTEM_PROMPT` to extract licensing, grounded stack signals, and ecosystem features while omitting installation instructions, community links, and issue placeholders.
+
+#### Testing
+
+- **Backend Tests (866 passed in Rust suite)**: All 106 capture::web tests and 866 crate tests passing. `cargo clippy --all-targets -- -D warnings` passed with 0 warnings.
+- **Frontend Tests (360 passed across 26 test files)**: Updated `CaptureContextTab.test.tsx` for the 5-dimension model, verifying no issue placeholders or conversation headings appear. `npx tsc --noEmit` passed with 0 errors.
+- **Web Dashboard**: `npx tsc --noEmit` passed with 0 errors.
+
 ## [0.28.4] - 2026-09-04
 
 ### Dedicated GitHub Repository Context Architecture

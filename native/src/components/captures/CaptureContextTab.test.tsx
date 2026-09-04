@@ -10,29 +10,29 @@ describe('CaptureContextTab', () => {
   const sampleRepoContext: RepositoryContext = {
     capture_id: 'cap_orca',
     repository_name: 'stablyai/orca',
-    objective: 'Orca is an agentic workspace built with Rust, Tauri, and React.',
-    stack: {
-      languages: ['Rust', 'TypeScript'],
-      frontend: ['React', 'Vite'],
-      backend: ['Tauri'],
-      storage: ['SQLite'],
-      testing: ['Vitest'],
-      integrations: ['GitHub API'],
-    },
-    features: [
-      { name: 'Universal voice dictation', description: 'Real-time whisper', is_core: true },
-      { name: 'Local memory vault', description: 'SQLite-backed knowledge', is_core: true },
-      { name: 'Debug logging', description: 'Internal diagnostics', is_core: false },
+    objective:
+      'Orca is an AI orchestration/development environment for running multiple coding agents in parallel, using isolated Git worktrees and tools for managing and monitoring agent work.',
+    stack: [
+      'Git / Git worktrees',
+      'WebGL terminal rendering',
+      'Chromium/browser integration',
+      'SSH / remote development',
+      'CLI-based coding-agent ecosystem',
     ],
-    user_base: {
-      primary: ['Developers', 'AI Researchers'],
-      secondary: ['Open-Source Contributors'],
-      evidence: 'Grounded in developer workflows section of README',
-    },
-    open_issues: [],
-    past_issues: [],
-    open_issues_available: false,
-    past_issues_available: false,
+    features: [
+      'Parallel coding-agent orchestration',
+      'Isolated Git worktrees',
+      'Multi-agent development workflows',
+      'Integrated terminal splits',
+      'GitHub and Linear integration',
+      'Supports a broad range of CLI coding agents',
+    ],
+    user_base: [
+      'Software developers',
+      'AI-assisted developers',
+      'Developers using coding agents',
+    ],
+    licensing: 'MIT License',
     generated_at: '2026-09-04T00:00:00Z',
     model: 'Anthropic Claude',
     deterministic: false,
@@ -56,9 +56,9 @@ describe('CaptureContextTab', () => {
     requirements: [{ id: 'req_1', statement: 'Must work offline', source_turn_ordinals: [1] }],
     constraints: [{ id: 'con_1', statement: 'Zero telemetry', reason: 'Privacy', source_turn_ordinals: [1] }],
     preferences: [],
-    rejected_approaches: [{ approach: 'Cloud sync', reason_rejected: 'Privacy risk' }],
+    rejected_approaches: [{ approach: 'Cloud sync', reason_rejected: 'Privacy risk', source_turn_ordinals: [1] }],
     open_questions: [],
-    action_items: [{ id: 'act_1', description: 'Write unit tests' }],
+    action_items: [{ id: 'act_1', description: 'Write unit tests', status: 'OPEN', source_turn_ordinals: [1] }],
     important_facts: [],
     key_artifacts: [],
     generated_at: '2026-09-04T00:00:00Z',
@@ -73,10 +73,17 @@ describe('CaptureContextTab', () => {
       application: 'github',
       domain: 'github.com',
       url: 'https://github.com/stablyai/orca',
+      page_title: 'stablyai/orca',
       captured_at: '2026-09-03T10:00:00Z',
       coverage: 'full',
       fidelity: 'structural',
-      trust_level: 'external_untrusted',
+      trust: 'external_untrusted',
+      extractor_id: 'github',
+      extractor_version: 1,
+      notes: [],
+      block_count: 5,
+      skipped_block_count: 0,
+      truncated: false,
       version: 1,
       recapture_count: 0,
     };
@@ -102,7 +109,7 @@ describe('CaptureContextTab', () => {
     expect(mockOnAnalyze).toHaveBeenCalledTimes(1);
   });
 
-  it('renders RepositoryContext with repository dimensions and no conversation headings', () => {
+  it('renders RepositoryContext with 5 core dimensions and no issue or conversation headings', () => {
     const sourceContext: SourceContext = {
       capture_id: 'cap_orca',
       generated_at: '2026-09-04T00:00:00Z',
@@ -121,35 +128,36 @@ describe('CaptureContextTab', () => {
       />,
     );
 
-    // Objective & Repository Name
+    // 1. Objective & Repository Name
     expect(screen.getByText('Objective')).toBeDefined();
     expect(screen.getByText('stablyai/orca')).toBeDefined();
     expect(screen.getByText(sampleRepoContext.objective)).toBeDefined();
 
-    // Stack sections
+    // 2. Stack (evidenced technical signals)
     expect(screen.getByText('Stack')).toBeDefined();
-    expect(screen.getByText('Rust')).toBeDefined();
-    expect(screen.getByText('TypeScript')).toBeDefined();
-    expect(screen.getByText('React')).toBeDefined();
-    expect(screen.getByText('Tauri')).toBeDefined();
+    expect(screen.getByText('Git / Git worktrees')).toBeDefined();
+    expect(screen.getByText('WebGL terminal rendering')).toBeDefined();
+    expect(screen.getByText('Chromium/browser integration')).toBeDefined();
 
-    // Features
-    expect(screen.getByText(/Features \(3\)/)).toBeDefined();
-    expect(screen.getByText('Universal voice dictation')).toBeDefined();
-    expect(screen.getAllByText('Core').length).toBe(2);
-    expect(screen.getByText('Supporting')).toBeDefined();
+    // 3. Features / Ecosystem (product & ecosystem capabilities)
+    expect(screen.getByText('Features / Ecosystem')).toBeDefined();
+    expect(screen.getByText('Parallel coding-agent orchestration')).toBeDefined();
+    expect(screen.getByText('Supports a broad range of CLI coding agents')).toBeDefined();
 
-    // User Base
+    // 4. User Base
     expect(screen.getByText('User Base')).toBeDefined();
-    expect(screen.getByText('Developers')).toBeDefined();
+    expect(screen.getByText('Software developers')).toBeDefined();
+    expect(screen.getByText('AI-assisted developers')).toBeDefined();
 
-    // Honest missing issues notices
-    expect(
-      screen.getByText('No issue data was available in the captured repository content.'),
-    ).toBeDefined();
-    expect(
-      screen.getByText('No historical issue information was available in the captured repository evidence.'),
-    ).toBeDefined();
+    // 5. Licensing
+    expect(screen.getByText('Licensing')).toBeDefined();
+    expect(screen.getByText('MIT License')).toBeDefined();
+
+    // INVARIANT: Open Issues, Past Issues, and issue placeholders must NOT exist
+    expect(screen.queryByText(/Open Issues/i)).toBeNull();
+    expect(screen.queryByText(/Past Issues/i)).toBeNull();
+    expect(screen.queryByText(/No issue/i)).toBeNull();
+    expect(screen.queryByText(/No historical/i)).toBeNull();
 
     // INVARIANT: Conversation-only concepts must NOT appear
     expect(screen.queryByText(/Key Decisions Made/i)).toBeNull();
@@ -187,5 +195,7 @@ describe('CaptureContextTab', () => {
 
     // INVARIANT: Repository Stack heading must NOT appear
     expect(screen.queryByText('Stack')).toBeNull();
+    expect(screen.queryByText('Features / Ecosystem')).toBeNull();
+    expect(screen.queryByText('Licensing')).toBeNull();
   });
 });
