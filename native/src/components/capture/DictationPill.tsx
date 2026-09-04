@@ -100,6 +100,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string>('Text inserted');
+  const [processingMessage, setProcessingMessage] = useState<string>('Transcribing...');
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   // Dependency Verification Statuses
@@ -419,6 +420,10 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         }
         if (payload.status === 'TRANSCRIBING' || payload.status === 'PROCESSING') {
           setPhase('processing');
+          setProcessingMessage('Transcribing...');
+        } else if (payload.status === 'WAITING_FOR_TAB') {
+          setPhase('processing');
+          setProcessingMessage(payload.message || 'Waiting for tab...');
         } else if (payload.status === 'SUCCESS') {
           setPhase('success');
           const isDictation = payload.mode === 'dictation' || captureMode === 'dictation';
@@ -431,7 +436,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
           successTimerRef.current = setTimeout(() => setPhase('collapsed'), 2200);
         } else if (payload.status === 'FOCUS_CHANGED') {
           setPhase('success');
-          setSuccessMessage(payload.message || 'Copied to clipboard (focus moved)');
+          setSuccessMessage(payload.message || 'Copied (Ctrl+V)');
           if (successTimerRef.current) clearTimeout(successTimerRef.current);
           successTimerRef.current = setTimeout(() => setPhase('collapsed'), 3200);
         } else if (payload.status === 'ERROR' || payload.message) {
@@ -725,7 +730,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
               <div className="flex items-center gap-2 w-full overflow-hidden">
                 <span className="w-2.5 h-2.5 rounded-full border-[1.4px] border-slate-300 dark:border-neutral-700 border-t-blue-600 dark:border-t-blue-400 animate-spin shrink-0" />
                 <span className="font-mono text-[10.5px] tracking-wide text-slate-600 dark:text-neutral-400 whitespace-nowrap truncate animate-in fade-in duration-200">
-                  Transcribing...
+                  {processingMessage}
                 </span>
               </div>
             )}

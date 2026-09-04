@@ -39,6 +39,12 @@ pub enum InjectionOutcome {
         target_title: String,
         current_title: String,
     },
+    /// Waited for the user to return to the original window and tab, but the timeout expired.
+    TimedOutWaitingForReturn {
+        target_title: String,
+    },
+    /// Wait loop was cancelled (e.g. user began a new dictation session).
+    Cancelled,
 }
 
 /// Normalizes titles to detect whether two window titles represent the same tab/document,
@@ -199,6 +205,86 @@ pub fn inject_text_safely(
     Ok(InjectionOutcome::Success)
 }
 
+/// Injects text into the target focused element. If the user switched tabs or windows
+/// before transcription completes, this function does NOT blindly abort or type into the wrong tab:
+/// it enters a polling loop (up to `timeout`) waiting for the user to return to the original window
+/// and tab/document. As soon as the user returns, it allows the browser 150ms to reactivate
+/// the input caret and injects the text directly into the text box.
+pub fn inject_text_with_return_wait<F, W>(
+    text: &str,
+    target: Option<&TargetFocusContext>,
+    timeout: std::time::Duration,
+    check_interval: std::time::Duration,
+    on_wait_start: W,
+    is_cancelled: F,
+) -> Result<InjectionOutcome, InjectionError>
+where
+    F: Fn() -> bool,
+    W: FnOnce(&str),
+{
+    if text.trim().is_empty() {
+        return Ok(InjectionOutcome::Success);
+    }
+
+    let target = match target {
+        Some(t) => t,
+        None => {
+            inject_text(text)?;
+            return Ok(InjectionOutcome::Success);
+        }
+    };
+
+    // Fast path: Check if target window and tab are already active right now
+    if let Some(current) = capture_target_focus_context() {
+        if current.hwnd == target.hwnd {
+            if is_same_tab_or_document(&target.title, &current.title) {
+                inject_text(text)?;
+                return Ok(InjectionOutcome::Success);
+            }
+        } else if restore_foreground_window(target.hwnd) {
+            if let Some(restored) = capture_target_focus_context() {
+                if is_same_tab_or_document(&target.title, &restored.title) {
+                    inject_text(text)?;
+                    return Ok(InjectionOutcome::Success);
+                }
+            }
+        }
+    }
+
+    // Focus is currently in another tab or application.
+    // Notify caller that we are entering wait mode so UI can inform the user.
+    on_wait_start(&target.title);
+
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if is_cancelled() {
+            return Ok(InjectionOutcome::Cancelled);
+        }
+
+        std::thread::sleep(check_interval);
+
+        if let Some(current) = capture_target_focus_context() {
+            // Check if user returned to the target window and tab
+            if current.hwnd == target.hwnd && is_same_tab_or_document(&target.title, &current.title) {
+                // Stabilize: allow 150ms for browser DOM activeElement / caret to settle
+                std::thread::sleep(std::time::Duration::from_millis(150));
+
+                // Confirm tab hasn't shifted again before typing
+                if let Some(recheck) = capture_target_focus_context() {
+                    if recheck.hwnd == target.hwnd && is_same_tab_or_document(&target.title, &recheck.title) {
+                        inject_text(text)?;
+                        return Ok(InjectionOutcome::Success);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(InjectionOutcome::TimedOutWaitingForReturn {
+        target_title: target.title.clone(),
+    })
+}
+
 /// Types `text` into whichever field currently has OS focus, as if the user
 /// had typed it themselves — this is what makes dictation "universal"
 /// instead of confined to Relay's own window.
@@ -283,5 +369,36 @@ mod tests {
         // Different tabs
         assert!(!is_same_tab_or_document("ChatGPT - Google Chrome", "YouTube - Google Chrome"));
         assert!(!is_same_tab_or_document("PR #1 - GitHub", "PR #2 - GitHub"));
+    }
+
+    #[test]
+    fn test_inject_text_with_return_wait_empty_or_cancelled() {
+        let dummy_target = TargetFocusContext {
+            hwnd: 999999,
+            title: "Nonexistent Window Title".to_string(),
+            process_id: 1234,
+        };
+
+        // Empty text succeeds immediately
+        let res_empty = inject_text_with_return_wait(
+            "",
+            Some(&dummy_target),
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(10),
+            |_| {},
+            || false,
+        );
+        assert_eq!(res_empty.unwrap(), InjectionOutcome::Success);
+
+        // Cancelled before/during wait returns Cancelled
+        let res_cancelled = inject_text_with_return_wait(
+            "Hello world",
+            Some(&dummy_target),
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(10),
+            |_| {},
+            || true, // immediately cancelled
+        );
+        assert_eq!(res_cancelled.unwrap(), InjectionOutcome::Cancelled);
     }
 }

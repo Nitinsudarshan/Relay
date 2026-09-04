@@ -1,5 +1,17 @@
 # Relay — Changelog
 
+## [0.31.3] - 2026-09-04
+
+### Wait-for-Return Dictation Injection & External OS Toast Notification
+
+**Type**: patch — added wait-for-return injection polling so switching away and returning to the original browser tab automatically completes text injection, moved full tab-switch messages to external native Windows OS toast notifications, and streamlined the dictation pill with compact labels (`native/src-tauri/src/hotkeys/injection.rs`, `native/src-tauri/src/hotkeys/mod.rs`, `native/src/components/capture/DictationPill.tsx`).
+
+#### Fixes & Improvements
+
+- **Wait-for-Return Injection (`injection.rs`, `hotkeys/mod.rs`)**: Instead of permanently aborting text injection if the user briefly switches tabs or windows before transcription finishes, Relay enters a non-blocking wait loop (polling every 100ms up to 15 seconds). As soon as the user returns to the target tab/window, Relay waits 150ms for the browser DOM caret to stabilize and injects the text directly into the text box.
+- **External Native OS Toast Notification (`hotkeys/mod.rs`)**: Full status messages like `"Tab changed — transcription copied to clipboard (Ctrl+V)"` are now delivered via native Windows OS toasts (`tauri-plugin-notification`) outside the pill, guaranteeing complete readability without occupying screen real estate.
+- **Compact Dictation Pill Labels (`DictationPill.tsx`)**: Replaced long overflow-prone strings inside the compact floating pill with concise indicators (`"Waiting for tab..."`, `"Copied (Ctrl+V)"`), perfectly fitting within the pill's resting and expanded bounds.
+
 ## [0.31.2] - 2026-09-04
 
 ### Dictation Focus Restoration & Tab-Switch Safe Injection Guard

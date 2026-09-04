@@ -7,8 +7,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_notification::NotificationExt;
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
+
+/// Sends a native OS toast notification outside the compact dictation pill.
+fn send_os_dictation_toast(app: &AppHandle, title: &str, body: &str) {
+    let _ = app.notification().builder().title(title).body(body).show();
+}
 
 /// Broadcast after every (re-)registration attempt so any surface can show
 /// the *actual* OS-level outcome instead of optimistically assuming
@@ -617,25 +623,79 @@ fn stop_dictation_session(
                 let _ = app.emit("dictation-clipboard-copy", &final_text);
             }
 
-            // 2. Inject text into the active field, guarded against tab or window switching
+            // 2. Inject text into the active field, guarded against tab or window switching.
+            // If the user moved to another tab or window, wait up to 15s for them to return
+            // so text is injected directly into the original field without spraying into the wrong place.
             let t_injection_start = std::time::Instant::now();
 
             if auto_paste {
-                match injection::inject_text_safely(&final_text, target_focus.as_ref()) {
+                let app_for_wait = app.clone();
+                let dictation_state_for_cancel = dictation_state.clone();
+
+                let outcome = injection::inject_text_with_return_wait(
+                    &final_text,
+                    target_focus.as_ref(),
+                    std::time::Duration::from_secs(15),
+                    std::time::Duration::from_millis(100),
+                    |_target_title| {
+                        tracing::info!(
+                            "[Dictation] Active focus moved from '{}'. Waiting up to 15s for return...",
+                            _target_title
+                        );
+                        emit_capture_status_event(
+                            &app_for_wait,
+                            false,
+                            None,
+                            "WAITING_FOR_TAB",
+                            Some("Switch back to tab to inject...".to_string()),
+                        );
+                    },
+                    move || {
+                        dictation_state_for_cancel.lock_or_recover().generation != session_generation
+                    },
+                );
+
+                match outcome {
                     Ok(injection::InjectionOutcome::Success) => {
                         emit_capture_status_event(&app, false, None, "SUCCESS", None);
                     }
-                    Ok(injection::InjectionOutcome::TabChanged { target_title, current_title }) => {
+                    Ok(injection::InjectionOutcome::TimedOutWaitingForReturn { target_title }) => {
                         tracing::info!(
-                            "[Dictation] Active tab changed from '{}' to '{}'. Prevented typing into wrong tab.",
-                            target_title, current_title
+                            "[Dictation] Timed out waiting for return to '{}'. Transcription kept in clipboard.",
+                            target_title
+                        );
+                        send_os_dictation_toast(
+                            &app,
+                            "Relay Dictation",
+                            "Tab wait timed out — transcription copied to clipboard (Ctrl+V)",
                         );
                         emit_capture_status_event(
                             &app,
                             false,
                             None,
                             "FOCUS_CHANGED",
-                            Some("Tab changed — transcription copied to clipboard (Ctrl+V)".to_string()),
+                            Some("Copied (Ctrl+V)".to_string()),
+                        );
+                    }
+                    Ok(injection::InjectionOutcome::Cancelled) => {
+                        tracing::info!("[Dictation] Focus return wait cancelled by newer session.");
+                    }
+                    Ok(injection::InjectionOutcome::TabChanged { target_title, current_title }) => {
+                        tracing::info!(
+                            "[Dictation] Active tab changed from '{}' to '{}'. Prevented typing into wrong tab.",
+                            target_title, current_title
+                        );
+                        send_os_dictation_toast(
+                            &app,
+                            "Relay Dictation",
+                            "Tab changed — transcription copied to clipboard (Ctrl+V)",
+                        );
+                        emit_capture_status_event(
+                            &app,
+                            false,
+                            None,
+                            "FOCUS_CHANGED",
+                            Some("Copied (Ctrl+V)".to_string()),
                         );
                     }
                     Ok(injection::InjectionOutcome::AppChanged { target_title, current_title }) => {
@@ -643,12 +703,17 @@ fn stop_dictation_session(
                             "[Dictation] Foreground app changed from '{}' to '{}'. Prevented typing into wrong app.",
                             target_title, current_title
                         );
+                        send_os_dictation_toast(
+                            &app,
+                            "Relay Dictation",
+                            "App changed — transcription copied to clipboard (Ctrl+V)",
+                        );
                         emit_capture_status_event(
                             &app,
                             false,
                             None,
                             "FOCUS_CHANGED",
-                            Some("App changed — transcription copied to clipboard (Ctrl+V)".to_string()),
+                            Some("Copied (Ctrl+V)".to_string()),
                         );
                     }
                     Err(e) => {
