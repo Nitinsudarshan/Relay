@@ -1912,3 +1912,214 @@ export interface TalkbackSettings {
 
 export * from './models';
 
+// ── Foundation Roadmap 11-20 Types ──────────────────────────────────────────
+
+export type RetrievalSourceType =
+  | 'voice_note'
+  | 'scribble'
+  | 'meeting'
+  | 'meeting_facts'
+  | 'file'
+  | 'capture'
+  | 'memory'
+  | 'derived_artifact';
+
+export interface RetrievalProvenance {
+  source_id: string;
+  source_type: RetrievalSourceType;
+  source_origin?: string | null;
+  capture_id?: string | null;
+  derived_id?: string | null;
+  evidence?: string | null;
+}
+
+export interface TimeFilter {
+  created_after?: string | null;
+  created_before?: string | null;
+}
+
+export interface RetrievalFilter {
+  source_types?: RetrievalSourceType[];
+  tags?: string[];
+  time_filter?: TimeFilter | null;
+  entity_keys?: string[];
+}
+
+export interface RetrievalQuery {
+  text: string;
+  filter?: RetrievalFilter;
+  limit?: number | null;
+  char_budget?: number | null;
+  include_evidence?: boolean;
+}
+
+export interface RetrievedItem {
+  id: string;
+  source_type: RetrievalSourceType;
+  title: string;
+  content: string;
+  snippet: string;
+  score: number;
+  timestamp?: string | null;
+  provenance: RetrievalProvenance;
+  topics: string[];
+  metadata?: any;
+}
+
+export interface RetrievalResult {
+  query: string;
+  items: RetrievedItem[];
+  total_matches: number;
+  budget_used: number;
+}
+
+export type RelationshipType =
+  | 'derived_from'
+  | 'summarizes'
+  | 'analyses'
+  | 'references'
+  | 'belongs_to'
+  | 'supersedes';
+
+export interface RelationshipRecord {
+  id: string;
+  source_id: string;
+  target_id: string;
+  relationship_type: RelationshipType;
+  confidence: number;
+  created_at: string;
+  provenance?: string | null;
+  metadata?: any;
+}
+
+export type EntityCategory =
+  | 'person'
+  | 'organization'
+  | 'project'
+  | 'product'
+  | 'technology'
+  | 'location'
+  | 'date'
+  | 'url'
+  | 'identifier';
+
+export interface EntityMention {
+  source_id: string;
+  evidence: string;
+  confidence: number;
+  timestamp?: string | null;
+}
+
+export interface ResolvedEntity {
+  id: string;
+  canonical_name: string;
+  category: EntityCategory;
+  aliases: string[];
+  source_identifiers: string[];
+  urls: string[];
+  confidence: number;
+  mentions: EntityMention[];
+}
+
+export type MemoryType =
+  | 'fact'
+  | 'preference'
+  | 'decision'
+  | 'project_context'
+  | 'relationship'
+  | 'instruction';
+
+export type MemoryStatus = 'active' | 'superseded' | 'archived' | 'deleted';
+
+export type EpistemicState = 'current' | 'no_longer_current' | 'known_false' | 'unverified';
+
+export interface MemoryProvenance {
+  source_id: string;
+  source_type: string;
+  evidence: string;
+  confidence: number;
+  extracted_by: string;
+}
+
+export interface MemoryItem {
+  id: string;
+  memory_type: MemoryType;
+  subject: string;
+  content: string;
+  status: MemoryStatus;
+  epistemic_state: EpistemicState;
+  confidence: number;
+  provenance: MemoryProvenance[];
+  superseded_by?: string | null;
+  supersedes_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  metadata?: any;
+}
+
+export type ContextPackType =
+  | 'repository'
+  | 'meeting'
+  | 'project'
+  | 'conversation'
+  | 'document'
+  | 'general';
+
+export interface ContextPackItem {
+  id: string;
+  source_id: string;
+  item_type: string;
+  title: string;
+  content: string;
+  is_external: boolean;
+  provenance: string;
+}
+
+export interface ContextPack {
+  id: string;
+  pack_type: ContextPackType;
+  query: string;
+  intent?: string | null;
+  items: ContextPackItem[];
+  entities: ResolvedEntity[];
+  memories: MemoryItem[];
+  relationships: RelationshipRecord[];
+  char_budget: number;
+  total_chars: number;
+  created_at: string;
+}
+
+export type ActionType =
+  | 'open_url'
+  | 'open_source'
+  | 'create_note'
+  | 'create_task'
+  | 'save_capture'
+  | 'copy_content'
+  | string;
+
+export type ActionStatus =
+  | 'pending'
+  | 'requires_confirmation'
+  | 'confirmed'
+  | 'executing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface UniversalAction {
+  id: string;
+  action_type: ActionType;
+  intent?: string | null;
+  target: string;
+  parameters: any;
+  source_context?: string | null;
+  requires_confirmation: boolean;
+  status: ActionStatus;
+  result?: any;
+  error_message?: string | null;
+  provenance?: string | null;
+  created_at: string;
+  executed_at?: string | null;
+}
+

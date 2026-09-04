@@ -113,6 +113,8 @@ pub struct AppState {
     /// The loopback listener the Relay browser extension posts captures to.
     /// `None` whenever capture is switched off, which is the default.
     pub capture_bridge: Mutex<Option<crate::capture::web::bridge::BridgeHandle>>,
+    pub memory_store: Arc<crate::memory::MemoryStore>,
+    pub relationship_store: Arc<crate::relationships::RelationshipStore>,
 }
 
 /// The state of an in-flight voice setup.
@@ -4154,6 +4156,170 @@ pub async fn open_external_url(url: String) -> Result<(), CommandError> {
     }
 
     Ok(())
+}
+
+// ── Foundation Roadmap 11-20 Commands ────────────────────────────────────────
+
+#[tauri::command]
+pub async fn unified_retrieve(
+    query: crate::retrieval::RetrievalQuery,
+    state: State<'_, AppState>,
+) -> Result<crate::retrieval::RetrievalResult, CommandError> {
+    Ok(crate::retrieval::UnifiedRetrievalService::search(
+        &state.vault,
+        Some(&state.meetings_v2.store()),
+        Some(&state.meeting_processor),
+        &query,
+    ))
+}
+
+#[tauri::command]
+pub async fn assemble_context_pack(
+    query: String,
+    pack_type: Option<String>,
+    char_budget: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<crate::context::ContextPack, CommandError> {
+    let pt = pack_type.map(|t| match t.to_lowercase().as_str() {
+        "repository" => crate::context::ContextPackType::Repository,
+        "meeting" => crate::context::ContextPackType::Meeting,
+        "project" => crate::context::ContextPackType::Project,
+        "conversation" => crate::context::ContextPackType::Conversation,
+        "document" => crate::context::ContextPackType::Document,
+        _ => crate::context::ContextPackType::General,
+    });
+
+    let mut req = crate::context::ContextAssemblyRequest::new(&query);
+    if let Some(t) = pt {
+        req = req.with_pack_type(t);
+    }
+    if let Some(b) = char_budget {
+        req = req.with_char_budget(b);
+    }
+
+    Ok(crate::context::ContextAssemblyService::assemble(
+        &state.vault,
+        Some(&state.memory_store),
+        Some(&state.relationship_store),
+        &req,
+    ))
+}
+
+#[tauri::command]
+pub async fn list_memories(
+    memory_type: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::memory::MemoryItem>, CommandError> {
+    let mt = memory_type.and_then(|t| match t.to_lowercase().as_str() {
+        "fact" => Some(crate::memory::MemoryType::Fact),
+        "preference" => Some(crate::memory::MemoryType::Preference),
+        "decision" => Some(crate::memory::MemoryType::Decision),
+        "project_context" => Some(crate::memory::MemoryType::ProjectContext),
+        "relationship" => Some(crate::memory::MemoryType::Relationship),
+        "instruction" => Some(crate::memory::MemoryType::Instruction),
+        _ => None,
+    });
+    Ok(state.memory_store.list_active(mt))
+}
+
+#[tauri::command]
+pub async fn create_memory(
+    memory_type: String,
+    subject: String,
+    content: String,
+    source_id: String,
+    evidence: String,
+    state: State<'_, AppState>,
+) -> Result<crate::memory::MemoryItem, CommandError> {
+    let mt = match memory_type.to_lowercase().as_str() {
+        "preference" => crate::memory::MemoryType::Preference,
+        "decision" => crate::memory::MemoryType::Decision,
+        "project_context" => crate::memory::MemoryType::ProjectContext,
+        "relationship" => crate::memory::MemoryType::Relationship,
+        "instruction" => crate::memory::MemoryType::Instruction,
+        _ => crate::memory::MemoryType::Fact,
+    };
+    let prov = crate::memory::MemoryProvenance {
+        source_id,
+        source_type: "manual".to_string(),
+        evidence,
+        confidence: 1.0,
+        extracted_by: "user".to_string(),
+    };
+    let item = crate::memory::MemoryItem::new(mt, subject, content, prov);
+    state.memory_store.create_memory(item).map_err(|e| CommandError::new("MEMORY_ERROR", &e))
+}
+
+#[tauri::command]
+pub async fn supersede_memory(
+    old_id: String,
+    new_content: String,
+    source_id: String,
+    evidence: String,
+    state: State<'_, AppState>,
+) -> Result<crate::memory::MemoryItem, CommandError> {
+    let prov = crate::memory::MemoryProvenance {
+        source_id,
+        source_type: "update".to_string(),
+        evidence,
+        confidence: 1.0,
+        extracted_by: "user".to_string(),
+    };
+    let (_old, new_mem) = state
+        .memory_store
+        .supersede_memory(&old_id, &new_content, prov)
+        .map_err(|e| CommandError::new("MEMORY_ERROR", &e))?;
+    Ok(new_mem)
+}
+
+#[tauri::command]
+pub async fn extract_and_resolve_entities(
+    source_id: String,
+    content: String,
+) -> Result<Vec<crate::entities::ResolvedEntity>, CommandError> {
+    let extracted = crate::entities::EntityExtractor::extract_deterministic(&source_id, &content);
+    Ok(crate::entities::EntityResolver::resolve(&extracted))
+}
+
+#[tauri::command]
+pub async fn dispatch_universal_action(
+    mut action: crate::actions::UniversalAction,
+    confirmed: bool,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, CommandError> {
+    crate::actions::ActionDispatcher::execute(&mut action, confirmed, Some(&state.vault))
+        .map_err(|e| CommandError::new("ACTION_ERROR", &e))
+}
+
+#[tauri::command]
+pub async fn list_relationships(
+    source_id: Option<String>,
+    target_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::relationships::RelationshipRecord>, CommandError> {
+    if let Some(s) = source_id {
+        Ok(state.relationship_store.get_relationships_for_source(&s))
+    } else if let Some(t) = target_id {
+        Ok(state.relationship_store.get_relationships_for_target(&t))
+    } else {
+        Ok(state.relationship_store.list_all())
+    }
+}
+
+#[tauri::command]
+pub async fn add_relationship(
+    source_id: String,
+    target_id: String,
+    relationship_type: String,
+    state: State<'_, AppState>,
+) -> Result<crate::relationships::RelationshipRecord, CommandError> {
+    let rt = crate::relationships::RelationshipType::from_str_opt(&relationship_type)
+        .ok_or_else(|| CommandError::new("INVALID_INPUT", &format!("Unknown relationship type: {}", relationship_type)))?;
+    let rel = crate::relationships::RelationshipRecord::new(source_id, target_id, rt)
+        .map_err(|e| CommandError::new("INVALID_INPUT", &e))?;
+    state.relationship_store.add_relationship(rel.clone())
+        .map_err(|e| CommandError::new("RELATIONSHIP_ERROR", &e))?;
+    Ok(rel)
 }
 
 #[cfg(test)]

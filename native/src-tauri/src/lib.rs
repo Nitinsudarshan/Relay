@@ -1,15 +1,21 @@
+pub mod actions;
 pub mod capture;
 pub mod commands;
+pub mod context;
 pub mod developer;
 pub mod diagnostics;
+pub mod entities;
 pub mod hotkeys;
 pub mod identity;
 pub mod mcp;
 pub mod meetings_v2;
+pub mod memory;
 pub mod oauth;
 pub mod overlay;
 pub mod pipeline;
 pub mod providers;
+pub mod relationships;
+pub mod retrieval;
 pub mod settings;
 pub mod sync;
 pub mod talkback;
@@ -126,6 +132,9 @@ pub fn run() {
     let recorder = AudioRecorder::new();
     recorder.set_keep_warm_duration(settings.audio_input.parse_keep_warm_duration());
 
+    let memory_store = Arc::new(memory::MemoryStore::new(&vault_dir));
+    let relationship_store = Arc::new(relationships::RelationshipStore::new(&vault_dir));
+
     let state = AppState {
         recorder,
         vault: VaultManager::new(vault_dir),
@@ -140,6 +149,8 @@ pub fn run() {
         tts_root,
         voice_install: Arc::new(commands::VoiceInstall::default()),
         capture_bridge: Mutex::new(None),
+        memory_store,
+        relationship_store,
     };
 
     tauri::Builder::default()
@@ -343,6 +354,15 @@ pub fn run() {
             commands::import_ai_conversation_export_bytes,
             commands::pick_ai_conversation_export_file,
             commands::open_external_url,
+            commands::unified_retrieve,
+            commands::assemble_context_pack,
+            commands::list_memories,
+            commands::create_memory,
+            commands::supersede_memory,
+            commands::extract_and_resolve_entities,
+            commands::dispatch_universal_action,
+            commands::list_relationships,
+            commands::add_relationship,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

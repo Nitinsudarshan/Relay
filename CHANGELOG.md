@@ -1,5 +1,23 @@
 # Relay — Changelog
 
+## [0.32.0] - 2026-09-04
+
+### Foundation Roadmap 11–20: Retrieval, Relationships, Entities, Memory, Context Packs & Universal Actions
+
+**Type**: minor — completed items 11–20 of the Relay foundation roadmap, transitioning Relay from capture/normalization/analysis into a connected, retrievable, composable, and safely actionable knowledge system with end-to-end provenance (`native/src-tauri/src/retrieval/*`, `native/src-tauri/src/relationships/*`, `native/src-tauri/src/pipeline/analysis/*`, `native/src-tauri/src/entities/*`, `native/src-tauri/src/memory/*`, `native/src-tauri/src/context/*`, `native/src-tauri/src/actions/*`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`, `native/src/types/index.ts`).
+
+#### Features & Architecture
+
+- **Unified Retrieval Layer (Item 11, `retrieval/*`)**: Built a single query and retrieval abstraction across all Relay knowledge sources (notes, scribbles, web captures, meetings, derived artifacts) supporting keyword scoring with exact-match boosts, metadata filtering, source-type filtering, time bounds, and complete provenance tracking (`Source -> Capture -> Derived Artifact -> Evidence`).
+- **Explicit Source-Derived Relationships (Item 12, `relationships/*`)**: Introduced a typed relationship model (`derived_from`, `summarizes`, `analyses`, `references`, `belongs_to`, `supersedes`) with indexed persistence in `.relay/vault/relationships/index.json` and cycle detection preventing loops in directional relationships.
+- **Derived Artifact Model (Item 13, `pipeline/analysis/derived.rs`)**: Formalized derived data artifacts (`Summary`, `Context`, `Extraction`, `Classification`, `Analysis`, `Transcript`) with generation metadata, model provider info, evidence links, and clean separation from raw immutable sources.
+- **Central Entity & Fact Extraction (Item 14, `entities/extractor.rs`)**: Implemented evidence-grounded extraction for people, organizations, projects, products, technologies, locations, dates, and URLs, retaining enclosing-sentence evidence and confidence scores.
+- **Conservative Entity Resolution (Item 15, `entities/resolution.rs`)**: Built alias mapping and URL/repo canonicalization (e.g., resolving `https://github.com/stablyai/orca`, `stablyai/orca`, and `Orca` to the canonical project) while strictly refusing to merge ambiguous or domain-separated entities without evidence.
+- **Memory Layer & Epistemic Lifecycle (Items 16 & 17, `memory/*`)**: Introduced a durable, provenance-aware memory layer stored at `.relay/vault/memory/index.json`. Distinguishes facts, preferences, decisions, project context, and instructions; supports non-destructive evolution through explicit `supersedes` lineages, archiving, and distinguishing `Unknown` from `KnownFalse` and `NoLongerCurrent`.
+- **Context Packs & Shared Assembly Service (Items 18 & 19, `context/*`)**: Created task-specific bounded projections of knowledge (`ContextPack`) combining sources, derived summaries, entities, and active memories within strict character/token budgets. Implemented standard assembly pipelines for LLMs, UI views, and Talkback voice prompts (`to_prompt_context`, `to_talkback_context`).
+- **Universal Action Layer (Item 20, `actions/*`)**: Created a unified action contract separating `Intent`, `Action`, and `Execution`. Supports actions (`open_source`, `open_url`, `create_note`, `create_task`, `save_capture`, `copy_content`) with strict confirmation gating for mutating actions and safe local dispatch.
+- **Tauri Commands & Frontend Contracts (`commands.rs`, `lib.rs`, `native/src/types/index.ts`)**: Exposed 9 new Tauri commands (`unified_retrieve`, `assemble_context_pack`, `list_memories`, `create_memory`, `supersede_memory`, `extract_and_resolve_entities`, `dispatch_universal_action`, `list_relationships`, `add_relationship`), wired state into backend `AppState`, and declared TypeScript interfaces in `native/src/types/index.ts`.
+
 ## [0.31.3] - 2026-09-04
 
 ### Wait-for-Return Dictation Injection & External OS Toast Notification

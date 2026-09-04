@@ -44,6 +44,9 @@ pub enum DerivedType {
     Context,
     Enrichment,
     Extraction,
+    Classification,
+    Analysis,
+    Transcript,
 }
 
 impl DerivedType {
@@ -53,6 +56,9 @@ impl DerivedType {
             Self::Context => "context",
             Self::Enrichment => "enrichment",
             Self::Extraction => "extraction",
+            Self::Classification => "classification",
+            Self::Analysis => "analysis",
+            Self::Transcript => "transcript",
         }
     }
 
@@ -62,6 +68,9 @@ impl DerivedType {
             AnalysisType::Context => Self::Context,
             AnalysisType::Enrichment => Self::Enrichment,
             AnalysisType::Extraction => Self::Extraction,
+            AnalysisType::Classification => Self::Classification,
+            AnalysisType::Analysis => Self::Analysis,
+            AnalysisType::Transcript => Self::Transcript,
         }
     }
 }
@@ -120,6 +129,9 @@ pub struct DerivedData {
     /// Status, prompt id and version, model, and whether a fallback wrote it.
     pub analysis: AnalysisMetadata,
     pub payload: DerivedPayload,
+    /// Explicit evidence references (quotes, line numbers, turn ordinals).
+    #[serde(default)]
+    pub evidence_references: Vec<String>,
 }
 
 fn default_version() -> u32 {
@@ -147,6 +159,7 @@ impl DerivedData {
             updated_at: now,
             analysis,
             payload,
+            evidence_references: Vec::new(),
         }
     }
 
@@ -164,11 +177,27 @@ impl DerivedData {
             updated_at: chrono::Utc::now().to_rfc3339(),
             analysis,
             payload,
+            evidence_references: self.evidence_references.clone(),
         }
+    }
+
+    pub fn with_evidence(mut self, evidence: Vec<String>) -> Self {
+        self.evidence_references = evidence;
+        self
     }
 
     pub fn is_usable(&self) -> bool {
         self.analysis.is_usable()
+    }
+
+    /// Converts this derived artifact into an explicit relationship pointing back to its source.
+    pub fn as_relationship(&self) -> Result<crate::relationships::RelationshipRecord, String> {
+        let rel_type = match self.derived_type {
+            DerivedType::Summary => crate::relationships::RelationshipType::Summarizes,
+            DerivedType::Analysis => crate::relationships::RelationshipType::Analyses,
+            _ => crate::relationships::RelationshipType::DerivedFrom,
+        };
+        crate::relationships::RelationshipRecord::new(&self.id, &self.source_id, rel_type)
     }
 }
 
@@ -264,5 +293,21 @@ mod tests {
         assert!(derived.analysis.model.is_none());
         // Still usable — an honest fallback is worth showing, flagged as one.
         assert!(derived.is_usable());
+    }
+
+    #[test]
+    fn test_derived_as_relationship() {
+        let summary = DerivedData::new(
+            "cap_1",
+            DerivedType::Summary,
+            metadata(),
+            DerivedPayload::Text("Sum".to_string()),
+        ).with_evidence(vec!["evidence turn 1".to_string()]);
+
+        let rel = summary.as_relationship().unwrap();
+        assert_eq!(rel.source_id, "cap_1::summary");
+        assert_eq!(rel.target_id, "cap_1");
+        assert_eq!(rel.relationship_type, crate::relationships::RelationshipType::Summarizes);
+        assert_eq!(summary.evidence_references, vec!["evidence turn 1"]);
     }
 }

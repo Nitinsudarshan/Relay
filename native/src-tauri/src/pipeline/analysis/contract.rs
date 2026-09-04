@@ -40,6 +40,12 @@ pub enum AnalysisType {
     Enrichment,
     /// A named structured extraction over the source.
     Extraction,
+    /// Categorization or domain taxonomy tagging.
+    Classification,
+    /// Deep source analysis or evaluation.
+    Analysis,
+    /// Generated speech or video transcript.
+    Transcript,
 }
 
 impl AnalysisType {
@@ -49,6 +55,9 @@ impl AnalysisType {
             Self::Context => "context",
             Self::Enrichment => "enrichment",
             Self::Extraction => "extraction",
+            Self::Classification => "classification",
+            Self::Analysis => "analysis",
+            Self::Transcript => "transcript",
         }
     }
 }
