@@ -257,9 +257,48 @@ pub fn gather_candidates(
 
     if wanted.contains(&SourceType::Capture) {
         match vault.list_captures() {
-            Ok(captures) => candidates.extend(captures.iter().map(capture_candidate)),
+            Ok(captures) => {
+                candidates.extend(captures.iter().map(capture_candidate));
+
+                // Also include derived structured context (e.g. RepositoryContext)
+                for capture_file in &captures {
+                    if let Ok(Some(derived)) = vault.get_derived_data(&capture_file.id, crate::pipeline::analysis::DerivedType::Context) {
+                        if let crate::pipeline::analysis::DerivedPayload::Structured(ref val) = derived.payload {
+                            if let Ok(repo_ctx) = serde_json::from_value::<crate::capture::web::context::RepositoryContext>(val.clone()) {
+                                let mut body = format!("Repository: {}\nObjective: {}\n", repo_ctx.repository_name, repo_ctx.objective);
+                                if !repo_ctx.stack.is_empty() {
+                                    body.push_str(&format!("Stack: {}\n", repo_ctx.stack.join(", ")));
+                                }
+                                if !repo_ctx.features.is_empty() {
+                                    body.push_str(&format!("Features: {}\n", repo_ctx.features.join(", ")));
+                                }
+                                if !repo_ctx.user_base.is_empty() {
+                                    body.push_str(&format!("User base: {}\n", repo_ctx.user_base.join(", ")));
+                                }
+                                candidates.push(
+                                    CandidateDoc::new(SourceType::Capture, &capture_file.id, &format!("{} Context", repo_ctx.repository_name), &cap(&body))
+                                        .with_timestamp(&derived.created_at)
+                                        .with_topics(vec!["repository".to_string(), "context".to_string()])
+                                        .with_detail("repository context"),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
             Err(e) => tracing::warn!("talkback: captures unavailable for retrieval: {}", e),
         }
+    }
+
+    // Active durable memories from MemoryStore
+    let mem_store = crate::memory::MemoryStore::new(&vault.vault_dir());
+    for mem in mem_store.list_active(None) {
+        candidates.push(
+            CandidateDoc::new(SourceType::Scribble, &mem.id, &format!("Remembered: {}", mem.subject), &cap(&mem.content))
+                .with_timestamp(&mem.created_at)
+                .with_topics(vec![mem.memory_type.as_str().to_string(), mem.subject.clone()])
+                .with_detail(mem.memory_type.as_str()),
+        );
     }
 
     let needs_meetings =

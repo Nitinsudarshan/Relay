@@ -25,6 +25,8 @@ impl MemoryStore {
             if let Ok(data) = fs::read_to_string(&storage_path) {
                 if let Ok(records) = serde_json::from_str::<Vec<MemoryItem>>(&data) {
                     loaded = records;
+                } else {
+                    tracing::warn!("Memory index was malformed; recovering from clean state");
                 }
             }
         }
@@ -35,10 +37,13 @@ impl MemoryStore {
         }
     }
 
+    /// Persists current in-memory state to disk atomically.
     fn persist(&self) -> Result<(), String> {
         let items = self.items.read().map_err(|e| e.to_string())?;
         let json = serde_json::to_string_pretty(&*items).map_err(|e| e.to_string())?;
-        fs::write(&self.storage_path, json).map_err(|e| e.to_string())?;
+        let tmp_path = self.storage_path.with_extension("tmp");
+        fs::write(&tmp_path, json.as_bytes()).map_err(|e| e.to_string())?;
+        fs::rename(&tmp_path, &self.storage_path).map_err(|e| e.to_string())?;
         Ok(())
     }
 

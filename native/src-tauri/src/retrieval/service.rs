@@ -1,19 +1,65 @@
 //! Unified Retrieval Service implementation.
 //!
 //! Evaluates queries across all Relay knowledge sources without per-feature silos.
+//! Employs multi-signal deterministic scoring, provenance preservation, and explainability.
 
 use super::model::*;
+use super::providers::{DerivedDataProvider, MeetingProvider, MemoryProvider, VaultProvider};
 use crate::meetings_v2::processing::MeetingProcessor;
 use crate::meetings_v2::session_store::SessionStore;
-use crate::vault::{VaultManager, VOICE_NOTE_TYPE};
+use crate::memory::MemoryStore;
+use crate::vault::VaultManager;
 
-/// Tokenize search text into lowercased terms.
+/// Common English stop words filtered out during boost calculations.
+pub const STOP_WORDS: &[&str] = &[
+    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are",
+    "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but",
+    "by", "did", "do", "does", "doing", "down", "during", "each", "few", "for", "from", "further",
+    "had", "has", "have", "having", "he", "her", "here", "hers", "herself", "him", "himself", "his",
+    "how", "i", "if", "in", "into", "is", "it", "its", "itself", "just", "me", "more", "most",
+    "my", "myself", "no", "nor", "not", "now", "of", "off", "on", "once", "only", "or", "other",
+    "our", "ours", "ourselves", "out", "over", "own", "s", "same", "she", "should", "so", "some",
+    "such", "t", "than", "that", "the", "their", "theirs", "them", "themselves", "then", "there",
+    "these", "they", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was",
+    "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why", "will", "with",
+];
+
+/// Tokenize search text into lowercased terms, preserving repository identifiers.
 pub fn tokenize(query: &str) -> Vec<String> {
-    query
+    let mut terms = Vec::new();
+    let lower = query.trim().to_lowercase();
+    if lower.is_empty() {
+        return terms;
+    }
+
+    // Check for repo/URL patterns like owner/repo
+    for token in lower.split_whitespace() {
+        let clean = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '_' && c != '-');
+        if clean.contains('/') && !clean.contains("://") {
+            terms.push(clean.to_string());
+            for sub in clean.split('/') {
+                let sub_clean = sub.trim_matches(|c: char| !c.is_alphanumeric());
+                if !sub_clean.is_empty() && !terms.contains(&sub_clean.to_string()) {
+                    terms.push(sub_clean.to_string());
+                }
+            }
+        }
+    }
+
+    // Standard word tokenizer
+    let words: Vec<String> = lower
         .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
-        .map(|s| s.trim().to_lowercase())
+        .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .collect()
+        .collect();
+
+    for w in words {
+        if !terms.contains(&w) {
+            terms.push(w);
+        }
+    }
+
+    terms
 }
 
 /// Helper to generate a contextual snippet around matching query terms.
@@ -27,8 +73,20 @@ pub fn extract_snippet(content: &str, query_terms: &[String], max_chars: usize) 
 
     let lower = content.to_lowercase();
     let mut best_pos = None;
-    for term in query_terms {
-        if let Some(pos) = lower.find(term) {
+
+    // Filter out stop words for snippet centering if non-stop-words exist
+    let content_terms: Vec<&String> = query_terms
+        .iter()
+        .filter(|t| !STOP_WORDS.contains(&t.as_str()))
+        .collect();
+    let search_terms = if !content_terms.is_empty() {
+        content_terms
+    } else {
+        query_terms.iter().collect()
+    };
+
+    for term in search_terms {
+        if let Some(pos) = lower.find(term.as_str()) {
             best_pos = Some(pos);
             break;
         }
@@ -58,170 +116,86 @@ pub fn extract_snippet(content: &str, query_terms: &[String], max_chars: usize) 
 pub struct UnifiedRetrievalService;
 
 impl UnifiedRetrievalService {
-    /// Executes a search across all provided Relay stores.
+    /// Executes a search across all provided Relay stores with candidate normalization,
+    /// multi-signal scoring, and explainability.
     pub fn search(
         vault: &VaultManager,
         session_store: Option<&SessionStore>,
-        _meeting_processor: Option<&MeetingProcessor>,
+        meeting_processor: Option<&MeetingProcessor>,
+        query: &RetrievalQuery,
+    ) -> RetrievalResult {
+        Self::search_with_memory(vault, None, session_store, meeting_processor, query)
+    }
+
+    /// Extended search allowing optional memory store injection.
+    pub fn search_with_memory(
+        vault: &VaultManager,
+        memory_store: Option<&MemoryStore>,
+        session_store: Option<&SessionStore>,
+        meeting_processor: Option<&MeetingProcessor>,
         query: &RetrievalQuery,
     ) -> RetrievalResult {
         let terms = tokenize(&query.text);
-        let mut candidates: Vec<RetrievedItem> = Vec::new();
+        let mut candidates = Vec::new();
 
-        let allowed = |st: RetrievalSourceType| -> bool {
-            query.filter.source_types.is_empty() || query.filter.source_types.contains(&st)
-        };
+        // 1. Gather Vault candidates (Scribbles, Voice Notes, Files, Captures)
+        let vault_provider = VaultProvider::new(vault);
+        candidates.extend(vault_provider.gather_all(query));
 
-        // 1. Scribbles
-        if allowed(RetrievalSourceType::Scribble) {
-            if let Ok(scribbles) = vault.list_scribbles() {
-                for s in scribbles {
-                    let mut tags = s.tags.clone();
-                    tags.extend(s.topics.clone());
-                    let body = match &s.summary {
-                        Some(sum) if !sum.trim().is_empty() => format!("{}\n\n{}", sum.trim(), s.content),
-                        _ => s.content.clone(),
-                    };
-                    let provenance = RetrievalProvenance::new(&s.id, RetrievalSourceType::Scribble);
-                    if let Some(item) = Self::score_item(
-                        &s.id,
-                        RetrievalSourceType::Scribble,
-                        &s.title,
-                        &body,
-                        Some(&s.created_at),
-                        tags,
-                        provenance,
-                        &terms,
-                        &query.filter,
-                    ) {
-                        candidates.push(item);
-                    }
-                }
+        // 2. Gather Derived Data candidates (RepositoryContext, Summaries)
+        let derived_provider = DerivedDataProvider::new(vault);
+        candidates.extend(derived_provider.gather(query));
+
+        // 3. Gather Memories if available
+        if let Some(mem_store) = memory_store {
+            let memory_provider = MemoryProvider::new(mem_store);
+            candidates.extend(memory_provider.gather(query));
+        }
+
+        // 4. Gather Meetings if available
+        let meeting_provider = MeetingProvider::new(session_store, meeting_processor);
+        candidates.extend(meeting_provider.gather(query));
+
+        // Score candidates
+        let mut scored_items: Vec<RetrievedItem> = Vec::new();
+        for candidate in candidates {
+            if let Some(item) = Self::score_candidate(&candidate, &terms, &query.text, &query.filter) {
+                scored_items.push(item);
             }
         }
 
-        // 2. Voice Notes
-        if allowed(RetrievalSourceType::VoiceNote) {
-            if let Ok(notes) = vault.list_notes() {
-                for n in notes {
-                    if n.note_type == VOICE_NOTE_TYPE {
-                        let provenance = RetrievalProvenance::new(&n.id, RetrievalSourceType::VoiceNote);
-                        if let Some(item) = Self::score_item(
-                            &n.id,
-                            RetrievalSourceType::VoiceNote,
-                            &n.title,
-                            &n.content,
-                            Some(&n.created_at),
-                            n.tags.clone(),
-                            provenance,
-                            &terms,
-                            &query.filter,
-                        ) {
-                            candidates.push(item);
-                        }
-                    }
-                }
+        // Sort candidates deterministically:
+        // 1. Score descending
+        // 2. Source type weight descending
+        // 3. Timestamp descending
+        // 4. Stable ID ascending
+        scored_items.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    b.source_type
+                        .default_weight()
+                        .partial_cmp(&a.source_type.default_weight())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| b.timestamp.cmp(&a.timestamp))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+
+        // Deduplication: prevent duplicate items with same source origin or content snippet
+        let mut deduplicated: Vec<RetrievedItem> = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for item in scored_items {
+            if seen_ids.contains(&item.id) {
+                continue;
             }
+            seen_ids.insert(item.id.clone());
+            deduplicated.push(item);
         }
 
-        // 3. Vault Files & Web Captures
-        let check_files = allowed(RetrievalSourceType::File);
-        let check_captures = allowed(RetrievalSourceType::Capture);
-        if check_files || check_captures {
-            if let Ok(files) = vault.list_vault_files() {
-                for f in files {
-                    let is_capture = f.is_capture();
-                    let st = if is_capture {
-                        RetrievalSourceType::Capture
-                    } else {
-                        RetrievalSourceType::File
-                    };
-
-                    if !allowed(st) {
-                        continue;
-                    }
-
-                    let mut tags = f.tags.clone();
-                    tags.extend(f.topics.clone());
-                    let title = if is_capture {
-                        f.capture
-                            .as_ref()
-                            .map(|c| c.page_title.as_str())
-                            .unwrap_or(&f.original_filename)
-                    } else {
-                        &f.original_filename
-                    };
-
-                    let body = match &f.summary {
-                        Some(sum) if !sum.trim().is_empty() => format!("{}\n\n{}", sum.trim(), f.content),
-                        _ => f.content.clone(),
-                    };
-
-                    let mut prov = RetrievalProvenance::new(&f.id, st);
-                    if let Some(c) = &f.capture {
-                        prov = prov.with_origin(&c.url).with_capture(&f.id);
-                    } else if !f.last_known_source_path.is_empty() {
-                        prov = prov.with_origin(&f.last_known_source_path);
-                    }
-
-                    if let Some(item) = Self::score_item(
-                        &f.id,
-                        st,
-                        title,
-                        &body,
-                        Some(&f.created_at),
-                        tags,
-                        prov,
-                        &terms,
-                        &query.filter,
-                    ) {
-                        candidates.push(item);
-                    }
-                }
-            }
-        }
-
-        // 4. Meetings
-        if allowed(RetrievalSourceType::Meeting) {
-            if let Some(store) = session_store {
-                if let Ok(sessions) = store.list_sessions() {
-                    for s in sessions {
-                        let title = if s.title.is_empty() { "Untitled Meeting" } else { &s.title };
-                        let mut body = s.summary.clone().unwrap_or_default();
-                        if !s.action_items.is_empty() {
-                            body.push_str("\n\nAction Items:\n");
-                            for item in &s.action_items {
-                                body.push_str(&format!("- {}\n", item));
-                            }
-                        }
-                        if body.trim().is_empty() {
-                            body = format!("Meeting session {}", s.id);
-                        }
-                        let created_at = s.created_at.clone();
-                        let prov = RetrievalProvenance::new(&s.id, RetrievalSourceType::Meeting);
-
-                        if let Some(item) = Self::score_item(
-                            &s.id,
-                            RetrievalSourceType::Meeting,
-                            title,
-                            &body,
-                            Some(&created_at),
-                            vec!["meeting".to_string()],
-                            prov,
-                            &terms,
-                            &query.filter,
-                        ) {
-                            candidates.push(item);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Sort candidates by score descending
-        candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-
-        let total_matches = candidates.len();
+        let total_matches = deduplicated.len();
 
         // Apply budget & limit
         let mut result_items = Vec::new();
@@ -229,13 +203,12 @@ impl UnifiedRetrievalService {
         let limit = query.limit.unwrap_or(usize::MAX);
         let max_budget = query.char_budget.unwrap_or(usize::MAX);
 
-        for item in candidates {
+        for item in deduplicated {
             if result_items.len() >= limit {
                 break;
             }
             let item_len = item.content.len();
             if budget_used + item_len > max_budget && !result_items.is_empty() {
-                // Char budget exceeded
                 continue;
             }
             budget_used += item_len;
@@ -250,7 +223,191 @@ impl UnifiedRetrievalService {
         }
     }
 
-    /// Evaluates a single candidate item against search terms and filters.
+    /// Evaluates a normalized candidate against query signals, filters, and generates explainability.
+    pub fn score_candidate(
+        candidate: &CandidateItem,
+        terms: &[String],
+        raw_query: &str,
+        filter: &RetrievalFilter,
+    ) -> Option<RetrievedItem> {
+        // Time filter
+        if let Some(tf) = &filter.time_filter {
+            if let Some(ref ts) = candidate.timestamp {
+                if let Some(after) = &tf.created_after {
+                    if ts < after {
+                        return None;
+                    }
+                }
+                if let Some(before) = &tf.created_before {
+                    if ts > before {
+                        return None;
+                    }
+                }
+            }
+        }
+
+        // Tag / topic filter
+        if !filter.tags.is_empty() {
+            let has_tag = filter.tags.iter().any(|t| {
+                let lower_t = t.to_lowercase();
+                candidate.topics.iter().any(|topic| topic.to_lowercase() == lower_t)
+            });
+            if !has_tag {
+                return None;
+            }
+        }
+
+        // Entity key filter
+        if !filter.entity_keys.is_empty() {
+            let has_entity = filter.entity_keys.iter().any(|e| {
+                let lower_e = e.to_lowercase();
+                candidate.entity_refs.iter().any(|ent| ent.to_lowercase() == lower_e)
+                    || candidate.title.to_lowercase().contains(&lower_e)
+            });
+            if !has_entity {
+                return None;
+            }
+        }
+
+        let mut provenance = candidate.provenance.clone();
+
+        // Empty query: match all with base weight + recency
+        if terms.is_empty() {
+            let snippet = extract_snippet(&candidate.content, terms, 240);
+            provenance.evidence = Some(snippet.clone());
+            let base = candidate.source_type.default_weight();
+            return Some(RetrievedItem {
+                id: candidate.id.clone(),
+                source_type: candidate.source_type,
+                title: candidate.title.clone(),
+                content: candidate.content.clone(),
+                snippet,
+                score: base,
+                timestamp: candidate.timestamp.clone(),
+                provenance,
+                topics: candidate.topics.clone(),
+                entity_refs: candidate.entity_refs.clone(),
+                explainability: Explainability {
+                    matched_terms: Vec::new(),
+                    match_types: vec![MatchType::RecencyOnly],
+                    why: vec!["empty query matched all items passing filter".to_string()],
+                    base_score: base,
+                    boosts_applied: Vec::new(),
+                    final_score: base,
+                },
+                metadata: candidate.metadata.clone(),
+            });
+        }
+
+        let title_lower = candidate.title.to_lowercase();
+        let content_lower = candidate.content.to_lowercase();
+        let raw_query_lower = raw_query.trim().to_lowercase();
+
+        let mut matched_terms = Vec::new();
+        let mut match_types = Vec::new();
+        let mut why = Vec::new();
+        let mut boosts_applied = Vec::new();
+
+        let mut title_boost = 0.0;
+        let mut topic_boost = 0.0;
+        let mut exact_phrase_boost = 0.0;
+        let mut derived_priority_boost = 0.0;
+
+        // 1. Exact phrase match
+        if !raw_query_lower.is_empty()
+            && (title_lower.contains(&raw_query_lower) || content_lower.contains(&raw_query_lower))
+        {
+            exact_phrase_boost += 6.0;
+            match_types.push(MatchType::ExactPhrase);
+            why.push("exact phrase match".to_string());
+            boosts_applied.push("exact_phrase (+6.0)".to_string());
+        }
+
+        // 2. Term coverage
+        let mut term_matches = 0;
+        for term in terms {
+            let in_title = title_lower.contains(term);
+            let in_content = content_lower.contains(term);
+            let in_topics = candidate.topics.iter().any(|top| top.to_lowercase().contains(term));
+            let in_entities = candidate.entity_refs.iter().any(|ent| ent.to_lowercase().contains(term));
+
+            if in_title || in_content || in_topics || in_entities {
+                term_matches += 1;
+                matched_terms.push(term.clone());
+
+                if in_title && !boosts_applied.iter().any(|b| b.starts_with("title")) {
+                    title_boost += 3.5;
+                    match_types.push(MatchType::TitleMatch);
+                    why.push("title match".to_string());
+                    boosts_applied.push("title_match (+3.5)".to_string());
+                }
+
+                if in_topics && !boosts_applied.iter().any(|b| b.starts_with("topic")) {
+                    topic_boost += 2.0;
+                    match_types.push(MatchType::TopicMatch);
+                    why.push("topic match".to_string());
+                    boosts_applied.push("topic_match (+2.0)".to_string());
+                }
+
+                if in_entities && !boosts_applied.iter().any(|b| b.starts_with("entity")) {
+                    match_types.push(MatchType::EntityMatch);
+                    why.push("entity reference match".to_string());
+                    boosts_applied.push("entity_match (+2.5)".to_string());
+                }
+            }
+        }
+
+        if term_matches == 0 && exact_phrase_boost == 0.0 {
+            return None;
+        }
+
+        // 3. Derived Data Priority:
+        // When querying for overview or what a project/repo is (e.g. "What is Orca?"),
+        // a structured RepositoryContext should be prioritized above raw captures.
+        if candidate.source_type == RetrievalSourceType::DerivedArtifact {
+            derived_priority_boost += 3.0;
+            match_types.push(MatchType::DerivedAbstraction);
+            why.push("derived context abstraction priority".to_string());
+            boosts_applied.push("derived_abstraction (+3.0)".to_string());
+        }
+
+        let coverage = term_matches as f32 / terms.len().max(1) as f32;
+        if coverage > 0.0 {
+            match_types.push(MatchType::TermCoverage);
+        }
+
+        let coverage_score = coverage * 5.0;
+        let base_score = coverage_score + title_boost + topic_boost + exact_phrase_boost + derived_priority_boost;
+        let source_weight = candidate.source_type.default_weight();
+        let final_score = base_score * source_weight;
+
+        let snippet = extract_snippet(&candidate.content, terms, 240);
+        provenance.evidence = Some(snippet.clone());
+
+        Some(RetrievedItem {
+            id: candidate.id.clone(),
+            source_type: candidate.source_type,
+            title: candidate.title.clone(),
+            content: candidate.content.clone(),
+            snippet,
+            score: final_score,
+            timestamp: candidate.timestamp.clone(),
+            provenance,
+            topics: candidate.topics.clone(),
+            entity_refs: candidate.entity_refs.clone(),
+            explainability: Explainability {
+                matched_terms,
+                match_types,
+                why,
+                base_score,
+                boosts_applied,
+                final_score,
+            },
+            metadata: candidate.metadata.clone(),
+        })
+    }
+
+    /// Backwards-compatible scoring helper for tests and external callers.
     #[allow(clippy::too_many_arguments)]
     pub fn score_item(
         id: &str,
@@ -259,101 +416,23 @@ impl UnifiedRetrievalService {
         content: &str,
         timestamp: Option<&str>,
         topics: Vec<String>,
-        mut provenance: RetrievalProvenance,
+        provenance: RetrievalProvenance,
         terms: &[String],
         filter: &RetrievalFilter,
     ) -> Option<RetrievedItem> {
-        // Time filter
-        if let Some(tf) = &filter.time_filter {
-            if let Some(ts) = timestamp {
-                if let Some(after) = &tf.created_after {
-                    if ts < after.as_str() {
-                        return None;
-                    }
-                }
-                if let Some(before) = &tf.created_before {
-                    if ts > before.as_str() {
-                        return None;
-                    }
-                }
-            }
-        }
-
-        // Tag filter
-        if !filter.tags.is_empty() {
-            let has_tag = filter.tags.iter().any(|t| {
-                let lower_t = t.to_lowercase();
-                topics.iter().any(|topic| topic.to_lowercase() == lower_t)
-            });
-            if !has_tag {
-                return None;
-            }
-        }
-
-        // Empty query matches all items passing filters with base score
-        if terms.is_empty() {
-            let snippet = extract_snippet(content, terms, 240);
-            provenance.evidence = Some(snippet.clone());
-            return Some(RetrievedItem {
-                id: id.to_string(),
-                source_type,
-                title: title.to_string(),
-                content: content.to_string(),
-                snippet,
-                score: source_type.default_weight(),
-                timestamp: timestamp.map(|t| t.to_string()),
-                provenance,
-                topics,
-                metadata: serde_json::Value::Null,
-            });
-        }
-
-        let title_lower = title.to_lowercase();
-        let content_lower = content.to_lowercase();
-
-        let mut term_matches = 0;
-        let mut title_boost = 0.0;
-        let mut topic_boost = 0.0;
-
-        for term in terms {
-            let in_title = title_lower.contains(term);
-            let in_content = content_lower.contains(term);
-            let in_topics = topics.iter().any(|top| top.to_lowercase().contains(term));
-
-            if in_title || in_content || in_topics {
-                term_matches += 1;
-                if in_title {
-                    title_boost += 3.0;
-                }
-                if in_topics {
-                    topic_boost += 2.0;
-                }
-            }
-        }
-
-        if term_matches == 0 {
-            return None;
-        }
-
-        let coverage = term_matches as f32 / terms.len() as f32;
-        let raw_score = (coverage * 5.0) + title_boost + topic_boost;
-        let final_score = raw_score * source_type.default_weight();
-
-        let snippet = extract_snippet(content, terms, 240);
-        provenance.evidence = Some(snippet.clone());
-
-        Some(RetrievedItem {
+        let candidate = CandidateItem {
             id: id.to_string(),
             source_type,
             title: title.to_string(),
             content: content.to_string(),
-            snippet,
-            score: final_score,
             timestamp: timestamp.map(|t| t.to_string()),
-            provenance,
             topics,
+            entity_refs: Vec::new(),
+            provenance,
             metadata: serde_json::Value::Null,
-        })
+        };
+        let raw_query = terms.join(" ");
+        Self::score_candidate(&candidate, terms, &raw_query, filter)
     }
 }
 
@@ -364,7 +443,10 @@ mod tests {
     #[test]
     fn test_tokenize() {
         let terms = tokenize("Orca stablyai/orca project");
-        assert_eq!(terms, vec!["orca", "stablyai", "orca", "project"]);
+        assert!(terms.contains(&"orca".to_string()));
+        assert!(terms.contains(&"stablyai".to_string()));
+        assert!(terms.contains(&"stablyai/orca".to_string()));
+        assert!(terms.contains(&"project".to_string()));
     }
 
     #[test]
@@ -391,6 +473,31 @@ mod tests {
         assert_eq!(item.source_type, RetrievalSourceType::Scribble);
         assert!(item.snippet.contains("Relay"));
         assert_eq!(item.provenance.source_id, "note_1");
+        assert!(!item.explainability.why.is_empty());
+    }
+
+    #[test]
+    fn test_exact_phrase_matching_boost() {
+        let prov = RetrievalProvenance::new("note_2", RetrievalSourceType::Scribble);
+        let terms = tokenize("parallel coding-agent workflows");
+        let filter = RetrievalFilter::default();
+
+        let item = UnifiedRetrievalService::score_item(
+            "note_2",
+            RetrievalSourceType::Scribble,
+            "Orca Workflows",
+            "Relay enables parallel coding-agent workflows across multiple models.",
+            Some("2026-09-04T12:00:00Z"),
+            vec![],
+            prov,
+            &terms,
+            &filter,
+        );
+
+        assert!(item.is_some());
+        let item = item.unwrap();
+        assert!(item.explainability.match_types.contains(&MatchType::ExactPhrase));
+        assert!(item.explainability.why.iter().any(|w| w.contains("exact phrase")));
     }
 
     #[test]
@@ -413,7 +520,6 @@ mod tests {
             &terms,
             &filter,
         );
-        // Scored item itself doesn't filter source_type directly (search does), but let's check time filter
         assert!(item.is_some());
     }
 
@@ -429,7 +535,6 @@ mod tests {
             ..Default::default()
         };
 
-        // Outside time window (too late)
         let too_late = UnifiedRetrievalService::score_item(
             "note_1",
             RetrievalSourceType::Scribble,
@@ -443,7 +548,6 @@ mod tests {
         );
         assert!(too_late.is_none());
 
-        // In time window
         let in_window = UnifiedRetrievalService::score_item(
             "note_1",
             RetrievalSourceType::Scribble,

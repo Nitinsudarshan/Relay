@@ -1953,6 +1953,25 @@ export interface RetrievalQuery {
   include_evidence?: boolean;
 }
 
+export type MatchType =
+  | 'exact_phrase'
+  | 'title_match'
+  | 'heading_match'
+  | 'topic_match'
+  | 'entity_match'
+  | 'derived_abstraction'
+  | 'term_coverage'
+  | 'recency_only';
+
+export interface Explainability {
+  matched_terms: string[];
+  match_types: MatchType[];
+  why: string[];
+  base_score: number;
+  boosts_applied: string[];
+  final_score: number;
+}
+
 export interface RetrievedItem {
   id: string;
   source_type: RetrievalSourceType;
@@ -1963,6 +1982,7 @@ export interface RetrievedItem {
   timestamp?: string | null;
   provenance: RetrievalProvenance;
   topics: string[];
+  explainability?: Explainability | null;
   metadata?: any;
 }
 
@@ -2122,4 +2142,35 @@ export interface UniversalAction {
   created_at: string;
   executed_at?: string | null;
 }
+
+export interface CandidateMemory {
+  memory_type: MemoryType;
+  subject: string;
+  content: string;
+  evidence: string;
+  source_id: string;
+  confidence: number;
+  reason_for_retention: string;
+}
+
+export type FormationAction = 'created' | 'superseded' | 'deduplicated' | 'rejected';
+
+export interface MemoryFormationOutcome {
+  action: FormationAction;
+  memory?: MemoryItem | null;
+  superseded_memory_id?: string | null;
+  reason: string;
+}
+
+export interface KnowledgeTelemetrySnapshot {
+  total_memories: number;
+  active_memories: number;
+  total_entities: number;
+  total_relationships: number;
+  total_scribbles: number;
+  total_notes: number;
+  total_files: number;
+  total_captures: number;
+}
+
 

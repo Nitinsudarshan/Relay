@@ -115,6 +115,7 @@ pub struct AppState {
     pub capture_bridge: Mutex<Option<crate::capture::web::bridge::BridgeHandle>>,
     pub memory_store: Arc<crate::memory::MemoryStore>,
     pub relationship_store: Arc<crate::relationships::RelationshipStore>,
+    pub entity_store: Arc<crate::entities::EntityStore>,
 }
 
 /// The state of an in-flight voice setup.
@@ -4165,8 +4166,9 @@ pub async fn unified_retrieve(
     query: crate::retrieval::RetrievalQuery,
     state: State<'_, AppState>,
 ) -> Result<crate::retrieval::RetrievalResult, CommandError> {
-    Ok(crate::retrieval::UnifiedRetrievalService::search(
+    Ok(crate::retrieval::UnifiedRetrievalService::search_with_memory(
         &state.vault,
+        Some(&state.memory_store),
         Some(&state.meetings_v2.store()),
         Some(&state.meeting_processor),
         &query,
@@ -4197,12 +4199,78 @@ pub async fn assemble_context_pack(
         req = req.with_char_budget(b);
     }
 
-    Ok(crate::context::ContextAssemblyService::assemble(
+    Ok(crate::context::ContextAssemblyService::assemble_full(
         &state.vault,
         Some(&state.memory_store),
         Some(&state.relationship_store),
+        Some(&state.entity_store),
+        Some(&state.meetings_v2.store()),
+        Some(&state.meeting_processor),
         &req,
     ))
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct KnowledgeTelemetrySnapshot {
+    pub total_memories: usize,
+    pub active_memories: usize,
+    pub total_entities: usize,
+    pub total_relationships: usize,
+    pub total_scribbles: usize,
+    pub total_notes: usize,
+    pub total_files: usize,
+    pub total_captures: usize,
+}
+
+#[tauri::command]
+pub async fn get_knowledge_telemetry(
+    state: State<'_, AppState>,
+) -> Result<KnowledgeTelemetrySnapshot, CommandError> {
+    let active_mems = state.memory_store.list_active(None).len();
+    let all_rels = state.relationship_store.list_all().len();
+    let all_ents = state.entity_store.list_all().len();
+    let scribbles = state.vault.list_scribbles().map(|v| v.len()).unwrap_or(0);
+    let notes = state.vault.list_notes().map(|v| v.len()).unwrap_or(0);
+    let (files, caps) = state.vault.list_vault_files()
+        .map(|all| {
+            let caps = all.iter().filter(|f| f.is_capture()).count();
+            let files = all.len() - caps;
+            (files, caps)
+        })
+        .unwrap_or((0, 0));
+
+    Ok(KnowledgeTelemetrySnapshot {
+        total_memories: active_mems,
+        active_memories: active_mems,
+        total_entities: all_ents,
+        total_relationships: all_rels,
+        total_scribbles: scribbles,
+        total_notes: notes,
+        total_files: files,
+        total_captures: caps,
+    })
+}
+
+#[tauri::command]
+pub async fn form_memory_candidate(
+    candidate: crate::memory::CandidateMemory,
+    state: State<'_, AppState>,
+) -> Result<crate::memory::MemoryFormationOutcome, CommandError> {
+    crate::memory::MemoryFormationService::process_candidate(&state.memory_store, candidate)
+        .map_err(|e| CommandError::new("MEMORY_ERROR", &e))
+}
+
+#[tauri::command]
+pub async fn list_entities(
+    category: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::entities::ResolvedEntity>, CommandError> {
+    if let Some(cat_str) = category {
+        if let Some(cat) = crate::entities::EntityCategory::from_str_opt(&cat_str) {
+            return Ok(state.entity_store.list_by_category(cat));
+        }
+    }
+    Ok(state.entity_store.list_all())
 }
 
 #[tauri::command]

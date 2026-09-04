@@ -76,18 +76,37 @@ impl EntityResolver {
                     continue;
                 }
 
-                // Match condition A: Matching repo identifier (e.g. stablyai/orca)
+                // Match condition A: Matching repo identifier or exact canonical URL
                 if let Some(ref rid) = repo_id {
-                    if candidate.source_identifiers.iter().any(|id| id == rid) {
+                    if candidate.source_identifiers.iter().any(|id| id == rid)
+                        || candidate.urls.iter().any(|u| u.contains(rid.as_str()))
+                    {
                         match_idx = Some(idx);
                         break;
                     }
-                    // Match short name with repo name (e.g. "Orca" matches "stablyai/orca")
+                    // Match short name with repo suffix if grounded by repo name match
                     if let Some(repo_name) = rid.split('/').nth(1) {
-                        if normalize_for_matching(repo_name) == normalize_for_matching(&candidate.canonical_name) {
+                        let cand_norm = normalize_for_matching(&candidate.canonical_name);
+                        let repo_norm = normalize_for_matching(repo_name);
+                        if cand_norm == repo_norm {
                             match_idx = Some(idx);
                             break;
                         }
+                    }
+                }
+
+                // Match condition A2: If candidate has repo identifier and current entity is short name
+                if repo_id.is_none() {
+                    for cand_rid in &candidate.source_identifiers {
+                        if let Some(repo_name) = cand_rid.split('/').nth(1) {
+                            if normalize_for_matching(repo_name) == norm_name {
+                                match_idx = Some(idx);
+                                break;
+                            }
+                        }
+                    }
+                    if match_idx.is_some() {
+                        break;
                     }
                 }
 
@@ -195,5 +214,15 @@ mod tests {
         let resolved = EntityResolver::resolve(&mentions);
         // Git and GitHub are different categories and distinct concepts; must stay separate!
         assert_eq!(resolved.len(), 2);
+    }
+
+    #[test]
+    fn test_false_merge_prevention_across_unrelated_sources() {
+        let mentions = vec![
+            ExtractedEntity::new("Orca", EntityCategory::Product, "doc_marine", "The wild orca travels in pods."),
+            ExtractedEntity::new("someone/orca", EntityCategory::Project, "doc_repo", "Repo someone/orca is a cli tool."),
+        ];
+        let resolved = EntityResolver::resolve(&mentions);
+        assert_eq!(resolved.len(), 2, "Unrelated generic mention must not falsely merge with arbitrary repo without shared context");
     }
 }

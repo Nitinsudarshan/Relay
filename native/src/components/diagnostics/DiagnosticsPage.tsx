@@ -20,11 +20,13 @@ import {
   Settings,
   HelpCircle,
   Mic,
+  Brain,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MeetingPipelineDiagnostics } from './MeetingPipelineDiagnostics';
+import { KnowledgeArchitectureDiagnostics } from './KnowledgeArchitectureDiagnostics';
 import {
   AppSettings,
   OllamaModelDetails,
@@ -41,7 +43,7 @@ interface DiagnosticsPageProps {
 }
 
 export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab }) => {
-  const [activeTab, setActiveTab] = useState<'stt' | 'meetings' | 'llm' | 'system'>(
+  const [activeTab, setActiveTab] = useState<'stt' | 'meetings' | 'llm' | 'system' | 'knowledge'>(
     'stt',
   );
 
@@ -449,7 +451,26 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
           <HardDrive className="w-4 h-4" />
           System & Audio Runtime
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('knowledge')}
+          className={`pb-2.5 px-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all ${
+            activeTab === 'knowledge'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Brain className="w-4 h-4" />
+          Knowledge Architecture
+        </button>
       </div>
+
+      {activeTab === 'knowledge' && (
+        <div className="space-y-6 animate-in fade-in-50">
+          <KnowledgeArchitectureDiagnostics />
+        </div>
+      )}
 
       {activeTab === 'meetings' && (
         <div className="space-y-6 animate-in fade-in-50">

@@ -34,16 +34,38 @@ impl RelationshipStore {
         }
     }
 
-    /// Persists current in-memory state to disk.
+    /// Persists current in-memory state to disk atomically.
     fn persist(&self) -> Result<(), String> {
         let records = self.records.read().map_err(|e| e.to_string())?;
         let json = serde_json::to_string_pretty(&*records).map_err(|e| e.to_string())?;
-        fs::write(&self.storage_path, json).map_err(|e| e.to_string())?;
+        let tmp_path = self.storage_path.with_extension("tmp");
+        fs::write(&tmp_path, json.as_bytes()).map_err(|e| e.to_string())?;
+        fs::rename(&tmp_path, &self.storage_path).map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    /// Adds or updates a relationship, ensuring no supersedes cycle is introduced.
+    /// Reloads records from disk.
+    pub fn reload(&self) {
+        if self.storage_path.exists() {
+            if let Ok(data) = fs::read_to_string(&self.storage_path) {
+                if let Ok(records) = serde_json::from_str::<Vec<RelationshipRecord>>(&data) {
+                    if let Ok(mut lock) = self.records.write() {
+                        *lock = records;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Adds or updates a relationship, validating endpoints and ensuring no supersedes cycle is introduced.
     pub fn add_relationship(&self, rel: RelationshipRecord) -> Result<(), String> {
+        if rel.source_id.trim().is_empty() || rel.target_id.trim().is_empty() {
+            return Err("Relationship endpoints cannot be empty".to_string());
+        }
+        if rel.source_id == rel.target_id {
+            return Err(format!("Self-referential relationship is forbidden: {}", rel.source_id));
+        }
+
         let mut records = self.records.write().map_err(|e| e.to_string())?;
 
         // Detect supersedes cycle if adding a supersedes link
