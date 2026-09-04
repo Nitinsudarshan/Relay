@@ -209,9 +209,10 @@ pub async fn test_ollama_prompt(
         "stream": false,
     });
 
+    let timeout_secs = 90;
     let res = client
         .post(format!("{}/api/generate", host))
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(timeout_secs))
         .json(&body)
         .send()
         .await;
@@ -238,22 +239,38 @@ pub async fn test_ollama_prompt(
                     },
                 }
             } else {
+                let status = resp.status();
+                let err_text = resp.text().await.unwrap_or_default();
                 OllamaPromptTestResult {
                     success: false,
                     latency_ms,
                     response: None,
-                    error: Some(format!("HTTP error {}", resp.status())),
+                    error: Some(if !err_text.is_empty() {
+                        format!("HTTP {}: {}", status, err_text)
+                    } else {
+                        format!("HTTP {}", status)
+                    }),
                     model: model.to_string(),
                 }
             }
         }
-        Err(e) => OllamaPromptTestResult {
-            success: false,
-            latency_ms,
-            response: None,
-            error: Some(e.to_string()),
-            model: model.to_string(),
-        },
+        Err(e) => {
+            let error_msg = if e.is_timeout() {
+                format!(
+                    "Request timed out after {}s. Large models (e.g. 8B–30B) or cold starts can take longer to load weights from disk into memory.",
+                    timeout_secs
+                )
+            } else {
+                format!("Failed to reach Ollama at {}: {}", host, e)
+            };
+            OllamaPromptTestResult {
+                success: false,
+                latency_ms,
+                response: None,
+                error: Some(error_msg),
+                model: model.to_string(),
+            }
+        }
     }
 }
 

@@ -62,6 +62,7 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
 
   // LLM prompt test state
   const [testPrompt, setTestPrompt] = useState('Hello! Reply with "Relay AI ready" in under 5 words.');
+  const [selectedTestModel, setSelectedTestModel] = useState<string>('');
   const [runningLlmTest, setRunningLlmTest] = useState(false);
   const [llmTestResult, setLlmTestResult] = useState<OllamaPromptTestResult | null>(null);
 
@@ -112,10 +113,10 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
   const fetchLlmModels = async () => {
     setLoadingLlmModels(true);
     try {
-      const models = await invoke<OllamaModelDetails[]>('get_available_llm_models', { host: null });
-      setInstalledLlmModels(models || []);
+      const models = await invoke<OllamaModelDetails[]>('get_available_llm_models');
+      setInstalledLlmModels(models);
     } catch (err) {
-      setInstalledLlmModels([]);
+      console.error('Failed to fetch LLM models in diagnostics:', err);
     } finally {
       setLoadingLlmModels(false);
     }
@@ -124,10 +125,10 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
   const fetchSttModels = async () => {
     setLoadingSttModels(true);
     try {
-      const overview = await invoke<SttModelsOverview>('get_available_stt_models');
-      setSttOverview(overview);
+      const ov = await invoke<SttModelsOverview>('get_available_stt_models');
+      setSttOverview(ov);
     } catch (err) {
-      console.error('Failed to get STT models overview:', err);
+      console.error('Failed to fetch STT models in diagnostics:', err);
     } finally {
       setLoadingSttModels(false);
     }
@@ -137,9 +138,9 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
     setLoadingDevices(true);
     try {
       const devs = await invoke<AudioDeviceInfo[]>('get_audio_devices');
-      setAudioDevices(devs || []);
+      setAudioDevices(devs);
     } catch (err) {
-      console.error('Failed to load audio devices:', err);
+      console.error('Failed to fetch audio devices in diagnostics:', err);
     } finally {
       setLoadingDevices(false);
     }
@@ -157,17 +158,27 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
   };
 
   useEffect(() => {
-    refreshAll();
+    fetchSettings();
+    fetchAppInfo();
+    checkLlmBackend();
+    fetchLlmModels();
+    fetchSttModels();
+    fetchAudioDevices();
   }, []);
 
-  const handleRunLlmPromptTest = async () => {
+  const handleRunLlmPromptTest = async (overrideModel?: string) => {
     if (!settings) return;
+    const modelToTest =
+      overrideModel || selectedTestModel || settings.provider.ollama_model || 'llama3.2:latest';
+    if (overrideModel) {
+      setSelectedTestModel(overrideModel);
+    }
     setRunningLlmTest(true);
     setLlmTestResult(null);
     try {
       const res = await invoke<OllamaPromptTestResult>('test_llm_prompt', {
         host: settings.provider.ollama_host || null,
-        model: settings.provider.ollama_model,
+        model: modelToTest,
         prompt: testPrompt || null,
       });
       setLlmTestResult(res);
@@ -175,7 +186,7 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
       setLlmTestResult({
         success: false,
         latency_ms: 0,
-        model: settings.provider.ollama_model,
+        model: modelToTest,
         error: err?.message || String(err),
       });
     } finally {
@@ -567,9 +578,30 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
 
             <div className="space-y-3">
               <div>
-                <label className="block text-[11px] font-medium text-foreground mb-1">
-                  Test Prompt (sent to configured model: <span className="font-mono text-primary">{activeLlmModelName}</span>)
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-medium text-foreground">
+                    Benchmark Prompt
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-muted-foreground">Target Model:</span>
+                    <select
+                      value={selectedTestModel || activeLlmModelName}
+                      onChange={(e) => setSelectedTestModel(e.target.value)}
+                      className="text-xs font-mono bg-background border border-border rounded px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      {installedLlmModels.map((m) => (
+                        <option key={m.name} value={m.name}>
+                          {m.name} {m.name === activeLlmModelName ? '(Active)' : ''}
+                        </option>
+                      ))}
+                      {!installedLlmModels.some(
+                        (m) => m.name === activeLlmModelName || m.model === activeLlmModelName
+                      ) && (
+                        <option value={activeLlmModelName}>{activeLlmModelName} (Active)</option>
+                      )}
+                    </select>
+                  </div>
+                </div>
                 <div className="flex gap-2">
                   <Input
                     value={testPrompt}
@@ -581,7 +613,7 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
                     type="button"
                     variant="default"
                     size="sm"
-                    onClick={handleRunLlmPromptTest}
+                    onClick={() => handleRunLlmPromptTest()}
                     disabled={runningLlmTest || !isOllamaUp}
                     className="text-xs flex items-center gap-1.5 shrink-0"
                   >
@@ -589,6 +621,15 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
                     {runningLlmTest ? 'Running…' : 'Run Test'}
                   </Button>
                 </div>
+                {runningLlmTest && (
+                  <p className="text-[11px] text-muted-foreground mt-1.5 flex items-center gap-1 animate-pulse">
+                    <span>⏳ Benchmarking against</span>
+                    <span className="font-mono text-primary font-semibold">
+                      {selectedTestModel || activeLlmModelName}
+                    </span>
+                    <span>— cold model loading from disk into VRAM/RAM can take 15–45s for larger models.</span>
+                  </p>
+                )}
               </div>
 
               {/* Prompt Test Result Display */}
@@ -667,6 +708,7 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
                       <th className="py-2 px-2">Params</th>
                       <th className="py-2 px-2">Quant</th>
                       <th className="py-2 px-2">Family</th>
+                      <th className="py-2 px-2 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
@@ -698,6 +740,22 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
                           </td>
                           <td className="py-2 px-2 text-muted-foreground">
                             {m.family || '—'}
+                          </td>
+                          <td className="py-2 px-2 text-right">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-6 text-[11px] px-2 gap-1 font-sans"
+                              onClick={() => {
+                                setSelectedTestModel(m.name);
+                                handleRunLlmPromptTest(m.name);
+                              }}
+                              disabled={runningLlmTest || !isOllamaUp}
+                            >
+                              <Play className="w-2.5 h-2.5 text-primary" />
+                              Benchmark
+                            </Button>
                           </td>
                         </tr>
                       );

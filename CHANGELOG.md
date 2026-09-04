@@ -1,5 +1,16 @@
 # Relay — Changelog
 
+## [0.30.1] - 2026-09-04
+
+### LLM Benchmark Timeout Extension & Model Selector in Diagnostics Hub
+
+**Type**: patch — extended Ollama prompt benchmark timeout to 90s to avoid timeouts during cold-start weight loading for larger models (8B–30B), added friendly timeout diagnostics, and introduced target model selector and direct benchmark buttons to the Diagnostics Hub (`native/src-tauri/src/providers/ollama_manager.rs`, `native/src/components/diagnostics/DiagnosticsPage.tsx`).
+
+#### Improvements & Fixes
+
+- **Ollama Benchmark Timeout Extended (`ollama_manager.rs`)**: Increased live LLM prompt benchmark timeout from 15s to 90s. When testing 8B+ models (`gemma4:latest`, `glm-4.7-flash:latest`), initial cold start model loading from disk into VRAM/RAM can take 15–30s. Added specific timeout detection and error explanation to distinguish between offline backends and cold weight loading.
+- **Interactive Model Benchmark Selection (`DiagnosticsPage.tsx`)**: Added a target model dropdown to the Live Prompt & Latency Benchmark card, allowing users to benchmark any installed model without changing active production settings. Added a direct `[Benchmark]` button in each row of the Installed Local Ollama Models table.
+
 ## [0.30.0] - 2026-09-04
 
 ### Data-Driven Model Discovery & Dedicated Diagnostics Hub
