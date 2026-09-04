@@ -18,6 +18,7 @@ pub enum RetrievalSourceType {
     Capture,
     Memory,
     DerivedArtifact,
+    Entity,
 }
 
 impl RetrievalSourceType {
@@ -31,6 +32,7 @@ impl RetrievalSourceType {
             Self::Capture => "capture",
             Self::Memory => "memory",
             Self::DerivedArtifact => "derived_artifact",
+            Self::Entity => "entity",
         }
     }
 
@@ -43,8 +45,9 @@ impl RetrievalSourceType {
     pub fn default_weight(&self) -> f32 {
         match self {
             Self::Memory => 1.30,
-            Self::MeetingFacts => 1.25,
-            Self::DerivedArtifact => 1.20,
+            Self::DerivedArtifact => 1.25,
+            Self::MeetingFacts => 1.20,
+            Self::Entity => 1.15,
             Self::Scribble => 1.10,
             Self::Capture => 1.05,
             Self::File => 1.05,
@@ -106,6 +109,45 @@ impl RetrievalProvenance {
         self.evidence = Some(evidence.into());
         self
     }
+}
+
+/// Category of match detected during multi-signal scoring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchType {
+    ExactPhrase,
+    TitleMatch,
+    HeadingMatch,
+    TopicMatch,
+    EntityMatch,
+    DerivedAbstraction,
+    TermCoverage,
+    RecencyOnly,
+}
+
+/// Granular explainability explaining why an item was selected and ranked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Explainability {
+    pub matched_terms: Vec<String>,
+    pub match_types: Vec<MatchType>,
+    pub why: Vec<String>,
+    pub base_score: f32,
+    pub boosts_applied: Vec<String>,
+    pub final_score: f32,
+}
+
+/// Normalized candidate passed to the scoring and ranking engine.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CandidateItem {
+    pub id: String,
+    pub source_type: RetrievalSourceType,
+    pub title: String,
+    pub content: String,
+    pub timestamp: Option<String>,
+    pub topics: Vec<String>,
+    pub entity_refs: Vec<String>,
+    pub provenance: RetrievalProvenance,
+    pub metadata: serde_json::Value,
 }
 
 /// Time window filter.
@@ -173,7 +215,7 @@ impl RetrievalQuery {
     }
 }
 
-/// A single item retrieved by Unified Retrieval.
+/// A single item retrieved by Unified Retrieval with full explainability.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RetrievedItem {
     pub id: String,
@@ -186,6 +228,10 @@ pub struct RetrievedItem {
     pub provenance: RetrievalProvenance,
     #[serde(default)]
     pub topics: Vec<String>,
+    #[serde(default)]
+    pub entity_refs: Vec<String>,
+    #[serde(default)]
+    pub explainability: Explainability,
     #[serde(default)]
     pub metadata: serde_json::Value,
 }

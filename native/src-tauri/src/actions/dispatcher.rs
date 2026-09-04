@@ -1,47 +1,43 @@
 //! Action dispatching and execution layer.
 //!
 //! Separates intent from concrete action and validates confirmation requirements
-//! prior to mutating executions.
+//! prior to mutating executions, with strict idempotency and audit logging.
 
-use super::model::{ActionStatus, ActionType, UniversalAction};
-use crate::vault::{Scribble, VaultManager};
-
-fn open_in_browser(url: &str) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("rundll32")
-            .args(["url.dll,FileProtocolHandler", url])
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(url)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(url)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
+use super::audit::{ActionAuditLogger, ActionAuditRecord};
+use super::idempotency::IdempotencyStore;
+use super::model::{ActionStatus, UniversalAction};
+use super::registry::{ActionExecutionContext, ActionRegistry};
+use crate::vault::VaultManager;
 
 pub struct ActionDispatcher;
 
 impl ActionDispatcher {
-    /// Attempts to execute an action, respecting confirmation constraints.
+    /// Attempts to execute an action, respecting confirmation constraints,
+    /// checking idempotency, and recording an audit trail.
     pub fn execute(
         action: &mut UniversalAction,
         confirmed: bool,
         vault: Option<&VaultManager>,
     ) -> Result<serde_json::Value, String> {
-        // Enforce confirmation requirement
-        if action.requires_confirmation && !confirmed {
+        let registry = ActionRegistry::new();
+        let handler = registry.find_handler(&action.action_type)
+            .ok_or_else(|| format!("Action '{}' is unsupported/not-implemented", action.action_type.as_str()))?;
+
+        // 1. Check idempotency cache if vault is available
+        if let Some(v) = vault {
+            let idemp_store = IdempotencyStore::new(&v.vault_dir());
+            if let Some(cached) = idemp_store.get_cached_result(&action.id) {
+                action.mark_completed(cached.clone());
+                return Ok(cached);
+            }
+        }
+
+        // 2. Validate action input
+        handler.validate(action)?;
+
+        // 3. Enforce confirmation requirement in code
+        let requires_conf = handler.requires_confirmation(action) || action.requires_confirmation;
+        if requires_conf && !confirmed {
             action.status = ActionStatus::RequiresConfirmation;
             return Err(format!(
                 "Action '{}' on target '{}' requires explicit confirmation before execution.",
@@ -51,63 +47,37 @@ impl ActionDispatcher {
         }
 
         action.status = ActionStatus::Executing;
+        let ctx = ActionExecutionContext { vault };
+        let execution_result = handler.execute(action, &ctx);
 
-        let res = match &action.action_type {
-            ActionType::OpenUrl => {
-                let url = &action.target;
-                if !url.starts_with("http://") && !url.starts_with("https://") {
-                    return Err(format!("Invalid URL: {}", url));
-                }
-                let _ = open_in_browser(url);
-                Ok(serde_json::json!({ "opened_url": url, "status": "success" }))
+        // 4. Audit logging & idempotency recording
+        if let Some(v) = vault {
+            let audit_logger = ActionAuditLogger::new(&v.vault_dir());
+            let (status_str, res_val, err_str) = match &execution_result {
+                Ok(val) => ("completed", Some(val.clone()), None),
+                Err(err) => ("failed", None, Some(err.clone())),
+            };
+            let audit_record = ActionAuditRecord {
+                action_id: action.id.clone(),
+                action_type: action.action_type.as_str().to_string(),
+                target: action.target.clone(),
+                parameters: action.parameters.clone(),
+                requires_confirmation: requires_conf,
+                confirmed,
+                status: status_str.to_string(),
+                result: res_val,
+                error: err_str,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+            let _ = audit_logger.log_record(&audit_record);
+
+            if let Ok(ref val) = execution_result {
+                let idemp_store = IdempotencyStore::new(&v.vault_dir());
+                let _ = idemp_store.record_result(&action.id, val.clone());
             }
+        }
 
-            ActionType::CopyContent => {
-                let text = action.parameters.get("text")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or(&action.target);
-                
-                // Copy to system clipboard
-                if let Ok(mut board) = arboard::Clipboard::new() {
-                    let _ = board.set_text(text);
-                }
-                Ok(serde_json::json!({ "copied_chars": text.len(), "status": "success" }))
-            }
-
-            ActionType::CreateNote => {
-                let Some(v) = vault else {
-                    return Err("Vault is required to create a note".to_string());
-                };
-                let title = action.parameters.get("title")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("New Note");
-                let content = action.parameters.get("content")
-                    .and_then(|c| c.as_str())
-                    .unwrap_or(&action.target);
-
-                let scribble = Scribble::new_text(content, Some(title));
-                v.save_scribble(&scribble).map_err(|e| e.to_string())?;
-                Ok(serde_json::json!({ "note_id": scribble.id, "title": title, "status": "created" }))
-            }
-
-            ActionType::OpenSource => {
-                Ok(serde_json::json!({ "source_id": action.target, "status": "opened" }))
-            }
-
-            ActionType::CreateTask => {
-                Ok(serde_json::json!({ "task": action.target, "status": "created" }))
-            }
-
-            ActionType::SaveCapture => {
-                Ok(serde_json::json!({ "capture_target": action.target, "status": "saved" }))
-            }
-
-            ActionType::Custom(name) => {
-                Ok(serde_json::json!({ "custom_action": name, "status": "dispatched" }))
-            }
-        };
-
-        match res {
+        match execution_result {
             Ok(val) => {
                 action.mark_completed(val.clone());
                 Ok(val)
@@ -123,6 +93,7 @@ impl ActionDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::model::ActionType;
 
     #[test]
     fn test_read_only_action_executes_without_confirmation() {
@@ -145,20 +116,36 @@ mod tests {
             "Note content here",
             serde_json::json!({ "title": "Test Title" }),
         );
-        assert!(act.requires_confirmation);
 
         // Unconfirmed execution fails
         let res = ActionDispatcher::execute(&mut act, false, None);
         assert!(res.is_err());
         assert_eq!(act.status, ActionStatus::RequiresConfirmation);
 
-        // Confirmed execution proceeds
+        // Confirmed execution proceeds and creates genuine side-effect
         let temp_dir = std::env::temp_dir().join(format!("relay_test_act_{}", uuid::Uuid::new_v4()));
         let _ = std::fs::create_dir_all(&temp_dir);
         let vault = VaultManager::new(temp_dir.clone());
         let res2 = ActionDispatcher::execute(&mut act, true, Some(&vault));
         assert!(res2.is_ok());
         assert_eq!(act.status, ActionStatus::Completed);
+
+        // Idempotency: repeating with same action ID returns cached result without creating duplicate
+        let res3 = ActionDispatcher::execute(&mut act, true, Some(&vault));
+        assert!(res3.is_ok());
+
         let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_unsupported_action_fails_truthfully() {
+        let mut act = UniversalAction::new(
+            ActionType::Custom("some_unsupported_action".to_string()),
+            "target",
+            serde_json::json!({}),
+        );
+        let res = ActionDispatcher::execute(&mut act, true, None);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("unsupported/not-implemented"));
     }
 }

@@ -4,7 +4,9 @@
 //! to assemble bounded, provenance-preserving Context Packs.
 
 use super::pack::{ContextPack, ContextPackItem, ContextPackType};
-use crate::entities::{EntityExtractor, EntityResolver};
+use crate::entities::{EntityExtractor, EntityResolver, EntityStore};
+use crate::meetings_v2::processing::MeetingProcessor;
+use crate::meetings_v2::session_store::SessionStore;
 use crate::memory::MemoryStore;
 use crate::relationships::RelationshipStore;
 use crate::retrieval::{RetrievalFilter, RetrievalQuery, UnifiedRetrievalService};
@@ -55,23 +57,69 @@ impl ContextAssemblyService {
         relationship_store: Option<&RelationshipStore>,
         request: &ContextAssemblyRequest,
     ) -> ContextPack {
+        Self::assemble_full(vault, memory_store, relationship_store, None, None, None, request)
+    }
+
+    /// Full assembly entrypoint receiving all stores for deep integration.
+    pub fn assemble_full(
+        vault: &VaultManager,
+        memory_store: Option<&MemoryStore>,
+        relationship_store: Option<&RelationshipStore>,
+        entity_store: Option<&EntityStore>,
+        session_store: Option<&SessionStore>,
+        meeting_processor: Option<&MeetingProcessor>,
+        request: &ContextAssemblyRequest,
+    ) -> ContextPack {
         let budget = request.char_budget.unwrap_or(8_000);
         let pack_type = request.pack_type.unwrap_or(ContextPackType::General);
         let mut pack = ContextPack::new(pack_type, &request.query, budget);
         pack.intent = request.intent.clone();
 
-        // 1. Run Unified Retrieval
+        // 1. Run Unified Retrieval with all knowledge stores
         let mut ret_query = RetrievalQuery::new(&request.query)
             .with_char_budget(budget);
         if let Some(ref f) = request.filter {
             ret_query.filter = f.clone();
         }
 
-        let ret_result = UnifiedRetrievalService::search(vault, None, None, &ret_query);
+        let ret_result = UnifiedRetrievalService::search_with_memory(
+            vault,
+            memory_store,
+            session_store,
+            meeting_processor,
+            &ret_query,
+        );
 
-        // 2. Add retrieved items up to budget
+        // 2. Domain-Aware Item Prioritization:
+        // E.g., for a Repository pack, prioritize DerivedArtifact (RepositoryContext) over raw files.
+        let mut sorted_items = ret_result.items;
+        match pack_type {
+            ContextPackType::Repository => {
+                sorted_items.sort_by(|a, b| {
+                    let a_is_derived = a.source_type == crate::retrieval::RetrievalSourceType::DerivedArtifact;
+                    let b_is_derived = b.source_type == crate::retrieval::RetrievalSourceType::DerivedArtifact;
+                    b_is_derived.cmp(&a_is_derived).then_with(|| {
+                        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                });
+            }
+            ContextPackType::Meeting => {
+                sorted_items.sort_by(|a, b| {
+                    let a_is_mtg = a.source_type == crate::retrieval::RetrievalSourceType::Meeting;
+                    let b_is_mtg = b.source_type == crate::retrieval::RetrievalSourceType::Meeting;
+                    b_is_mtg.cmp(&a_is_mtg).then_with(|| {
+                        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                });
+            }
+            _ => {}
+        }
+
+        // 3. Add retrieved items up to budget
         let mut aggregated_content = String::new();
-        for item in ret_result.items {
+        let mut added_source_ids = Vec::new();
+
+        for item in sorted_items {
             let prov_str = item.provenance.source_origin
                 .unwrap_or_else(|| item.provenance.source_id.clone());
 
@@ -87,12 +135,13 @@ impl ContextAssemblyService {
 
             aggregated_content.push_str(&pack_item.content);
             aggregated_content.push(' ');
+            added_source_ids.push(item.id.clone());
 
             if !pack.try_add_item(pack_item) {
                 break;
             }
 
-            // 3. Collect linked relationships
+            // 4. Graph expansion: collect linked relationships
             if let Some(rel_store) = relationship_store {
                 let rels = rel_store.get_relationships_for_source(&item.id);
                 for r in rels {
@@ -103,13 +152,37 @@ impl ContextAssemblyService {
             }
         }
 
-        // 4. Extract and resolve entities across the retrieved evidence
-        if !aggregated_content.is_empty() {
-            let extracted = EntityExtractor::extract_deterministic(&pack.id, &aggregated_content);
-            pack.entities = EntityResolver::resolve(&extracted);
+        // 5. Entities: query EntityStore if available, and extract from aggregated content
+        let mut candidate_entities = Vec::new();
+        if let Some(estore) = entity_store {
+            // Find entities matching query or in store
+            let terms = crate::retrieval::tokenize(&request.query);
+            for term in terms {
+                if let Some(ent) = estore.find_by_name(&term) {
+                    if !candidate_entities.contains(&ent) {
+                        candidate_entities.push(ent);
+                    }
+                }
+                if let Some(ent) = estore.find_by_identifier(&term) {
+                    if !candidate_entities.contains(&ent) {
+                        candidate_entities.push(ent);
+                    }
+                }
+            }
         }
 
-        // 5. Retrieve matching memories
+        if !aggregated_content.is_empty() {
+            let extracted = EntityExtractor::extract_deterministic(&pack.id, &aggregated_content);
+            let resolved = EntityResolver::resolve(&extracted);
+            for ent in resolved {
+                if !candidate_entities.iter().any(|e| e.canonical_name.to_lowercase() == ent.canonical_name.to_lowercase()) {
+                    candidate_entities.push(ent);
+                }
+            }
+        }
+        pack.entities = candidate_entities;
+
+        // 6. Memory: add active memories from MemoryStore
         if let Some(mem_store) = memory_store {
             let active_memories = mem_store.list_active(None);
             let query_terms = crate::retrieval::tokenize(&request.query);
@@ -117,7 +190,7 @@ impl ContextAssemblyService {
                 let mem_text = format!("{} {}", mem.subject, mem.content).to_lowercase();
                 let matches = query_terms.is_empty()
                     || query_terms.iter().any(|t| mem_text.contains(t));
-                if matches {
+                if matches && !pack.memories.iter().any(|m| m.id == mem.id) {
                     pack.memories.push(mem);
                 }
             }

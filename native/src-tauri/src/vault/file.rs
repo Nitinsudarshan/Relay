@@ -150,7 +150,7 @@ impl VaultFile {
 
     /// Whether this artifact is a capture rather than an imported document.
     pub fn is_capture(&self) -> bool {
-        self.capture.is_some()
+        self.capture.is_some() || self.file_type == CAPTURE_FILE_TYPE || self.file_type == "capture"
     }
 }
 

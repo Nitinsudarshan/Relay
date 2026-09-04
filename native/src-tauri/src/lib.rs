@@ -136,6 +136,7 @@ pub fn run() {
 
     let memory_store = Arc::new(memory::MemoryStore::new(&vault_dir));
     let relationship_store = Arc::new(relationships::RelationshipStore::new(&vault_dir));
+    let entity_store = Arc::new(entities::EntityStore::new(&vault_dir));
 
     let state = AppState {
         recorder,
@@ -153,6 +154,7 @@ pub fn run() {
         capture_bridge: Mutex::new(None),
         memory_store,
         relationship_store,
+        entity_store,
     };
 
     tauri::Builder::default()
@@ -365,6 +367,9 @@ pub fn run() {
             commands::open_external_url,
             commands::unified_retrieve,
             commands::assemble_context_pack,
+            commands::get_knowledge_telemetry,
+            commands::form_memory_candidate,
+            commands::list_entities,
             commands::list_memories,
             commands::create_memory,
             commands::supersede_memory,

@@ -1094,6 +1094,23 @@ impl VaultManager {
         let raw = serde_json::to_string_pretty(&to_write)
             .map_err(|e| VaultError::FrontmatterError(e.to_string()))?;
         fs::write(path, raw.as_bytes())?;
+
+        // Automatically record operational relationship for derived artifact
+        let rel_store = crate::relationships::RelationshipStore::new(&self.vault_dir());
+        let rel_type = match to_write.derived_type {
+            crate::pipeline::analysis::DerivedType::Summary => crate::relationships::RelationshipType::Summarizes,
+            crate::pipeline::analysis::DerivedType::Context => crate::relationships::RelationshipType::DerivedFrom,
+            crate::pipeline::analysis::DerivedType::Analysis => crate::relationships::RelationshipType::Analyses,
+            _ => crate::relationships::RelationshipType::DerivedFrom,
+        };
+        if let Ok(rel) = crate::relationships::RelationshipRecord::new(
+            &to_write.id,
+            &to_write.source_id,
+            rel_type,
+        ) {
+            let _ = rel_store.add_relationship(rel);
+        }
+
         Ok(to_write)
     }
 
