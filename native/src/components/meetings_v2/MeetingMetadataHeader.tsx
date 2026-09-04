@@ -177,6 +177,44 @@ export const MeetingMetadataHeader: React.FC<MeetingMetadataHeaderProps> = ({
         </div>
       )}
 
+      {metadata?.attendance_reconciliation && metadata.attendance_reconciliation.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mr-1">
+            Attendance:
+          </span>
+          {metadata.attendance_reconciliation.map((rec) => (
+            <span
+              key={rec.name}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-border/60 bg-muted/20 text-[11px]"
+              title={`${rec.name} — Calendar: ${rec.calendar_status}, Audio: ${rec.audio_status}, Identity: ${rec.identity_status}`}
+            >
+              <span className="font-medium text-foreground">{rec.name}</span>
+              <span className="text-[10px] text-muted-foreground">
+                ({rec.calendar_status})
+              </span>
+              <span
+                className={`text-[10px] px-1 rounded ${
+                  rec.audio_status === 'heard'
+                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium'
+                    : 'bg-muted text-muted-foreground/70'
+                }`}
+              >
+                {rec.audio_status}
+              </span>
+              <span
+                className={`text-[10px] ${
+                  rec.identity_status === 'confirmed'
+                    ? 'text-emerald-600 dark:text-emerald-400 font-medium'
+                    : 'text-muted-foreground/80'
+                }`}
+              >
+                · {rec.identity_status}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
+
       {health && (lostSeconds > 0 || health.failed_chunk_count > 0 || withheldSpans > 0) && (
         <p className="flex items-start gap-1.5 text-[11px] text-amber-800 dark:text-amber-200">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" aria-hidden="true" />

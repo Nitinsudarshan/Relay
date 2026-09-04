@@ -21,8 +21,9 @@ const TONE_CLASSES: Record<string, string> = {
 /** The stages worth showing a user, in pipeline order. */
 const VISIBLE_STAGES: { key: keyof MeetingProcessing['stages']; label: string }[] = [
   { key: 'normalization', label: 'Transcript' },
+  { key: 'speakers', label: 'Speakers' },
   { key: 'conversation', label: 'Conversation' },
-  { key: 'summary', label: 'Summary' },
+  { key: 'summary', label: 'Meeting intelligence' },
 ];
 
 const StageChip: React.FC<{ label: string; stage?: StageState | null }> = ({
@@ -76,9 +77,6 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
   const summary = processing?.summary;
   const usedFallback = summary?.fallback_used === true;
   const modelRejected = summary?.provider_output_status === 'REJECTED';
-  const rejectionCodes = (summary?.rejected_issues ?? [])
-    .map((issue) => issue.code)
-    .join(', ');
 
   return (
     <div className="flex flex-col gap-2 px-6 py-2.5 border-b border-border bg-card/40">
@@ -104,7 +102,7 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
         {summary && (
           <span className="text-[10px] font-mono text-muted-foreground ml-auto">
             {summary.mode.toLowerCase()} ·{' '}
-            {usedFallback ? 'no model' : summary.model} · v
+            {usedFallback ? 'local intelligence' : summary.model} · v
             {summary.processing_version}
           </span>
         )}
@@ -129,21 +127,28 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
       )}
 
       {!summaryFailed && usedFallback && (
-        <p className="text-[11px] text-amber-600 dark:text-amber-400">
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span>Summary generated locally</span>
           {modelRejected ? (
-            <>
-              Generated from fallback because the model output failed validation
-              {rejectionCodes ? ` (${rejectionCodes})` : ''}. Regenerate to try the
-              model again.
-            </>
-          ) : (
-            <>
-              Written without a language model
-              {summaryStage?.error ? ` — ${summaryStage.error}` : ''}. The transcript
-              is unaffected; retry once a model is available.
-            </>
+            <span className="text-muted-foreground/80">· AI enhancement was unavailable</span>
+          ) : summaryStage?.error ? (
+            <span className="text-muted-foreground/80">· AI enhancement was unavailable</span>
+          ) : null}
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              className="text-primary hover:underline font-medium cursor-pointer ml-1"
+            >
+              Try with AI
+            </button>
           )}
-        </p>
+        </div>
+      )}
+
+      {!summaryFailed && !usedFallback && summary && (
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span>Summary enhanced with local model ({summary.model})</span>
+        </div>
       )}
     </div>
   );

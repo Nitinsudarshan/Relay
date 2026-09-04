@@ -2269,6 +2269,36 @@ pub async fn prepare_meeting_v2(
     if session_id.trim().is_empty() {
         return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
     }
+
+    // Auto-match calendar event if not linked yet and calendar is connected
+    let sessions = state.meetings_v2.store();
+    if sessions.get_calendar_link(&session_id).is_none() {
+        if let Ok(session) = sessions.get_session(&session_id) {
+            if let Some(started) = session
+                .started_at
+                .as_deref()
+                .and_then(|r| chrono::DateTime::parse_from_rfc3339(r).ok())
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+            {
+                let ended = started + chrono::Duration::seconds(session.duration_seconds.max(1.0) as i64);
+                if let Ok(events) = crate::calendar::google::events_between(
+                    &state.config_dir,
+                    started - chrono::Duration::hours(2),
+                    ended + chrono::Duration::hours(2),
+                )
+                .await
+                {
+                    let link = crate::calendar::MeetingCalendarLink {
+                        outcome: crate::calendar::match_recording(&events, started, ended),
+                        linked_at: chrono::Utc::now().to_rfc3339(),
+                        chosen_by_user: false,
+                    };
+                    let _ = sessions.save_calendar_link(&session_id, &link);
+                }
+            }
+        }
+    }
+
     let options = {
         let settings = state.settings.lock_or_recover();
         meeting_processing_options(&settings, None, None)
@@ -2536,13 +2566,11 @@ pub async fn get_calendar_connection(
                 connected: true,
                 account_email: tokens.account_email,
                 account_name: tokens.account_name,
-                // A stored grant with no refresh token stops working at the
-                // next expiry and cannot recover on its own. Saying so now
-                // beats a confusing failure later.
                 problem: tokens.refresh_token.is_none().then(|| {
                     "This connection cannot renew itself and will stop working. Reconnect it."
                         .to_string()
                 }),
+                last_synced_at: tokens.last_synced_at,
             },
             None => crate::calendar::CalendarConnection::disconnected(),
         },
@@ -2566,15 +2594,72 @@ pub async fn connect_google_calendar(
         .await
         .map_err(|e| CommandError::new("CALENDAR_CONNECT_FAILED", &e))?;
 
-    KeyringTokenStore::save(&state.config_dir, TokenNamespace::Calendar, &result.tokens)
+    let now_iso = chrono::Utc::now().to_rfc3339();
+    let mut tokens = result.tokens;
+    tokens.last_synced_at = Some(now_iso.clone());
+
+    KeyringTokenStore::save(&state.config_dir, TokenNamespace::Calendar, &tokens)
         .map_err(|e| CommandError::new("CALENDAR_TOKEN_SAVE_FAILED", &e))?;
 
     Ok(crate::calendar::CalendarConnection {
         connected: true,
-        account_email: result.tokens.account_email.clone(),
-        account_name: result.tokens.account_name.clone(),
+        account_email: tokens.account_email.clone(),
+        account_name: tokens.account_name.clone(),
         problem: None,
+        last_synced_at: Some(now_iso),
     })
+}
+
+/// Triggers an immediate Google Calendar synchronization and updates last_synced_at.
+#[tauri::command]
+pub async fn sync_google_calendar(
+    state: State<'_, AppState>,
+) -> Result<crate::calendar::CalendarConnection, CommandError> {
+    use crate::oauth::{KeyringTokenStore, TokenNamespace};
+
+    let mut tokens = KeyringTokenStore::load(&state.config_dir, TokenNamespace::Calendar)
+        .ok_or_else(|| CommandError::new("NOT_CONNECTED", "Google Calendar is not connected"))?;
+
+    crate::calendar::google::access_token(&state.config_dir)
+        .await
+        .map_err(|e| CommandError::new("CALENDAR_SYNC_FAILED", &e))?;
+
+    let now_iso = chrono::Utc::now().to_rfc3339();
+    tokens.last_synced_at = Some(now_iso.clone());
+    KeyringTokenStore::save(&state.config_dir, TokenNamespace::Calendar, &tokens)
+        .map_err(|e| CommandError::new("TOKEN_SAVE_FAILED", &e))?;
+
+    Ok(crate::calendar::CalendarConnection {
+        connected: true,
+        account_email: tokens.account_email,
+        account_name: tokens.account_name,
+        problem: None,
+        last_synced_at: Some(now_iso),
+    })
+}
+
+/// Returns upcoming Google Calendar events for the next 24 hours.
+/// Returns an empty list if calendar is not connected or fails, without failing the UI.
+#[tauri::command]
+pub async fn get_upcoming_calendar_events(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::calendar::CalendarEvent>, CommandError> {
+    use crate::oauth::{KeyringTokenStore, TokenNamespace};
+
+    if KeyringTokenStore::load(&state.config_dir, TokenNamespace::Calendar).is_none() {
+        return Ok(Vec::new());
+    }
+
+    let now = chrono::Utc::now();
+    let later = now + chrono::Duration::hours(24);
+
+    match crate::calendar::google::events_between(&state.config_dir, now, later).await {
+        Ok(events) => Ok(events),
+        Err(e) => {
+            tracing::warn!("Failed to fetch upcoming calendar events: {}", e);
+            Ok(Vec::new())
+        }
+    }
 }
 
 /// Forgets the calendar connection.
@@ -2838,6 +2923,58 @@ pub async fn rename_meeting_v2_speaker(
 
     let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
     Ok(processing)
+}
+
+/// Merges source_speaker_id into target_speaker_id, re-deriving conversation turns
+/// and updating speaker assignments without modifying the raw transcript.
+#[tauri::command]
+pub async fn merge_meeting_v2_speakers(
+    app: AppHandle,
+    session_id: String,
+    source_speaker_id: String,
+    target_speaker_id: String,
+    new_display_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingProcessing, CommandError> {
+    if session_id.trim().is_empty()
+        || source_speaker_id.trim().is_empty()
+        || target_speaker_id.trim().is_empty()
+    {
+        return Err(CommandError::new(
+            "INVALID_SPEAKER_MERGE",
+            "A meeting id, source speaker id, and target speaker id are required",
+        ));
+    }
+
+    let processing = state
+        .meeting_processor
+        .merge_speakers(
+            &session_id,
+            &source_speaker_id,
+            &target_speaker_id,
+            new_display_name.as_deref(),
+        )
+        .map_err(|e| CommandError::new("MERGE_SPEAKERS_FAILED", &e))?;
+
+    let _ = app.emit(MEETING_PROCESSING_EVENT, &processing);
+    Ok(processing)
+}
+
+/// Returns the absolute path to a 30s audio chunk WAV for playback/seeking.
+#[tauri::command]
+pub async fn get_meeting_v2_audio_chunk_path(
+    session_id: String,
+    chunk_index: usize,
+    state: State<'_, AppState>,
+) -> Result<String, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+    let path = state.meetings_v2.store().chunk_path(&session_id, chunk_index);
+    if !path.exists() {
+        return Err(CommandError::new("AUDIO_CHUNK_NOT_FOUND", "Audio chunk file not found"));
+    }
+    Ok(path.to_string_lossy().to_string())
 }
 
 /// Separates the recorded audio into distinct voices, then re-attributes.

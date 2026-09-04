@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
   Mic,
@@ -17,11 +17,14 @@ import {
   Terminal,
   NotebookPen,
   ListTodo,
+  Calendar,
 } from 'lucide-react';
 import { ConfirmationModal } from '../common/ConfirmationModal';
 import {
   ActionItem,
   AppSettings,
+  CalendarConnection,
+  CalendarEvent,
   DirectiveKind,
   LiveTranscriptUpdate,
   MeetingExtension,
@@ -29,7 +32,6 @@ import {
   MeetingProcessing,
   MeetingProcessingIndexEntry,
   MeetingSession,
-  CalendarConnection,
   MeetingCalendarLink,
   MeetingTaskPushResult,
   RelatedMeeting,
@@ -117,6 +119,7 @@ export const MeetingsV2View: React.FC = () => {
   const [speakerError, setSpeakerError] = useState<string | null>(null);
   const [calendar, setCalendar] = useState<CalendarConnection | null>(null);
   const [calendarLink, setCalendarLink] = useState<MeetingCalendarLink | null>(null);
+  const [upcomingEvents, setUpcomingEvents] = useState<CalendarEvent[]>([]);
   const [busyActionItemId, setBusyActionItemId] = useState<string | null>(null);
   const [isAddingAllTasks, setIsAddingAllTasks] = useState<boolean>(false);
   const [isPromoting, setIsPromoting] = useState<boolean>(false);
@@ -366,7 +369,14 @@ export const MeetingsV2View: React.FC = () => {
   // not while somebody is reading a meeting.
   useEffect(() => {
     invoke<CalendarConnection>('get_calendar_connection')
-      .then(setCalendar)
+      .then((conn) => {
+        setCalendar(conn);
+        if (conn?.connected) {
+          invoke<CalendarEvent[]>('get_upcoming_calendar_events')
+            .then(setUpcomingEvents)
+            .catch(() => setUpcomingEvents([]));
+        }
+      })
       .catch((err) => console.error('Failed to read the calendar connection:', err));
   }, []);
 
@@ -546,6 +556,48 @@ export const MeetingsV2View: React.FC = () => {
       console.error('Failed to rename speaker:', err);
     } finally {
       setIsRenamingSpeaker(false);
+    }
+  };
+
+  const handleMergeSpeakers = async (
+    sessionId: string,
+    sourceSpeakerId: string,
+    targetSpeakerId: string,
+  ) => {
+    try {
+      const updated = await invoke<MeetingProcessing>('merge_meeting_v2_speakers', {
+        sessionId,
+        sourceSpeakerId,
+        targetSpeakerId,
+      });
+      setProcessing(updated);
+    } catch (err) {
+      console.error('Failed to merge speakers:', err);
+    }
+  };
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const handleSeekAudio = async (startTimeS: number) => {
+    if (!selectedSessionId) return;
+    try {
+      const chunkIndex = Math.floor(startTimeS / 30);
+      const chunkOffset = startTimeS % 30;
+      const chunkPath = await invoke<string>('get_meeting_v2_audio_chunk_path', {
+        sessionId: selectedSessionId,
+        chunkIndex,
+      });
+      if (!chunkPath) return;
+      const assetUrl = convertFileSrc(chunkPath);
+      if (!audioRef.current) {
+        audioRef.current = new Audio();
+      }
+      const audio = audioRef.current;
+      audio.src = assetUrl;
+      audio.currentTime = chunkOffset;
+      audio.play().catch((e) => console.warn('Audio seek play failed:', e));
+    } catch (err) {
+      console.error('Failed to seek audio chunk:', err);
     }
   };
 
@@ -892,6 +944,43 @@ export const MeetingsV2View: React.FC = () => {
           </div>
         )}
 
+        {upcomingEvents.length > 0 && (
+          <div className="p-2.5 border-b border-border bg-muted/20 space-y-1.5 shrink-0">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+              <span className="flex items-center gap-1.5 text-foreground">
+                <Calendar className="w-3.5 h-3.5 text-primary" />
+                Upcoming Calendar ({upcomingEvents.length})
+              </span>
+            </div>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {upcomingEvents.map((evt) => {
+                const start = new Date(evt.starts_at);
+                const timeStr = isNaN(start.getTime())
+                  ? ''
+                  : start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                return (
+                  <div
+                    key={evt.id}
+                    className="p-1.5 rounded-md bg-card border border-border/60 text-[11px] flex flex-col gap-0.5"
+                  >
+                    <div className="flex items-center justify-between gap-1 font-medium text-foreground">
+                      <span className="truncate">{evt.title}</span>
+                      <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                        {timeStr}
+                      </span>
+                    </div>
+                    {evt.attendees && evt.attendees.length > 0 && (
+                      <span className="text-[10px] text-muted-foreground">
+                        {evt.attendees.length} participant{evt.attendees.length === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Recorded Sessions List */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
           {sessions.length === 0 && !activeSession ? (
@@ -1222,6 +1311,10 @@ export const MeetingsV2View: React.FC = () => {
                 onRenameSpeaker={(speakerId, displayName) =>
                   handleRenameSpeaker(selectedSession.id, speakerId, displayName)
                 }
+                onMergeSpeaker={(sourceId, targetId) =>
+                  handleMergeSpeakers(selectedSession.id, sourceId, targetId)
+                }
+                onSeek={(startTimeS) => handleSeekAudio(startTimeS)}
               />
             )}
 

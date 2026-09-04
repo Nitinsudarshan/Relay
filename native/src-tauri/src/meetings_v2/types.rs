@@ -417,7 +417,73 @@ impl TranscriptUtterance {
         let total = self.mic_rms + self.sys_rms;
         (total > 0.0).then(|| self.mic_rms / total)
     }
+
+    /// Stable segment id for this utterance inside its chunk.
+    pub fn segment_id(&self, chunk_index: usize) -> String {
+        format!("seg_{:05}_{:03}", chunk_index, self.index)
+    }
 }
+
+/// How a speaker assignment decision was made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SpeakerAssignmentMethod {
+    /// Explicit user rename/reassignment directive.
+    Manual,
+    /// Direct capture channel evidence (e.g. mic stream for local user).
+    Channel,
+    /// Matched against the meeting-local self-voice acoustic reference.
+    SelfVoiceAnchor,
+    /// Matched against an explicit enrolled voice profile.
+    EnrolledVoice,
+    /// Unsupervised acoustic clustering / diarization cluster.
+    Diarization,
+    /// Resolved from calendar attendee candidates.
+    CalendarCandidate,
+    /// Conservative self-introduction or direct speech address.
+    ContextualInference,
+    /// Unresolved or unnamed speaker.
+    Unknown,
+}
+
+/// Structured evidence supporting a speaker assignment.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SpeakerEvidence {
+    #[serde(default)]
+    pub channel: Option<String>,
+    #[serde(default)]
+    pub cluster_id: Option<usize>,
+    #[serde(default)]
+    pub similarity: Option<f32>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+/// A formal speaker assignment for one transcript utterance.
+/// Kept separate from the raw transcript so raw text remains strictly immutable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpeakerAssignment {
+    pub utterance_id: String,
+    pub speaker_id: String,
+    pub confidence: f32,
+    pub method: SpeakerAssignmentMethod,
+    pub evidence: SpeakerEvidence,
+}
+
+/// A conversational unit aggregating consecutive same-speaker utterances across chunk boundaries.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpeakerTurn {
+    pub id: String,
+    pub meeting_id: String,
+    pub speaker_id: Option<String>,
+    pub start_time_s: f64,
+    pub end_time_s: f64,
+    pub utterance_ids: Vec<String>,
+    pub text: String,
+    #[serde(default)]
+    pub confidence: Option<f32>,
+}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

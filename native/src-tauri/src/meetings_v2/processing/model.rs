@@ -84,6 +84,15 @@ impl SegmentChannel {
             Self::Mixed | Self::Unknown => None,
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mic => "mic",
+            Self::System => "system",
+            Self::Mixed => "mixed",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 /// How a speaker's identity was established.
@@ -92,9 +101,14 @@ impl SegmentChannel {
 pub enum SpeakerOrigin {
     /// Rung 1: microphone stream vs system stream.
     Channel,
-    /// Rung 4: a diarization cluster. Not produced yet; the model accepts it
-    /// so diarization can be added without a schema change.
+    /// Meeting-local self-voice acoustic reference.
+    SelfVoiceAnchor,
+    /// Rung 4: a diarization cluster.
     Diarization,
+    /// Calendar attendee candidate match.
+    Calendar,
+    /// Contextual speech inference (self-introduction).
+    ContextualInference,
     /// Rung 6: the user named this speaker.
     Manual,
 }
@@ -213,7 +227,13 @@ pub struct ConversationTurn {
     pub text: String,
     /// The normalized segments merged into this turn.
     pub segment_ids: Vec<String>,
+    /// Confidence of attribution for this turn.
+    #[serde(default)]
+    pub confidence: Option<f32>,
 }
+
+/// Canonical speaker turn alias for conversational unit.
+pub type SpeakerTurn = ConversationTurn;
 
 /// The speaker-labelled, chronological, readable transcript.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -918,6 +938,9 @@ pub struct MeetingProcessing {
     pub summary: Option<SummaryArtifact>,
     #[serde(default)]
     pub scribble_ref: Option<ScribbleRef>,
+    /// Explicit provenance mapping attributing each utterance to identity evidence.
+    #[serde(default)]
+    pub speaker_assignments: Vec<crate::meetings_v2::types::SpeakerAssignment>,
 }
 
 impl MeetingProcessing {
@@ -939,6 +962,7 @@ impl MeetingProcessing {
             facts: None,
             summary: None,
             scribble_ref: None,
+            speaker_assignments: Vec::new(),
         }
     }
 
@@ -947,6 +971,8 @@ impl MeetingProcessing {
     /// A meeting counts as `Partial` — not `Failed` — as long as any stage
     /// produced something, because the raw transcript and whatever was derived
     /// remain usable. Only a run where nothing succeeded is `Failed`.
+    /// When a valid summary is present (including deterministic fallback), the meeting
+    /// is treated as ready rather than failed.
     pub fn recompute_status(&mut self) {
         let stages = [
             &self.stages.normalization,
@@ -970,13 +996,22 @@ impl MeetingProcessing {
             .filter(|s| s.status != StageStatus::NotRun)
             .count();
 
+        // If a valid summary exists (e.g. deterministic summary), the summary is ready
+        // and should not cause the whole meeting to read as degraded/partial.
+        let summary_ready = self.summary.is_some();
+        let effective_failed = if summary_ready && self.stages.summary.status == StageStatus::Failed {
+            failed.saturating_sub(1)
+        } else {
+            failed
+        };
+
         self.status = if any_running {
             ProcessingStatus::Running
         } else if attempted == 0 {
             ProcessingStatus::NotStarted
-        } else if failed == 0 {
+        } else if effective_failed == 0 {
             ProcessingStatus::Ready
-        } else if succeeded > 0 {
+        } else if succeeded > 0 || summary_ready {
             ProcessingStatus::Partial
         } else {
             ProcessingStatus::Failed

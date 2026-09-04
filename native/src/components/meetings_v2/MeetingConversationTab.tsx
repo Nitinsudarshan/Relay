@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AudioLines, Check, Info, Pencil, RefreshCw, Users, X } from 'lucide-react';
+import { AudioLines, Check, GitMerge, Info, Pencil, Play, RefreshCw, Users, X } from 'lucide-react';
 import type { Conversation, Diarization, Speaker } from '../../types';
 import { formatTimestamp, speakerLabel } from './meetingProcessing';
 
@@ -9,6 +9,8 @@ interface MeetingConversationTabProps {
   /** The acoustic separation the roster came from, if one has run. */
   diarization?: Diarization | null;
   onRenameSpeaker: (speakerId: string, displayName: string | null) => void;
+  onMergeSpeaker?: (sourceSpeakerId: string, targetSpeakerId: string) => void;
+  onSeek?: (startTimeS: number) => void;
   /** Re-runs acoustic speaker separation over the stored audio. */
   onIdentifySpeakers: (expectedSpeakers: number | null) => void;
   isRenaming: boolean;
@@ -27,6 +29,9 @@ interface MeetingConversationTabProps {
  */
 const ORIGIN_MARKS: Record<Speaker['origin'], { mark: string; title: string }> = {
   MANUAL: { mark: '✓', title: 'You named this speaker' },
+  SELF_VOICE_ANCHOR: { mark: '⚓', title: 'Matched local self-voice anchor' },
+  CALENDAR: { mark: '📅', title: 'Candidate from calendar' },
+  CONTEXTUAL_INFERENCE: { mark: '💬', title: 'Inferred from context' },
   DIARIZATION: {
     mark: '~',
     title: 'A distinct voice was isolated but nobody has named it',
@@ -39,10 +44,13 @@ const ORIGIN_MARKS: Record<Speaker['origin'], { mark: string; title: string }> =
 
 const SpeakerRow: React.FC<{
   speaker: Speaker;
+  otherSpeakers: Speaker[];
   onRename: (displayName: string | null) => void;
+  onMerge?: (targetSpeakerId: string) => void;
   isRenaming: boolean;
-}> = ({ speaker, onRename, isRenaming }) => {
+}> = ({ speaker, otherSpeakers, onRename, onMerge, isRenaming }) => {
   const [editing, setEditing] = useState(false);
+  const [merging, setMerging] = useState(false);
   const [draft, setDraft] = useState(speaker.display_name ?? '');
 
   const commit = () => {
@@ -84,37 +92,82 @@ const SpeakerRow: React.FC<{
     );
   }
 
-  const origin = ORIGIN_MARKS[speaker.origin];
+  if (merging) {
+    return (
+      <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-accent/40 border border-border text-xs">
+        <span className="text-[10px] text-muted-foreground">Merge into:</span>
+        <select
+          className="text-xs bg-background border border-input rounded px-1.5 py-0.5 text-foreground"
+          onChange={(e) => {
+            const targetId = e.target.value;
+            if (targetId) {
+              setMerging(false);
+              onMerge?.(targetId);
+            }
+          }}
+          defaultValue=""
+        >
+          <option value="" disabled>Select speaker…</option>
+          {otherSpeakers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.display_name?.trim() || s.fallback_label}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => setMerging(false)}
+          className="p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
+          title="Cancel merge"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      </div>
+    );
+  }
+
+  const origin = ORIGIN_MARKS[speaker.origin] ?? ORIGIN_MARKS.CHANNEL;
 
   return (
-    <button
-      onClick={() => {
-        setDraft(speaker.display_name ?? '');
-        setEditing(true);
-      }}
-      className="group flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card hover:bg-accent border border-border text-xs text-foreground transition-colors cursor-pointer"
-      title={`Rename ${speaker.fallback_label} (id: ${speaker.id}) — ${origin.title}`}
-    >
-      <span>
-        {speaker.display_name?.trim() || speaker.fallback_label}
-      </span>
-      {origin.mark && (
-        <span
-          className={`text-[10px] font-mono ${
-            speaker.origin === 'MANUAL'
-              ? 'text-emerald-600 dark:text-emerald-400'
-              : 'text-muted-foreground'
-          }`}
-          aria-hidden="true"
-        >
-          {origin.mark}
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => {
+          setDraft(speaker.display_name ?? '');
+          setEditing(true);
+        }}
+        className="group flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card hover:bg-accent border border-border text-xs text-foreground transition-colors cursor-pointer"
+        title={`Rename ${speaker.fallback_label} (id: ${speaker.id}) — ${origin.title}`}
+      >
+        <span>
+          {speaker.display_name?.trim() || speaker.fallback_label}
         </span>
+        {origin.mark && (
+          <span
+            className={`text-[10px] font-mono ${
+              speaker.origin === 'MANUAL'
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-muted-foreground'
+            }`}
+            aria-hidden="true"
+          >
+            {origin.mark}
+          </span>
+        )}
+        {speaker.is_local_user && (
+          <span className="text-[9px] font-mono text-primary font-semibold">you</span>
+        )}
+        <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+      </button>
+
+      {otherSpeakers.length > 0 && onMerge && (
+        <button
+          onClick={() => setMerging(true)}
+          className="p-1 rounded-md hover:bg-accent text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+          title={`Merge ${speaker.fallback_label} into another speaker`}
+        >
+          <GitMerge className="w-3 h-3" />
+        </button>
       )}
-      {speaker.is_local_user && (
-        <span className="text-[9px] font-mono text-primary font-semibold">you</span>
-      )}
-      <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-    </button>
+    </div>
   );
 };
 
@@ -126,6 +179,8 @@ export const MeetingConversationTab: React.FC<MeetingConversationTabProps> = ({
   speakers,
   diarization,
   onRenameSpeaker,
+  onMergeSpeaker,
+  onSeek,
   onIdentifySpeakers,
   isRenaming,
   isIdentifying,
@@ -181,8 +236,14 @@ export const MeetingConversationTab: React.FC<MeetingConversationTabProps> = ({
             <SpeakerRow
               key={speaker.id}
               speaker={speaker}
+              otherSpeakers={speakers.filter((s) => s.id !== speaker.id)}
               isRenaming={isRenaming}
               onRename={(name) => onRenameSpeaker(speaker.id, name)}
+              onMerge={
+                onMergeSpeaker
+                  ? (targetId) => onMergeSpeaker(speaker.id, targetId)
+                  : undefined
+              }
             />
           ))}
 
@@ -269,9 +330,15 @@ export const MeetingConversationTab: React.FC<MeetingConversationTabProps> = ({
                 >
                   {label}
                 </span>
-                <span className="text-[10px] font-mono text-muted-foreground">
-                  {formatTimestamp(turn.start_time_s)}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => onSeek?.(turn.start_time_s)}
+                  className="group flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-primary hover:underline cursor-pointer"
+                  title={`Play from ${formatTimestamp(turn.start_time_s)}`}
+                >
+                  <Play className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100 text-primary" />
+                  <span>{formatTimestamp(turn.start_time_s)}</span>
+                </button>
               </div>
               <p className="text-sm text-foreground/90 leading-relaxed font-sans select-text pl-0.5">
                 {turn.text}

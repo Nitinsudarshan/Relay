@@ -43,6 +43,16 @@ const SUMMARY_MODE_OPTIONS: {
   { value: 'detailed', label: 'Detailed', hint: 'More context, still not a transcript' },
 ];
 
+const formatRelativeSync = (iso: string): string => {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins === 1) return '1 minute ago';
+  if (mins < 60) return `${mins} minutes ago`;
+  const hours = Math.floor(mins / 60);
+  return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
+};
+
 /**
  * Settings › Meetings.
  *
@@ -107,6 +117,20 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
     }
   };
 
+  const syncCalendar = async () => {
+    setCalendarBusy(true);
+    setCalendarError(null);
+    try {
+      setCalendar(await invoke<CalendarConnection>('sync_google_calendar'));
+    } catch (error) {
+      setCalendarError(
+        error instanceof Error ? error.message : String(error ?? 'Syncing failed.'),
+      );
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
+
   const update = (patch: Partial<MeetingSettings>) =>
     onChange({ ...settings, meetings: { ...meetings, ...patch } });
 
@@ -156,6 +180,84 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
           30-second audio chunks, and live transcription are unaffected by anything
           on this page.
         </p>
+      </div>
+
+      {/* Google Calendar Context */}
+      <div className="flex flex-col gap-3 p-4 rounded-lg border border-border/60 bg-card/40">
+        <div>
+          <div className="flex items-center gap-2">
+            <CalendarDays className="w-4 h-4 text-primary" />
+            <p className="text-xs font-medium text-foreground">Google Calendar</p>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            Read-only contextual evidence for meeting titles and candidate attendee rosters. Relay never modifies your calendar or records events automatically.
+          </p>
+        </div>
+
+        {calendar?.connected ? (
+          <div className="flex flex-col gap-3 pt-1">
+            <div className="flex items-center justify-between p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+              <div className="flex items-center gap-2.5">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <div>
+                  <p className="text-xs font-medium text-foreground">✓ Google Calendar connected</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Account: {calendar.account_email ?? 'Connected'}
+                    {calendar.last_synced_at && (
+                      <span className="ml-2 font-mono">
+                        · Last synced: {formatRelativeSync(calendar.last_synced_at)}
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={syncCalendar}
+                  disabled={calendarBusy}
+                  className="px-2.5 py-1 text-xs font-medium rounded-md bg-secondary hover:bg-secondary/80 text-foreground border border-border cursor-pointer transition-colors"
+                >
+                  {calendarBusy ? 'Syncing…' : 'Sync now'}
+                </button>
+                <button
+                  type="button"
+                  onClick={disconnectCalendar}
+                  disabled={calendarBusy}
+                  className="px-2.5 py-1 text-xs font-medium rounded-md text-destructive hover:bg-destructive/10 border border-destructive/20 cursor-pointer transition-colors"
+                >
+                  Disconnect
+                </button>
+              </div>
+            </div>
+            {calendar.problem && (
+              <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                {calendar.problem}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/40 border border-border/40">
+            <div>
+              <p className="text-xs text-foreground font-medium">Not connected</p>
+              <p className="text-[11px] text-muted-foreground">
+                Connect your primary Google Calendar to auto-match recorded meetings.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={connectCalendar}
+              disabled={calendarBusy}
+              className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
+            >
+              {calendarBusy ? 'Connecting…' : 'Connect Google Calendar'}
+            </button>
+          </div>
+        )}
+
+        {calendarError && (
+          <p className="text-[11px] text-destructive">{calendarError}</p>
+        )}
       </div>
 
       <div className="flex flex-col gap-4 p-4 rounded-lg border border-border/60 bg-card/40">

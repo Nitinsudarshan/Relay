@@ -60,6 +60,7 @@ pub fn build_conversation(segments: &[NormalizedSegment]) -> Conversation {
                 end_time_s: segment.end_time_s,
                 text: segment.text.trim().to_string(),
                 segment_ids: vec![segment.id.clone()],
+                confidence: Some(1.0),
             });
         }
     }

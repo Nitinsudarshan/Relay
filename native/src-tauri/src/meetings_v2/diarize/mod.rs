@@ -34,10 +34,13 @@ pub mod engine;
 pub mod features;
 /// Speaker assignment while a meeting is still being recorded.
 pub mod incremental;
+pub mod self_voice;
 /// Synthetic voices that behave like real ones. Test-only, and the reason the
 /// first calibration of this module was wrong.
 #[cfg(test)]
 pub mod fixtures;
+
+pub use self_voice::SelfVoiceAnchor;
 
 use super::session_store::SessionStore;
 use super::types::{TranscriptSegment, TranscriptSegmentStatus};

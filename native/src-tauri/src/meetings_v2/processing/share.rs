@@ -319,6 +319,7 @@ mod tests {
             turn_count: 21,
             health,
             speaker_method: method,
+            attendance_reconciliation: Vec::new(),
         }
     }
 
@@ -425,6 +426,7 @@ mod tests {
                     end_time_s: 20.0,
                     text: "Shall we start with the placement numbers?".into(),
                     segment_ids: vec!["seg_00000_000".into()],
+                    confidence: None,
                 },
                 ConversationTurn {
                     id: "turn_00001".into(),
@@ -433,6 +435,7 @@ mod tests {
                     end_time_s: 45.0,
                     text: "We closed forty-one this month.".into(),
                     segment_ids: vec!["seg_00000_001".into()],
+                    confidence: None,
                 },
             ],
             unattributed_turn_count: 0,

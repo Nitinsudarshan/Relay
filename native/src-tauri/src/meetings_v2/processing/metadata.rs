@@ -212,6 +212,18 @@ pub struct MeetingMetadata {
     pub health: TranscriptHealth,
     /// How speakers were told apart, for the header's provenance line.
     pub speaker_method: SpeakerMethod,
+    /// Calendar attendee to audio/speaker evidence reconciliation.
+    #[serde(default)]
+    pub attendance_reconciliation: Vec<AttendanceReconciliation>,
+}
+
+/// Reconciliation status of a calendar attendee against audio and speaker evidence.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AttendanceReconciliation {
+    pub name: String,
+    pub calendar_status: String,
+    pub audio_status: String,
+    pub identity_status: String,
 }
 
 /// What established the speaker roster.
@@ -316,6 +328,44 @@ pub fn build(mut input: MetadataInput<'_>) -> MeetingMetadata {
     );
     let participants = build_participants(&input);
 
+    let attendance_reconciliation = match input.calendar {
+        Some(event) => event
+            .attendees
+            .iter()
+            .map(|attendee| {
+                let name = attendee.name.clone();
+                let cal_status = match attendee.response {
+                    crate::calendar::AttendanceResponse::Accepted => "accepted",
+                    crate::calendar::AttendanceResponse::Tentative => "tentative",
+                    crate::calendar::AttendanceResponse::Declined => "declined",
+                    crate::calendar::AttendanceResponse::NoResponse => "no_response",
+                }
+                .to_string();
+
+                let matched_part = participants
+                    .iter()
+                    .find(|p| p.label.eq_ignore_ascii_case(&name));
+                let audio_status = match matched_part {
+                    Some(p) if p.speaking_seconds > 0.0 => "heard".to_string(),
+                    _ => "no voice evidence".to_string(),
+                };
+                let identity_status = match matched_part {
+                    Some(p) if p.is_confirmed => "confirmed".to_string(),
+                    Some(p) if p.is_named && p.origin.spoke() => "inferred".to_string(),
+                    _ => "unresolved".to_string(),
+                };
+
+                AttendanceReconciliation {
+                    name,
+                    calendar_status: cal_status,
+                    audio_status,
+                    identity_status,
+                }
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+
     MeetingMetadata {
         title: session.title.clone(),
         date_iso: session
@@ -346,6 +396,7 @@ pub fn build(mut input: MetadataInput<'_>) -> MeetingMetadata {
         } else {
             SpeakerMethod::Channel
         },
+        attendance_reconciliation,
     }
 }
 
@@ -591,6 +642,7 @@ mod tests {
             end_time_s: end,
             text: "words".into(),
             segment_ids: vec![],
+            confidence: None,
         }
     }
 

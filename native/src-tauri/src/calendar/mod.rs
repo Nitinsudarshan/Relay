@@ -40,6 +40,8 @@ pub struct CalendarConnection {
     /// words naming the fix.
     #[serde(default)]
     pub problem: Option<String>,
+    #[serde(default)]
+    pub last_synced_at: Option<String>,
 }
 
 impl CalendarConnection {
@@ -49,6 +51,7 @@ impl CalendarConnection {
             account_email: None,
             account_name: None,
             problem: None,
+            last_synced_at: None,
         }
     }
 }

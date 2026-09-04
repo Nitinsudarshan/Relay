@@ -1071,7 +1071,37 @@ export interface MeetingSession {
  */
 
 export type SegmentChannel = 'MIC' | 'SYSTEM' | 'MIXED' | 'UNKNOWN';
-export type SpeakerOrigin = 'CHANNEL' | 'DIARIZATION' | 'MANUAL';
+export type SpeakerOrigin =
+  | 'CHANNEL'
+  | 'SELF_VOICE_ANCHOR'
+  | 'DIARIZATION'
+  | 'CALENDAR'
+  | 'CONTEXTUAL_INFERENCE'
+  | 'MANUAL';
+
+export type SpeakerAssignmentMethod =
+  | 'CHANNEL'
+  | 'DIARIZATION'
+  | 'SELF_VOICE_ANCHOR'
+  | 'ENROLLED_VOICE'
+  | 'CALENDAR_CANDIDATE'
+  | 'CONTEXTUAL_INFERENCE'
+  | 'MANUAL';
+
+export interface SpeakerEvidence {
+  channel?: string | null;
+  cluster_id?: number | null;
+  similarity?: number | null;
+  notes?: string | null;
+}
+
+export interface SpeakerAssignment {
+  utterance_id: string;
+  speaker_id: string;
+  confidence: number;
+  method: SpeakerAssignmentMethod;
+  evidence: SpeakerEvidence;
+}
 
 /**
  * A meeting participant. `id` is the stable identifier used by every derived
@@ -1123,6 +1153,7 @@ export interface ConversationTurn {
   end_time_s: number;
   text: string;
   segment_ids: string[];
+  confidence?: number | null;
 }
 
 export interface Conversation {
@@ -1578,6 +1609,14 @@ export interface MeetingMetadata {
   turn_count: number;
   health: TranscriptHealth;
   speaker_method: SpeakerMethod;
+  attendance_reconciliation?: AttendanceReconciliation[];
+}
+
+export interface AttendanceReconciliation {
+  name: string;
+  calendar_status: string;
+  audio_status: string;
+  identity_status: string;
 }
 
 export type NameEvidence = 'SELF_INTRODUCTION' | 'DIRECT_ADDRESS';
@@ -1713,6 +1752,7 @@ export interface CalendarConnection {
   account_name?: string | null;
   /** A stored connection that cannot currently be used, in words naming the fix. */
   problem?: string | null;
+  last_synced_at?: string | null;
 }
 
 /** A meeting rendered as one Markdown document, for sharing. */
@@ -1732,6 +1772,7 @@ export interface MeetingProcessing {
   stages: StageStates;
   normalized?: NormalizedTranscript | null;
   speakers: Speaker[];
+  speaker_assignments?: SpeakerAssignment[];
   /** The acoustic separation the roster was built from. Null means channel only. */
   diarization?: Diarization | null;
   conversation?: Conversation | null;

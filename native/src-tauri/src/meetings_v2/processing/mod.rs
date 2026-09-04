@@ -209,17 +209,28 @@ impl MeetingProcessor {
             );
         }
 
+        // The calendar's answer to what this meeting was called and who was
+        // invited, when a recording was matched to an event.
+        let calendar_link = self.sessions.get_calendar_link(meeting_id);
+        let calendar_event = calendar_link.as_ref().and_then(|link| link.event());
+        let calendar_attendees = calendar_event.map(|e| e.attendees.as_slice()).unwrap_or(&[]);
+
         let speaker_started = Instant::now();
 
         // Rung 4. Reuses whatever a previous run found rather than re-reading
         // every WAV on each prepare, unless the transcript has changed under it.
         let diarization = self.resolve_diarization(meeting_id, options, &normalized.segments);
 
-        let mut roster = speakers::attribute_speakers_with_voices(
+        let (mut roster, speaker_assignments) = speakers::attribute_speakers_with_evidence(
             &mut normalized.segments,
-            &existing_speakers,
-            options.speaker_identification,
-            diarization.as_ref(),
+            speakers::AttributionInput {
+                existing: &existing_speakers,
+                mode: options.speaker_identification,
+                diarization: diarization.as_ref(),
+                self_voice: None,
+                calendar_attendees,
+                assume_in_person: options.assume_in_person,
+            },
         );
 
         // Rung 6: a name the user typed wins over anything found automatically.
@@ -252,10 +263,6 @@ impl MeetingProcessor {
             .sessions
             .get_transcript_segments(meeting_id)
             .unwrap_or_default();
-        // The calendar's answer to what this meeting was called and who was
-        // invited, when a recording was matched to an event.
-        let calendar_link = self.sessions.get_calendar_link(meeting_id);
-        let calendar_event = calendar_link.as_ref().and_then(|link| link.event());
 
         let meeting_metadata = metadata::build(metadata::MetadataInput {
             session: &session,
@@ -360,6 +367,7 @@ impl MeetingProcessor {
             };
 
             processing.speakers = roster.clone();
+            processing.speaker_assignments = speaker_assignments;
             processing.conversation = conversation.clone();
             if diarization.is_some() {
                 processing.diarization = diarization.clone();
@@ -853,6 +861,60 @@ audio are unaffected."
             speaker_id = %speaker_id,
             named = display_name.is_some(),
             "meeting_processing: speaker renamed"
+        );
+        Ok(updated)
+    }
+
+    /// Merges one speaker into another.
+    ///
+    /// Remaps all segments and assignments from `source_speaker_id` to `target_speaker_id`.
+    /// Re-derives the conversation turns without modifying the immutable raw transcript.
+    pub fn merge_speakers(
+        &self,
+        meeting_id: &str,
+        source_speaker_id: &str,
+        target_speaker_id: &str,
+        new_display_name: Option<&str>,
+    ) -> Result<MeetingProcessing, String> {
+        let mut merge_error = None;
+        let updated = self.store.update(meeting_id, |processing| {
+            let Some(normalized) = processing.normalized.as_mut() else {
+                merge_error = Some("Meeting has no normalized transcript to merge".to_string());
+                return;
+            };
+
+            match speakers::merge_speakers(
+                &mut processing.speakers,
+                &mut normalized.segments,
+                &mut processing.speaker_assignments,
+                source_speaker_id,
+                target_speaker_id,
+                new_display_name,
+            ) {
+                Ok(()) => {
+                    // Re-derive conversation turns so consecutive segments naturally merge
+                    let conv = conversation::build_conversation(&normalized.segments);
+                    processing.conversation = Some(conv);
+
+                    if let Some(summary) = processing.summary.as_mut() {
+                        summary.speaker_names_stale = true;
+                    }
+                    let report = validate::validate_speakers(&processing.speakers);
+                    processing.stages.speakers.validation = Some(report);
+                }
+                Err(e) => merge_error = Some(e),
+            }
+        })?;
+
+        if let Some(e) = merge_error {
+            return Err(e);
+        }
+
+        tracing::info!(
+            meeting_id = %meeting_id,
+            source = %source_speaker_id,
+            target = %target_speaker_id,
+            "meeting_processing: speakers merged"
         );
         Ok(updated)
     }

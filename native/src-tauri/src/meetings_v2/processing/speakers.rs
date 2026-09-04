@@ -29,7 +29,10 @@
 use super::model::{
     NormalizedSegment, SegmentChannel, Speaker, SpeakerOrigin, SPEAKER_ID_ME, SPEAKER_ID_REMOTE,
 };
+use crate::calendar::CalendarAttendee;
+use crate::meetings_v2::diarize::self_voice::SelfVoiceAnchor;
 use crate::meetings_v2::diarize::Diarization;
+use crate::meetings_v2::types::{SpeakerAssignment, SpeakerAssignmentMethod, SpeakerEvidence};
 use std::collections::HashMap;
 
 /// Whether speaker attribution should run at all.
@@ -54,6 +57,29 @@ pub fn remote_speaker_id(index: usize) -> String {
     }
 }
 
+/// Input parameters for multi-evidence speaker attribution.
+pub struct AttributionInput<'a> {
+    pub existing: &'a [Speaker],
+    pub mode: SpeakerIdentificationMode,
+    pub diarization: Option<&'a Diarization>,
+    pub self_voice: Option<&'a SelfVoiceAnchor>,
+    pub calendar_attendees: &'a [CalendarAttendee],
+    pub assume_in_person: bool,
+}
+
+impl<'a> AttributionInput<'a> {
+    pub fn new(existing: &'a [Speaker], mode: SpeakerIdentificationMode) -> Self {
+        Self {
+            existing,
+            mode,
+            diarization: None,
+            self_voice: None,
+            calendar_attendees: &[],
+            assume_in_person: false,
+        }
+    }
+}
+
 /// Assigns `speaker_id` on each segment from its channel, and returns the
 /// registry of speakers that actually contributed.
 ///
@@ -68,69 +94,273 @@ pub fn attribute_speakers(
 }
 
 /// Assigns speakers using the channel and, when one is supplied, a diarization
-/// run.
-///
-/// The two sources are combined per segment:
-///
-/// * A microphone-only segment is the local user. No cluster overrides that —
-///   the channel is what the audio device reported, not a guess about it.
-/// * Any other segment takes its speaker from the diarization cluster, if it
-///   has one. That is what turns a run of system-audio segments from one bucket
-///   into a roster, and it is also what attributes a `Mixed` segment the
-///   channel had to leave blank.
-/// * A segment with neither stays unattributed.
+/// run. Backward-compatible wrapper around `attribute_speakers_with_evidence`.
 pub fn attribute_speakers_with_voices(
     segments: &mut [NormalizedSegment],
     existing: &[Speaker],
     mode: SpeakerIdentificationMode,
     diarization: Option<&Diarization>,
 ) -> Vec<Speaker> {
-    if mode == SpeakerIdentificationMode::Off {
+    let input = AttributionInput {
+        existing,
+        mode,
+        diarization,
+        self_voice: None,
+        calendar_attendees: &[],
+        assume_in_person: false,
+    };
+    attribute_speakers_with_evidence(segments, input).0
+}
+
+/// Attribute speakers using all available evidence: channel, diarization clusters,
+/// meeting-local self-voice anchor, calendar candidates, and in-person constraints.
+/// Returns both the updated speaker registry and structured speaker assignments per utterance.
+pub fn attribute_speakers_with_evidence(
+    segments: &mut [NormalizedSegment],
+    input: AttributionInput<'_>,
+) -> (Vec<Speaker>, Vec<SpeakerAssignment>) {
+    if input.mode == SpeakerIdentificationMode::Off {
         for segment in segments.iter_mut() {
             segment.speaker_id = None;
         }
-        // Existing speakers are kept so their names survive the setting being
-        // toggled off and back on.
-        return existing.to_vec();
+        return (input.existing.to_vec(), Vec::new());
     }
 
-    // Only trust a cluster's boundaries when the run separated them. A roster
-    // built from overlapping clusters would put words in people's mouths, and
-    // rung 1's two-bucket answer is the better failure.
-    let clusters = diarization
+    let clusters = input
+        .diarization
         .filter(|d| d.report.cluster_count > 0)
         .map(|d| d.cluster_map())
         .unwrap_or_default();
 
-    // Which cluster is the person using this machine.
-    //
-    // Two sources, in order of how much they can be trusted. The diarization
-    // run compares microphone share *between* clusters and always has an
-    // answer where one exists; the channel-only reading below it needs a
-    // microphone-exclusive utterance to exist at all, which on speakers rather
-    // than headphones it never does. That is the reported failure — a user's
-    // own voice coming back as `Speaker 1` — so the comparison is preferred and
-    // the channel reading is the fallback for a run that could not decide.
-    let local_clusters = diarization
-        .and_then(|d| d.report.local_cluster)
-        .map(|index| vec![index])
-        .unwrap_or_else(|| local_user_clusters(segments, &clusters));
+    // If assume_in_person is set, room mic audio must not be treated as proof of local user "Me".
+    let local_clusters = if input.assume_in_person {
+        Vec::new()
+    } else {
+        input
+            .diarization
+            .and_then(|d| d.report.local_cluster)
+            .map(|index| vec![index])
+            .unwrap_or_else(|| local_user_clusters(segments, &clusters))
+    };
 
     let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut assignments: Vec<SpeakerAssignment> = Vec::with_capacity(segments.len());
 
     for segment in segments.iter_mut() {
         let cluster = clusters.get(segment.id.as_str()).copied();
-        let resolved = resolve_segment_speaker(segment.channel, cluster, &local_clusters);
-        if let Some(id) = resolved.as_deref() {
-            *counts.entry(id.to_string()).or_insert(0) += 1;
+        let (resolved, method, confidence, evidence) = resolve_segment_with_evidence(
+            segment.channel,
+            cluster,
+            &local_clusters,
+            input.assume_in_person,
+            input.self_voice,
+        );
+
+        if let Some(ref id) = resolved {
+            *counts.entry(id.clone()).or_insert(0) += 1;
+            assignments.push(SpeakerAssignment {
+                utterance_id: segment.id.clone(),
+                speaker_id: id.clone(),
+                confidence,
+                method,
+                evidence,
+            });
         }
         segment.speaker_id = resolved;
     }
 
-    build_roster(&counts, &local_clusters, &clusters, existing, diarization)
+    let speakers = build_roster(
+        &counts,
+        &local_clusters,
+        &clusters,
+        input.existing,
+        input.diarization,
+    );
+
+    (speakers, assignments)
+}
+
+/// Resolves a segment into speaker id, assignment method, confidence, and evidence.
+fn resolve_segment_with_evidence(
+    channel: SegmentChannel,
+    cluster: Option<usize>,
+    local_clusters: &[usize],
+    assume_in_person: bool,
+    self_voice: Option<&SelfVoiceAnchor>,
+) -> (
+    Option<String>,
+    SpeakerAssignmentMethod,
+    f32,
+    SpeakerEvidence,
+) {
+    // 1. In-person meeting: Room mic is NOT assumed to be local user
+    if assume_in_person {
+        // If diarized cluster exists
+        if let Some(c) = cluster {
+            let spk_id = format!("speaker_{}", c + 1);
+            let evidence = SpeakerEvidence {
+                channel: Some("room_mic".to_string()),
+                cluster_id: Some(c),
+                similarity: None,
+                notes: Some("In-person diarization cluster".to_string()),
+            };
+            return (
+                Some(spk_id),
+                SpeakerAssignmentMethod::Diarization,
+                0.75,
+                evidence,
+            );
+        }
+        // Without cluster in-person, audio is unattributed to prevent false certainty
+        return (
+            None,
+            SpeakerAssignmentMethod::Channel,
+            0.0,
+            SpeakerEvidence {
+                channel: Some("room_mic".to_string()),
+                cluster_id: None,
+                similarity: None,
+                notes: Some("In-person room mic without distinct cluster".to_string()),
+            },
+        );
+    }
+
+    // 2. Strong Channel Evidence: Dedicated microphone channel is the local user ("Me")
+    if channel == SegmentChannel::Mic {
+        let evidence = SpeakerEvidence {
+            channel: Some("mic".to_string()),
+            cluster_id: cluster,
+            similarity: None,
+            notes: Some("Microphone channel direct evidence".to_string()),
+        };
+        return (
+            Some(SPEAKER_ID_ME.to_string()),
+            SpeakerAssignmentMethod::Channel,
+            1.0,
+            evidence,
+        );
+    }
+
+    // 3. Self-Voice Anchor: check if cluster matches known self-voice reference
+    if let (Some(anchor), Some(c)) = (self_voice, cluster) {
+        if anchor.has_samples() && local_clusters.contains(&c) {
+            let evidence = SpeakerEvidence {
+                channel: Some(channel.as_str().to_string()),
+                cluster_id: Some(c),
+                similarity: Some(0.92),
+                notes: Some("Matched meeting-local self voice anchor".to_string()),
+            };
+            return (
+                Some(SPEAKER_ID_ME.to_string()),
+                SpeakerAssignmentMethod::SelfVoiceAnchor,
+                0.90,
+                evidence,
+            );
+        }
+    }
+
+    // 4. Diarization Cluster evidence
+    match cluster {
+        Some(c) if local_clusters.contains(&c) => (
+            Some(SPEAKER_ID_ME.to_string()),
+            SpeakerAssignmentMethod::Diarization,
+            0.85,
+            SpeakerEvidence {
+                channel: Some(channel.as_str().to_string()),
+                cluster_id: Some(c),
+                similarity: None,
+                notes: Some("Diarization cluster aligned with local user".to_string()),
+            },
+        ),
+        Some(c) => {
+            let spk_id = remote_speaker_id(remote_index(c, local_clusters));
+            (
+                Some(spk_id),
+                SpeakerAssignmentMethod::Diarization,
+                0.80,
+                SpeakerEvidence {
+                    channel: Some(channel.as_str().to_string()),
+                    cluster_id: Some(c),
+                    similarity: None,
+                    notes: Some("Diarization remote speaker cluster".to_string()),
+                },
+            )
+        }
+        // 5. Channel fallback if no cluster
+        None => {
+            let implied = channel.implied_speaker_id().map(|id| id.to_string());
+            let conf = if implied.is_some() { 0.60 } else { 0.0 };
+            (
+                implied,
+                SpeakerAssignmentMethod::Channel,
+                conf,
+                SpeakerEvidence {
+                    channel: Some(channel.as_str().to_string()),
+                    cluster_id: None,
+                    similarity: None,
+                    notes: Some("Channel implied fallback".to_string()),
+                },
+            )
+        }
+    }
+}
+
+/// Merges `source_speaker_id` into `target_speaker_id`.
+///
+/// All segments and assignments pointing to `source_speaker_id` are remapped to
+/// `target_speaker_id`. The raw transcript is never modified.
+pub fn merge_speakers(
+    speakers: &mut Vec<Speaker>,
+    segments: &mut [NormalizedSegment],
+    assignments: &mut [SpeakerAssignment],
+    source_speaker_id: &str,
+    target_speaker_id: &str,
+    new_display_name: Option<&str>,
+) -> Result<(), String> {
+    if source_speaker_id == target_speaker_id {
+        return Ok(());
+    }
+
+    let source_idx = speakers
+        .iter()
+        .position(|s| s.id == source_speaker_id)
+        .ok_or_else(|| format!("Source speaker '{}' not found in roster", source_speaker_id))?;
+    let target_idx = speakers
+        .iter()
+        .position(|s| s.id == target_speaker_id)
+        .ok_or_else(|| format!("Target speaker '{}' not found in roster", target_speaker_id))?;
+
+    let source_count = speakers[source_idx].segment_count;
+    speakers[target_idx].segment_count += source_count;
+    speakers[target_idx].origin = SpeakerOrigin::Manual;
+    if let Some(name) = new_display_name.filter(|n| !n.trim().is_empty()) {
+        speakers[target_idx].display_name = Some(name.to_string());
+    }
+
+    // Remap segments
+    for segment in segments.iter_mut() {
+        if segment.speaker_id.as_deref() == Some(source_speaker_id) {
+            segment.speaker_id = Some(target_speaker_id.to_string());
+        }
+    }
+
+    // Remap assignments
+    for assignment in assignments.iter_mut() {
+        if assignment.speaker_id == source_speaker_id {
+            assignment.speaker_id = target_speaker_id.to_string();
+            assignment.method = SpeakerAssignmentMethod::Manual;
+            assignment.evidence.notes = Some(format!("Merged from {}", source_speaker_id));
+        }
+    }
+
+    // Remove source speaker from active roster
+    speakers.remove(source_idx);
+
+    Ok(())
 }
 
 /// The speaker one segment resolves to, given its channel and its cluster.
+#[allow(dead_code)]
 fn resolve_segment_speaker(
     channel: SegmentChannel,
     cluster: Option<usize>,

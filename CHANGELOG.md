@@ -1,5 +1,36 @@
 # Relay — Changelog
 
+## [0.36.0] - 2026-09-05
+
+### Meetings Intelligence v2: Canonical Utterance Turns, Speaker Intelligence, Self-Voice Anchoring, Google Calendar Candidate Reconciliation, and Deterministic Floor UX
+
+**Type**: minor — major unified Meetings Intelligence v2 upgrade establishing clean layer separation between 30s storage chunks, Whisper utterances, speaker assignments, conversational speaker turns, calendar context, meeting facts, and deterministic/LLM summaries (`native/src-tauri/src/meetings_v2/*`, `native/src-tauri/src/calendar/*`, `native/src-tauri/src/commands.rs`, `native/src/types/index.ts`, `native/src/components/meetings_v2/*`, `native/src/components/settings/MeetingsSettings.tsx`).
+
+#### Features
+
+- **Canonical Utterances and Speaker Turns (`native/src-tauri/src/meetings_v2/types.rs`, `native/src-tauri/src/meetings_v2/processing/model.rs`)**: Established a clean 7-layer architecture where 30-second audio chunks are strictly capture/storage units, Whisper segments are canonical utterances with meeting-relative timestamps, and consecutive same-speaker utterances merge into conversational turns spanning chunk boundaries while faithfully preserving short interjections (e.g. 1s "Yes.").
+- **Self-Voice Anchoring (`native/src-tauri/src/meetings_v2/diarize/self_voice.rs`)**: Built meeting-local acoustic reference extraction from high-quality microphone samples (>1.0s) with calibrated distance metrics (`threshold = 0.65`), allowing reliable identification of short local-user interjections without cross-meeting persistent biometric voiceprints.
+- **Multi-Signal Speaker Attribution & Provenance (`native/src-tauri/src/meetings_v2/processing/speakers.rs`)**: Centralized speaker resolution enforcing a testable evidence hierarchy: manual user override > channel identity (`mic` vs `system`) > self-voice anchor > diarization clusters > contextual self-introductions > calendar candidate roster > unnamed speaker floor (`Speaker N`). Every assignment carries explicit confidence and provenance evidence.
+- **In-Person Room Microphone Safety (`native/src-tauri/src/meetings_v2/processing/speakers.rs`)**: When a meeting is flagged as in-person / room mic, channel-based assumption that the microphone is the local user is automatically disabled; speaker separation relies on acoustic diarization, self-voice anchoring, and user confirmation.
+- **Non-Destructive Speaker Merging & Reassignment (`native/src-tauri/src/meetings_v2/processing/speakers.rs`, `native/src-tauri/src/commands.rs`, `native/src/components/meetings_v2/MeetingConversationTab.tsx`)**: Exposed `merge_meeting_v2_speakers` Tauri command and conversational UI controls enabling users to rename or merge speakers (`Speaker 3 -> Bala`). Updates roster and assignments across facts and action items without modifying immutable raw transcript text (`transcript.jsonl`).
+- **Google Calendar Sync & 24h Upcoming Schedule (`native/src-tauri/src/calendar/*`, `native/src-tauri/src/commands.rs`, `native/src/components/settings/MeetingsSettings.tsx`, `native/src/components/meetings_v2/MeetingsV2View.tsx`)**: Reconnected Google Calendar read-only OAuth with explicit `sync_google_calendar` manual sync, automatic token refresh, token persistence, and a 24-hour upcoming meetings schedule card in the Meetings sidebar.
+- **Calendar Attendance Reconciliation (`native/src-tauri/src/meetings_v2/processing/metadata.rs`, `native/src/components/meetings_v2/MeetingMetadataHeader.tsx`)**: Enriched meeting metadata with structured attendance reconciliation separating *Invited* (calendar attendee list) from *Heard* ("heard" vs "no voice evidence") and *Identity* ("confirmed", "inferred", "unresolved"). Inactive attendees are never falsely declared absent.
+- **Direct Audio Seeking (`native/src-tauri/src/commands.rs`, `native/src/components/meetings_v2/MeetingConversationTab.tsx`, `native/src/components/meetings_v2/MeetingsV2View.tsx`)**: Added `get_meeting_v2_audio_chunk_path` command and clickable turn timestamp seeking that maps any conversational turn timestamp directly to the underlying `chunk_NNNN.wav` and plays it locally via Tauri asset streaming.
+- **Deterministic Summary Floor & Graceful AI UX (`native/src-tauri/src/meetings_v2/processing/model.rs`, `native/src/components/meetings_v2/MeetingProcessingStatus.tsx`)**: Fixed meeting processing status so that deterministic summary generation treats the meeting as `Ready` (`✓ Summary generated locally`). Eliminated alarming error banners when local LLMs are absent or return empty prose; relegated internal model generation retry mechanics exclusively to the Diagnostics Hub.
+
+#### Improvements
+
+- **Architecture Documentation (`docs/meetings/MEETINGS_INTELLIGENCE_V2.md`, `docs/README.md`)**: Documented the 7-layer architecture, evidence hierarchy, audio chunk invariance, calendar security boundary, and local-first privacy principles.
+
+#### Security
+
+- **Prompt Injection Defense (`native/src-tauri/src/meetings_v2/intelligence_tests.rs`)**: Verified that untrusted calendar titles, descriptions, and attendee rosters remain bounded external evidence and cannot execute prompt injection instructions against LLM prompts.
+- **Zero-Biometrics Privacy**: Guaranteed no cross-meeting persistent biometric voiceprints by default.
+
+#### Testing
+
+- **15 New Unified Integration Tests (`native/src-tauri/src/meetings_v2/intelligence_tests.rs`)**: Added automated tests covering 2-speaker turns, 5-speaker clusters, interruptions, 1s interjections, cross-chunk boundary invariance, speaker change at boundary, consecutive turn merges, SHA-256 raw transcript immutability, in-person room mic safety, calendar attendance reconciliation, prompt injection resistance, and deterministic summary ready status. All 15/15 passed.
+
 ## [0.35.2] - 2026-09-05
 
 ### Fix GitHub Actions CI: Manifest Version Sync and Headless Clipboard Test

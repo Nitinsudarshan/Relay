@@ -29,3 +29,7 @@ pub use types::{
     MeetingState, TranscriptSegment, TranscriptSegmentStatus,
 };
 
+#[cfg(test)]
+pub mod intelligence_tests;
+
+
