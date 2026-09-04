@@ -22,6 +22,8 @@ export const DEFAULT_MEETING_SETTINGS: MeetingSettings = {
   default_summary_mode: 'standard',
   default_extension_id: 'default',
   speaker_identification: 'automatic',
+  identify_individual_speakers: true,
+  expected_speakers: null,
   extensions: [],
   summary_instructions: '',
 };
@@ -187,6 +189,61 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
             <option value="off">Off</option>
           </select>
         </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium text-foreground">
+              Separate individual speakers
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              Tells the people on the call apart from each other, not just from
+              you, so a meeting of twenty does not read as one “Speaker 1”. Runs
+              once after recording ends. Voice features are used for that run and
+              never stored, so no voiceprint is created.
+            </p>
+          </div>
+          <Switch
+            checked={meetings.identify_individual_speakers}
+            onCheckedChange={(checked) =>
+              update({ identify_individual_speakers: checked })
+            }
+            disabled={meetings.speaker_identification === 'off'}
+            aria-label="Separate individual speakers"
+          />
+        </div>
+
+        {meetings.identify_individual_speakers &&
+          meetings.speaker_identification !== 'off' && (
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-medium text-foreground">
+                  Expected speakers
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  A hint, not a target. Leave it on Auto unless the count is
+                  known — and note it cannot conjure a speaker the recording
+                  does not contain: twenty in the room and three on the audio is
+                  still three.
+                </p>
+              </div>
+              <input
+                type="number"
+                min={0}
+                max={12}
+                value={meetings.expected_speakers ?? ''}
+                placeholder="Auto"
+                onChange={(e) => {
+                  const parsed = Number.parseInt(e.target.value, 10);
+                  update({
+                    expected_speakers:
+                      Number.isFinite(parsed) && parsed > 0 ? parsed : null,
+                  });
+                }}
+                className="w-20 text-xs bg-input border border-border rounded-md px-2 py-1.5 text-foreground"
+                aria-label="Expected number of speakers"
+              />
+            </div>
+          )}
       </div>
 
       <div className="flex flex-col gap-3 p-4 rounded-lg border border-border/60 bg-card/40">

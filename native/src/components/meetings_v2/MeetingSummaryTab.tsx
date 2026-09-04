@@ -5,6 +5,7 @@ import {
   Copy,
   Info,
   RefreshCw,
+  Share2,
   Sparkles,
 } from 'lucide-react';
 import { MarkdownView } from '../common/MarkdownView';
@@ -13,6 +14,7 @@ import type {
   MeetingExtension,
   MeetingProcessing,
   RelatedMeeting,
+  SharedDocument,
   SummaryMode,
 } from '../../types';
 import { MeetingActionItems } from './MeetingActionItems';
@@ -35,7 +37,50 @@ interface MeetingSummaryTabProps {
   busyActionItemId?: string | null;
   isAddingAllTasks?: boolean;
   onSelectRelated: (meetingId: string) => void;
+  /**
+   * Renders the meeting as one shareable document. Returns the text, which the
+   * tab copies — the backend composes it so the header stays counted rather
+   * than reassembled in the UI.
+   */
+  onShare: (options: ShareSelection) => Promise<SharedDocument>;
 }
+
+/** Which parts of a meeting go into a shared document. */
+export interface ShareSelection {
+  summary: boolean;
+  actionItems: boolean;
+  decisions: boolean;
+  conversation: boolean;
+  notes: boolean;
+}
+
+const DEFAULT_SHARE: ShareSelection = {
+  summary: true,
+  actionItems: true,
+  decisions: true,
+  conversation: false,
+  notes: false,
+};
+
+/**
+ * The share menu's checkboxes.
+ *
+ * The conversation and the notes are off by default for different reasons: the
+ * conversation turns a one-page summary into forty, and notes are often private
+ * working material. Both are deliberate choices the user makes each time rather
+ * than a setting they configure once and forget.
+ */
+const SHARE_PARTS: {
+  key: keyof ShareSelection;
+  label: string;
+  hint?: string;
+}[] = [
+  { key: 'summary', label: 'Summary' },
+  { key: 'actionItems', label: 'To-dos' },
+  { key: 'decisions', label: 'Decisions' },
+  { key: 'conversation', label: 'Full conversation', hint: 'long' },
+  { key: 'notes', label: 'Your notes', hint: 'private by default' },
+];
 
 /**
  * The default meeting view: what mattered, what was decided, what needs doing.
@@ -53,10 +98,17 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
   busyActionItemId,
   isAddingAllTasks,
   onSelectRelated,
+  onShare,
 }) => {
   const [copied, setCopied] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [extensionMenuOpen, setExtensionMenuOpen] = useState(false);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const [shareSelection, setShareSelection] = useState<ShareSelection>(DEFAULT_SHARE);
+  const [shareState, setShareState] = useState<'idle' | 'working' | 'done' | 'error'>(
+    'idle',
+  );
+  const [shareNote, setShareNote] = useState<string | null>(null);
 
   const summary = processing?.summary;
   const facts = processing?.facts;
@@ -73,6 +125,37 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy summary:', err);
+    }
+  };
+
+  /**
+   * Builds the shareable document and puts it on the clipboard.
+   *
+   * Copying rather than writing a file: the destination is almost always a
+   * message or a document somebody else already has open, and a file in
+   * Downloads is a second step for no benefit. The suggested filename comes
+   * back anyway, for the case where the user does want to save it.
+   */
+  const handleShare = async () => {
+    setShareState('working');
+    setShareNote(null);
+    try {
+      const document = await onShare(shareSelection);
+      await navigator.clipboard.writeText(document.contents);
+      setShareState('done');
+      setShareNote(`Copied — ${document.includes}`);
+      setTimeout(() => {
+        setShareState('idle');
+        setShareNote(null);
+      }, 4000);
+    } catch (err) {
+      console.error('Failed to share meeting:', err);
+      setShareState('error');
+      setShareNote(
+        typeof err === 'object' && err !== null && 'message' in err
+          ? String((err as { message: unknown }).message)
+          : 'Could not build the document.',
+      );
     }
   };
 
@@ -195,23 +278,108 @@ export const MeetingSummaryTab: React.FC<MeetingSummaryTabProps> = ({
           <span>Regenerate</span>
         </button>
 
-        <button
-          onClick={handleCopy}
-          className="ml-auto flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-mono text-muted-foreground hover:text-foreground bg-card hover:bg-accent border border-border transition-colors cursor-pointer"
-        >
-          {copied ? (
-            <>
-              <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-              <span className="text-emerald-600 dark:text-emerald-400 font-sans">Copied</span>
-            </>
-          ) : (
-            <>
-              <Copy className="w-3 h-3" />
-              <span>Copy</span>
-            </>
-          )}
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <div className="relative">
+            <button
+              onClick={() => {
+                setShareMenuOpen((v) => !v);
+                setModeMenuOpen(false);
+                setExtensionMenuOpen(false);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-card hover:bg-accent border border-border text-xs font-medium text-foreground transition-colors cursor-pointer"
+              title="Build one document with the meeting's date, participants and duration in front of the summary"
+            >
+              <Share2 className="w-3 h-3 text-primary" />
+              <span>Share</span>
+              <ChevronDown className="w-3 h-3 text-muted-foreground" />
+            </button>
+
+            {shareMenuOpen && (
+              <div className="absolute right-0 z-20 mt-1 w-64 rounded-lg bg-popover border border-border shadow-lg overflow-hidden p-2 space-y-1">
+                <p className="text-[11px] text-muted-foreground px-1 pb-1">
+                  The date, duration and participants are always included, so the
+                  summary carries its own provenance.
+                </p>
+                {SHARE_PARTS.map((part) => (
+                  <label
+                    key={part.key}
+                    className="flex items-center gap-2 px-1 py-1 rounded hover:bg-accent cursor-pointer text-xs text-foreground"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={shareSelection[part.key]}
+                      onChange={(e) =>
+                        setShareSelection((prev) => ({
+                          ...prev,
+                          [part.key]: e.target.checked,
+                        }))
+                      }
+                      className="accent-primary"
+                    />
+                    <span className="flex-1">{part.label}</span>
+                    {part.hint && (
+                      <span className="text-[10px] text-muted-foreground">
+                        {part.hint}
+                      </span>
+                    )}
+                  </label>
+                ))}
+                <button
+                  onClick={() => {
+                    setShareMenuOpen(false);
+                    void handleShare();
+                  }}
+                  disabled={shareState === 'working'}
+                  className="w-full mt-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {shareState === 'working' ? (
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Copy className="w-3 h-3" />
+                  )}
+                  Copy document
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-mono text-muted-foreground hover:text-foreground bg-card hover:bg-accent border border-border transition-colors cursor-pointer"
+            title="Copy the summary prose alone"
+          >
+            {copied ? (
+              <>
+                <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                <span className="text-emerald-600 dark:text-emerald-400 font-sans">Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3 h-3" />
+                <span>Copy</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
+
+      {shareNote && (
+        <p
+          className={`flex items-center gap-1.5 text-[11px] ${
+            shareState === 'error'
+              ? 'text-amber-800 dark:text-amber-200'
+              : 'text-emerald-700 dark:text-emerald-300'
+          }`}
+          aria-live="polite"
+        >
+          {shareState === 'error' ? (
+            <Info className="w-3.5 h-3.5 shrink-0" />
+          ) : (
+            <Check className="w-3.5 h-3.5 shrink-0" />
+          )}
+          {shareNote}
+        </p>
+      )}
 
       {summary.speaker_names_stale && (
         <p className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">

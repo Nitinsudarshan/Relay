@@ -1,6 +1,11 @@
-import React from 'react';
-import { FileText, Sparkles, Terminal } from 'lucide-react';
-import type { LiveTranscriptUpdate, TranscriptSegment } from '../../types';
+import React, { useState } from 'react';
+import { AlertTriangle, FileText, Sparkles, Terminal } from 'lucide-react';
+import type {
+  HallucinationReason,
+  LiveTranscriptUpdate,
+  TranscriptSegment,
+  TranscriptSegmentStatus,
+} from '../../types';
 
 interface MeetingRawTranscriptTabProps {
   segments: TranscriptSegment[];
@@ -17,6 +22,82 @@ const CHANNEL_LABEL = (segment: TranscriptSegment): string => {
   if (segment.mic_had_audio) return 'mic';
   if (segment.sys_had_audio) return 'system';
   return 'no channel data';
+};
+
+const STATUS_STYLE: Record<TranscriptSegmentStatus, string> = {
+  SUCCESS: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10',
+  EMPTY: 'text-muted-foreground bg-muted',
+  FAILED: 'text-muted-foreground bg-muted',
+  REJECTED: 'text-amber-700 dark:text-amber-300 bg-amber-500/15',
+};
+
+/** Why a decode was thrown away, in one readable line. */
+function describeReason(reason: HallucinationReason): string {
+  switch (reason.kind) {
+    case 'REPETITION_LOOP':
+      return `the decoder looped on "${reason.phrase}" ${reason.repeats} times`;
+    case 'FILLER_OVER_SILENCE':
+      return `"${reason.phrase}" over ${reason.voiced_seconds.toFixed(1)}s of voice — subtitle filler, not speech`;
+    case 'NO_SPEECH':
+      return `Whisper reported this was not speech (p=${reason.probability.toFixed(2)})`;
+    case 'IMPLAUSIBLE_RATE':
+      return `${reason.words} words over ${reason.voiced_seconds.toFixed(1)}s of voice (${reason.words_per_second.toFixed(1)} words per second)`;
+  }
+}
+
+/**
+ * A chunk whose decode was rejected.
+ *
+ * The discarded text is kept and shown behind a disclosure rather than deleted.
+ * This tab is the diagnostic source for the whole pipeline: a chunk that
+ * silently vanishes is indistinguishable from one that never existed, and the
+ * discarded text is the evidence the rejection was right.
+ */
+const RejectedBody: React.FC<{ segment: TranscriptSegment }> = ({ segment }) => {
+  const [showDiscarded, setShowDiscarded] = useState(false);
+  const rejection = segment.rejection;
+  if (!rejection) return null;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <p className="flex items-start gap-1.5 text-[12px] text-amber-800 dark:text-amber-200 font-sans">
+        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" aria-hidden="true" />
+        <span>
+          Discarded — {describeReason(rejection.reason)}. The audio for this chunk
+          is unchanged.
+        </span>
+      </p>
+      <button
+        type="button"
+        onClick={() => setShowDiscarded((v) => !v)}
+        aria-expanded={showDiscarded}
+        className="self-start text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+      >
+        {showDiscarded ? 'Hide' : 'Show'} what was discarded (
+        {rejection.discarded_word_count} words)
+      </button>
+      {showDiscarded && (
+        <p className="text-[12px] text-muted-foreground/80 leading-relaxed font-mono select-text px-2 py-1.5 rounded bg-muted/50 border border-border">
+          {rejection.discarded_text}
+          {rejection.truncated && <span className="italic"> …</span>}
+        </p>
+      )}
+    </div>
+  );
+};
+
+/** The voiced-time measurement, when the recorder took one. */
+const SpeechNote: React.FC<{ segment: TranscriptSegment }> = ({ segment }) => {
+  const speech = segment.speech;
+  if (!speech) return null;
+  return (
+    <span
+      className="text-[9px] text-muted-foreground/80 font-mono"
+      title={`Voiced audio measured at 20 ms resolution against this chunk's own noise floor (${speech.noise_floor_rms.toFixed(4)} RMS). Overall RMS was ${speech.rms.toFixed(4)} — the measurement that used to decide this on its own.`}
+    >
+      {speech.voiced_seconds.toFixed(1)}s voiced
+    </span>
+  );
 };
 
 /**
@@ -113,7 +194,11 @@ export const MeetingRawTranscriptTab: React.FC<MeetingRawTranscriptTabProps> = (
           {segments.map((seg) => (
             <div
               key={seg.chunk_index}
-              className="p-4 rounded-lg bg-card border border-border flex flex-col gap-1.5"
+              className={`p-4 rounded-lg flex flex-col gap-1.5 border ${
+                seg.status === 'REJECTED'
+                  ? 'bg-amber-500/5 border-amber-500/25'
+                  : 'bg-card border-border'
+              }`}
             >
               <div className="flex items-center justify-between text-[11px] text-muted-foreground font-mono">
                 <span>
@@ -128,24 +213,27 @@ export const MeetingRawTranscriptTab: React.FC<MeetingRawTranscriptTabProps> = (
                   >
                     {CHANNEL_LABEL(seg)}
                   </span>
+                  <SpeechNote segment={seg} />
                   <span
                     className={`px-1.5 rounded text-[9px] font-bold uppercase ${
-                      seg.status === 'SUCCESS'
-                        ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
-                        : 'text-muted-foreground bg-muted'
+                      STATUS_STYLE[seg.status] ?? 'text-muted-foreground bg-muted'
                     }`}
                   >
                     {seg.status}
                   </span>
                 </span>
               </div>
-              <p className="text-sm text-foreground leading-relaxed font-mono text-[13px] select-text">
-                {seg.text || (
-                  <span className="italic text-muted-foreground font-sans">
-                    (Silence / No Speech)
-                  </span>
-                )}
-              </p>
+              {seg.status === 'REJECTED' ? (
+                <RejectedBody segment={seg} />
+              ) : (
+                <p className="text-sm text-foreground leading-relaxed font-mono text-[13px] select-text">
+                  {seg.text || (
+                    <span className="italic text-muted-foreground font-sans">
+                      (Silence / No Speech)
+                    </span>
+                  )}
+                </p>
+              )}
             </div>
           ))}
         </div>

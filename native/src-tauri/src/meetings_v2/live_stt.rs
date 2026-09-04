@@ -1,4 +1,5 @@
 use super::capture::{LiveAudioFrame, TARGET_SAMPLE_RATE};
+use super::transcript_health::{self, DecodeEvidence};
 use super::types::LiveTranscriptUpdate;
 use crate::capture::stt::{SttLanguageConfig, StreamingTranscriber};
 use std::path::PathBuf;
@@ -211,8 +212,16 @@ fn run_live_loop(
 
         // Silence never reaches Whisper: it would burn a full decode to produce
         // nothing, or worse, hallucinate on background noise.
-        if !utterance.has_speech {
+        //
+        // The frame flags alone are not enough. They compare each second against
+        // a fixed RMS floor, so steady room tone sitting just above it marks
+        // every frame as speech and the whole utterance is decoded — the same
+        // failure the durable clock had. Measuring against the buffer's own
+        // noise floor is what tells a fan from a voice.
+        let profile = transcript_health::profile_speech(&utterance.samples, TARGET_SAMPLE_RATE);
+        if !utterance.has_speech || !profile.is_worth_decoding() {
             utterance.samples.clear();
+            utterance.has_speech = false;
             utterance.silent_frames = 0;
             continue;
         }
@@ -226,6 +235,27 @@ fn run_live_loop(
         };
 
         let commit_now = utterance.should_commit();
+
+        // The live stream is what the user watches while talking, so a
+        // hallucination here is the most visible failure Relay has. It is also
+        // the cheapest to catch: the same assessment the durable clock runs.
+        let text = match transcript_health::assess(
+            &text,
+            DecodeEvidence {
+                voiced_seconds: profile.voiced_seconds,
+                total_seconds: profile.total_seconds,
+                mean_no_speech_prob: 0.0,
+            },
+        ) {
+            Some(reason) => {
+                tracing::debug!(
+                    "LiveSttWorker: discarded live decode — {}",
+                    reason.describe()
+                );
+                String::new()
+            }
+            None => text,
+        };
 
         if !text.is_empty() {
             utterance.last_text = text;
@@ -243,9 +273,17 @@ fn run_live_loop(
 
     // Flush whatever was in flight so the last thing said still appears.
     if utterance.has_speech && !utterance.is_empty() {
-        if let Ok(text) = transcriber.transcribe(&utterance.samples) {
-            if !text.is_empty() {
-                utterance.last_text = text;
+        let profile = transcript_health::profile_speech(&utterance.samples, TARGET_SAMPLE_RATE);
+        if profile.is_worth_decoding() {
+            if let Ok(text) = transcriber.transcribe(&utterance.samples) {
+                let evidence = DecodeEvidence {
+                    voiced_seconds: profile.voiced_seconds,
+                    total_seconds: profile.total_seconds,
+                    mean_no_speech_prob: 0.0,
+                };
+                if !text.is_empty() && transcript_health::assess(&text, evidence).is_none() {
+                    utterance.last_text = text;
+                }
             }
         }
         commit(&app, &session_id, &mut utterance, latest_capture);

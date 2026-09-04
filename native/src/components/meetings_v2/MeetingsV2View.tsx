@@ -22,6 +22,7 @@ import { ConfirmationModal } from '../common/ConfirmationModal';
 import {
   ActionItem,
   AppSettings,
+  DirectiveKind,
   LiveTranscriptUpdate,
   MeetingExtension,
   MeetingNotes,
@@ -30,10 +31,12 @@ import {
   MeetingSession,
   MeetingTaskPushResult,
   RelatedMeeting,
+  SharedDocument,
   SummaryMode,
   TranscriptSegment,
 } from '../../types';
 import { MeetingConversationTab } from './MeetingConversationTab';
+import { MeetingMetadataHeader } from './MeetingMetadataHeader';
 import { MeetingProcessingStatus } from './MeetingProcessingStatus';
 import {
   MeetingRawTranscriptTab,
@@ -107,6 +110,8 @@ export const MeetingsV2View: React.FC = () => {
     DEFAULT_MEETING_UI_SETTINGS,
   );
   const [isRenamingSpeaker, setIsRenamingSpeaker] = useState<boolean>(false);
+  const [isIdentifyingSpeakers, setIsIdentifyingSpeakers] = useState<boolean>(false);
+  const [speakerError, setSpeakerError] = useState<string | null>(null);
   const [busyActionItemId, setBusyActionItemId] = useState<string | null>(null);
   const [isAddingAllTasks, setIsAddingAllTasks] = useState<boolean>(false);
   const [isPromoting, setIsPromoting] = useState<boolean>(false);
@@ -345,7 +350,7 @@ export const MeetingsV2View: React.FC = () => {
       })
       .catch((err) => {
         console.error('Failed to load meeting notes:', err);
-        if (!cancelled) setNotes({ during: '', before: '' });
+        if (!cancelled) setNotes({ directives: [], during: '', before: '' });
       });
     return () => {
       cancelled = true;
@@ -510,6 +515,92 @@ export const MeetingsV2View: React.FC = () => {
       console.error('Failed to rename speaker:', err);
     } finally {
       setIsRenamingSpeaker(false);
+    }
+  };
+
+  /**
+   * Adds one typed directive.
+   *
+   * Errors propagate to the tab, which shows them inline: a rejected name
+   * correction the user cannot see is a correction they will assume worked.
+   */
+  /** Builds the shareable document for the selected meeting. */
+  const handleShareMeeting = async (
+    sessionId: string,
+    selection: {
+      summary: boolean;
+      actionItems: boolean;
+      decisions: boolean;
+      conversation: boolean;
+      notes: boolean;
+    },
+  ) =>
+    invoke<SharedDocument>('share_meeting_v2', {
+      sessionId,
+      includeSummary: selection.summary,
+      includeActionItems: selection.actionItems,
+      includeDecisions: selection.decisions,
+      includeConversation: selection.conversation,
+      includeNotes: selection.notes,
+    });
+
+  const handleAddDirective = async (
+    sessionId: string,
+    kind: DirectiveKind,
+    subject: string | null,
+    value: string,
+  ) => {
+    setNotes(
+      await invoke<MeetingNotes>('add_meeting_v2_directive', {
+        sessionId,
+        kind,
+        subject,
+        value,
+      }),
+    );
+  };
+
+  const handleRemoveDirective = async (sessionId: string, directiveId: string) => {
+    setNotes(
+      await invoke<MeetingNotes>('remove_meeting_v2_directive', {
+        sessionId,
+        directiveId,
+      }),
+    );
+  };
+
+  /**
+   * Separates the recorded audio into distinct voices, then re-attributes.
+   *
+   * Offered as an explicit action, not only as a background step: people
+   * usually decide they need speakers once they have read the notes, and by
+   * then the automatic pass has already run with whatever hint was in settings.
+   */
+  const handleIdentifySpeakers = async (
+    sessionId: string,
+    expectedSpeakers: number | null,
+  ) => {
+    if (isIdentifyingSpeakers) return;
+    setIsIdentifyingSpeakers(true);
+    setSpeakerError(null);
+    try {
+      setProcessing(
+        await invoke<MeetingProcessing>('identify_meeting_v2_speakers', {
+          sessionId,
+          expectedSpeakers,
+        }),
+      );
+    } catch (err) {
+      // The common failure is discarded audio, and the backend's message says
+      // what still works. Showing it beats a console line nobody reads.
+      const message =
+        typeof err === 'object' && err !== null && 'message' in err
+          ? String((err as { message: unknown }).message)
+          : String(err);
+      console.error('Failed to identify speakers:', err);
+      setSpeakerError(message);
+    } finally {
+      setIsIdentifyingSpeakers(false);
     }
   };
 
@@ -876,16 +967,14 @@ export const MeetingsV2View: React.FC = () => {
                 <h2 className="text-lg font-extrabold text-foreground tracking-tight truncate">
                   {meetingTitle(selectedSession, processing)}
                 </h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Recorded on {new Date(selectedSession.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} • Duration:{' '}
-                  {formatDuration(
-                    isSelectedActive ? activeElapsedSec : selectedSession.duration_seconds
-                  )}{' '}
-                  • Chunks: {selectedSession.chunk_count} • Words: {selectedSessionWords}
-                  {selectedSession.paused_seconds > 1
-                    ? ` • Paused: ${formatDuration(selectedSession.paused_seconds)}`
-                    : ''}
-                </p>
+                <div className="mt-1.5">
+                  <MeetingMetadataHeader
+                    metadata={processing?.metadata}
+                    session={selectedSession}
+                    liveElapsedSeconds={isSelectedActive ? activeElapsedSec : null}
+                    wordCount={selectedSessionWords}
+                  />
+                </div>
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
@@ -939,6 +1028,19 @@ export const MeetingsV2View: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {speakerError && (
+              <div className="mx-5 mt-3 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-800 dark:text-amber-200 flex items-center gap-2 shrink-0">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span className="flex-1 min-w-0">{speakerError}</span>
+                <button
+                  onClick={() => setSpeakerError(null)}
+                  className="hover:underline font-medium cursor-pointer shrink-0"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
 
             {promotedScribbleTitle && (
               <div className="mx-5 mt-3 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[11px] text-emerald-700 dark:text-emerald-300 flex items-center gap-2 shrink-0">
@@ -1021,14 +1123,25 @@ export const MeetingsV2View: React.FC = () => {
                 busyActionItemId={busyActionItemId}
                 isAddingAllTasks={isAddingAllTasks}
                 onSelectRelated={handleSelectSession}
+                onShare={(selection) =>
+                  handleShareMeeting(selectedSession.id, selection)
+                }
               />
             )}
 
             {activeMeetingTab === 'notes' && (
               <MeetingNotesTab
                 notes={notes}
+                speakers={processing?.speakers ?? []}
+                unresolved={processing?.unresolved_directives ?? []}
                 isLoaded={notes !== null}
                 onSave={(next) => handleSaveNotes(selectedSession.id, next)}
+                onAddDirective={(kind, subject, value) =>
+                  handleAddDirective(selectedSession.id, kind, subject, value)
+                }
+                onRemoveDirective={(directiveId) =>
+                  handleRemoveDirective(selectedSession.id, directiveId)
+                }
               />
             )}
 
@@ -1036,7 +1149,12 @@ export const MeetingsV2View: React.FC = () => {
               <MeetingConversationTab
                 conversation={processing?.conversation}
                 speakers={processing?.speakers ?? []}
+                diarization={processing?.diarization}
                 isRenaming={isRenamingSpeaker}
+                isIdentifying={isIdentifyingSpeakers}
+                onIdentifySpeakers={(expected) =>
+                  handleIdentifySpeakers(selectedSession.id, expected)
+                }
                 isDisabled={!meetingSettings.generateConversationTranscript}
                 onRenameSpeaker={(speakerId, displayName) =>
                   handleRenameSpeaker(selectedSession.id, speakerId, displayName)

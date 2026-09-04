@@ -9,14 +9,21 @@
  */
 import type {
   ActionItem,
+  Diarization,
+  MeetingDirective,
   MeetingFacts,
+  MeetingMetadata,
+  MeetingNotes,
   MeetingProcessing,
   MeetingSession,
   NormalizedSegment,
   NormalizedTranscript,
+  Participant,
   Speaker,
   StageState,
   StageStates,
+  TranscriptHealth,
+  TranscriptSegment,
 } from '../types';
 
 export const makeSpeaker = (overrides: Partial<Speaker> = {}): Speaker => ({
@@ -27,6 +34,123 @@ export const makeSpeaker = (overrides: Partial<Speaker> = {}): Speaker => ({
   channel: 'MIC',
   is_local_user: false,
   segment_count: 4,
+  ...overrides,
+});
+
+export const makeParticipant = (overrides: Partial<Participant> = {}): Participant => ({
+  speaker_id: 'spk_1',
+  label: 'Speaker 1',
+  is_named: false,
+  is_confirmed: false,
+  origin: 'CHANNEL',
+  is_local_user: false,
+  speaking_seconds: 600,
+  turn_count: 8,
+  share_of_talk: 0.4,
+  ...overrides,
+});
+
+export const makeTranscriptHealth = (
+  overrides: Partial<TranscriptHealth> = {},
+): TranscriptHealth => ({
+  chunk_count: 12,
+  decoded_chunk_count: 12,
+  empty_chunk_count: 0,
+  rejected_chunk_count: 0,
+  failed_chunk_count: 0,
+  voiced_seconds: 1800,
+  rejected_seconds: 0,
+  rejection_reasons: {},
+  withheld_on_read: {},
+  withheld_word_count: 0,
+  ...overrides,
+});
+
+export const makeMetadata = (
+  overrides: Partial<MeetingMetadata> = {},
+): MeetingMetadata => ({
+  title: 'Pricing for the enterprise tier',
+  date_iso: '2026-08-26',
+  started_at: '2026-08-26T14:03:00Z',
+  ended_at: '2026-08-26T14:48:00Z',
+  duration_seconds: 2700,
+  paused_seconds: 0,
+  speaking_participant_count: 2,
+  participants: [
+    makeParticipant({
+      speaker_id: 'spk_me',
+      label: 'Me',
+      origin: 'LOCAL_USER',
+      is_local_user: true,
+      share_of_talk: 0.6,
+    }),
+    makeParticipant(),
+  ],
+  chunk_count: 12,
+  word_count: 4200,
+  turn_count: 18,
+  health: makeTranscriptHealth(),
+  speaker_method: 'DIARIZATION',
+  ...overrides,
+});
+
+export const makeDiarization = (
+  overrides: Partial<Diarization> = {},
+): Diarization => ({
+  report: {
+    cluster_count: 2,
+    placed_count: 10,
+    unplaced_count: 0,
+    skipped_count: 0,
+    well_separated: true,
+    mean_within_distance: 0.3,
+    min_between_distance: 4.2,
+    expected_speakers: null,
+    duration_ms: 120,
+  },
+  assignments: [],
+  ...overrides,
+});
+
+export const makeDirective = (
+  overrides: Partial<MeetingDirective> = {},
+): MeetingDirective => ({
+  id: 'dir_1',
+  kind: 'SPEAKER_NAME',
+  subject: 'spk_1',
+  value: 'Pranjali',
+  created_at: '2026-08-26T14:50:00Z',
+  ...overrides,
+});
+
+export const makeNotes = (overrides: Partial<MeetingNotes> = {}): MeetingNotes => ({
+  directives: [],
+  during: '',
+  before: '',
+  updated_at: '2026-08-26T14:50:00Z',
+  ...overrides,
+});
+
+export const makeTranscriptSegment = (
+  overrides: Partial<TranscriptSegment> = {},
+): TranscriptSegment => ({
+  chunk_index: 0,
+  start_time_s: 0,
+  end_time_s: 30,
+  text: 'So the placement numbers came in at forty-one this month.',
+  created_at: '2026-08-26T14:03:30Z',
+  status: 'SUCCESS',
+  mic_had_audio: true,
+  sys_had_audio: false,
+  utterances: [],
+  speech: {
+    voiced_seconds: 22,
+    total_seconds: 30,
+    peak_amplitude: 0.6,
+    rms: 0.08,
+    noise_floor_rms: 0.002,
+  },
+  rejection: null,
   ...overrides,
 });
 
@@ -142,7 +266,11 @@ export const makeProcessing = (
   stages: makeStages(),
   normalized: makeNormalized(),
   speakers: [makeSpeaker()],
+  diarization: null,
   conversation: null,
+  metadata: makeMetadata(),
+  names: null,
+  unresolved_directives: [],
   facts: makeFacts(),
   summary: null,
   scribble_ref: null,

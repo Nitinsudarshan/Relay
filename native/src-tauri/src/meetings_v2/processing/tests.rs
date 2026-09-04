@@ -52,6 +52,8 @@ impl Harness {
                         mic_had_audio: *mic,
                         sys_had_audio: *sys,
                         utterances: Vec::new(),
+                        speech: None,
+                        rejection: None,
                     },
                 )
                 .unwrap();
@@ -187,10 +189,14 @@ fn prose() -> String {
 /// two-chunk fixture. The fixture transcript is 46 words, so the budget it earns
 /// is genuinely small — which is the point of deriving it from the meeting.
 fn short_prose() -> String {
+    // Every section the facts support, including Risks — omitting one is now a
+    // validation failure, which is what the "unstructured summary" complaint
+    // was about. A fixture that skipped a section used to pass silently.
     "## Overview\n\nRelease timing and the schema freeze were settled.\n\n\
 ## Decisions\n\n- The release ships Friday — Me\n- The schema is frozen — Speaker 1\n\n\
 ## Action Items\n\n- [ ] Write the changelog — **Me** · Due: 2026-08-28\n\
 - [ ] Review the migration script — **Speaker 1**\n\n\
+## Risks & Blockers\n\n- **Blocker:** The migration script is unreviewed.\n\n\
 ## Open Questions\n\n- Who signs off on the migration?\n"
         .to_string()
 }
@@ -1088,6 +1094,8 @@ async fn related_meetings_are_found_through_shared_metadata() {
                         mic_had_audio: *mic,
                         sys_had_audio: *sys,
                         utterances: Vec::new(),
+                        speech: None,
+                        rejection: None,
                     },
                 )
                 .unwrap();
@@ -2703,6 +2711,7 @@ async fn conflicting_notes_and_transcript_are_left_conflicting() {
 async fn a_meetings_notes_are_never_written_by_the_pipeline() {
     let harness = Harness::new(&fixture_a());
     let notes = crate::meetings_v2::types::MeetingNotes {
+        directives: Vec::new(),
         during: "budget is the blocker".to_string(),
         before: "agenda: budget".to_string(),
         updated_at: None,

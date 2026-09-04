@@ -186,6 +186,30 @@ pub fn validate_summary(
         ));
     }
 
+    // The other direction, and the one nothing checked: facts with content and
+    // no section to put them in.
+    //
+    // §12 of the output contract specifies these headings, but until this
+    // existed only `## Overview` was enforced — so a model that answered with
+    // one heading and a wall of prose underneath passed, however many decisions
+    // and commitments the meeting produced. The result reads as an essay about
+    // a meeting rather than its record, which is not a style preference: a
+    // reader looking for what they own cannot find it, and there is nothing to
+    // scan.
+    //
+    // An error rather than a warning, so the repair pass gets a chance; and if
+    // repair fails, the deterministic renderer produces every section the facts
+    // support, which is the outcome we want either way.
+    for missing in missing_sections(body, facts) {
+        issues.push(error(
+            "SUMMARY_MISSING_SECTION",
+            format!(
+                "The facts record {} but the summary has no \"{}\" section.",
+                missing.evidence, missing.heading
+            ),
+        ));
+    }
+
     if looks_like_json(body) {
         issues.push(error(
             "SUMMARY_JSON_LEAKED",
@@ -628,6 +652,10 @@ record no risks. Remove that section rather than filling it."
 Decisions and write it as something that was proposed, not settled.",
                 issue.message
             ),
+            "SUMMARY_MISSING_SECTION" => format!(
+                "Your previous answer left out a required section. {} Add the section with the heading exactly as the structure gives it, and put those items under it as bullets. The summary is a record somebody scans for what they own — a single block of prose is not one.",
+                issue.message
+            ),
             "SUMMARY_EMPTY" => "Your previous answer was empty. Write the summary.".to_string(),
             _ => continue,
         };
@@ -817,6 +845,73 @@ fn bold_spans(markdown: &str) -> Vec<String> {
     spans
 }
 
+/// A section the facts require and the prose does not have.
+struct MissingSection {
+    /// The heading, exactly as §12 of the output contract gives it.
+    heading: &'static str,
+    /// What the facts hold that needs it, for the repair instruction.
+    evidence: String,
+}
+
+/// Sections the facts have content for and the prose omits.
+///
+/// Matched on the heading's own words rather than the full string, so a model
+/// that writes `## Action items` or `## 4. Action Items` is not failed for
+/// casing or numbering — the requirement is that the section exists, not that
+/// its heading is byte-identical.
+fn missing_sections(markdown: &str, facts: &MeetingFacts) -> Vec<MissingSection> {
+    let mut missing = Vec::new();
+
+    let mut require = |present: bool, count: usize, heading: &'static str, noun: &str| {
+        if count > 0 && !present {
+            missing.push(MissingSection {
+                heading,
+                evidence: format!(
+                    "{} {}{}",
+                    count,
+                    noun,
+                    if count == 1 { "" } else { "s" }
+                ),
+            });
+        }
+    };
+
+    require(
+        has_section(markdown, "decision"),
+        facts.decisions.len(),
+        "## Decisions",
+        "decision",
+    );
+    require(
+        has_section(markdown, "action"),
+        facts.action_items.len(),
+        "## Action Items",
+        "action item",
+    );
+    require(
+        has_section(markdown, "risk"),
+        facts.risks.len(),
+        "## Risks & Blockers",
+        "risk or blocker",
+    );
+    require(
+        has_section(markdown, "open question"),
+        facts.open_questions.len(),
+        "## Open Questions",
+        "open question",
+    );
+
+    missing
+}
+
+/// Whether any `##` heading in the markdown mentions `needle`.
+fn has_section(markdown: &str, needle: &str) -> bool {
+    markdown.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed.starts_with("##") && trimmed.to_lowercase().contains(needle)
+    })
+}
+
 /// Decisions-section lines with no matching extracted decision.
 fn unsupported_decisions(markdown: &str, facts: &MeetingFacts) -> Vec<String> {
     let mut in_decisions = false;
@@ -864,8 +959,9 @@ fn unsupported_decisions(markdown: &str, facts: &MeetingFacts) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::meetings_v2::processing::model::{
-        ActionItemStatus, Decision, Entity, EntityKind, KeyPoint, MeetingType, SegmentChannel,
-        SpeakerOrigin, SummaryMode, SPEAKER_ID_ME, SPEAKER_ID_REMOTE,
+        ActionItem, ActionItemStatus, Decision, Entity, EntityKind, KeyPoint, MeetingType,
+        OpenQuestion, OwnerType, Risk, RiskKind, SegmentChannel, SpeakerOrigin, SummaryMode,
+        SPEAKER_ID_ME, SPEAKER_ID_REMOTE,
     };
 
     fn speaker(id: &str, fallback: &str, name: Option<&str>, local: bool) -> Speaker {
@@ -932,6 +1028,19 @@ mod tests {
         crate::meetings_v2::processing::length::summary_budget(1_200, mode)
     }
 
+    /// A structurally complete summary padded to `words`.
+    ///
+    /// The length tests are about length. Padding under a bare `## Overview`
+    /// used to be enough because nothing required the other sections; now that
+    /// something does, a length test has to supply them or it fails for a
+    /// reason it is not about.
+    fn padded_summary(words: usize) -> String {
+        format!(
+            "## Overview\n\n{}\n\n## Decisions\n\n- Ship the release on Friday — Me\n",
+            "word ".repeat(words)
+        )
+    }
+
     #[test]
     fn a_reasonable_summary_passes() {
         let markdown = "## Overview\n\n- The team settled the release date after weighing migration risk.\n\n## Decisions\n\n- Ship the release on Friday — Me\n";
@@ -960,7 +1069,7 @@ mod tests {
         // deterministic fact dump instead. Forty words over is a style problem.
         let budget = budget(SummaryMode::Concise);
         let over = budget.max_words + 20;
-        let markdown = format!("## Overview\n\n{}", "word ".repeat(over));
+        let markdown = padded_summary(over);
 
         let report = validate_summary(
             &markdown,
@@ -983,8 +1092,7 @@ mod tests {
 
     #[test]
     fn a_runaway_summary_is_an_error() {
-        let padding = "The team discussed the architecture at some length. ".repeat(120);
-        let markdown = format!("## Overview\n\n{}", padding);
+        let markdown = padded_summary(1_200);
         let report = validate_summary(
             &markdown,
             &facts(),
@@ -1001,8 +1109,7 @@ mod tests {
     fn length_is_judged_against_the_meeting_not_a_constant() {
         // The same prose is fine for a long meeting and far too long for a
         // two-minute one. Under the old fixed cap both got the same verdict.
-        let words = 400;
-        let markdown = format!("## Overview\n\n{}", "word ".repeat(words));
+        let markdown = padded_summary(400);
         let long_meeting =
             crate::meetings_v2::processing::length::summary_budget(9_000, SummaryMode::Standard);
         let short_meeting =
@@ -1114,14 +1221,164 @@ mod tests {
 
     #[test]
     fn duplicate_bullets_are_a_warning_not_a_failure() {
-        let markdown =
-            "## Overview\n\n- The release date was settled.\n- The release date was settled.\n";
+        let markdown = "## Overview\n\n- The release date was settled.\n- The release date was settled.\n\n## Decisions\n\n- Ship the release on Friday — Me\n";
         let report = validate_summary(markdown, &facts(), &roster(), &budget(SummaryMode::Standard), "", false);
         assert!(report.passed, "duplicates should not block a summary");
         assert!(report
             .issues
             .iter()
             .any(|i| i.code == "SUMMARY_DUPLICATE_BULLETS"));
+    }
+
+    #[test]
+    fn a_wall_of_prose_under_one_heading_is_rejected_when_the_facts_have_sections() {
+        // The reported complaint: a summary that reads as an essay about a
+        // meeting rather than its record. Nothing checked for this — only the
+        // Overview heading was required — so a model that answered with one
+        // heading and a paragraph passed however many decisions it left out.
+        let markdown = "## Overview\n\nThe team met to discuss the release, weighed the migration risk at some length, and reached a view on timing that everyone was comfortable with before moving on to other matters.";
+        let report = validate_summary(
+            markdown,
+            &facts(),
+            &roster(),
+            &budget(SummaryMode::Standard),
+            "",
+            false,
+        );
+
+        assert!(!report.passed, "issues: {:?}", report.issues);
+        let issue = report
+            .issues
+            .iter()
+            .find(|i| i.code == "SUMMARY_MISSING_SECTION")
+            .expect("the missing Decisions section must be reported");
+        assert!(issue.message.contains("## Decisions"), "{}", issue.message);
+        assert!(issue.message.contains("1 decision"), "{}", issue.message);
+    }
+
+    #[test]
+    fn every_section_the_facts_support_is_required() {
+        let mut rich = facts();
+        rich.action_items = vec![ActionItem {
+            id: "act_0".into(),
+            description: "Send the migration plan".into(),
+            owner_type: OwnerType::Me,
+            owner_speaker_id: Some(SPEAKER_ID_ME.into()),
+            owner_label: None,
+            deadline: None,
+            status: ActionItemStatus::Open,
+            source_segment_ids: Vec::new(),
+            confidence: 0.9,
+            kanban_card_id: None,
+        }];
+        rich.risks = vec![Risk {
+            id: "risk_0".into(),
+            statement: "The payment integration has blocking bugs".into(),
+            kind: RiskKind::Blocker,
+            raised_by_speaker_id: None,
+            source_segment_ids: Vec::new(),
+        }];
+        rich.open_questions = vec![OpenQuestion {
+            id: "q_0".into(),
+            question: "Who owns the rollback plan?".into(),
+            source_segment_ids: Vec::new(),
+        }];
+
+        let markdown = "## Overview\n\n- The release date was settled after weighing risk.\n";
+        let report = validate_summary(
+            markdown,
+            &rich,
+            &roster(),
+            &budget(SummaryMode::Standard),
+            "",
+            false,
+        );
+
+        let missing: Vec<&str> = report
+            .issues
+            .iter()
+            .filter(|i| i.code == "SUMMARY_MISSING_SECTION")
+            .map(|i| i.message.as_str())
+            .collect();
+        assert_eq!(missing.len(), 4, "{missing:?}");
+        assert!(missing.iter().any(|m| m.contains("## Decisions")));
+        assert!(missing.iter().any(|m| m.contains("## Action Items")));
+        assert!(missing.iter().any(|m| m.contains("## Risks & Blockers")));
+        assert!(missing.iter().any(|m| m.contains("## Open Questions")));
+    }
+
+    #[test]
+    fn a_section_is_recognised_however_the_model_wrote_its_heading() {
+        // The requirement is that the section exists, not that the heading is
+        // byte-identical. Failing a correct summary over casing or a number
+        // would spend a repair round on nothing.
+        for heading in [
+            "## Decisions",
+            "## decisions",
+            "## 3. Decisions",
+            "### Decisions",
+            "## Decisions made",
+        ] {
+            let markdown = format!(
+                "## Overview\n\n- The release date was settled.\n\n{heading}\n\n- Ship on Friday — Me\n"
+            );
+            let report = validate_summary(
+                &markdown,
+                &facts(),
+                &roster(),
+                &budget(SummaryMode::Standard),
+                "",
+                false,
+            );
+            assert!(
+                !report
+                    .issues
+                    .iter()
+                    .any(|i| i.code == "SUMMARY_MISSING_SECTION"),
+                "{heading} was not recognised"
+            );
+        }
+    }
+
+    #[test]
+    fn a_meeting_that_produced_nothing_needs_no_sections() {
+        // The rule runs off the facts, so a meeting with no decisions and no
+        // commitments is not failed for having no Decisions section.
+        let mut bare = facts();
+        bare.decisions = Vec::new();
+        let markdown = "## Overview\n\n- The team talked through the migration without settling anything.\n";
+        let report = validate_summary(
+            markdown,
+            &bare,
+            &roster(),
+            &budget(SummaryMode::Standard),
+            "",
+            false,
+        );
+        assert!(
+            !report
+                .issues
+                .iter()
+                .any(|i| i.code == "SUMMARY_MISSING_SECTION"),
+            "issues: {:?}",
+            report.issues
+        );
+    }
+
+    #[test]
+    fn a_missing_section_produces_a_repair_instruction_that_names_it() {
+        let markdown = "## Overview\n\n- The release date was settled after weighing risk.\n";
+        let report = validate_summary(
+            markdown,
+            &facts(),
+            &roster(),
+            &budget(SummaryMode::Standard),
+            "",
+            false,
+        );
+        let feedback = repair_feedback(&report, &budget(SummaryMode::Standard))
+            .expect("a structural failure must be repairable");
+        assert!(feedback.contains("## Decisions"), "{feedback}");
     }
 
     #[test]

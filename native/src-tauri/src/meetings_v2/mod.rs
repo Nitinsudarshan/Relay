@@ -1,17 +1,29 @@
 pub mod capture;
+/// Rung 4 of the speaker-identification ladder: separating recorded audio into
+/// distinct voices. Reads the recorder's chunk WAVs, never writes them.
+pub mod diarize;
 pub mod engine;
 pub mod live_stt;
 /// Derived meeting intelligence: normalization, speakers, conversation,
 /// structured extraction, summaries. Reads the recorder's artifacts, never
 /// writes them.
 pub mod processing;
+/// Runnable checks for the pipeline's failure modes, for the Diagnostics page.
+/// Proves on the user's machine what the unit tests prove on CI.
+pub mod selftest;
 pub mod session_store;
+/// Tells speech apart from what Whisper emits when there is no speech.
+/// Read by both audio clocks and by the diagnostics surface.
+pub mod transcript_health;
 pub mod types;
 pub mod worker;
 
 pub use engine::MeetingsV2Engine;
 pub use processing::{MeetingProcessing, MeetingProcessor, ProcessingOptions};
 pub use session_store::SessionStore;
+pub use diarize::{Diarization, DiarizationReport, VoiceAssignment};
+pub use selftest::{MeetingSelfTestReport, SelfTestCheck};
+pub use transcript_health::{HallucinationReason, SpeechProfile, TranscriptRejection};
 pub use types::{
     AudioLevels, LiveTranscriptUpdate, MeetingDiagnostics, MeetingNotes, MeetingSession,
     MeetingState, TranscriptSegment, TranscriptSegmentStatus,

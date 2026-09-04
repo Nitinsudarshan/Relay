@@ -730,6 +730,19 @@ export interface MeetingSettings {
   default_summary_mode: DefaultSummaryModeSetting;
   default_extension_id: string;
   speaker_identification: SpeakerIdentificationSetting;
+  /**
+   * Whether individual speakers are separated acoustically, rather than only
+   * split into "me" and everyone else.
+   *
+   * Creates no biometric data: voice features live for the duration of one run
+   * and are never stored or matched across meetings.
+   */
+  identify_individual_speakers: boolean;
+  /**
+   * A clustering hint: how many people are expected to speak. Null means work
+   * it out. Setting it cannot invent a speaker the audio does not support.
+   */
+  expected_speakers?: number | null;
   extensions: MeetingExtensionSetting[];
   /**
    * Standing instructions for how summaries should read. Presentation only —
@@ -1021,6 +1034,15 @@ export interface MeetingSession {
   /** @deprecated See `summary`. Superseded by `MeetingFacts.action_items`. */
   action_items?: string[];
   pending_transcription_chunks: number;
+  /**
+   * Chunks whose decode was thrown away as something other than speech.
+   *
+   * The number that explains a thin summary: nine rejected chunks is four
+   * minutes of the meeting that never reached the model.
+   */
+  rejected_chunk_count?: number;
+  /** Voiced seconds across the whole recording. Against `duration_seconds`, the talk-to-silence ratio. */
+  voiced_seconds?: number;
   error_message?: string | null;
 }
 
@@ -1100,8 +1122,44 @@ export interface Conversation {
  * A source artifact, not derived: generating or regenerating a summary reads
  * them and never writes them.
  */
+/**
+ * What a directive is telling Relay.
+ *
+ * Each kind is read by the pipeline stage that can act on it, which is the
+ * point: a name correction typed as a sentence in a paragraph only works if a
+ * model notices it, whereas `SPEAKER_NAME` renames the speaker in the registry
+ * and every derived view picks it up at read time.
+ */
+export type DirectiveKind =
+  /** "Speaker 2 is Pranjali." Renames a speaker. Needs a subject. */
+  | 'SPEAKER_NAME'
+  /** "Ayush was on this call." Adds a participant whether or not they spoke. */
+  | 'PARTICIPANT'
+  /** "It is LanceDB, not Lance TV." Adds a glossary term. Needs a subject. */
+  | 'TERM'
+  /** What the meeting was for. Context, never evidence of a decision. */
+  | 'AGENDA'
+  /** Anything else worth remembering. */
+  | 'NOTE';
+
+/** One short, typed instruction a person gave about a meeting. */
+export interface MeetingDirective {
+  id: string;
+  kind: DirectiveKind;
+  /**
+   * For `SPEAKER_NAME`, which speaker (id, display name, or `Speaker N`).
+   * For `TERM`, the misheard spelling. Unused otherwise.
+   */
+  subject?: string | null;
+  /** For `SPEAKER_NAME` the name, for `TERM` the correct spelling, else the content. */
+  value: string;
+  created_at: string;
+}
+
 export interface MeetingNotes {
-  /** Written during or after the meeting. The common case. */
+  /** Short typed instructions. The primary surface for correcting a meeting. */
+  directives: MeetingDirective[];
+  /** Written during or after the meeting. The common case for prose. */
   during: string;
   /** Written before it, if anything was. Optional enrichment, roughly 1 in 100. */
   before: string;
@@ -1354,6 +1412,180 @@ export interface ScribbleRef {
 }
 
 /** A meeting's complete derived artifact (`processing.json`). */
+/**
+ * How an acoustic speaker-separation run turned out.
+ *
+ * `well_separated` is the field the UI must respect: false means the clusters
+ * sit no further from each other than their own members do, so the roster is
+ * provisional and must not be presented as fact.
+ */
+export interface DiarizationReport {
+  cluster_count: number;
+  placed_count: number;
+  unplaced_count: number;
+  skipped_count: number;
+  well_separated: boolean;
+  mean_within_distance: number;
+  min_between_distance: number;
+  expected_speakers?: number | null;
+  duration_ms: number;
+}
+
+export interface VoiceAssignment {
+  segment_id: string;
+  cluster?: number | null;
+  distance: number;
+}
+
+export interface Diarization {
+  report: DiarizationReport;
+  assignments: VoiceAssignment[];
+}
+
+/** How a participant came to be on the list. */
+export type ParticipantOrigin =
+  | 'LOCAL_USER'
+  | 'CHANNEL'
+  | 'DIARIZATION'
+  | 'SELF_INTRODUCED'
+  | 'MENTIONED'
+  | 'STATED';
+
+/** One person the meeting involved, whether or not they were heard. */
+export interface Participant {
+  speaker_id?: string | null;
+  /** Never invented: a name somebody supplied, or a `Speaker N` label. */
+  label: string;
+  is_named: boolean;
+  /** True when a person confirmed the name, false when it was inferred. */
+  is_confirmed: boolean;
+  origin: ParticipantOrigin;
+  is_local_user: boolean;
+  speaking_seconds: number;
+  turn_count: number;
+  /** Share of attributed talking time, 0..1. */
+  share_of_talk: number;
+}
+
+/**
+ * What became of every recorded chunk.
+ *
+ * The numbers that explain a thin summary: nine rejected chunks is four and a
+ * half minutes of the meeting that never reached the model.
+ */
+export interface TranscriptHealth {
+  chunk_count: number;
+  decoded_chunk_count: number;
+  empty_chunk_count: number;
+  rejected_chunk_count: number;
+  failed_chunk_count: number;
+  voiced_seconds: number;
+  rejected_seconds: number;
+  rejection_reasons: Record<string, number>;
+  /** Spans withheld at read time, recorded before hallucination screening existed. */
+  withheld_on_read: Record<string, number>;
+  withheld_word_count: number;
+}
+
+/** What established the speaker roster. */
+export type SpeakerMethod = 'NONE' | 'CHANNEL' | 'DIARIZATION';
+
+/**
+ * Everything about a meeting that is counted rather than inferred.
+ *
+ * Distinct from `MeetingFacts`, which is what a model read out of the
+ * transcript and can be wrong. Nothing here can be wrong the way a generated
+ * sentence can.
+ */
+export interface MeetingMetadata {
+  title: string;
+  date_iso: string;
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_seconds: number;
+  paused_seconds: number;
+  speaking_participant_count: number;
+  participants: Participant[];
+  chunk_count: number;
+  word_count: number;
+  turn_count: number;
+  health: TranscriptHealth;
+  speaker_method: SpeakerMethod;
+}
+
+export type NameEvidence = 'SELF_INTRODUCTION' | 'DIRECT_ADDRESS';
+
+/** A name the transcript offered, and what it was offered for. */
+export interface NameCandidate {
+  name: string;
+  evidence: NameEvidence;
+  /** Set only for a self-introduction. */
+  speaker_id?: string | null;
+  source_segment_ids: string[];
+  mentions: number;
+}
+
+export interface NameFindings {
+  /** Speaker id to the name that speaker gave for themselves. */
+  self_introductions: Record<string, NameCandidate>;
+  /** Names addressed in the meeting but not bound to any voice. */
+  mentioned: NameCandidate[];
+}
+
+/**
+ * An instruction that could not be applied — a name correction naming a
+ * speaker this meeting does not have, say. Surfaced rather than swallowed, or
+ * the user assumes the correction took.
+ */
+export interface UnresolvedDirective {
+  directive_id: string;
+  kind: DirectiveKind;
+  summary: string;
+  reason: string;
+}
+
+/**
+ * One meeting-pipeline check and what it found.
+ *
+ * `detail` always carries the measurement behind the verdict: a check that
+ * reports only pass/fail cannot be trusted, and a failure with no number
+ * cannot be diagnosed.
+ */
+export interface MeetingSelfTestCheck {
+  id: string;
+  name: string;
+  /** What a pass actually proves, written for whoever is reading the panel. */
+  purpose: string;
+  passed: boolean;
+  detail: string;
+  duration_ms: number;
+}
+
+export interface MeetingSelfTestReport {
+  checks: MeetingSelfTestCheck[];
+  passed: number;
+  failed: number;
+  duration_ms: number;
+  /** False means no Whisper model is configured — not a failure. */
+  whisper_checked: boolean;
+  /**
+   * What the installed Whisper model produced from thirty seconds of room tone.
+   *
+   * The most useful line in the report: subtitle boilerplate here is the exact
+   * hallucination the pipeline exists to catch, produced by this model on this
+   * machine.
+   */
+  whisper_on_silence?: string | null;
+}
+
+/** A meeting rendered as one Markdown document, for sharing. */
+export interface SharedDocument {
+  filename: string;
+  contents: string;
+  /** What went in, for the confirmation shown after copying. */
+  includes: string;
+}
+
 export interface MeetingProcessing {
   meeting_id: string;
   processing_version: number;
@@ -1363,7 +1595,14 @@ export interface MeetingProcessing {
   stages: StageStates;
   normalized?: NormalizedTranscript | null;
   speakers: Speaker[];
+  /** The acoustic separation the roster was built from. Null means channel only. */
+  diarization?: Diarization | null;
   conversation?: Conversation | null;
+  /** Counted facts: participants, timing, transcript health. */
+  metadata?: MeetingMetadata | null;
+  /** Names the transcript itself offered. Never treated as confirmed. */
+  names?: NameFindings | null;
+  unresolved_directives?: UnresolvedDirective[];
   facts?: MeetingFacts | null;
   summary?: SummaryArtifact | null;
   scribble_ref?: ScribbleRef | null;
@@ -1414,7 +1653,56 @@ export interface MeetingProcessingIndexEntry {
   action_item_count: number;
 }
 
-export type TranscriptSegmentStatus = 'SUCCESS' | 'EMPTY' | 'FAILED';
+/**
+ * `REJECTED` is distinct from `EMPTY` on purpose. `EMPTY` means the recorder
+ * heard no speech in the chunk and never decoded it; `REJECTED` means Whisper
+ * decoded it and the result was thrown away as something other than speech —
+ * a decoder loop, subtitle filler over silence, or more words than the voiced
+ * time could hold. Conflating them hides the failure.
+ */
+export type TranscriptSegmentStatus = 'SUCCESS' | 'EMPTY' | 'FAILED' | 'REJECTED';
+
+/** Why a decode was rejected as something other than speech. */
+export type HallucinationReason =
+  | { kind: 'REPETITION_LOOP'; phrase: string; repeats: number }
+  | { kind: 'FILLER_OVER_SILENCE'; phrase: string; voiced_seconds: number; voiced_ratio: number }
+  | { kind: 'NO_SPEECH'; probability: number }
+  | {
+      kind: 'IMPLAUSIBLE_RATE';
+      words: number;
+      voiced_seconds: number;
+      words_per_second: number;
+    };
+
+/**
+ * A rejected decode, kept on the segment in place of text.
+ *
+ * The discarded text is retained so the rejection is auditable from the
+ * artifact — a transcript that silently drops a chunk is not a diagnostic
+ * source.
+ */
+export interface TranscriptRejection {
+  reason: HallucinationReason;
+  discarded_text: string;
+  truncated: boolean;
+  discarded_word_count: number;
+}
+
+/**
+ * How much of a chunk's audio was actually voice, measured at 20 ms resolution
+ * against the chunk's own noise floor.
+ *
+ * `rms` is the measurement the old silence gate used on its own, kept because
+ * comparing it against `voiced_seconds` is what makes the old failure legible:
+ * steady room tone has a healthy RMS and no voiced time at all.
+ */
+export interface SpeechProfile {
+  voiced_seconds: number;
+  total_seconds: number;
+  peak_amplitude: number;
+  rms: number;
+  noise_floor_rms: number;
+}
 
 export interface TranscriptSegment {
   chunk_index: number;
@@ -1436,6 +1724,10 @@ export interface TranscriptSegment {
    * recorded before v2.5, which are still read from the chunk-level flags above.
    */
   utterances?: TranscriptUtterance[];
+  /** Null for transcripts recorded before the speech gate existed. */
+  speech?: SpeechProfile | null;
+  /** Present exactly when `status` is `REJECTED`. */
+  rejection?: TranscriptRejection | null;
 }
 
 /**

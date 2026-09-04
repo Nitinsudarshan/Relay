@@ -884,8 +884,34 @@ pub struct MeetingProcessing {
     pub normalized: Option<NormalizedTranscript>,
     #[serde(default)]
     pub speakers: Vec<Speaker>,
+    /// The acoustic speaker separation the roster was built from, when one ran.
+    ///
+    /// Kept so the UI can say how a speaker was found and how confident the
+    /// separation was, and so `prepare` need not re-read every chunk WAV on
+    /// each open. `None` means attribution used the capture channel alone.
+    #[serde(default)]
+    pub diarization: Option<crate::meetings_v2::diarize::Diarization>,
     #[serde(default)]
     pub conversation: Option<Conversation>,
+    /// The meeting's counted facts — participants, timing, transcript health.
+    ///
+    /// Distinct from `facts` below, which is what a model read out of the
+    /// transcript and can be wrong. Everything here is counted or measured.
+    #[serde(default)]
+    pub metadata: Option<crate::meetings_v2::processing::metadata::MeetingMetadata>,
+    /// Names the transcript itself offered (rung 5).
+    ///
+    /// Kept apart from the roster: these label a participant without claiming
+    /// the user confirmed them, so `Speaker 2` never silently becomes a name
+    /// nobody approved.
+    #[serde(default)]
+    pub names: Option<crate::meetings_v2::processing::names::NameFindings>,
+    /// Instructions the user gave that could not be applied — a name correction
+    /// naming a speaker this meeting does not have, say. Surfaced rather than
+    /// swallowed, or the user assumes the correction took.
+    #[serde(default)]
+    pub unresolved_directives:
+        Vec<crate::meetings_v2::processing::directives::UnresolvedDirective>,
     #[serde(default)]
     pub facts: Option<MeetingFacts>,
     #[serde(default)]
@@ -905,7 +931,11 @@ impl MeetingProcessing {
             stages: StageStates::default(),
             normalized: None,
             speakers: Vec::new(),
+            diarization: None,
             conversation: None,
+            metadata: None,
+            names: None,
+            unresolved_directives: Vec::new(),
             facts: None,
             summary: None,
             scribble_ref: None,

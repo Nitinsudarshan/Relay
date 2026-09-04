@@ -1,24 +1,36 @@
 //! Speaker attribution and the speaker registry.
 //!
-//! Only rung 1 of the ladder in `Meeting-rules/meeting_speaker_identification.md`
-//! is implemented: microphone input is the local user, system audio is everyone
-//! else. It needs no model, no ONNX runtime, and no consent flow, and it
-//! resolves every first-person commitment in a solo stretch — which is the
-//! majority of the to-dos that matter to the person using the app.
+//! Two rungs of the ladder in `Meeting-rules/meeting_speaker_identification.md`
+//! are implemented, and they compose rather than compete:
 //!
-//! Two invariants hold everything else together:
+//! * **Rung 1 — channel.** Microphone input is the local user, system audio is
+//!   everyone else. Free, certain for "me", and always on. On its own it can
+//!   only ever produce two speakers, which is why a 44-minute meeting with
+//!   twenty people in it used to show one chip reading "Speaker 1".
+//! * **Rung 4 — diarization.** `meetings_v2::diarize` clusters the recorded
+//!   audio into distinct voices. Where a cluster covers the remote side, it
+//!   splits that single anonymous bucket into `Speaker 1`, `Speaker 2`, …
+//!
+//! Rung 1 wins wherever the two disagree about the *local* user, because the
+//! channel is direct evidence and a cluster is an inference. Everywhere else
+//! diarization refines what the channel could only bucket.
+//!
+//! Three invariants hold everything else together:
 //!
 //! 1. **Ids are never display names.** `speaker_1` is the identifier;
 //!    "Pranjali" is a label the user can change at any time. Renaming touches
 //!    the registry and nothing else, so no transcript is ever rewritten.
-//! 2. **Ambiguity is preserved, not resolved.** Where the channel says nothing
-//!    (both sources audible in one chunk, or no channel data at all), the
-//!    segment keeps `speaker_id = None`. Diarization can fill those in later
-//!    without any id changing.
+//! 2. **Ambiguity is preserved, not resolved.** Where neither the channel nor a
+//!    cluster can say who spoke, the segment keeps `speaker_id = None`.
+//! 3. **A cluster is never presented as a certainty.** `SpeakerOrigin` records
+//!    which rung found each speaker, so the UI can distinguish a channel fact
+//!    from an acoustic inference from a name a person typed.
 
 use super::model::{
     NormalizedSegment, SegmentChannel, Speaker, SpeakerOrigin, SPEAKER_ID_ME, SPEAKER_ID_REMOTE,
 };
+use crate::meetings_v2::diarize::Diarization;
+use std::collections::HashMap;
 
 /// Whether speaker attribution should run at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +39,19 @@ pub enum SpeakerIdentificationMode {
     Automatic,
     /// No attribution; every turn is unattributed.
     Off,
+}
+
+/// The stable id for a diarization cluster that is not the local user.
+///
+/// Cluster 0 maps to [`SPEAKER_ID_REMOTE`] (`speaker_1`) so a meeting that was
+/// attributed by channel alone, and is then diarized, keeps its first remote
+/// speaker's id — and therefore any name the user already gave them.
+pub fn remote_speaker_id(index: usize) -> String {
+    if index == 0 {
+        SPEAKER_ID_REMOTE.to_string()
+    } else {
+        format!("speaker_{}", index + 1)
+    }
 }
 
 /// Assigns `speaker_id` on each segment from its channel, and returns the
@@ -39,6 +64,27 @@ pub fn attribute_speakers(
     existing: &[Speaker],
     mode: SpeakerIdentificationMode,
 ) -> Vec<Speaker> {
+    attribute_speakers_with_voices(segments, existing, mode, None)
+}
+
+/// Assigns speakers using the channel and, when one is supplied, a diarization
+/// run.
+///
+/// The two sources are combined per segment:
+///
+/// * A microphone-only segment is the local user. No cluster overrides that —
+///   the channel is what the audio device reported, not a guess about it.
+/// * Any other segment takes its speaker from the diarization cluster, if it
+///   has one. That is what turns a run of system-audio segments from one bucket
+///   into a roster, and it is also what attributes a `Mixed` segment the
+///   channel had to leave blank.
+/// * A segment with neither stays unattributed.
+pub fn attribute_speakers_with_voices(
+    segments: &mut [NormalizedSegment],
+    existing: &[Speaker],
+    mode: SpeakerIdentificationMode,
+    diarization: Option<&Diarization>,
+) -> Vec<Speaker> {
     if mode == SpeakerIdentificationMode::Off {
         for segment in segments.iter_mut() {
             segment.speaker_id = None;
@@ -48,40 +94,152 @@ pub fn attribute_speakers(
         return existing.to_vec();
     }
 
-    let mut me_count = 0usize;
-    let mut remote_count = 0usize;
+    // Only trust a cluster's boundaries when the run separated them. A roster
+    // built from overlapping clusters would put words in people's mouths, and
+    // rung 1's two-bucket answer is the better failure.
+    let clusters = diarization
+        .filter(|d| d.report.cluster_count > 0)
+        .map(|d| d.cluster_map())
+        .unwrap_or_default();
+
+    // Which clusters are the local user's, so a cluster that is really "me"
+    // does not also appear as a remote speaker. Decided by majority: the
+    // channel is certain per segment, so the cluster that most often coincides
+    // with microphone-only audio is the local user's voice.
+    let local_clusters = local_user_clusters(segments, &clusters);
+
+    let mut counts: HashMap<String, usize> = HashMap::new();
 
     for segment in segments.iter_mut() {
-        segment.speaker_id = segment
-            .channel
-            .implied_speaker_id()
-            .map(|id| id.to_string());
+        let cluster = clusters.get(segment.id.as_str()).copied();
+        let resolved = resolve_segment_speaker(segment.channel, cluster, &local_clusters);
+        if let Some(id) = resolved.as_deref() {
+            *counts.entry(id.to_string()).or_insert(0) += 1;
+        }
+        segment.speaker_id = resolved;
+    }
 
-        match segment.speaker_id.as_deref() {
-            Some(SPEAKER_ID_ME) => me_count += 1,
-            Some(SPEAKER_ID_REMOTE) => remote_count += 1,
+    build_roster(&counts, &local_clusters, &clusters, existing, diarization)
+}
+
+/// The speaker one segment resolves to, given its channel and its cluster.
+fn resolve_segment_speaker(
+    channel: SegmentChannel,
+    cluster: Option<usize>,
+    local_clusters: &[usize],
+) -> Option<String> {
+    // Rung 1 first, and it is not overridable: microphone-only audio is the
+    // person holding the microphone.
+    if channel == SegmentChannel::Mic {
+        return Some(SPEAKER_ID_ME.to_string());
+    }
+
+    match cluster {
+        Some(c) if local_clusters.contains(&c) => Some(SPEAKER_ID_ME.to_string()),
+        Some(c) => Some(remote_speaker_id(remote_index(c, local_clusters))),
+        // No cluster: fall back to what the channel alone can say.
+        None => channel.implied_speaker_id().map(|id| id.to_string()),
+    }
+}
+
+/// Clusters that coincide with microphone-only audio more often than not.
+///
+/// A diarization run does not know which voice belongs to the person using the
+/// app; the channel does. Intersecting the two is what stops the local user
+/// appearing twice — once as "Me" from the channel and once as a `Speaker N`
+/// from their own cluster.
+fn local_user_clusters(segments: &[NormalizedSegment], clusters: &HashMap<&str, usize>) -> Vec<usize> {
+    let mut mic_hits: HashMap<usize, usize> = HashMap::new();
+    let mut other_hits: HashMap<usize, usize> = HashMap::new();
+
+    for segment in segments {
+        let Some(&cluster) = clusters.get(segment.id.as_str()) else {
+            continue;
+        };
+        match segment.channel {
+            SegmentChannel::Mic => *mic_hits.entry(cluster).or_insert(0) += 1,
+            SegmentChannel::System => *other_hits.entry(cluster).or_insert(0) += 1,
+            // A mixed or unknown chunk is evidence for neither side.
             _ => {}
         }
     }
 
-    let mut speakers = Vec::new();
-    if me_count > 0 {
+    let mut local: Vec<usize> = mic_hits
+        .into_iter()
+        .filter(|(cluster, mic)| *mic > other_hits.get(cluster).copied().unwrap_or(0))
+        .map(|(cluster, _)| cluster)
+        .collect();
+    local.sort_unstable();
+    local
+}
+
+/// Position of a remote cluster among the remote clusters, so ids stay
+/// contiguous when one cluster is the local user's.
+fn remote_index(cluster: usize, local_clusters: &[usize]) -> usize {
+    cluster - local_clusters.iter().filter(|&&l| l < cluster).count()
+}
+
+/// Builds the registry from the segment counts, preserving names.
+fn build_roster(
+    counts: &HashMap<String, usize>,
+    local_clusters: &[usize],
+    clusters: &HashMap<&str, usize>,
+    existing: &[Speaker],
+    diarization: Option<&Diarization>,
+) -> Vec<Speaker> {
+    let diarized = diarization.is_some_and(|d| d.report.cluster_count > 0);
+    let mut speakers: Vec<Speaker> = Vec::new();
+
+    if let Some(&count) = counts.get(SPEAKER_ID_ME) {
         speakers.push(build_speaker(
             SPEAKER_ID_ME,
             "Me",
             SegmentChannel::Mic,
             true,
-            me_count,
+            count,
+            // "Me" is a channel fact whether or not diarization ran.
+            SpeakerOrigin::Channel,
             existing,
         ));
     }
-    if remote_count > 0 {
+
+    // Remote speakers, in cluster order, so `Speaker 1` is the first remote
+    // voice heard rather than whichever id sorts first as a string.
+    let mut remote_ids: Vec<(usize, String)> = if diarized {
+        let mut distinct: Vec<usize> = clusters
+            .values()
+            .copied()
+            .filter(|c| !local_clusters.contains(c))
+            .collect();
+        distinct.sort_unstable();
+        distinct.dedup();
+        distinct
+            .into_iter()
+            .map(|c| {
+                let index = remote_index(c, local_clusters);
+                (index, remote_speaker_id(index))
+            })
+            .collect()
+    } else {
+        vec![(0, SPEAKER_ID_REMOTE.to_string())]
+    };
+    remote_ids.sort_by_key(|(index, _)| *index);
+
+    for (index, id) in remote_ids {
+        let Some(&count) = counts.get(&id) else {
+            continue;
+        };
         speakers.push(build_speaker(
-            SPEAKER_ID_REMOTE,
-            "Speaker 1",
+            &id,
+            &format!("Speaker {}", index + 1),
             SegmentChannel::System,
             false,
-            remote_count,
+            count,
+            if diarized {
+                SpeakerOrigin::Diarization
+            } else {
+                SpeakerOrigin::Channel
+            },
             existing,
         ));
     }
@@ -99,12 +257,14 @@ pub fn attribute_speakers(
     speakers
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_speaker(
     id: &str,
     fallback_label: &str,
     channel: SegmentChannel,
     is_local_user: bool,
     segment_count: usize,
+    found_by: SpeakerOrigin,
     existing: &[Speaker],
 ) -> Speaker {
     let prior = existing.iter().find(|s| s.id == id);
@@ -112,11 +272,11 @@ fn build_speaker(
         id: id.to_string(),
         display_name: prior.and_then(|s| s.display_name.clone()),
         fallback_label: fallback_label.to_string(),
-        // A manual name is a stronger claim than the channel that found the
+        // A manual name is a stronger claim than whichever rung found the
         // speaker, so it is preserved on re-attribution.
         origin: match prior.map(|s| s.origin) {
             Some(SpeakerOrigin::Manual) => SpeakerOrigin::Manual,
-            _ => SpeakerOrigin::Channel,
+            _ => found_by,
         },
         channel,
         is_local_user,
@@ -311,6 +471,339 @@ mod tests {
         let mut speakers = Vec::new();
         assert!(rename_speaker(&mut speakers, "speaker_9", Some("Ghost")).is_err());
         assert!(speakers.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Rung 4 — diarization
+    //
+    // The reported failure: a 44-minute meeting with twenty people showed one
+    // remote speaker, because channel attribution has only two buckets.
+    // -----------------------------------------------------------------------
+
+    use crate::meetings_v2::diarize::{Diarization, DiarizationReport, VoiceAssignment};
+
+    fn diarization(clusters: &[(&str, Option<usize>)], cluster_count: usize) -> Diarization {
+        Diarization {
+            report: DiarizationReport {
+                cluster_count,
+                placed_count: clusters.iter().filter(|(_, c)| c.is_some()).count(),
+                unplaced_count: clusters.iter().filter(|(_, c)| c.is_none()).count(),
+                skipped_count: 0,
+                well_separated: true,
+                mean_within_distance: 0.2,
+                min_between_distance: 1.4,
+                expected_speakers: None,
+                duration_ms: 40,
+            },
+            assignments: clusters
+                .iter()
+                .map(|(id, cluster)| VoiceAssignment {
+                    segment_id: (*id).to_string(),
+                    cluster: *cluster,
+                    distance: 0.2,
+                })
+                .collect(),
+        }
+    }
+
+    /// Four remote turns from three different voices, plus one of the user's.
+    fn conference_call() -> Vec<NormalizedSegment> {
+        let raws = vec![
+            raw(0, "Right, shall we start with the placement numbers", true, false),
+            raw(1, "We closed forty-one this month", false, true),
+            raw(2, "That is ahead of where we were in July", false, true),
+            raw(3, "I can pull the cohort breakdown before Thursday", false, true),
+            raw(4, "And I will circulate the sheet after that", false, true),
+        ];
+        normalize_transcript(&raws, &[]).segments
+    }
+
+    #[test]
+    fn diarization_splits_the_remote_bucket_into_a_real_roster() {
+        let mut segments = conference_call();
+        // Three distinct remote voices across the four system-audio turns.
+        let voices = diarization(
+            &[
+                ("seg_00000", Some(0)),
+                ("seg_00001", Some(1)),
+                ("seg_00002", Some(2)),
+                ("seg_00003", Some(3)),
+                ("seg_00004", Some(3)),
+            ],
+            4,
+        );
+
+        let roster = attribute_speakers_with_voices(
+            &mut segments,
+            &[],
+            SpeakerIdentificationMode::Automatic,
+            Some(&voices),
+        );
+
+        assert_eq!(
+            roster.len(),
+            4,
+            "one local user and three remote voices, not one bucket: {:?}",
+            roster.iter().map(|s| s.label()).collect::<Vec<_>>()
+        );
+        let remote: Vec<&str> = roster
+            .iter()
+            .filter(|s| !s.is_local_user)
+            .map(|s| s.label())
+            .collect();
+        assert_eq!(remote, vec!["Speaker 1", "Speaker 2", "Speaker 3"]);
+    }
+
+    #[test]
+    fn without_diarization_the_roster_is_still_the_two_bucket_answer() {
+        // Rung 1 alone. Unchanged behaviour, and the reason rung 4 exists.
+        let mut segments = conference_call();
+        let roster = attribute_speakers(&mut segments, &[], SpeakerIdentificationMode::Automatic);
+        assert_eq!(roster.len(), 2);
+        assert_eq!(
+            roster
+                .iter()
+                .filter(|s| !s.is_local_user)
+                .map(|s| s.label())
+                .collect::<Vec<_>>(),
+            vec!["Speaker 1"]
+        );
+    }
+
+    #[test]
+    fn the_microphone_channel_is_never_overridden_by_a_cluster() {
+        // The channel is what the audio device reported; a cluster is an
+        // inference about it. Where they disagree about the local user, the
+        // device wins.
+        let mut segments = conference_call();
+        let voices = diarization(
+            &[
+                // Cluster 2 is mostly remote, and the run put the user's own
+                // turn in it. That must not make the user a remote speaker.
+                ("seg_00000", Some(2)),
+                ("seg_00001", Some(2)),
+                ("seg_00002", Some(2)),
+                ("seg_00003", Some(1)),
+                ("seg_00004", Some(1)),
+            ],
+            3,
+        );
+
+        attribute_speakers_with_voices(
+            &mut segments,
+            &[],
+            SpeakerIdentificationMode::Automatic,
+            Some(&voices),
+        );
+        assert_eq!(segments[0].speaker_id.as_deref(), Some(SPEAKER_ID_ME));
+    }
+
+    #[test]
+    fn the_local_users_own_cluster_does_not_also_become_a_remote_speaker() {
+        // The user talks on mic and is also heard through the loopback, so
+        // their voice forms a cluster. Without intersecting the cluster against
+        // the channel, they appear twice.
+        let raws = vec![
+            raw(0, "Let me share what I found", true, false),
+            raw(1, "So the migration is nearly done", true, false),
+            raw(2, "Sounds good, ship it", false, true),
+        ];
+        let mut segments = normalize_transcript(&raws, &[]).segments;
+        let voices = diarization(
+            &[
+                ("seg_00000", Some(0)),
+                ("seg_00001", Some(0)),
+                ("seg_00002", Some(1)),
+            ],
+            2,
+        );
+
+        let roster = attribute_speakers_with_voices(
+            &mut segments,
+            &[],
+            SpeakerIdentificationMode::Automatic,
+            Some(&voices),
+        );
+
+        assert_eq!(roster.len(), 2, "{:?}", roster.iter().map(|s| s.label()).collect::<Vec<_>>());
+        assert_eq!(roster.iter().filter(|s| s.is_local_user).count(), 1);
+        assert_eq!(
+            roster
+                .iter()
+                .filter(|s| !s.is_local_user)
+                .map(|s| s.label())
+                .collect::<Vec<_>>(),
+            vec!["Speaker 1"]
+        );
+    }
+
+    #[test]
+    fn diarization_attributes_a_mixed_chunk_the_channel_had_to_leave_blank() {
+        let raws = vec![raw(0, "We were both talking over each other", true, true)];
+        let mut segments = normalize_transcript(&raws, &[]).segments;
+
+        // The channel alone leaves this unattributed.
+        attribute_speakers(&mut segments, &[], SpeakerIdentificationMode::Automatic);
+        assert_eq!(segments[0].speaker_id, None);
+
+        let mut segments = normalize_transcript(&raws, &[]).segments;
+        let voices = diarization(&[("seg_00000", Some(0))], 1);
+        attribute_speakers_with_voices(
+            &mut segments,
+            &[],
+            SpeakerIdentificationMode::Automatic,
+            Some(&voices),
+        );
+        assert_eq!(segments[0].speaker_id.as_deref(), Some(SPEAKER_ID_REMOTE));
+    }
+
+    #[test]
+    fn an_unplaced_stretch_falls_back_to_the_channel_rather_than_guessing() {
+        let raws = vec![
+            raw(0, "Someone spoke here but too briefly to place", true, true),
+            raw(1, "This one came through the call", false, true),
+        ];
+        let mut segments = normalize_transcript(&raws, &[]).segments;
+        let voices = diarization(&[("seg_00000", None), ("seg_00001", Some(0))], 1);
+
+        attribute_speakers_with_voices(
+            &mut segments,
+            &[],
+            SpeakerIdentificationMode::Automatic,
+            Some(&voices),
+        );
+
+        assert_eq!(segments[0].speaker_id, None, "a mixed chunk with no cluster stays honest");
+        assert_eq!(segments[1].speaker_id.as_deref(), Some(SPEAKER_ID_REMOTE));
+    }
+
+    #[test]
+    fn a_diarized_speaker_records_that_a_cluster_found_them() {
+        let mut segments = conference_call();
+        let voices = diarization(
+            &[
+                ("seg_00000", Some(0)),
+                ("seg_00001", Some(1)),
+                ("seg_00002", Some(1)),
+                ("seg_00003", Some(2)),
+                ("seg_00004", Some(2)),
+            ],
+            3,
+        );
+        let roster = attribute_speakers_with_voices(
+            &mut segments,
+            &[],
+            SpeakerIdentificationMode::Automatic,
+            Some(&voices),
+        );
+
+        let me = roster.iter().find(|s| s.is_local_user).unwrap();
+        assert_eq!(
+            me.origin,
+            SpeakerOrigin::Channel,
+            "\"Me\" is a channel fact, not an acoustic inference"
+        );
+        for remote in roster.iter().filter(|s| !s.is_local_user) {
+            assert_eq!(remote.origin, SpeakerOrigin::Diarization);
+        }
+    }
+
+    #[test]
+    fn a_rename_survives_diarization_being_run_afterwards() {
+        // The user named Speaker 1 before diarization existed. Running it must
+        // not lose that name — which is why cluster 0 maps to `speaker_1`.
+        let mut segments = conference_call();
+        let mut roster =
+            attribute_speakers(&mut segments, &[], SpeakerIdentificationMode::Automatic);
+        rename_speaker(&mut roster, SPEAKER_ID_REMOTE, Some("Pranjali")).unwrap();
+
+        let mut segments = conference_call();
+        let voices = diarization(
+            &[
+                ("seg_00000", Some(0)),
+                ("seg_00001", Some(1)),
+                ("seg_00002", Some(1)),
+                ("seg_00003", Some(2)),
+                ("seg_00004", Some(2)),
+            ],
+            3,
+        );
+        let after = attribute_speakers_with_voices(
+            &mut segments,
+            &roster,
+            SpeakerIdentificationMode::Automatic,
+            Some(&voices),
+        );
+
+        let named = after.iter().find(|s| s.id == SPEAKER_ID_REMOTE).unwrap();
+        assert_eq!(named.label(), "Pranjali");
+        assert_eq!(named.origin, SpeakerOrigin::Manual);
+    }
+
+    #[test]
+    fn a_diarization_that_found_nothing_falls_back_to_the_channel() {
+        let mut segments = conference_call();
+        let empty = diarization(&[], 0);
+        let roster = attribute_speakers_with_voices(
+            &mut segments,
+            &[],
+            SpeakerIdentificationMode::Automatic,
+            Some(&empty),
+        );
+        assert_eq!(roster.len(), 2);
+        assert_eq!(segments[1].speaker_id.as_deref(), Some(SPEAKER_ID_REMOTE));
+    }
+
+    #[test]
+    fn remote_ids_stay_contiguous_when_a_cluster_belongs_to_the_local_user() {
+        // Cluster 1 is the user's. The remaining clusters must be Speaker 1 and
+        // Speaker 2, with no gap where cluster 1 used to be.
+        let raws = vec![
+            raw(0, "My own voice on the microphone", true, false),
+            raw(1, "The first remote voice", false, true),
+            raw(2, "A second remote voice", false, true),
+        ];
+        let mut segments = normalize_transcript(&raws, &[]).segments;
+        let voices = diarization(
+            &[
+                ("seg_00000", Some(1)),
+                ("seg_00001", Some(0)),
+                ("seg_00002", Some(2)),
+            ],
+            3,
+        );
+        let roster = attribute_speakers_with_voices(
+            &mut segments,
+            &[],
+            SpeakerIdentificationMode::Automatic,
+            Some(&voices),
+        );
+
+        let labels: Vec<&str> = roster
+            .iter()
+            .filter(|s| !s.is_local_user)
+            .map(|s| s.label())
+            .collect();
+        assert_eq!(labels, vec!["Speaker 1", "Speaker 2"]);
+        let ids: Vec<&str> = roster
+            .iter()
+            .filter(|s| !s.is_local_user)
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["speaker_1", "speaker_2"]);
+    }
+
+    #[test]
+    fn diarization_is_ignored_when_identification_is_off() {
+        let mut segments = conference_call();
+        let voices = diarization(&[("seg_00001", Some(1))], 2);
+        attribute_speakers_with_voices(
+            &mut segments,
+            &[],
+            SpeakerIdentificationMode::Off,
+            Some(&voices),
+        );
+        assert!(segments.iter().all(|s| s.speaker_id.is_none()));
     }
 
     #[test]

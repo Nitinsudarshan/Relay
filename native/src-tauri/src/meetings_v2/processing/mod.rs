@@ -52,16 +52,28 @@
 
 pub mod context;
 pub mod conversation;
+/// Applies the typed instructions a user attached to a meeting.
+pub mod directives;
 /// The summary quality evaluation set — fixtures, expectations, and a scorer.
 pub mod eval;
 pub mod extract;
 pub mod length;
 pub mod llm;
+/// The meeting's counted facts: participants, timing, and how much of the
+/// recording survived transcription. Never inferred, so never wrong the way a
+/// generated sentence can be.
+pub mod metadata;
 pub mod model;
 pub mod modes;
+/// Rung 5 of the speaker-identification ladder: names the meeting said out
+/// loud. Deterministic patterns, never a model — a model asked who someone is
+/// always answers.
+pub mod names;
 pub mod normalize;
 pub mod qualify;
 pub mod related;
+/// Assembles a meeting into one document somebody else can read.
+pub mod share;
 pub mod speakers;
 pub mod store;
 pub mod summarize;
@@ -70,6 +82,8 @@ pub mod tasks;
 pub mod validate;
 
 use super::session_store::SessionStore;
+use super::diarize::{diarize_session, Diarization};
+use super::transcript_health::{self, DecodeEvidence};
 use super::types::{MeetingNotes, TranscriptSegment, TranscriptSegmentStatus};
 use llm::MeetingLlm;
 pub use model::MeetingProcessing;
@@ -83,6 +97,7 @@ use length::summary_budget;
 use normalize::RawSegmentInput;
 use related::{find_related, MeetingIndexEntry, RelatedMeeting};
 use speakers::SpeakerIdentificationMode;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 use store::ProcessingStore;
@@ -95,6 +110,11 @@ pub struct ProcessingOptions {
     pub glossary: Vec<String>,
     pub generate_conversation: bool,
     pub speaker_identification: SpeakerIdentificationMode,
+    /// Whether to separate individual voices acoustically (rung 4). Without
+    /// this, attribution has two outcomes — the local user and everyone else.
+    pub diarize_speakers: bool,
+    /// Clustering hint. `None` means "work it out from the audio".
+    pub expected_speakers: Option<usize>,
     pub summary_mode: SummaryMode,
     pub extension_id: String,
     pub user_extensions: Vec<MeetingExtension>,
@@ -110,6 +130,8 @@ impl Default for ProcessingOptions {
             glossary: Vec::new(),
             generate_conversation: true,
             speaker_identification: SpeakerIdentificationMode::Automatic,
+            diarize_speakers: true,
+            expected_speakers: None,
             summary_mode: SummaryMode::Standard,
             extension_id: modes::DEFAULT_EXTENSION_ID.to_string(),
             user_extensions: Vec::new(),
@@ -149,23 +171,60 @@ impl MeetingProcessor {
         meeting_id: &str,
         options: &ProcessingOptions,
     ) -> Result<MeetingProcessing, String> {
-        let raw = self.read_raw_segments(meeting_id)?;
+        let raw_read = self.read_raw_segments(meeting_id)?;
+        let raw = raw_read.inputs.as_slice();
         let existing_speakers = self
             .store
             .load(meeting_id)
             .map(|p| p.speakers)
             .unwrap_or_default();
 
+        // Notes are a source artifact, read here and never written. The typed
+        // directives in them are instructions for specific stages: a misheard
+        // term joins this run's glossary, and a name correction is applied to
+        // the roster below.
+        let notes = self.read_notes(meeting_id);
+
         let started = Instant::now();
-        let mut normalized = normalize::normalize_transcript(&raw, &options.glossary);
+        let mut glossary = options.glossary.clone();
+        glossary.extend(notes.glossary_terms());
+        let mut normalized = normalize::normalize_transcript(raw, &glossary);
         let normalize_ms = started.elapsed().as_millis() as u64;
 
+        if raw_read.total_rejections() > 0 {
+            tracing::info!(
+                meeting_id = %meeting_id,
+                stage = "normalization",
+                recorded_rejections = ?raw_read.recorded_rejections,
+                retro_rejections = ?raw_read.retro_rejections,
+                retro_dropped_words = raw_read.retro_dropped_words,
+                "meeting_processing: transcript spans withheld as non-speech"
+            );
+        }
+
         let speaker_started = Instant::now();
-        let roster = speakers::attribute_speakers(
+
+        // Rung 4. Reuses whatever a previous run found rather than re-reading
+        // every WAV on each prepare, unless the transcript has changed under it.
+        let diarization = self.resolve_diarization(meeting_id, options, &normalized.segments);
+
+        let mut roster = speakers::attribute_speakers_with_voices(
             &mut normalized.segments,
             &existing_speakers,
             options.speaker_identification,
+            diarization.as_ref(),
         );
+
+        // Rung 6: a name the user typed wins over anything found automatically.
+        // Applied after attribution because a directive can only name a speaker
+        // that attribution produced.
+        let unresolved_names = directives::apply_speaker_names(&mut roster, &notes);
+
+        // Rung 5: names the meeting itself offered. Kept separate from the
+        // roster — they label a participant without claiming the user confirmed
+        // them — so `Speaker 2` never silently becomes a name nobody approved.
+        let name_findings = names::find_names(&normalized.segments, &roster);
+
         let speaker_report = validate::validate_speakers(&roster);
         let speaker_ms = speaker_started.elapsed().as_millis() as u64;
 
@@ -174,6 +233,32 @@ impl MeetingProcessor {
             .generate_conversation
             .then(|| conversation::build_conversation(&normalized.segments));
         let conversation_ms = conversation_started.elapsed().as_millis() as u64;
+
+        // Metadata is counted, not inferred, so it is rebuilt on every prepare
+        // rather than cached: a rename or a new directive changes it, and a
+        // stale participant list is worse than none.
+        let session = self
+            .sessions
+            .get_session(meeting_id)
+            .map_err(|e| format!("Meeting not found: {}", e))?;
+        let raw_segments = self
+            .sessions
+            .get_transcript_segments(meeting_id)
+            .unwrap_or_default();
+        let meeting_metadata = metadata::build(metadata::MetadataInput {
+            session: &session,
+            raw_segments: &raw_segments,
+            normalized: Some(&normalized),
+            conversation: conversation.as_ref(),
+            speakers: &roster,
+            names: &name_findings,
+            notes: &notes,
+            diarized: diarization
+                .as_ref()
+                .is_some_and(|d| d.report.cluster_count > 0),
+            withheld_on_read: raw_read.retro_rejections.clone(),
+            withheld_word_count: raw_read.retro_dropped_words,
+        });
 
         let source_chars = normalized.source_char_count;
         let output_chars = normalized.output_char_count;
@@ -244,6 +329,9 @@ impl MeetingProcessor {
             };
 
             processing.normalized = Some(normalized.clone());
+            processing.metadata = Some(meeting_metadata.clone());
+            processing.names = Some(name_findings.clone());
+            processing.unresolved_directives = unresolved_names.clone();
             // Compared before the roster is replaced: existing prose is only
             // stale if the labels it was written against have actually changed.
             // Flagging it on every prepare would put a "regenerate" banner on
@@ -260,6 +348,9 @@ impl MeetingProcessor {
 
             processing.speakers = roster.clone();
             processing.conversation = conversation.clone();
+            if diarization.is_some() {
+                processing.diarization = diarization.clone();
+            }
 
             if labels_changed {
                 if let Some(summary) = processing.summary.as_mut() {
@@ -857,20 +948,158 @@ audio are unaffected."
         ))
     }
 
+    /// The diarization to attribute with: a cached run when one still matches
+    /// the transcript, a fresh run otherwise, or `None` when it is switched off
+    /// or the audio is gone.
+    ///
+    /// Cached rather than re-run on every prepare because reading and
+    /// characterising every chunk WAV is the one genuinely expensive step in an
+    /// otherwise model-free stage, and `prepare` runs on open. The cache is
+    /// keyed on how many utterances the transcript holds and on the hint,
+    /// because those are the two things that make a previous run wrong.
+    fn resolve_diarization(
+        &self,
+        meeting_id: &str,
+        options: &ProcessingOptions,
+        segments: &[model::NormalizedSegment],
+    ) -> Option<Diarization> {
+        if !options.diarize_speakers
+            || options.speaker_identification == SpeakerIdentificationMode::Off
+        {
+            return None;
+        }
+
+        let cached = self.store.load(meeting_id).and_then(|p| p.diarization);
+        if let Some(existing) = cached {
+            let same_hint = existing.report.expected_speakers == options.expected_speakers;
+            let same_size = existing.assignments.len() == segments.len();
+            if same_hint && same_size {
+                return Some(existing);
+            }
+        }
+
+        match diarize_session(&self.sessions, meeting_id, options.expected_speakers) {
+            Ok(diarization) => Some(diarization),
+            Err(e) => {
+                // Not a failure of the meeting: attribution falls back to the
+                // channel, which is what it did before rung 4 existed.
+                tracing::info!(
+                    meeting_id = %meeting_id,
+                    "meeting_processing: speakers not separated acoustically ({}); \
+attributing by capture channel alone",
+                    e
+                );
+                None
+            }
+        }
+    }
+
+    /// Re-runs diarization for one meeting, ignoring any cached result.
+    ///
+    /// Exposed because §3 of the speaker rules requires identification to be a
+    /// command the user can invoke: they usually decide they need speakers only
+    /// once they have seen the notes.
+    pub fn identify_speakers(
+        &self,
+        meeting_id: &str,
+        options: &ProcessingOptions,
+    ) -> Result<MeetingProcessing, String> {
+        let diarization = diarize_session(&self.sessions, meeting_id, options.expected_speakers)?;
+        self.store.update(meeting_id, |processing| {
+            processing.diarization = Some(diarization.clone());
+        })?;
+        // Re-attributing is what turns the run into a roster; the cache now
+        // holds this run, so prepare reuses it rather than doing the work twice.
+        self.prepare(meeting_id, options)
+    }
+
+    /// What became of every recorded chunk of one meeting.
+    ///
+    /// Computed from the raw transcript rather than read from the derived model,
+    /// so it answers for a meeting that has never been processed — which is
+    /// exactly the meeting somebody is most likely to be asking about.
+    pub fn transcript_health(
+        &self,
+        meeting_id: &str,
+    ) -> Result<metadata::TranscriptHealth, String> {
+        let segments = self
+            .sessions
+            .get_transcript_segments(meeting_id)
+            .map_err(|e| format!("Failed to read the raw transcript: {e}"))?;
+        let read = screen_raw_segments(segments.clone());
+
+        Ok(metadata::transcript_health(
+            &segments,
+            read.retro_rejections,
+            read.retro_dropped_words,
+        ))
+    }
+
+    /// Assembles a meeting into one Markdown document somebody else can read.
+    ///
+    /// Composes only: the header is counted, the prose was already generated
+    /// and validated, and the conversation is transcript text. Nothing here
+    /// writes, and a meeting that has never been summarized still produces a
+    /// readable header rather than an error.
+    pub fn share_document(
+        &self,
+        meeting_id: &str,
+        options: share::ShareOptions,
+    ) -> Result<SharedDocument, String> {
+        let processing = self
+            .store
+            .load(meeting_id)
+            .ok_or_else(|| "This meeting has not been processed yet.".to_string())?;
+
+        let metadata = processing
+            .metadata
+            .clone()
+            .ok_or_else(|| "This meeting has no metadata yet. Open it once to build it.".to_string())?;
+        let notes = self.read_notes(meeting_id);
+
+        let markdown = share::render(
+            &share::ShareInput {
+                metadata: &metadata,
+                summary: processing.summary.as_ref(),
+                facts: processing.facts.as_ref(),
+                conversation: processing.conversation.as_ref(),
+                speakers: &processing.speakers,
+                notes: &notes.during_for_model(),
+            },
+            options,
+        );
+
+        Ok(SharedDocument {
+            filename: share::suggested_filename(&metadata),
+            contents: markdown,
+            includes: share::describe(options),
+        })
+    }
+
+    /// Reads the user's notes, treating an unreadable file as no notes.
+    ///
+    /// A meeting with no notes is the common case, so absence is not an error;
+    /// and a corrupt notes file must not stop a meeting being processed.
+    fn read_notes(&self, meeting_id: &str) -> MeetingNotes {
+        self.sessions.get_notes(meeting_id).unwrap_or_else(|e| {
+            tracing::warn!(
+                meeting_id = %meeting_id,
+                "meeting_processing: notes unreadable ({}); processing without them",
+                e
+            );
+            MeetingNotes::default()
+        })
+    }
+
     /// Reads the raw transcript. The only source-artifact access the pipeline
     /// makes, and it is read-only.
-    fn read_raw_segments(&self, meeting_id: &str) -> Result<Vec<RawSegmentInput>, String> {
+    fn read_raw_segments(&self, meeting_id: &str) -> Result<RawTranscriptRead, String> {
         let segments = self
             .sessions
             .get_transcript_segments(meeting_id)
             .map_err(|e| format!("Failed to read the raw transcript: {}", e))?;
 
-        Ok(segments
-            .into_iter()
-            .filter(|s| s.status == TranscriptSegmentStatus::Success)
-            .filter(|s| !s.text.trim().is_empty())
-            .flat_map(raw_inputs_from_segment)
-            .collect())
+        Ok(screen_raw_segments(segments))
     }
 
     /// Writes one stage record to the processing log.
@@ -1013,6 +1242,103 @@ mod tests;
 ///
 /// A chunk with no utterances — recorded before v2.5, or one Whisper returned no
 /// timed spans for — becomes a single whole-chunk input, exactly as before.
+/// A meeting rendered for sharing.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SharedDocument {
+    /// A dated, slugged filename for a saved copy.
+    pub filename: String,
+    pub contents: String,
+    /// What went in, for the confirmation the UI shows.
+    pub includes: String,
+}
+
+/// What a read of the raw transcript found, including what it refused to pass
+/// on.
+#[derive(Debug, Default, Clone)]
+pub struct RawTranscriptRead {
+    pub inputs: Vec<RawSegmentInput>,
+    /// Segments the recorder already rejected, by reason key.
+    pub recorded_rejections: BTreeMap<String, usize>,
+    /// Segments this read rejected because they were recorded before the
+    /// recorder screened for hallucination.
+    pub retro_rejections: BTreeMap<String, usize>,
+    /// Words dropped by `retro_rejections`. The number that explains why an old
+    /// meeting's summary changes when it is regenerated.
+    pub retro_dropped_words: usize,
+}
+
+impl RawTranscriptRead {
+    /// Every rejection, recorded and retroactive together.
+    pub fn total_rejections(&self) -> usize {
+        self.recorded_rejections.values().sum::<usize>()
+            + self.retro_rejections.values().sum::<usize>()
+    }
+}
+
+/// Screens raw transcript segments for text that is not speech.
+///
+/// The recorder screens every chunk as it is written, so for anything recorded
+/// from v2.6 on this only counts what the recorder already rejected. It runs
+/// again here for the meetings that already exist: thirteen sessions were
+/// recorded before the gate existed, and their `transcript.jsonl` holds runs of
+/// "Thank you." stored with `Success`. Rewriting those files is not an option —
+/// the raw transcript is immutable by design and is the evidence that the
+/// failure happened — so the screen runs on the way *out* instead, and the
+/// derived transcript comes out clean without a single byte of source data
+/// changing.
+///
+/// Screening is per utterance where the recorder resolved utterances, so one
+/// hallucinated span at the end of a chunk no longer costs the sentence in
+/// front of it.
+fn screen_raw_segments(segments: Vec<TranscriptSegment>) -> RawTranscriptRead {
+    let mut read = RawTranscriptRead::default();
+
+    for segment in segments {
+        if let Some(rejection) = segment.rejection.as_ref() {
+            *read
+                .recorded_rejections
+                .entry(rejection.reason.key().to_string())
+                .or_insert(0) += 1;
+            continue;
+        }
+        if segment.status != TranscriptSegmentStatus::Success || segment.text.trim().is_empty() {
+            continue;
+        }
+
+        // Without a measured profile there is no voiced time to compare against,
+        // which is the case for every pre-v2.6 transcript. Assuming the whole
+        // span was voiced is the conservative choice: it disables the rules that
+        // need audio evidence and leaves only the self-evident ones — a decoder
+        // loop is a decoder loop whatever the audio was.
+        let span_s = (segment.end_time_s - segment.start_time_s).max(0.001);
+        let (voiced_seconds, total_seconds) = match segment.speech {
+            Some(profile) => (profile.voiced_seconds, profile.total_seconds.max(0.001)),
+            None => (span_s, span_s),
+        };
+
+        for input in raw_inputs_from_segment(segment) {
+            let input_span = (input.end_time_s - input.start_time_s).max(0.001);
+            let evidence = DecodeEvidence {
+                voiced_seconds: voiced_seconds.min(input_span),
+                total_seconds: total_seconds.min(input_span).max(0.001),
+                mean_no_speech_prob: 0.0,
+            };
+            match transcript_health::assess(&input.text, evidence) {
+                Some(reason) => {
+                    *read
+                        .retro_rejections
+                        .entry(reason.key().to_string())
+                        .or_insert(0) += 1;
+                    read.retro_dropped_words += input.text.split_whitespace().count();
+                }
+                None => read.inputs.push(input),
+            }
+        }
+    }
+
+    read
+}
+
 fn raw_inputs_from_segment(segment: TranscriptSegment) -> Vec<RawSegmentInput> {
     if segment.utterances.is_empty() {
         return vec![RawSegmentInput {

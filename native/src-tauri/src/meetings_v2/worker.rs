@@ -1,5 +1,8 @@
 use super::capture::{resolve_utterance_channel, AudioChunk};
 use super::session_store::SessionStore;
+use super::transcript_health::{
+    self, DecodeEvidence, SpeechProfile, TranscriptRejection, MIN_VOICED_SECONDS,
+};
 use super::types::{TranscriptSegment, TranscriptSegmentStatus, TranscriptUtterance};
 use crate::capture::stt::{
     join_utterance_text, SttEngine, SttLanguageConfig, SttUtterance, WhisperDecodingConfig,
@@ -9,8 +12,9 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
-/// Below this RMS a chunk is treated as silence and never sent to Whisper.
-const SILENCE_RMS_THRESHOLD: f32 = 0.005;
+/// Shortest chunk worth decoding at all, in samples. Half a second; below this
+/// there is not a word to find.
+const MIN_DECODABLE_SAMPLES: usize = 16_000 / 2;
 
 /// How much of the previous chunk's text is carried into the next chunk's
 /// decode as context.
@@ -38,6 +42,19 @@ fn chunk_initial_prompt(vocabulary: Option<&str>, previous_tail: &str) -> Option
         (Some(v), true) => Some(v.to_string()),
         (Some(v), false) => Some(format!("{v}. {previous_tail}")),
     }
+}
+
+/// The tail of a chunk's text to carry into the next decode, or nothing.
+///
+/// Returns `None` whenever the text is not safe to prompt with. This is the
+/// other half of the loop fix: chunk state is already discarded between
+/// decodes, but the *prompt* is not, and Whisper reads it as preceding speech.
+/// Prompting chunk n+1 with "Thank you. Thank you." makes the same continuation
+/// overwhelmingly likely, which is how one bad chunk became nine consecutive
+/// ones in the failure this replaces.
+fn carry_forward(text: &str) -> Option<String> {
+    let tail = context_tail(text);
+    transcript_health::is_safe_as_prompt(&tail).then_some(tail)
 }
 
 /// The trailing `CONTEXT_CARRY_CHARS` of a chunk's text, cut at a word boundary.
@@ -108,6 +125,168 @@ fn attribute_utterances(
             }
         })
         .collect()
+}
+
+/// Utterances Whisper returned, minus the ones that are not speech.
+///
+/// Filtering happens per utterance rather than per chunk because Whisper
+/// routinely decodes a real sentence and then pads the rest of a 30-second
+/// window with filler. Dropping the padding keeps the sentence.
+fn keep_spoken_utterances(
+    decoded: &[SttUtterance],
+    profile: &SpeechProfile,
+) -> (Vec<SttUtterance>, usize) {
+    let mut kept = Vec::with_capacity(decoded.len());
+    let mut dropped = 0usize;
+
+    for utterance in decoded {
+        let span = (utterance.end_s - utterance.start_s).max(0.0);
+        // An utterance's own span is the audio it claims to cover, so the
+        // voiced time available to it is bounded by the chunk's voiced time.
+        let evidence = DecodeEvidence {
+            voiced_seconds: profile.voiced_seconds.min(span.max(0.001)),
+            total_seconds: span.max(0.001),
+            mean_no_speech_prob: utterance.no_speech_prob,
+        };
+        match transcript_health::assess(&utterance.text, evidence) {
+            Some(reason) => {
+                dropped += 1;
+                tracing::debug!(
+                    "Worker: dropped utterance [{:.1}s-{:.1}s]: {}",
+                    utterance.start_s,
+                    utterance.end_s,
+                    reason.describe()
+                );
+            }
+            None => kept.push(utterance.clone()),
+        }
+    }
+
+    (kept, dropped)
+}
+
+/// What one chunk's decode resolved to.
+struct DecodeOutcome {
+    text: String,
+    utterances: Vec<TranscriptUtterance>,
+    status: TranscriptSegmentStatus,
+    rejection: Option<TranscriptRejection>,
+    /// Text to prompt the next chunk with. `None` breaks the chain.
+    carry: Option<String>,
+}
+
+impl DecodeOutcome {
+    fn empty() -> Self {
+        Self {
+            text: String::new(),
+            utterances: Vec::new(),
+            status: TranscriptSegmentStatus::Empty,
+            rejection: None,
+            carry: None,
+        }
+    }
+
+    fn failed() -> Self {
+        Self {
+            text: String::new(),
+            utterances: Vec::new(),
+            status: TranscriptSegmentStatus::Failed,
+            rejection: None,
+            carry: None,
+        }
+    }
+
+    fn rejected(rejection: TranscriptRejection) -> Self {
+        Self {
+            text: String::new(),
+            utterances: Vec::new(),
+            status: TranscriptSegmentStatus::Rejected,
+            rejection: Some(rejection),
+            carry: None,
+        }
+    }
+}
+
+/// Turns Whisper's raw output for one chunk into the segment that gets stored.
+///
+/// Split out from the worker loop so the whole decision — what counts as
+/// speech, what is thrown away, and what is carried into the next decode — is
+/// testable without an audio device or a Whisper model.
+fn resolve_decode(
+    decoded: &[SttUtterance],
+    chunk: &AudioChunk,
+    profile: &SpeechProfile,
+) -> DecodeOutcome {
+    let (kept, dropped) = keep_spoken_utterances(decoded, profile);
+    if dropped > 0 {
+        tracing::info!(
+            "Worker: chunk #{} dropped {}/{} utterances as non-speech",
+            chunk.chunk_index,
+            dropped,
+            decoded.len()
+        );
+    }
+
+    let joined = join_utterance_text(&kept);
+    if joined.is_empty() {
+        // Everything Whisper produced was filler. If it produced anything at
+        // all, that is a rejection to record, not an empty chunk.
+        let discarded = join_utterance_text(decoded);
+        if discarded.is_empty() {
+            return DecodeOutcome::empty();
+        }
+        let mean_no_speech = mean_no_speech_prob(decoded);
+        let reason = transcript_health::assess(
+            &discarded,
+            DecodeEvidence {
+                voiced_seconds: profile.voiced_seconds,
+                total_seconds: profile.total_seconds,
+                mean_no_speech_prob: mean_no_speech,
+            },
+        )
+        .unwrap_or(transcript_health::HallucinationReason::NoSpeech {
+            probability: mean_no_speech,
+        });
+        return DecodeOutcome::rejected(transcript_health::rejection(reason, &discarded));
+    }
+
+    // The chunk as a whole is assessed again: individually plausible utterances
+    // can still form a loop across the window, which is the shape the reported
+    // failure actually took.
+    let evidence = DecodeEvidence {
+        voiced_seconds: profile.voiced_seconds,
+        total_seconds: profile.total_seconds,
+        mean_no_speech_prob: mean_no_speech_prob(&kept),
+    };
+    if let Some(reason) = transcript_health::assess(&joined, evidence) {
+        return DecodeOutcome::rejected(transcript_health::rejection(reason, &joined));
+    }
+
+    DecodeOutcome {
+        carry: carry_forward(&joined),
+        utterances: attribute_utterances(&kept, chunk),
+        text: joined,
+        status: TranscriptSegmentStatus::Success,
+        rejection: None,
+    }
+}
+
+/// Whisper's no-speech probability across a decode, weighted by span length.
+///
+/// Weighting matters: a one-word span with a high probability should not
+/// condemn twenty seconds of confident speech beside it.
+fn mean_no_speech_prob(utterances: &[SttUtterance]) -> f32 {
+    let mut weighted = 0.0f64;
+    let mut total = 0.0f64;
+    for utterance in utterances {
+        let span = (utterance.end_s - utterance.start_s).max(0.01);
+        weighted += utterance.no_speech_prob as f64 * span;
+        total += span;
+    }
+    if total <= 0.0 {
+        return 0.0;
+    }
+    (weighted / total) as f32
 }
 
 /// The durable recording clock (Clock A).
@@ -192,19 +371,31 @@ impl TranscriptionWorker {
                         .saturating_sub(session.transcript_segment_count);
                 });
 
-                // 2. Transcribe. Silence is rejected on energy alone rather than
-                //    spending a full decode to produce nothing.
-                let sum_sq: f32 = chunk.samples.iter().map(|&s| s * s).sum();
-                let rms = (sum_sq / sample_count.max(1) as f32).sqrt();
+                // 2. Decide whether there is speech here at all.
+                //
+                //    This is measured at 20 ms resolution against the chunk's own
+                //    noise floor, not as one RMS mean across thirty seconds. A
+                //    chunk-wide mean cannot tell a fan from a conversation: steady
+                //    hiss at 0.006 RMS clears any fixed threshold for the whole
+                //    window while containing no voice, and Whisper handed such a
+                //    window emits subtitle boilerplate — which is how a real
+                //    meeting ended up with four minutes of "Thank you."
+                let profile = transcript_health::profile_speech(&chunk.samples, 16_000);
 
-                let (text, utterances, status) = if sample_count < 16_000 / 2
-                    || rms < SILENCE_RMS_THRESHOLD
+                let outcome = if sample_count < MIN_DECODABLE_SAMPLES
+                    || !profile.is_worth_decoding()
                 {
-                    // Silence breaks the context chain: carrying text across a
-                    // gap would prompt the next chunk with speech that did not
-                    // immediately precede it.
-                    previous_tail.clear();
-                    (String::new(), Vec::new(), TranscriptSegmentStatus::Empty)
+                    tracing::info!(
+                        "Worker: chunk #{} not decoded — {:.2}s voiced of {:.1}s (floor {:.4}, \
+peak {:.3}); below the {:.1}s gate",
+                        chunk_idx,
+                        profile.voiced_seconds,
+                        profile.total_seconds,
+                        profile.noise_floor_rms,
+                        profile.peak_amplitude,
+                        MIN_VOICED_SECONDS
+                    );
+                    DecodeOutcome::empty()
                 } else {
                     let mut chunk_config = decoding_config.clone();
                     chunk_config.initial_prompt =
@@ -216,28 +407,33 @@ impl TranscriptionWorker {
                         &effective_lang_config,
                         &chunk_config,
                     ) {
-                        Ok((decoded, _diag)) => {
-                            let joined = join_utterance_text(&decoded);
-                            if joined.is_empty() {
-                                previous_tail.clear();
-                                (String::new(), Vec::new(), TranscriptSegmentStatus::Empty)
-                            } else {
-                                previous_tail = context_tail(&joined);
-                                let attributed = attribute_utterances(&decoded, &chunk);
-                                (joined, attributed, TranscriptSegmentStatus::Success)
-                            }
-                        }
+                        Ok((decoded, _diag)) => resolve_decode(&decoded, &chunk, &profile),
                         Err(e) => {
                             tracing::warn!(
                                 "Worker: STT transcription error on chunk #{}: {}",
                                 chunk_idx,
                                 e
                             );
-                            previous_tail.clear();
-                            (String::new(), Vec::new(), TranscriptSegmentStatus::Failed)
+                            DecodeOutcome::failed()
                         }
                     }
                 };
+
+                if let Some(rejection) = outcome.rejection.as_ref() {
+                    tracing::warn!(
+                        "Worker: chunk #{} rejected as non-speech — {} ({} words discarded)",
+                        chunk_idx,
+                        rejection.reason.describe(),
+                        rejection.discarded_word_count
+                    );
+                }
+
+                // Anything that is not clean speech breaks the context chain.
+                // Carrying a gap, a failure, or a loop forward is what turns one
+                // bad chunk into a run of them.
+                previous_tail = outcome.carry.clone().unwrap_or_default();
+
+                let text = outcome.text;
 
                 // 3. Persist the transcript segment.
                 let segment = TranscriptSegment {
@@ -246,13 +442,15 @@ impl TranscriptionWorker {
                     end_time_s: end_s,
                     text: text.clone(),
                     created_at: chrono::Utc::now().to_rfc3339(),
-                    status,
+                    status: outcome.status,
                     // Already measured on the chunk; carrying it onto the segment
                     // is what lets the processing pipeline attribute speakers by
                     // channel without any extra work or a second audio pass.
                     mic_had_audio: chunk.mic_had_audio,
                     sys_had_audio: chunk.sys_had_audio,
-                    utterances,
+                    utterances: outcome.utterances,
+                    speech: Some(profile),
+                    rejection: outcome.rejection,
                 };
 
                 if let Err(e) = store.append_transcript_segment(&session_id, &segment) {
@@ -264,9 +462,15 @@ impl TranscriptionWorker {
                 }
 
                 let segment_words = text.split_whitespace().count();
+                let rejected = segment.status == TranscriptSegmentStatus::Rejected;
+                let voiced_seconds = profile.voiced_seconds;
                 let _ = store.update_session(&session_id, |session| {
                     session.transcript_segment_count += 1;
                     session.word_count += segment_words;
+                    if rejected {
+                        session.rejected_chunk_count += 1;
+                    }
+                    session.voiced_seconds += voiced_seconds;
                     session.pending_transcription_chunks = session
                         .chunk_count
                         .saturating_sub(session.transcript_segment_count);
@@ -338,6 +542,156 @@ mod tests {
             text: text.to_string(),
             no_speech_prob: 0.01,
         }
+    }
+
+    /// A profile describing audio that really did contain speech.
+    fn voiced(seconds: f64) -> SpeechProfile {
+        SpeechProfile {
+            voiced_seconds: seconds,
+            total_seconds: 30.0,
+            peak_amplitude: 0.6,
+            rms: 0.08,
+            noise_floor_rms: 0.002,
+        }
+    }
+
+    /// A profile describing thirty seconds of room tone.
+    fn near_silent() -> SpeechProfile {
+        SpeechProfile {
+            voiced_seconds: 0.0,
+            total_seconds: 30.0,
+            peak_amplitude: 0.03,
+            rms: 0.006,
+            noise_floor_rms: 0.0055,
+        }
+    }
+
+    #[test]
+    fn the_reported_failure_is_rejected_rather_than_stored_as_speech() {
+        // Chunk 11 of the reported meeting: 30 seconds of room tone that
+        // Whisper filled with subtitle boilerplate.
+        let chunk = chunk_with_track(track(&[(QUIET, QUIET); 30]), 330.0, 30.0);
+        let decoded: Vec<SttUtterance> = (0..15)
+            .map(|i| {
+                SttUtterance {
+                    start_s: i as f64 * 2.0,
+                    end_s: i as f64 * 2.0 + 2.0,
+                    text: "Thank you.".to_string(),
+                    no_speech_prob: 0.55,
+                }
+            })
+            .collect();
+
+        let outcome = resolve_decode(&decoded, &chunk, &near_silent());
+
+        assert_eq!(outcome.status, TranscriptSegmentStatus::Rejected);
+        assert!(outcome.text.is_empty(), "rejected text must not be stored as speech");
+        assert!(outcome.utterances.is_empty());
+        let rejection = outcome.rejection.expect("a rejection must be recorded");
+        assert!(
+            rejection.discarded_text.contains("Thank you"),
+            "the discarded text is the evidence the rejection was right"
+        );
+        assert!(rejection.discarded_word_count >= 30);
+    }
+
+    #[test]
+    fn a_rejected_chunk_never_prompts_the_next_one() {
+        let chunk = chunk_with_track(track(&[(QUIET, QUIET); 30]), 330.0, 30.0);
+        let decoded = vec![utterance(0.0, 30.0, "Thank you. Thank you. Thank you. Thank you.")];
+        let outcome = resolve_decode(&decoded, &chunk, &near_silent());
+        assert_eq!(
+            outcome.carry, None,
+            "carrying a loop forward is what turned one bad chunk into nine"
+        );
+    }
+
+    #[test]
+    fn real_speech_survives_and_is_carried_forward() {
+        let chunk = chunk_with_track(track(&[(LOUD, QUIET); 30]), 0.0, 30.0);
+        let decoded = vec![
+            utterance(0.0, 6.0, "So the placement numbers came in at forty-one this month."),
+            utterance(6.0, 12.0, "That is ahead of the plan we set in July."),
+        ];
+
+        let outcome = resolve_decode(&decoded, &chunk, &voiced(11.0));
+
+        assert_eq!(outcome.status, TranscriptSegmentStatus::Success);
+        assert!(outcome.text.contains("forty-one"));
+        assert_eq!(outcome.utterances.len(), 2);
+        assert!(outcome.carry.is_some(), "clean speech must prompt the next chunk");
+    }
+
+    #[test]
+    fn filler_padding_is_dropped_without_losing_the_sentence_beside_it() {
+        // Whisper's habitual shape: one real sentence, then boilerplate for the
+        // rest of the window. Rejecting the whole chunk would lose the sentence.
+        let chunk = chunk_with_track(track(&[(LOUD, QUIET); 30]), 0.0, 30.0);
+        let mut decoded = vec![utterance(
+            0.0,
+            5.0,
+            "Pranjali will send the placement sheet by Thursday.",
+        )];
+        for i in 0..8 {
+            decoded.push(SttUtterance {
+                start_s: 6.0 + i as f64 * 3.0,
+                end_s: 9.0 + i as f64 * 3.0,
+                text: "Thank you.".to_string(),
+                no_speech_prob: 0.9,
+            });
+        }
+
+        let outcome = resolve_decode(&decoded, &chunk, &voiced(5.0));
+
+        assert_eq!(outcome.status, TranscriptSegmentStatus::Success);
+        assert!(outcome.text.contains("placement sheet"));
+        assert!(
+            !outcome.text.contains("Thank you"),
+            "text was {:?}",
+            outcome.text
+        );
+        assert_eq!(outcome.utterances.len(), 1);
+    }
+
+    #[test]
+    fn a_decode_that_produced_nothing_at_all_is_empty_not_rejected() {
+        let chunk = chunk_with_track(track(&[(QUIET, QUIET); 30]), 0.0, 30.0);
+        let outcome = resolve_decode(&[], &chunk, &near_silent());
+        assert_eq!(outcome.status, TranscriptSegmentStatus::Empty);
+        assert!(outcome.rejection.is_none());
+    }
+
+    #[test]
+    fn the_no_speech_probability_is_weighted_by_how_long_each_span_was() {
+        let spans = vec![
+            SttUtterance {
+                start_s: 0.0,
+                end_s: 20.0,
+                text: "twenty seconds of confident speech".into(),
+                no_speech_prob: 0.02,
+            },
+            SttUtterance {
+                start_s: 20.0,
+                end_s: 20.5,
+                text: "hm".into(),
+                no_speech_prob: 0.95,
+            },
+        ];
+        let mean = mean_no_speech_prob(&spans);
+        assert!(
+            mean < 0.1,
+            "half a second of doubt must not condemn twenty seconds of speech; got {mean}"
+        );
+        assert_eq!(mean_no_speech_prob(&[]), 0.0);
+    }
+
+    #[test]
+    fn a_polite_closing_thank_you_over_real_speech_is_not_thrown_away() {
+        let chunk = chunk_with_track(track(&[(LOUD, QUIET); 30]), 0.0, 30.0);
+        let decoded = vec![utterance(0.0, 2.0, "Thank you.")];
+        let outcome = resolve_decode(&decoded, &chunk, &voiced(1.8));
+        assert_eq!(outcome.status, TranscriptSegmentStatus::Success);
+        assert_eq!(outcome.text, "Thank you.");
     }
 
     #[test]

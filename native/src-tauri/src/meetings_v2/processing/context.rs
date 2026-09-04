@@ -121,15 +121,25 @@ therefore \"unassigned\", and no statement may be attributed to a named person."
     /// mattered, and notes written beforehand are evidence about what was
     /// *intended*, which the meeting itself may have overtaken.
     pub fn render_notes(&self) -> String {
+        // Free-text directives are folded into these two blocks rather than
+        // given a third. To a summarizer, "remember the vault rewrite is
+        // blocked" typed as a directive and the same sentence typed in the
+        // paragraph box are the same kind of evidence; a separate block would
+        // only invite the model to weigh one above the other. The directives
+        // that are *not* prose — a name correction, a misheard term — never
+        // reach a model at all, because the registry and the glossary act on
+        // them directly.
         let mut out = String::new();
-        if self.notes.has_during() {
+        let during = self.notes.during_for_model();
+        if !during.trim().is_empty() {
             out.push_str("USER NOTES (written by a participant during or after the meeting)\n");
-            out.push_str(self.notes.during.trim());
+            out.push_str(during.trim());
             out.push_str("\n\n");
         }
-        if self.notes.has_before() {
+        let before = self.notes.before_for_model();
+        if !before.trim().is_empty() {
             out.push_str("NOTES WRITTEN BEFORE THE MEETING (intent and agenda, not outcome)\n");
-            out.push_str(self.notes.before.trim());
+            out.push_str(before.trim());
             out.push_str("\n\n");
         }
         out
@@ -353,6 +363,7 @@ mod tests {
         let segs = segments(2, 10);
         let speakers = vec![speaker(SPEAKER_ID_ME, "Me", None, true)];
         let notes = MeetingNotes {
+            directives: Vec::new(),
             during: "budget is the blocker".to_string(),
             before: "agenda: budget, hiring".to_string(),
             updated_at: None,
@@ -366,6 +377,42 @@ mod tests {
         assert!(rendered.contains("agenda: budget, hiring"));
         // Order: what a human wrote comes before the raw transcript.
         assert!(rendered.find("budget is the blocker") < rendered.find("[seg_00000]"));
+    }
+
+    #[test]
+    fn free_text_directives_reach_the_model_as_notes() {
+        use crate::meetings_v2::types::{DirectiveKind, MeetingDirective};
+
+        let segs = segments(2, 30);
+        let speakers = vec![speaker(SPEAKER_ID_ME, "Me", None, true)];
+        let mut notes = MeetingNotes::default();
+        notes.directives.push(
+            MeetingDirective::new(DirectiveKind::Note, None, "the vault rewrite is blocked")
+                .unwrap(),
+        );
+        notes.directives.push(
+            MeetingDirective::new(DirectiveKind::Agenda, None, "decide the launch date").unwrap(),
+        );
+        // Neither of these is prose, so neither belongs in a prompt.
+        notes.directives.push(
+            MeetingDirective::new(DirectiveKind::SpeakerName, Some("Speaker 1"), "Pranjali")
+                .unwrap(),
+        );
+        notes.directives.push(
+            MeetingDirective::new(DirectiveKind::Term, Some("Lance TV"), "LanceDB").unwrap(),
+        );
+
+        let rendered = context(&segs, &speakers, &notes, &[]).render_notes();
+        assert!(rendered.contains("the vault rewrite is blocked"), "{rendered}");
+        assert!(rendered.contains("decide the launch date"), "{rendered}");
+        assert!(
+            !rendered.contains("Pranjali"),
+            "a name correction is applied to the registry, not described to a model: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Lance TV"),
+            "a misheard term is applied by the normalizer, not described to a model: {rendered}"
+        );
     }
 
     #[test]

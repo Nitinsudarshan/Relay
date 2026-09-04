@@ -48,6 +48,7 @@ version it was traced from; read them as history, not as instructions.
 |---|---|
 | [meetings/MEETINGS_INTELLIGENCE_AUDIT.md](meetings/MEETINGS_INTELLIGENCE_AUDIT.md) | Stage-by-stage trace of the meetings pipeline (phase A audit). |
 | [meetings/SUMMARY_QUALITY_REBUILD.md](meetings/SUMMARY_QUALITY_REBUILD.md) | Why v0.15.1 summaries were poor and what replaced the pipeline. |
+| [meetings/TRANSCRIPT_AND_SPEAKER_REBUILD.md](meetings/TRANSCRIPT_AND_SPEAKER_REBUILD.md) | Why a recording stored four minutes of "Thank you." and reported one speaker for a room of twenty, and what replaced the code that caused both. Includes the two clustering designs that were wrong first, and the measurements the surviving constants were calibrated against. |
 | [meetings/MEETINGS_LEGACY_REMOVAL.md](meetings/MEETINGS_LEGACY_REMOVAL.md) | Archaeological record of the legacy meetings system (v0.1.0–v0.10.1). |
 | [capture/RESEARCH.md](capture/RESEARCH.md) | The research pass behind Capture v2's progressive traversal: how browsers hide content, what was verified in a real browser and what was not, the traversal and expansion designs, and the architectures rejected. |
 | [capture/BENCHMARKS.md](capture/BENCHMARKS.md) | What the reveal pass costs, measured — and, explicitly, what has not been measured. |

@@ -17,23 +17,55 @@ Two things are deliberately kept separate throughout:
 Conflating them is the most common design error. Diarization can succeed completely while identification fails, and the UI must be able to show that state honestly.
 
 > [!NOTE]
-> **What is implemented today.** Only **rung 1** of §1's attribution ladder is
-> built: microphone input is the local user (`speaker_me`), system audio is
-> everyone else (`speaker_1`). It needs no model, no ONNX runtime, and no consent
-> flow, and it creates no biometric data.
+> **What is implemented today** (v0.31.0). Rungs **1**, **4**, **5** and **6**
+> are built. Rungs 2 and 3 are not.
 >
-> Its resolution is bounded by what the recorder preserves: channel provenance
-> survives only as two booleans per 30-second chunk, so a chunk where both
-> sources were audible is left **unattributed** rather than guessed. Rungs 2–5
-> are not implemented; the data model accepts `SpeakerOrigin::Diarization` so
-> they can be added without a schema change. The follow-up needed for
-> turn-level attribution is recorded as out-of-scope issue 1 in
-> `docs/meetings/MEETINGS_INTELLIGENCE_AUDIT.md`.
+> - **Rung 1 — channel** (`processing/speakers.rs`): microphone input is the
+>   local user (`speaker_me`), system audio is everyone else. Always on, and it
+>   is not overridable by a later rung *for the local user*, because the channel
+>   is what the audio device reported and a cluster is an inference about it.
+> - **Rung 4 — diarization** (`meetings_v2::diarize`): the recorded chunk WAVs
+>   are cut at Whisper's own utterance boundaries, characterised, and clustered
+>   into distinct voices, which is what splits the single remote bucket into
+>   `Speaker 1`, `Speaker 2`, … Features are MFCC statistics plus a pitch
+>   estimate, **not** a neural embedding, so no biometric data is created:
+>   features live for the duration of one run and are never stored or matched
+>   across meetings. What that costs is stated in the module's own docs and
+>   tracked as `maybe_later.md` item 18 — two similar voices on one channel are
+>   beyond it, and `DiarizationReport::well_separated` is how the UI knows to
+>   present such a roster as provisional rather than as fact.
+> - **Rung 5 — contextual inference** (`processing/names.rs`): deterministic
+>   patterns over self-introductions and direct address, deliberately *not* the
+>   model pass §4 specifies. A model asked who Speaker 2 is will always produce
+>   a plausible answer, and the failure mode here is inventing a name. A
+>   self-introduction binds to the speaker who gave it; a direct address is
+>   recorded as a mentioned participant and never bound to a voice.
+> - **Rung 6 — user correction** (`processing/directives.rs`): a `SpeakerName`
+>   directive in the meeting's notes renames the speaker in the registry. It
+>   does not yet feed rungs 2 or 3, because neither exists.
 >
-> §2.1's settings surface is likewise partial by design: Settings › Meetings
-> exposes "Speaker identification: Automatic / Off". The voice-library toggles
-> in §2.1 are deliberately absent, because the feature that would create
-> biometric data does not exist yet.
+> **Rung 2 (enrolled voiceprint)** is absent because it is the feature that
+> would create biometric data, and §6's consent, management and deletion
+> requirements have to land with it — `maybe_later.md` item 18.
+> **Rung 3 (calendar attendees)** is absent because Relay has no calendar
+> integration; the participant list and the expected-speaker hint are the
+> surfaces it would fill — `maybe_later.md` item 19.
+>
+> §2.1's settings surface accordingly exposes "Speaker identification:
+> Automatic / Off", "Separate individual speakers" (rung 4, **on** by default —
+> see below) and an expected-speaker count. The voice-library toggles are still
+> deliberately absent.
+>
+> One deliberate departure from §2.1: "Identify individual speakers" defaults
+> **on**, where this document says off for CPU cost. The measured cost is a few
+> hundred milliseconds over a whole meeting, run once after recording ends; the
+> alternative default is a twenty-person meeting reporting one remote speaker,
+> which is the failure this rung was built to fix. §2.2's per-meeting override
+> exists as the **Identify speakers** action in the conversation tab, with its
+> own expected-speaker field.
+>
+> Also outstanding from §2.2: the **In person** marking that would disable rung
+> 1 and make diarization the primary path.
 
 
 ---
