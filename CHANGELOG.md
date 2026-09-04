@@ -1,15 +1,15 @@
 # Relay — Changelog
 
-## [0.29.0] - 2026-09-03
+## [0.29.0] - 2026-09-04
 
 ### Unified Analysis Foundation (01–10) — Source, Analysis Contract, Prompt Registry, Derived Data
 
-**Type**: minor — new `pipeline::analysis` module establishing one shared source → normalise → analyse → derived-data spine, with source-specific semantics kept on top of it; plus three honesty fixes in the existing capture and enrichment paths (`native/src-tauri/src/pipeline/analysis/*`, `native/src-tauri/src/pipeline/enrichment.rs`, `native/src-tauri/src/pipeline/mod.rs`, `native/src-tauri/src/providers/mod.rs`, `native/src-tauri/src/capture/web/canonical.rs`, `native/src-tauri/src/capture/web/context.rs`, `native/src-tauri/src/capture/web/mod.rs`, `native/src-tauri/src/capture/web/importer/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/vault/mod.rs`, `native/src-tauri/src/meetings_v2/processing/mod.rs`, `native/src/types/index.ts`, `native/src/components/captures/CaptureContextTab.tsx`, `native/src/components/captures/RepositoryContextView.tsx`, `native/src/components/captures/CaptureContextTab.test.tsx`, `docs/data-model.md`, `docs/architecture.md`).
+**Type**: minor — new `pipeline::analysis` module establishing one shared source → normalise → analyse → derived-data spine, with source-specific semantics kept on top of it; plus three honesty fixes in the existing capture and enrichment paths (`native/src-tauri/src/pipeline/analysis/*`, `native/src-tauri/src/pipeline/enrichment.rs`, `native/src-tauri/src/pipeline/mod.rs`, `native/src-tauri/src/providers/mod.rs`, `native/src-tauri/src/capture/web/canonical.rs`, `native/src-tauri/src/capture/web/context.rs`, `native/src-tauri/src/capture/web/mod.rs`, `native/src-tauri/src/capture/web/importer/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/vault/mod.rs`, `native/src-tauri/src/meetings_v2/processing/mod.rs`, `native/src/types/index.ts`, `native/src/components/captures/CaptureContextTab.tsx`, `native/src/components/captures/CaptureContextTab.test.tsx`, `docs/data-model.md`, `docs/architecture.md`).
 
 #### Fixes
 
 - **A provider outage is no longer stored as an AI summary (`providers/mod.rs`, `pipeline/enrichment.rs`)**: `LLMClient::complete` never returns `Err` — on any provider failure it returns canned filler. Because the summary prompt contains no "JSON", that filler was a markdown document asserting the content was "Recorded via Relay push-to-talk voice capture", which `summarize_vault_file` wrote to `VaultFile.summary` and Talkback then read back as retrieval context. Added `LLMClient::complete_verified`, which reports both a transport failure and substituted filler as `ProviderError::NoCompletion`, and routed summary, enrichment and both context extractors through it. The filler marker is now the public `providers::HEURISTIC_FALLBACK_MODEL`, shared with `meetings_v2` rather than restated there.
-- **"No open issues" and "issues were not captured" no longer render identically (`RepositoryContextView.tsx`)**: the renderer tested `available && issues.length > 0`, so a repository correctly analysed as having an empty issue tracker was reported to the user as one Relay never looked at. Issue sections now render three distinct states — present, known-empty, and evidence-unavailable — from one `IssueSection` component.
+- **"No open issues" versus "issues were not captured" — superseded by 0.28.5**: this branch originally fixed a renderer that tested `available && issues.length > 0`, so a repository correctly analysed as having an empty issue tracker was reported as one Relay never looked at. 0.28.5 removed `open_issues`, `past_issues` and their availability flags from `RepositoryContext` outright, which removes the ambiguity at the source. The fix was dropped on merge rather than carried forward; deleting the fields is the better answer and `RepositoryContextView.tsx` here is 0.28.5's.
 - **Removed the `Work on <title>` fallback (`capture/web/context.rs`)**: a `ConversationContext` with no extractable objective was given `format!("Work on {}", title)` and the state `"Discussion captured and ready for handoff."`, both indistinguishable from extracted understanding once stored. Replaced with named `INSUFFICIENT_*_EVIDENCE` constants that state what the evidence did not support.
 - **Source identity is no longer re-derived by substring match (`commands.rs`, `CaptureContextTab.tsx`)**: `analyze_capture_context` selected its analysis with `payload.url.contains("github.com")`, which matched `https://evil.example/?ref=github.com` and classified every GitHub issue, pull request and discussion as a repository; its `application == "github"` clause was dead, since the detector writes `"GitHub"`. Both backend and frontend now key off the `capture_type` that `capture/web/source.rs` already derived from the URL.
 - **Fixed a red CI typecheck gate (`CaptureContextTab.test.tsx`)**: three `tsc --noEmit` errors introduced in 0.28.4 — two context fixtures missing required fields, and `trust_level` where the type says `trust`. Vitest strips types rather than checking them, so the suite was green while CI was not.
@@ -34,7 +34,30 @@
 #### Testing
 
 - **Backend (921 passed, +44)**: 35 new tests across the analysis foundation — source classification including the `?ref=github.com` lookalike, ordinal-preserving normalization, prompt applicability and id stability, JSON validation rejecting arrays and prose, fallback status recording, and coverage caveats. Plus 2 vault tests covering derived-data round-trip, supersede-on-reanalysis and that the source is left untouched, and 3 covering the context dispatch end to end (a repository capture gets repository semantics and honest metadata, a GitHub issue does not, and an unextractable objective says so). `cargo clippy --all-targets -- -D warnings` clean.
-- **Frontend (362 passed across 26 suites, +2)**: added tests for known-empty versus unavailable issue evidence, and for the empty state keying off `capture_type` rather than the URL. `npx tsc --noEmit` clean in `native/` and `web/`.
+- **Frontend (361 passed across 26 suites, +1 over 0.28.5)**: added a test that the repository empty state keys off `capture_type` rather than the URL or the application name. `npx tsc --noEmit` clean in `native/` and `web/`.
+## [0.28.5] - 2026-09-04
+
+### Refined Repository Context: 5 Core Dimensions & Grounded Evidence
+
+**Type**: patch — refined `RepositoryContext` to 5 concise semantic dimensions (`Objective`, `Stack`, `Features / Ecosystem`, `User Base`, `Licensing`) strictly grounded in captured repository evidence, removed issue tracking sections, added licensing extraction, and updated extraction prompts and UI briefing layout (`native/src-tauri/src/capture/web/context.rs`, `native/src-tauri/src/capture/web/mod.rs`, `native/src/types/index.ts`, `native/src/components/captures/RepositoryContextView.tsx`, `native/src/components/captures/CaptureContextTab.test.tsx`).
+
+#### Features & Architecture
+
+- **Concise 5-Dimension `RepositoryContext` (`context.rs`, `types/index.ts`)**:
+  - **Objective**: Crisp product-level purpose grounded in repository description and README.
+  - **Stack**: Only surfaces technical details grounded in evidence (e.g. Git worktrees, WebGL terminal, Chromium integration, SSH, CLI-agent ecosystem) without fabricating unverified complete stacks.
+  - **Features / Ecosystem**: Granular product capabilities and broader ecosystem support (e.g. "Supports a broad range of CLI coding agents").
+  - **User Base**: Grounded user groups derived from stated use cases and workflows without speculative persona demographics.
+  - **Licensing**: Explicitly captured license indicator (e.g. "MIT License").
+- **Removal of Issue Tracking Fields**: Removed `open_issues`, `past_issues`, `open_issues_available`, and `past_issues_available` from `RepositoryContext`, extraction prompts, serialization, and UI. No empty issue placeholders are displayed.
+- **Briefing-Oriented UI (`RepositoryContextView.tsx`)**: Refactored the context tab into a clean, concise repository briefing highlighting the 5 primary dimensions with badge indicators and ecosystem callouts.
+- **Deterministic & LLM Extraction Updates (`context.rs`)**: Updated extraction logic and `REPOSITORY_CONTEXT_SYSTEM_PROMPT` to extract licensing, grounded stack signals, and ecosystem features while omitting installation instructions, community links, and issue placeholders.
+
+#### Testing
+
+- **Backend Tests (866 passed in Rust suite)**: All 106 capture::web tests and 866 crate tests passing. `cargo clippy --all-targets -- -D warnings` passed with 0 warnings.
+- **Frontend Tests (360 passed across 26 test files)**: Updated `CaptureContextTab.test.tsx` for the 5-dimension model, verifying no issue placeholders or conversation headings appear. `npx tsc --noEmit` passed with 0 errors.
+- **Web Dashboard**: `npx tsc --noEmit` passed with 0 errors.
 
 ## [0.28.4] - 2026-09-04
 

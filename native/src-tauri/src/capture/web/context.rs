@@ -135,59 +135,6 @@ pub struct ConversationContext {
     pub deterministic: bool,
 }
 
-/// Canonical stack details for a software repository.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct RepositoryStack {
-    #[serde(default)]
-    pub languages: Vec<String>,
-    #[serde(default)]
-    pub frontend: Vec<String>,
-    #[serde(default)]
-    pub backend: Vec<String>,
-    #[serde(default)]
-    pub storage: Vec<String>,
-    #[serde(default)]
-    pub testing: Vec<String>,
-    #[serde(default)]
-    pub integrations: Vec<String>,
-}
-
-/// A product or system capability provided by a software repository.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RepositoryFeature {
-    pub name: String,
-    pub description: String,
-    #[serde(default)]
-    pub is_core: bool,
-}
-
-/// A GitHub issue or historical issue item.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RepositoryIssue {
-    #[serde(default)]
-    pub number: Option<u32>,
-    pub title: String,
-    #[serde(default)]
-    pub status: String,
-    #[serde(default)]
-    pub issue_type: Option<String>,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub resolution: Option<String>,
-}
-
-/// Grounded user base breakdown for a software repository.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct RepositoryUserBase {
-    #[serde(default)]
-    pub primary: Vec<String>,
-    #[serde(default)]
-    pub secondary: Vec<String>,
-    #[serde(default)]
-    pub evidence: Option<String>,
-}
-
 /// The canonical derived context representation for a captured software repository.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RepositoryContext {
@@ -195,19 +142,13 @@ pub struct RepositoryContext {
     pub repository_name: String,
     pub objective: String,
     #[serde(default)]
-    pub stack: RepositoryStack,
+    pub stack: Vec<String>,
     #[serde(default)]
-    pub features: Vec<RepositoryFeature>,
+    pub features: Vec<String>,
     #[serde(default)]
-    pub user_base: RepositoryUserBase,
+    pub user_base: Vec<String>,
     #[serde(default)]
-    pub open_issues: Vec<RepositoryIssue>,
-    #[serde(default)]
-    pub past_issues: Vec<RepositoryIssue>,
-    #[serde(default)]
-    pub open_issues_available: bool,
-    #[serde(default)]
-    pub past_issues_available: bool,
+    pub licensing: Option<String>,
     pub generated_at: String,
     #[serde(default)]
     pub model: Option<String>,
@@ -1036,48 +977,51 @@ fn extract_sentence_from(slice: &str) -> String {
 
 pub const REPOSITORY_CONTEXT_SYSTEM_PROMPT: &str = r#"
 You are Relay's Repository Intelligence Engine.
-Your task is to analyze captured software repository documentation and evidence, and extract structured, high-signal repository context.
+Your task is to analyze captured software repository documentation and evidence, and extract a concise, structured repository briefing.
 
-The user needs to understand what this repository is, what it is built with, what functionality it provides, who it is for, and open or historical issues.
+The user needs to quickly understand:
+1. What this repository is (Objective)
+2. What technical signals are grounded in captured evidence (Stack)
+3. What product capabilities and ecosystem it offers (Features / Ecosystem)
+4. Who it is for (User Base)
+5. How it is licensed (Licensing)
 
-Do NOT output an essay or conversational preamble.
-Extract specific, concrete, structured elements based STRICTLY on the captured evidence.
-
-CRITICAL EVIDENCE & HONESTY RULES:
-1. Do NOT hallucinate technologies. Only include technologies with reasonable evidence from package manifests (Cargo.toml, package.json), configuration files, source code mentions, or documentation.
-2. Distinguish core features (capabilities clearly supported by the repository) from supporting functionality (internal tooling or utility capabilities).
-3. Ground the user base in stated use cases, documentation, and positioning. If evidence is insufficient, state: "The repository does not provide sufficient evidence to confidently identify a primary user group."
-4. Do NOT fabricate GitHub issues or bugs. If no GitHub issue information was captured in the content, set "open_issues": [] and "open_issues_available": false.
-5. Do NOT fabricate historical issues. If no changelog, release notes, or resolved issue records were captured, set "past_issues": [] and "past_issues_available": false.
+CRITICAL EXTRACTION RULES:
+1. OBJECTIVE: Produce a concise product-level objective explaining what the project is and what it accomplishes. Do NOT simply copy the README or dump installation steps. Preserve key repository terminology.
+2. STACK: Only list technical details directly supported by the captured evidence (e.g. Git / Git worktrees, WebGL terminal rendering, Chromium/browser integration, SSH / remote development, CLI-based coding-agent ecosystem). Do NOT infer or claim an unverified complete stack (such as React/Rust/Postgres) unless explicit evidence is present in the capture.
+3. FEATURES / ECOSYSTEM: Summarize concise product-level capabilities rather than reproducing every README bullet verbatim. If the repository supports a broader tool or agent ecosystem (such as CLI coding agents), explicitly include that ecosystem capability (e.g. "Supports a broad range of CLI coding agents").
+4. USER BASE: Identify the intended user groups from stated use cases, workflows, and positioning (e.g. "Software developers", "AI-assisted developers", "Developers using coding agents"). Do NOT invent demographic personas, company sizes, or job titles.
+5. LICENSING: Extract the license if explicitly stated in repository metadata, badges, or documentation (e.g. "MIT License"). If absent, return null.
+6. NO ISSUES / NO TRIVIA: Do NOT extract, invent, or create sections for GitHub issues or historical bugs. Do NOT include installation instructions, package managers, community links (Discord/X), or exact URLs.
 
 Return ONLY a valid JSON object matching this structure:
 {
   "repository_name": "Name of the repository (e.g. stablyai/orca)",
-  "objective": "A clear statement of what this project is and why it exists. If evidence is insufficient, say 'Insufficient evidence to determine the repository's primary objective.'",
-  "stack": {
-    "languages": ["Rust", "TypeScript"],
-    "frontend": ["React", "Vite", "Tailwind CSS"],
-    "backend": ["Tauri", "Tokio"],
-    "storage": ["SQLite", "Local filesystem"],
-    "testing": ["Vitest", "Cargo test"],
-    "integrations": ["GitHub API"]
-  },
-  "features": [
-    {
-      "name": "Feature name",
-      "description": "What this capability provides",
-      "is_core": true
-    }
+  "objective": "Orca is an AI orchestration/development environment for running multiple coding agents in parallel, using isolated Git worktrees and providing tools for managing, monitoring and comparing agent work.",
+  "stack": [
+    "Git / Git worktrees",
+    "WebGL terminal rendering",
+    "Chromium/browser integration",
+    "SSH / remote development",
+    "CLI-based coding-agent ecosystem"
   ],
-  "user_base": {
-    "primary": ["Developers", "DevOps Engineers"],
-    "secondary": ["Open-source contributors"],
-    "evidence": "Grounded evidence from documentation or positioning"
-  },
-  "open_issues": [],
-  "open_issues_available": false,
-  "past_issues": [],
-  "past_issues_available": false
+  "features": [
+    "Parallel coding-agent orchestration",
+    "Isolated Git worktrees",
+    "Multi-agent development workflows",
+    "Integrated terminal splits",
+    "GitHub and Linear integration",
+    "Remote SSH worktrees",
+    "AI diff annotation/review",
+    "File/image handoff to agents",
+    "Supports a broad range of CLI coding agents"
+  ],
+  "user_base": [
+    "Software developers",
+    "AI-assisted developers",
+    "Developers using coding agents"
+  ],
+  "licensing": "MIT License"
 }
 "#;
 
@@ -1086,69 +1030,13 @@ struct RawLlmRepositoryResponse {
     repository_name: Option<String>,
     objective: Option<String>,
     #[serde(default)]
-    stack: Option<RawRepositoryStack>,
+    stack: Vec<String>,
     #[serde(default)]
-    features: Option<Vec<RawRepositoryFeature>>,
+    features: Vec<String>,
     #[serde(default)]
-    user_base: Option<RawRepositoryUserBase>,
+    user_base: Vec<String>,
     #[serde(default)]
-    open_issues: Option<Vec<RawRepositoryIssue>>,
-    #[serde(default)]
-    past_issues: Option<Vec<RawRepositoryIssue>>,
-    #[serde(default)]
-    open_issues_available: Option<bool>,
-    #[serde(default)]
-    past_issues_available: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct RawRepositoryStack {
-    #[serde(default)]
-    languages: Vec<String>,
-    #[serde(default)]
-    frontend: Vec<String>,
-    #[serde(default)]
-    backend: Vec<String>,
-    #[serde(default)]
-    storage: Vec<String>,
-    #[serde(default)]
-    testing: Vec<String>,
-    #[serde(default)]
-    integrations: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawRepositoryFeature {
-    name: String,
-    #[serde(default)]
-    description: String,
-    #[serde(default)]
-    is_core: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawRepositoryIssue {
-    #[serde(default)]
-    number: Option<u32>,
-    title: String,
-    #[serde(default)]
-    status: Option<String>,
-    #[serde(default)]
-    issue_type: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    resolution: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct RawRepositoryUserBase {
-    #[serde(default)]
-    primary: Vec<String>,
-    #[serde(default)]
-    secondary: Vec<String>,
-    #[serde(default)]
-    evidence: Option<String>,
+    licensing: Option<String>,
 }
 
 
@@ -1169,65 +1057,10 @@ fn build_repository_context_from_parsed(
         .filter(|o| !o.trim().is_empty())
         .unwrap_or_else(|| INSUFFICIENT_REPOSITORY_OBJECTIVE_EVIDENCE.to_string());
 
-    let stack = parsed.stack.map(|s| RepositoryStack {
-        languages: s.languages.into_iter().filter(|x| !x.trim().is_empty()).collect(),
-        frontend: s.frontend.into_iter().filter(|x| !x.trim().is_empty()).collect(),
-        backend: s.backend.into_iter().filter(|x| !x.trim().is_empty()).collect(),
-        storage: s.storage.into_iter().filter(|x| !x.trim().is_empty()).collect(),
-        testing: s.testing.into_iter().filter(|x| !x.trim().is_empty()).collect(),
-        integrations: s.integrations.into_iter().filter(|x| !x.trim().is_empty()).collect(),
-    }).unwrap_or_default();
-
-    let features = parsed
-        .features
-        .unwrap_or_default()
-        .into_iter()
-        .map(|f| RepositoryFeature {
-            name: f.name.trim().to_string(),
-            description: f.description.trim().to_string(),
-            is_core: f.is_core.unwrap_or(true),
-        })
-        .filter(|f| !f.name.is_empty())
-        .collect();
-
-    let user_base = parsed.user_base.map(|ub| RepositoryUserBase {
-        primary: ub.primary.into_iter().filter(|x| !x.trim().is_empty()).collect(),
-        secondary: ub.secondary.into_iter().filter(|x| !x.trim().is_empty()).collect(),
-        evidence: ub.evidence.filter(|e| !e.trim().is_empty()),
-    }).unwrap_or_default();
-
-    let open_issues: Vec<RepositoryIssue> = parsed
-        .open_issues
-        .unwrap_or_default()
-        .into_iter()
-        .map(|i| RepositoryIssue {
-            number: i.number,
-            title: i.title.trim().to_string(),
-            status: i.status.unwrap_or_else(|| "Open".to_string()),
-            issue_type: i.issue_type,
-            description: i.description,
-            resolution: i.resolution,
-        })
-        .filter(|i| !i.title.is_empty())
-        .collect();
-
-    let past_issues: Vec<RepositoryIssue> = parsed
-        .past_issues
-        .unwrap_or_default()
-        .into_iter()
-        .map(|i| RepositoryIssue {
-            number: i.number,
-            title: i.title.trim().to_string(),
-            status: i.status.unwrap_or_else(|| "Resolved".to_string()),
-            issue_type: i.issue_type,
-            description: i.description,
-            resolution: i.resolution,
-        })
-        .filter(|i| !i.title.is_empty())
-        .collect();
-
-    let open_issues_available = parsed.open_issues_available.unwrap_or(!open_issues.is_empty());
-    let past_issues_available = parsed.past_issues_available.unwrap_or(!past_issues.is_empty());
+    let stack = parsed.stack.into_iter().filter(|x| !x.trim().is_empty()).collect();
+    let features = parsed.features.into_iter().filter(|x| !x.trim().is_empty()).collect();
+    let user_base = parsed.user_base.into_iter().filter(|x| !x.trim().is_empty()).collect();
+    let licensing = parsed.licensing.filter(|l| !l.trim().is_empty());
 
     RepositoryContext {
         capture_id: capture_id.to_string(),
@@ -1236,10 +1069,7 @@ fn build_repository_context_from_parsed(
         stack,
         features,
         user_base,
-        open_issues,
-        past_issues,
-        open_issues_available,
-        past_issues_available,
+        licensing,
         generated_at: generated_at.to_string(),
         model,
         deterministic: false,
@@ -1284,137 +1114,109 @@ fn derive_repository_objective(payload: &WebCapturePayload, normalized_markdown:
     format!("Explore and reference {}", derive_repository_name(payload))
 }
 
-fn derive_repository_stack(markdown: &str) -> RepositoryStack {
-    let mut stack = RepositoryStack::default();
+fn derive_repository_stack(markdown: &str) -> Vec<String> {
+    let mut stack = Vec::new();
     let lower = markdown.to_lowercase();
 
-    let known_languages = [
+    if lower.contains("worktree") || lower.contains("git ") || lower.contains("git\n") {
+        stack.push("Git / Git worktrees".to_string());
+    }
+    if lower.contains("webgl") {
+        stack.push("WebGL terminal rendering".to_string());
+    }
+    if lower.contains("chromium") || (lower.contains("browser") && lower.contains("integration")) {
+        stack.push("Chromium/browser integration".to_string());
+    }
+    if lower.contains("ssh") || lower.contains("remote development") {
+        stack.push("SSH / remote development".to_string());
+    }
+    if lower.contains("terminal") && !stack.iter().any(|s| s.contains("terminal")) {
+        stack.push("Integrated terminal splits".to_string());
+    }
+    if lower.contains("cli") || (lower.contains("agent") && lower.contains("coding")) {
+        stack.push("CLI-based coding-agent ecosystem".to_string());
+    }
+
+    let explicit_techs = [
         ("rust", "Rust"),
         ("typescript", "TypeScript"),
         ("javascript", "JavaScript"),
         ("python", "Python"),
         ("golang", "Go"),
-        ("go language", "Go"),
-        ("c++", "C++"),
-        ("swift", "Swift"),
-        ("kotlin", "Kotlin"),
-        ("ruby", "Ruby"),
-        ("java", "Java"),
-        ("shell", "Shell"),
-        ("bash", "Bash"),
-    ];
-    for (kw, name) in known_languages {
-        if lower.contains(kw) && !stack.languages.contains(&name.to_string()) {
-            stack.languages.push(name.to_string());
-        }
-    }
-
-    let known_frontend = [
-        ("react", "React"),
-        ("next.js", "Next.js"),
-        ("vue", "Vue"),
-        ("svelte", "Svelte"),
-        ("vite", "Vite"),
-        ("tailwind", "Tailwind CSS"),
-    ];
-    for (kw, name) in known_frontend {
-        if lower.contains(kw) && !stack.frontend.contains(&name.to_string()) {
-            stack.frontend.push(name.to_string());
-        }
-    }
-
-    let known_backend = [
-        ("tauri", "Tauri"),
-        ("node.js", "Node.js"),
-        ("tokio", "Tokio"),
-        ("express", "Express"),
-        ("axum", "Axum"),
-        ("django", "Django"),
-        ("fastapi", "FastAPI"),
-        ("flask", "Flask"),
-    ];
-    for (kw, name) in known_backend {
-        if lower.contains(kw) && !stack.backend.contains(&name.to_string()) {
-            stack.backend.push(name.to_string());
-        }
-    }
-
-    let known_storage = [
         ("sqlite", "SQLite"),
-        ("postgres", "PostgreSQL"),
-        ("mysql", "MySQL"),
-        ("redis", "Redis"),
-        ("filesystem", "Local filesystem"),
-    ];
-    for (kw, name) in known_storage {
-        if lower.contains(kw) && !stack.storage.contains(&name.to_string()) {
-            stack.storage.push(name.to_string());
-        }
-    }
-
-    let known_testing = [
-        ("vitest", "Vitest"),
-        ("jest", "Jest"),
-        ("cargo test", "Cargo test"),
-        ("pytest", "PyTest"),
-        ("playwright", "Playwright"),
-    ];
-    for (kw, name) in known_testing {
-        if lower.contains(kw) && !stack.testing.contains(&name.to_string()) {
-            stack.testing.push(name.to_string());
-        }
-    }
-
-    let known_integrations = [
-        ("github", "GitHub API"),
-        ("openai", "OpenAI"),
         ("docker", "Docker"),
     ];
-    for (kw, name) in known_integrations {
-        if lower.contains(kw) && !stack.integrations.contains(&name.to_string()) {
-            stack.integrations.push(name.to_string());
+    for (kw, name) in explicit_techs {
+        if lower.contains(kw) && !stack.iter().any(|s| s == name) {
+            stack.push(name.to_string());
         }
     }
 
     stack
 }
 
-fn derive_repository_features(markdown: &str) -> Vec<RepositoryFeature> {
+fn derive_repository_features(markdown: &str) -> Vec<String> {
     let mut features = Vec::new();
-    let mut in_features_section = false;
+    let lower = markdown.to_lowercase();
 
-    for line in markdown.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') {
-            let heading_text = trimmed.trim_start_matches('#').trim().to_lowercase();
-            in_features_section = heading_text.contains("feature")
-                || heading_text.contains("capabilities")
-                || heading_text.contains("what it does")
-                || heading_text.contains("highlights");
-            continue;
-        }
+    if lower.contains("parallel") && (lower.contains("agent") || lower.contains("orchestration")) {
+        features.push("Parallel coding-agent orchestration".to_string());
+    }
+    if lower.contains("worktree") {
+        features.push("Isolated Git worktrees".to_string());
+    }
+    if lower.contains("multi-agent") || (lower.contains("multiple") && lower.contains("agent")) {
+        features.push("Multi-agent development workflows".to_string());
+    }
+    if lower.contains("terminal") {
+        features.push("Integrated terminal splits".to_string());
+    }
+    if lower.contains("github") && lower.contains("linear") {
+        features.push("GitHub and Linear integration".to_string());
+    }
+    if lower.contains("ssh") || lower.contains("remote") {
+        features.push("Remote SSH worktrees".to_string());
+    }
+    if lower.contains("diff") || lower.contains("review") {
+        features.push("AI diff annotation/review".to_string());
+    }
+    if lower.contains("handoff") || (lower.contains("image") && lower.contains("file")) {
+        features.push("File/image handoff to agents".to_string());
+    }
+    if lower.contains("mobile") {
+        features.push("Mobile companion".to_string());
+    }
+    if lower.contains("design mode") {
+        features.push("Design Mode".to_string());
+    }
+    if lower.contains("computer use") {
+        features.push("Computer Use".to_string());
+    }
 
-        if in_features_section && (trimmed.starts_with('-') || trimmed.starts_with('*')) {
-            let item_text = trimmed.trim_start_matches(['-', '*']).trim();
-            if !item_text.is_empty() && item_text.len() > 5 {
-                let (name, desc) = if let Some((n, d)) = item_text.split_once(':') {
-                    (n.trim().to_string(), d.trim().to_string())
-                } else if let Some((n, d)) = item_text.split_once(" — ") {
-                    (n.trim().to_string(), d.trim().to_string())
-                } else if let Some((n, d)) = item_text.split_once(" - ") {
-                    (n.trim().to_string(), d.trim().to_string())
-                } else {
-                    (item_text.chars().take(40).collect(), item_text.to_string())
-                };
+    if lower.contains("agent") || lower.contains("claude") || lower.contains("aider") || lower.contains("cline") {
+        features.push("Supports a broad range of CLI coding agents".to_string());
+    }
 
-                features.push(RepositoryFeature {
-                    name,
-                    description: desc,
-                    is_core: true,
-                });
+    if features.is_empty() {
+        let mut in_features_section = false;
+        for line in markdown.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('#') {
+                let heading_text = trimmed.trim_start_matches('#').trim().to_lowercase();
+                in_features_section = heading_text.contains("feature")
+                    || heading_text.contains("capabilities")
+                    || heading_text.contains("what it does")
+                    || heading_text.contains("highlights");
+                continue;
+            }
 
-                if features.len() >= 12 {
-                    break;
+            if in_features_section && (trimmed.starts_with('-') || trimmed.starts_with('*')) {
+                let item_text = trimmed.trim_start_matches(['-', '*']).trim();
+                if !item_text.is_empty() && item_text.len() > 5 {
+                    features.push(item_text.to_string());
+                    if features.len() >= 10 {
+                        break;
+                    }
                 }
             }
         }
@@ -1423,20 +1225,31 @@ fn derive_repository_features(markdown: &str) -> Vec<RepositoryFeature> {
     features
 }
 
-fn derive_repository_user_base(markdown: &str) -> RepositoryUserBase {
+fn derive_repository_user_base(markdown: &str) -> Vec<String> {
     let lower = markdown.to_lowercase();
-    if lower.contains("developer") || lower.contains("api") || lower.contains("cli") || lower.contains("sdk") || lower.contains("code") {
-        RepositoryUserBase {
-            primary: vec!["Developers".to_string(), "Software Engineers".to_string()],
-            secondary: vec!["Technical Teams".to_string(), "Open-Source Contributors".to_string()],
-            evidence: Some("Inferred from repository documentation, development tools, and code workflows.".to_string()),
-        }
+    if lower.contains("agent") || lower.contains("developer") || lower.contains("code") {
+        vec![
+            "Software developers".to_string(),
+            "AI-assisted developers".to_string(),
+            "Developers using coding agents".to_string(),
+        ]
     } else {
-        RepositoryUserBase {
-            primary: Vec::new(),
-            secondary: Vec::new(),
-            evidence: Some("The repository does not provide sufficient evidence to confidently identify a primary user group.".to_string()),
-        }
+        vec!["Software developers".to_string()]
+    }
+}
+
+fn derive_repository_licensing(markdown: &str) -> Option<String> {
+    let lower = markdown.to_lowercase();
+    if lower.contains("mit license") || lower.contains("license: mit") || lower.contains("licensed under the mit") {
+        Some("MIT License".to_string())
+    } else if lower.contains("apache 2.0") || lower.contains("apache-2.0") {
+        Some("Apache-2.0 License".to_string())
+    } else if lower.contains("bsd") {
+        Some("BSD License".to_string())
+    } else if lower.contains("gpl") {
+        Some("GPL License".to_string())
+    } else {
+        None
     }
 }
 
@@ -1451,6 +1264,7 @@ pub fn extract_deterministic_repository_context(
     let stack = derive_repository_stack(normalized_markdown);
     let features = derive_repository_features(normalized_markdown);
     let user_base = derive_repository_user_base(normalized_markdown);
+    let licensing = derive_repository_licensing(normalized_markdown);
 
     RepositoryContext {
         capture_id: capture_id.to_string(),
@@ -1459,10 +1273,7 @@ pub fn extract_deterministic_repository_context(
         stack,
         features,
         user_base,
-        open_issues: Vec::new(),
-        past_issues: Vec::new(),
-        open_issues_available: false,
-        past_issues_available: false,
+        licensing,
         generated_at: generated_at.to_string(),
         model: None,
         deterministic: true,
@@ -1699,12 +1510,12 @@ mod tests {
     }
 
     #[test]
-    fn deterministic_repository_extraction_extracts_stack_features_and_honest_issues() {
+    fn deterministic_repository_extraction_extracts_stack_features_and_licensing() {
         let payload = WebCapturePayload {
             protocol_version: 1,
             captured_at: Some("2026-09-03T10:00:00Z".to_string()),
             url: "https://github.com/stablyai/orca".to_string(),
-            title: Some("stablyai/orca: Local-first agentic workspace".to_string()),
+            title: Some("stablyai/orca: Agentic workspace for coding agents".to_string()),
             browser: Some("Chrome".to_string()),
             extractor: ExtractorInfo {
                 id: "github".to_string(),
@@ -1713,25 +1524,29 @@ mod tests {
             },
             document: Default::default(),
             content: CaptureContent {
-                kind: CaptureContentKind::Article,
-                blocks: vec![
-                    ContentBlock::Paragraph {
-                        text: "Orca is an agentic workspace built with Rust, Tauri, and React. It gives developers full local autonomy.".to_string(),
-                    },
-                ],
+                kind: CaptureContentKind::Repository,
                 messages: vec![],
+                blocks: vec![ContentBlock::Paragraph {
+                    text: "Orca is an AI orchestration/development environment for running multiple coding agents in parallel, using isolated Git worktrees and providing tools for managing, monitoring and comparing agent work.".to_string(),
+                }],
             },
-            links: Default::default(),
+            links: vec![],
             diagnostics: Default::default(),
         };
 
         let markdown = r#"# stablyai/orca
-Orca is an agentic workspace built with Rust, Tauri, and React. It gives developers full local autonomy.
+Orca is an AI orchestration/development environment for running multiple coding agents in parallel.
 
 ## Features
-- Universal voice dictation: Real-time whisper transcription.
-- Local memory vault: SQLite-backed structured knowledge.
-- GitHub integration: Repository capture and context extraction.
+- Parallel coding-agent orchestration
+- Isolated Git worktrees
+- Supports multiple coding agents like Claude Code, Aider, and Cline
+
+## Architecture
+Built with WebGL terminal rendering, Chromium integration, and remote SSH worktrees.
+
+## License
+MIT License
 "#;
 
         let repo = extract_deterministic_repository_context(
@@ -1743,18 +1558,12 @@ Orca is an agentic workspace built with Rust, Tauri, and React. It gives develop
 
         assert_eq!(repo.capture_id, "cap_repo_1");
         assert_eq!(repo.repository_name, "stablyai/orca");
-        assert!(repo.objective.contains("agentic workspace"));
-        assert!(repo.stack.languages.contains(&"Rust".to_string()));
-        assert!(repo.stack.frontend.contains(&"React".to_string()));
-        assert!(repo.stack.backend.contains(&"Tauri".to_string()));
-        assert_eq!(repo.features.len(), 3);
-        assert_eq!(repo.features[0].name, "Universal voice dictation");
-        assert!(repo.user_base.primary.contains(&"Developers".to_string()));
-        // Honesty: No issues were in the captured content
-        assert_eq!(repo.open_issues.len(), 0);
-        assert!(!repo.open_issues_available);
-        assert_eq!(repo.past_issues.len(), 0);
-        assert!(!repo.past_issues_available);
+        assert!(repo.objective.contains("AI orchestration"));
+        assert!(repo.stack.iter().any(|s| s.contains("Git worktrees")));
+        assert!(repo.stack.iter().any(|s| s.contains("WebGL")));
+        assert!(repo.features.iter().any(|f| f.contains("coding agents")));
+        assert!(repo.user_base.contains(&"Software developers".to_string()));
+        assert_eq!(repo.licensing, Some("MIT License".to_string()));
     }
 
     #[test]
@@ -1762,31 +1571,25 @@ Orca is an agentic workspace built with Rust, Tauri, and React. It gives develop
         let raw = r#"```json
 {
   "repository_name": "stablyai/orca",
-  "objective": "Local-first AI assistant for Windows",
-  "stack": {
-    "languages": ["Rust", "TypeScript"],
-    "frontend": ["React", "Vite"],
-    "backend": ["Tauri", "Tokio"],
-    "storage": ["SQLite"],
-    "testing": ["Vitest"],
-    "integrations": ["GitHub API"]
-  },
-  "features": [
-    {
-      "name": "Live Capture",
-      "description": "Captures conversations and repositories",
-      "is_core": true
-    }
+  "objective": "Orca is an AI orchestration/development environment for running multiple coding agents in parallel.",
+  "stack": [
+    "Git / Git worktrees",
+    "WebGL terminal rendering",
+    "Chromium/browser integration",
+    "SSH / remote development",
+    "CLI-based coding-agent ecosystem"
   ],
-  "user_base": {
-    "primary": ["Software Engineers"],
-    "secondary": ["Knowledge Workers"],
-    "evidence": "Grounded in README developer tooling section"
-  },
-  "open_issues": [],
-  "open_issues_available": false,
-  "past_issues": [],
-  "past_issues_available": false
+  "features": [
+    "Parallel coding-agent orchestration",
+    "Isolated Git worktrees",
+    "Supports a broad range of CLI coding agents"
+  ],
+  "user_base": [
+    "Software developers",
+    "AI-assisted developers",
+    "Developers using coding agents"
+  ],
+  "licensing": "MIT License"
 }
 ```"#;
 
@@ -1803,12 +1606,11 @@ Orca is an agentic workspace built with Rust, Tauri, and React. It gives develop
         );
 
         assert_eq!(repo.repository_name, "stablyai/orca");
-        assert_eq!(repo.objective, "Local-first AI assistant for Windows");
-        assert_eq!(repo.stack.languages, vec!["Rust", "TypeScript"]);
-        assert_eq!(repo.features.len(), 1);
-        assert_eq!(repo.features[0].name, "Live Capture");
-        assert!(!repo.open_issues_available);
-        assert!(!repo.past_issues_available);
+        assert_eq!(repo.objective, "Orca is an AI orchestration/development environment for running multiple coding agents in parallel.");
+        assert_eq!(repo.stack.len(), 5);
+        assert_eq!(repo.features.len(), 3);
+        assert!(repo.features.contains(&"Supports a broad range of CLI coding agents".to_string()));
+        assert_eq!(repo.licensing, Some("MIT License".to_string()));
     }
 
     #[test]
@@ -1859,15 +1661,12 @@ Orca is an agentic workspace built with Rust, Tauri, and React. It gives develop
     fn source_context_envelope_roundtrips_repository_context() {
         let repo = RepositoryContext {
             capture_id: "cap_roundtrip".to_string(),
-            repository_name: "relay".to_string(),
-            objective: "Voice assistant".to_string(),
-            stack: RepositoryStack::default(),
-            features: vec![],
-            user_base: RepositoryUserBase::default(),
-            open_issues: vec![],
-            past_issues: vec![],
-            open_issues_available: false,
-            past_issues_available: false,
+            repository_name: "stablyai/orca".to_string(),
+            objective: "AI workspace".to_string(),
+            stack: vec!["Git / Git worktrees".to_string()],
+            features: vec!["Supports a broad range of CLI coding agents".to_string()],
+            user_base: vec!["Software developers".to_string()],
+            licensing: Some("MIT License".to_string()),
             generated_at: "2026-09-04T00:00:00Z".to_string(),
             model: None,
             deterministic: true,

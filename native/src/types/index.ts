@@ -245,47 +245,14 @@ export interface ConversationContext {
   deterministic: boolean;
 }
 
-export interface RepositoryStack {
-  languages: string[];
-  frontend: string[];
-  backend: string[];
-  storage: string[];
-  testing: string[];
-  integrations: string[];
-}
-
-export interface RepositoryFeature {
-  name: string;
-  description: string;
-  is_core?: boolean;
-}
-
-export interface RepositoryIssue {
-  number?: number | null;
-  title: string;
-  status?: string;
-  issue_type?: string | null;
-  description?: string | null;
-  resolution?: string | null;
-}
-
-export interface RepositoryUserBase {
-  primary: string[];
-  secondary: string[];
-  evidence?: string | null;
-}
-
 export interface RepositoryContext {
   capture_id: string;
   repository_name: string;
   objective: string;
-  stack: RepositoryStack;
-  features: RepositoryFeature[];
-  user_base: RepositoryUserBase;
-  open_issues: RepositoryIssue[];
-  past_issues: RepositoryIssue[];
-  open_issues_available: boolean;
-  past_issues_available: boolean;
+  stack: string[];
+  features: string[];
+  user_base: string[];
+  licensing?: string | null;
   generated_at: string;
   model?: string | null;
   deterministic: boolean;

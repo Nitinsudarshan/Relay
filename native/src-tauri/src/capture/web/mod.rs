@@ -34,8 +34,7 @@ pub mod normalize;
 pub mod source;
 
 pub use context::{
-    ConversationContext, RepositoryContext, RepositoryFeature, RepositoryIssue, RepositoryStack,
-    RepositoryUserBase, SourceContext, SourceContextKind,
+    ConversationContext, RepositoryContext, SourceContext, SourceContextKind,
 };
 
 use serde::{Deserialize, Serialize};
