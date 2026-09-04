@@ -1013,6 +1013,28 @@ attributing by capture channel alone",
         self.prepare(meeting_id, options)
     }
 
+    /// What became of every recorded chunk of one meeting.
+    ///
+    /// Computed from the raw transcript rather than read from the derived model,
+    /// so it answers for a meeting that has never been processed — which is
+    /// exactly the meeting somebody is most likely to be asking about.
+    pub fn transcript_health(
+        &self,
+        meeting_id: &str,
+    ) -> Result<metadata::TranscriptHealth, String> {
+        let segments = self
+            .sessions
+            .get_transcript_segments(meeting_id)
+            .map_err(|e| format!("Failed to read the raw transcript: {e}"))?;
+        let read = screen_raw_segments(segments.clone());
+
+        Ok(metadata::transcript_health(
+            &segments,
+            read.retro_rejections,
+            read.retro_dropped_words,
+        ))
+    }
+
     /// Assembles a meeting into one Markdown document somebody else can read.
     ///
     /// Composes only: the header is counted, the prose was already generated

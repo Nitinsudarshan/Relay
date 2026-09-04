@@ -48,9 +48,16 @@ This document tracks deferred features, rejected/postponed UI patterns, and arch
 > everyone else) is live, using the per-chunk flags the recorder already
 > measured.
 >
+> **Delivered in 0.31.0**: diarization. `meetings_v2::diarize` clusters the
+> stored chunk WAVs into distinct voices (rung 4 of
+> `Meeting-rules/meeting_speaker_identification.md`), so a call with several
+> remote participants no longer reports one `Speaker 1`. It runs on the mixed
+> track rather than per-source tracks, using MFCC statistics and a pitch
+> estimate rather than a neural embedding — see item 18 for what that costs.
+>
 > **Still outstanding**: meeting detection and auto-end; per-source audio
-> tracks; real diarization; and the acoustic-echo and dual-recorder edge cases
-> below. The per-source-track work is now the gating item — see item 4.
+> tracks; a voice library that matches a speaker across meetings; and the
+> acoustic-echo and dual-recorder edge cases below.
 - **Area**: Native App (`native/src-tauri/src/meetings_v2/*`, `native/src-tauri/src/vault/scribble.rs`, `native/src/components/meetings_v2/*`)
 - **Original Context**:
   - The pre-V2 meetings plan (removed once V2 shipped; see CHANGELOG v0.14.0) specified a detection and reminder architecture that the V2 rebuild does not implement: there is no calendar-proximity, meeting-process, or sustained-audio trigger, and no auto-end. A meeting today is started and stopped by hand.
@@ -247,3 +254,65 @@ This document tracks deferred features, rejected/postponed UI patterns, and arch
   - The bridge's `/v1/health` response is the natural carrier: the service worker already calls it during pairing, so the budget could ride along and be cached in `chrome.storage.local` rather than fetched per capture.
   - Expose it as a choice rather than a number — "quick", "thorough", "as long as it takes" — mapping to `maxMs`/`maxSteps` pairs, because a millisecond field invites a value that makes capture feel broken.
   - Whatever is chosen, `termination` and the completeness verdict must keep working the same way: a longer budget may not change what a capture is *allowed to claim*, only how much it manages to read.
+
+### 18. Neural Speaker Embeddings and a Voice Library
+
+- **Status**: Backlog (diarization shipped in 0.31.0 without them)
+- **Area**: Native backend (`native/src-tauri/src/meetings_v2/diarize/*`)
+- **Original Context**:
+  - 0.31.0 shipped rung 4 of `Meeting-rules/meeting_speaker_identification.md`
+    using classical features: MFCC mean and standard deviation over each
+    utterance, plus a median pitch estimate, clustered agglomeratively with the
+    speaker count read off the merge sequence.
+  - That was a deliberate trade. A neural speaker embedding (x-vector, ECAPA)
+    is materially better, and it means shipping an ONNX runtime, a model
+    download with its own licence question, and the consent flow §6 of the
+    speaker rules requires — because an embedding stored across meetings *is*
+    biometric data, which the classical path never creates.
+  - What the classical features do not buy is written into the module's own
+    docs: telling two similar voices apart on one channel, and matching a voice
+    across meetings. `DiarizationReport::well_separated` exists so the UI can
+    say which of those situations it is in rather than presenting a guess.
+- **Concept & Implementation Blueprint**:
+  - Add an ONNX runtime behind a feature flag and a settings toggle that is
+    **off** by default, alongside the existing "Separate individual speakers".
+  - Replace `features::VoiceFeatures::vector` with the embedding, keeping the
+    same `cluster::Utterance` shape so the clusterer and the merge-sequence
+    stopping rule are unchanged. Recalibrate `MIN_SPLIT_DISTANCE` against the
+    embedding's own scale — the constant's doc comment records how the current
+    value was measured, and the same method applies.
+  - Only then build the voice library (rung 2): enrolment, a "Remember voices
+    across meetings" toggle that must never default on, and the management UI
+    §6 requires — list, rename, merge, delete. Nothing in 0.31.0 persists a
+    voice, so there is no migration to do first.
+  - Per-source audio tracks (item 3) would help independently: diarizing the
+    system-audio stream alone removes the local user's voice from the clustering
+    problem entirely.
+
+### 19. Calendar Sync for Meeting Attendees and Titles
+
+- **Status**: Deferred — no calendar integration exists
+- **Area**: Native backend (`native/src-tauri/src/meetings_v2/processing/metadata.rs`, `native/src-tauri/src/oauth/*`)
+- **Original Context**:
+  - Rung 3 of `Meeting-rules/meeting_speaker_identification.md` is "calendar
+    attendees + conferencing display names", and §2.2 specifies that a
+    recording's expected-speaker count should default to the calendar attendee
+    count. Neither is built.
+  - 0.31.0 built the surface those would fill: `MeetingMetadata` carries a
+    participant list with a `ParticipantOrigin`, and `Stated` already covers "a
+    name a person supplied". A calendar attendee is the same shape with a
+    different origin, and the expected-speaker hint is already a parameter on
+    `diarize_session`.
+  - Google OAuth exists in `oauth/` for Drive, so the authorization half is not
+    starting from nothing.
+- **Concept & Implementation Blueprint**:
+  - Add a `ParticipantOrigin::Calendar` and populate participants from the
+    event whose window contains the recording's start time. Match an attendee
+    name to a diarization cluster only where exactly one candidate fits, which
+    is what rung 3 requires — several candidates means no claim.
+  - Default `expected_speakers` to the attendee count when an event matched,
+    leaving the user's explicit setting to win over it.
+  - Use the event title as the meeting title only when the user has not typed
+    one, and never overwrite a title the extraction stage produced.
+  - Treat the calendar as external source material, per `rules/security.md`: an
+    event description is data, never an instruction to Relay's AI.

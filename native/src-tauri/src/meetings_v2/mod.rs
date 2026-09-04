@@ -8,6 +8,9 @@ pub mod live_stt;
 /// structured extraction, summaries. Reads the recorder's artifacts, never
 /// writes them.
 pub mod processing;
+/// Runnable checks for the pipeline's failure modes, for the Diagnostics page.
+/// Proves on the user's machine what the unit tests prove on CI.
+pub mod selftest;
 pub mod session_store;
 /// Tells speech apart from what Whisper emits when there is no speech.
 /// Read by both audio clocks and by the diagnostics surface.
@@ -19,6 +22,7 @@ pub use engine::MeetingsV2Engine;
 pub use processing::{MeetingProcessing, MeetingProcessor, ProcessingOptions};
 pub use session_store::SessionStore;
 pub use diarize::{Diarization, DiarizationReport, VoiceAssignment};
+pub use selftest::{MeetingSelfTestReport, SelfTestCheck};
 pub use transcript_health::{HallucinationReason, SpeechProfile, TranscriptRejection};
 pub use types::{
     AudioLevels, LiveTranscriptUpdate, MeetingDiagnostics, MeetingNotes, MeetingSession,

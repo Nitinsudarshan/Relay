@@ -7,7 +7,7 @@ state of play. CI runs all of it on every push and pull request —
 
 ## 1. Rust backend (`native/src-tauri/`)
 
-825 tests (+4 ignored benchmarks), `cargo test`.
+1054 tests (+4 ignored benchmarks), `cargo test`.
 
 ```bash
 cd native/src-tauri
@@ -32,6 +32,25 @@ Where the coverage sits:
 - `meetings_v2/processing/eval.rs` — a deterministic, model-free scorer over a
   fixture set, with hallucination as a hard fail. This is the quality gate for
   summary output; it does not call a model and does not need one.
+- `meetings_v2/transcript_health.rs` — the screen that decides whether decoded
+  text is speech. Fixtures include the reported failure verbatim (seventy-three
+  repetitions of "Thank you.") and thirty seconds of synthesized room tone
+  whose mean RMS deliberately clears the fixed threshold this replaced, so the
+  gate test proves something rather than passing on a quiet fixture. Both
+  directions of the filler rule are covered: the same phrase is rejected over
+  silence and kept over speech.
+- `meetings_v2/diarize/` — the FFT and mel filterbank against a known tone,
+  pitch recovery at three fundamentals, three voices splitting, one voice *not*
+  splitting, the elbow rule on the measured distance scales, and the roster cap.
+  `diarize/mod.rs` also drives the whole path against real WAVs in a temporary
+  vault, including an assertion that it never writes to `transcript.jsonl`.
+- `meetings_v2/selftest.rs` — asserts every check the Diagnostics panel offers
+  passes on a correct build, and that each one reports a measurement rather
+  than a bare verdict. A red panel a user cannot interpret is worse than none.
+- `meetings_v2/processing/{metadata,names,directives,share}.rs` — the counted
+  header, name inference from self-introductions and direct address, applying
+  typed notes to the speaker registry, and composing a shareable document
+  including its own disclosures.
 - `settings/` — schema defaults, serde aliases, and backward compatibility with
   settings files written by earlier versions.
 - `vault/` — frontmatter parsing, note and scribble CRUD, merge behaviour.
@@ -52,7 +71,7 @@ never a live Ollama instance or a cloud API.
 
 ## 2. Native frontend (`native/src/`)
 
-221 tests, Vitest + React Testing Library, jsdom.
+409 tests, Vitest + React Testing Library, jsdom.
 
 ```bash
 cd native
@@ -78,6 +97,25 @@ Where the coverage sits:
 - `meetings_v2/MeetingsV2View.tsx` — behaviour tests driven entirely through
   `invoke` responses: what the list shows, adopting a recording already in
   progress, and surviving a failed load.
+- `meetings_v2/MeetingMetadataHeader.tsx` — that the header names participants
+  rather than only counting chunks, distinguishes a confirmed name from an
+  inferred one, marks somebody who was mentioned but never heard, and says how
+  much of a recording was discarded (and that the audio is intact).
+- `meetings_v2/MeetingNotesTab.tsx` — that the structured kinds come before the
+  paragraph box, that a name correction reaches the backend as a typed
+  directive against a real speaker, that one which names nobody cannot be
+  submitted, and that a rejected directive is shown rather than swallowed.
+- `meetings_v2/MeetingConversationTab.tsx` — that a channel-only roster says so
+  and offers to separate the voices, that a marginal split is reported as
+  marginal, that unattributed stretches are reported rather than guessed, and
+  that renaming a speaker leaves the turn text alone.
+- `meetings_v2/MeetingRawTranscriptTab.tsx` — that a rejected chunk renders as
+  rejected with its reason and voiced-time measurement, that the discarded text
+  stays available as the evidence, and that a silent chunk is distinguishable
+  from a discarded one.
+- `diagnostics/MeetingPipelineDiagnostics.tsx` — that nothing runs until asked,
+  that each verdict arrives with the measurement behind it, and that what the
+  installed Whisper model invented on room tone is shown.
 - `scribble/graph/graphPhysics.ts` — layout invariants: pinned nodes never
   drift, alpha always decays to zero, coincident nodes separate rather than
   producing `NaN`.

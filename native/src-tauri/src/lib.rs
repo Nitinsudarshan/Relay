@@ -282,6 +282,8 @@ pub fn run() {
             commands::rename_meeting_v2_speaker,
             commands::identify_meeting_v2_speakers,
             commands::share_meeting_v2,
+            commands::run_meeting_pipeline_selftest,
+            commands::get_meeting_v2_transcript_health,
             commands::get_meeting_v2_notes,
             commands::save_meeting_v2_notes,
             commands::add_meeting_v2_directive,

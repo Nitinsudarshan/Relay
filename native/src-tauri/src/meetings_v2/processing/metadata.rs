@@ -11,7 +11,6 @@
 //! with no date, no participants and no duration is a wall of claims with no
 //! provenance; the same summary under this header is a document.
 
-use super::conversation::format_timestamp;
 use super::model::{Conversation, NormalizedTranscript, Speaker, SpeakerOrigin};
 use super::names::{NameEvidence, NameFindings};
 use crate::meetings_v2::types::{
@@ -19,6 +18,23 @@ use crate::meetings_v2::types::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+/// A span of time as a duration, not as a clock reading.
+///
+/// `44m 43s`, matching what the app's own header shows. `format_timestamp`'s
+/// `44:43` is right for a position within a recording and wrong for a length:
+/// read on its own it looks like a time of day.
+pub fn format_duration(seconds: f64) -> String {
+    let total = seconds.max(0.0).round() as u64;
+    let hours = total / 3600;
+    let minutes = (total % 3600) / 60;
+    let secs = total % 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}m {secs}s")
+    } else {
+        format!("{minutes}m {secs}s")
+    }
+}
 
 /// How a participant came to be on the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,7 +151,7 @@ impl TranscriptHealth {
         if self.rejected_chunk_count > 0 {
             parts.push(format!(
                 "{} {} of audio produced no usable speech and was discarded",
-                format_timestamp(self.rejected_seconds),
+                format_duration(self.rejected_seconds),
                 if self.rejected_chunk_count == 1 {
                     "chunk"
                 } else {
@@ -214,7 +230,7 @@ impl MeetingMetadata {
 
         let mut facts: Vec<String> = vec![
             format!("**Date** {}", self.date_iso),
-            format!("**Duration** {}", format_timestamp(self.duration_seconds)),
+            format!("**Duration** {}", format_duration(self.duration_seconds)),
         ];
         if let Some(time) = self.local_time() {
             facts.insert(1, format!("**Started** {time}"));
@@ -222,7 +238,7 @@ impl MeetingMetadata {
         if self.paused_seconds > 1.0 {
             facts.push(format!(
                 "**Paused** {}",
-                format_timestamp(self.paused_seconds)
+                format_duration(self.paused_seconds)
             ));
         }
         facts.push(format!("**Words** {}", self.word_count));
@@ -285,7 +301,7 @@ pub struct MetadataInput<'a> {
 /// Builds a meeting's metadata.
 pub fn build(mut input: MetadataInput<'_>) -> MeetingMetadata {
     let session = input.session;
-    let health = build_health(
+    let health = transcript_health(
         input.raw_segments,
         std::mem::take(&mut input.withheld_on_read),
         input.withheld_word_count,
@@ -325,7 +341,12 @@ pub fn build(mut input: MetadataInput<'_>) -> MeetingMetadata {
     }
 }
 
-fn build_health(
+/// What became of every chunk of a raw transcript.
+///
+/// Public so the diagnostics surface can ask for it without going through a
+/// whole prepare: a meeting that has never been processed is exactly the one
+/// somebody is most likely to be asking about.
+pub fn transcript_health(
     segments: &[TranscriptSegment],
     withheld_on_read: BTreeMap<String, usize>,
     withheld_word_count: usize,
@@ -643,7 +664,7 @@ mod tests {
         let markdown = metadata.to_markdown();
         assert!(markdown.contains("# Placement review"));
         assert!(markdown.contains("2026-09-04"));
-        assert!(markdown.contains("44:43"), "{markdown}");
+        assert!(markdown.contains("44m 43s"), "{markdown}");
         assert!(markdown.contains("Participants (3)"));
         assert!(markdown.contains("Pranjali"));
         assert!(markdown.contains("Speaker 2 (unnamed)"), "{markdown}");
@@ -889,9 +910,17 @@ mod tests {
         assert!(health.has_losses());
 
         let described = health.describe().unwrap();
-        assert!(described.contains("1:00"), "{described}");
+        assert!(described.contains("1m 0s"), "{described}");
         assert!(described.contains("failed to transcribe"), "{described}");
         assert!(metadata.to_markdown().contains("Transcript note:"));
+    }
+
+    #[test]
+    fn a_duration_reads_as_a_length_not_as_a_clock_reading() {
+        assert_eq!(format_duration(0.0), "0m 0s");
+        assert_eq!(format_duration(2683.0), "44m 43s");
+        assert_eq!(format_duration(3661.0), "1h 1m 1s");
+        assert_eq!(format_duration(-5.0), "0m 0s");
     }
 
     #[test]

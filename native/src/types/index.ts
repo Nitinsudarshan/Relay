@@ -1544,6 +1544,40 @@ export interface UnresolvedDirective {
   reason: string;
 }
 
+/**
+ * One meeting-pipeline check and what it found.
+ *
+ * `detail` always carries the measurement behind the verdict: a check that
+ * reports only pass/fail cannot be trusted, and a failure with no number
+ * cannot be diagnosed.
+ */
+export interface MeetingSelfTestCheck {
+  id: string;
+  name: string;
+  /** What a pass actually proves, written for whoever is reading the panel. */
+  purpose: string;
+  passed: boolean;
+  detail: string;
+  duration_ms: number;
+}
+
+export interface MeetingSelfTestReport {
+  checks: MeetingSelfTestCheck[];
+  passed: number;
+  failed: number;
+  duration_ms: number;
+  /** False means no Whisper model is configured — not a failure. */
+  whisper_checked: boolean;
+  /**
+   * What the installed Whisper model produced from thirty seconds of room tone.
+   *
+   * The most useful line in the report: subtitle boilerplate here is the exact
+   * hallucination the pipeline exists to catch, produced by this model on this
+   * machine.
+   */
+  whisper_on_silence?: string | null;
+}
+
 /** A meeting rendered as one Markdown document, for sharing. */
 export interface SharedDocument {
   filename: string;

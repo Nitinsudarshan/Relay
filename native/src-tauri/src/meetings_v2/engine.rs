@@ -126,17 +126,10 @@ impl MeetingsV2Engine {
         session.state = MeetingState::Starting;
         self.store.init_session(&session)?;
 
-        let resolved_model_path = match whisper_model_path.filter(|p| !p.trim().is_empty()) {
-            Some(p) => Some(PathBuf::from(p)),
-            None => {
-                let default_path = models_dir.join(crate::capture::stt::DEFAULT_MODEL_FILENAME);
-                if default_path.exists() {
-                    Some(default_path)
-                } else {
-                    None
-                }
-            }
-        };
+        let resolved_model_path = crate::capture::stt::resolve_meeting_model_path(
+            models_dir,
+            whisper_model_path.as_deref(),
+        );
 
         // CLOCK A: durable 30 s chunks. Unbounded — durable audio is never dropped.
         let (chunk_tx, chunk_rx) = std_mpsc::channel::<AudioChunk>();

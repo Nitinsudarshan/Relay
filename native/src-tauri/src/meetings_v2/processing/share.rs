@@ -17,8 +17,8 @@
 //!   states it. A shared summary that hides its own limitations is worse than
 //!   no shared summary, because the reader cannot know to ask.
 
-use super::conversation::{format_timestamp, render_conversation_markdown};
-use super::metadata::{MeetingMetadata, SpeakerMethod};
+use super::conversation::render_conversation_markdown;
+use super::metadata::{format_duration, MeetingMetadata, SpeakerMethod};
 use super::model::{
     ActionItemStatus, Conversation, MeetingFacts, OwnerType, Speaker, SummaryArtifact,
 };
@@ -268,7 +268,7 @@ pub fn conversation_length_hint(conversation: Option<&Conversation>) -> Option<S
         "{} turns, {} words, {}",
         conversation.turns.len(),
         words,
-        format_timestamp(span)
+        format_duration(span)
     ))
 }
 
@@ -470,7 +470,7 @@ mod tests {
 
         assert!(doc.starts_with("# Placement review"));
         assert!(doc.contains("2026-09-04"));
-        assert!(doc.contains("44:43"));
+        assert!(doc.contains("44m 43s"));
         assert!(doc.contains("Participants (2)"));
         assert!(doc.contains("Nitin"));
         assert!(doc.contains("Pranjali"));

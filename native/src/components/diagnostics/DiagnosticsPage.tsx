@@ -19,10 +19,12 @@ import {
   Clock,
   Settings,
   HelpCircle,
+  Mic,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { MeetingPipelineDiagnostics } from './MeetingPipelineDiagnostics';
 import {
   AppSettings,
   OllamaModelDetails,
@@ -39,7 +41,9 @@ interface DiagnosticsPageProps {
 }
 
 export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab }) => {
-  const [activeTab, setActiveTab] = useState<'stt' | 'llm' | 'system'>('stt');
+  const [activeTab, setActiveTab] = useState<'stt' | 'meetings' | 'llm' | 'system'>(
+    'stt',
+  );
 
   // Overall system settings
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -409,6 +413,19 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
 
         <button
           type="button"
+          onClick={() => setActiveTab('meetings')}
+          className={`pb-2.5 px-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all ${
+            activeTab === 'meetings'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Mic className="w-4 h-4" />
+          Meeting Pipeline
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('llm')}
           className={`pb-2.5 px-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all ${
             activeTab === 'llm'
@@ -433,6 +450,12 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
           System & Audio Runtime
         </button>
       </div>
+
+      {activeTab === 'meetings' && (
+        <div className="space-y-6 animate-in fade-in-50">
+          <MeetingPipelineDiagnostics />
+        </div>
+      )}
 
       {/* TAB CONTENT 1: STT DIAGNOSTICS */}
       {activeTab === 'stt' && (

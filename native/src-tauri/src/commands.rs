@@ -2480,6 +2480,59 @@ the correction applies on the next run",
     }
 }
 
+/// Runs the meeting pipeline's self-checks against synthesized fixtures.
+///
+/// The point of running these here, rather than trusting CI, is that the
+/// failure they cover is machine-dependent: it turns on this microphone's noise
+/// floor and this installed Whisper model. Where a model is configured the run
+/// also asks it to transcribe thirty seconds of room tone and reports what came
+/// back, so the user can see the hallucination for themselves and see that the
+/// gate stopped it.
+///
+/// Reads and writes nothing: no recording, no vault access, no settings change.
+#[tauri::command]
+pub async fn run_meeting_pipeline_selftest(
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::MeetingSelfTestReport, CommandError> {
+    // The same resolution a real recording uses, so the report is about the
+    // model this machine actually records with.
+    let model_path = {
+        let settings = state.settings.lock_or_recover();
+        crate::capture::stt::resolve_meeting_model_path(
+            &state.config_dir.join("models"),
+            settings.stt.whisper_model_path.as_deref(),
+        )
+    };
+
+    // Whisper inference is CPU-bound and the fixtures are thirty seconds long.
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::meetings_v2::selftest::run(model_path.as_ref().and_then(|p| p.to_str()))
+    })
+    .await
+    .map_err(|e| CommandError::new("MEETING_SELFTEST_FAILED", &e.to_string()))
+}
+
+/// A meeting's transcript health: what became of every recorded chunk.
+///
+/// Separate from the derived data because it answers a different question —
+/// not "what did this meeting decide" but "how much of this meeting is even
+/// here". A summary that reads thin is explained by this number and by nothing
+/// else in the app.
+#[tauri::command]
+pub async fn get_meeting_v2_transcript_health(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::processing::metadata::TranscriptHealth, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+
+    state
+        .meeting_processor
+        .transcript_health(&session_id)
+        .map_err(|e| CommandError::new("READ_TRANSCRIPT_HEALTH_FAILED", &e))
+}
+
 /// Renders a meeting as one Markdown document, for sharing.
 ///
 /// The header is counted rather than generated — date, duration, participants,

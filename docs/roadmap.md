@@ -31,11 +31,18 @@ spirit of keeping the living spec honest.
    connectors" gap relative to Onyx-style tools; Calendar is the MVP target,
    Notion/Drive are explicitly Post-MVP per `docs/product.md`.
 
-3. **Meeting speaker diarization** — Relay transcribes meetings as a single
-   stream with no per-speaker attribution (OpenWhispr and Screenpipe both do
-   this; Relay's data model has no `speaker` field anywhere). Whisper-only
-   diarization requires a separate model/pass (e.g. pyannote or whisper.cpp's
-   experimental tinydiarize) — not started.
+3. **Speaker identity across meetings** — diarization itself shipped in
+   0.31.0: `meetings_v2::diarize` clusters the recorded audio into distinct
+   voices, so a call with several remote participants reads as several
+   speakers. It uses MFCC statistics and a pitch estimate rather than a neural
+   embedding, which is a deliberate trade — no ONNX runtime, no model download,
+   and no biometric data, against not being able to tell two similar voices
+   apart on one channel or recognise a voice in a later meeting.
+   `DiarizationReport::well_separated` reports when a roster should not be
+   trusted. The remaining gaps are the voiceprint library (rung 2 of
+   `Meeting-rules/meeting_speaker_identification.md`, and the feature that
+   would create biometric data — `maybe_later.md` item 18) and calendar
+   attendees (rung 3 — `maybe_later.md` item 19).
 
 4. **Multi-user / team features** — explicitly flagged in `docs/decisions.md`
    as "noted for later, not decided," and the IDE Build Prompt calls scope
@@ -51,5 +58,11 @@ spirit of keeping the living spec honest.
 ## Explicitly not gaps (already real)
 - Global hotkey, universal dictation, in-app voice chat, and local TTS —
   all shipped this round (see above), not stubs.
+- Multi-speaker attribution in meetings — real since 0.31.0, with its own
+  confidence reporting. See item 3 for what remains.
+- Hallucination screening on transcripts — real since 0.31.0. Every chunk is
+  gated on measured voiced time before decoding and screened for decoder loops
+  and subtitle filler after; a rejected chunk records what was discarded and
+  why. `docs/meetings/TRANSCRIPT_AND_SPEAKER_REBUILD.md` has the trace.
 - Configurable trigger-phrase matching (`TriggerEngine`) — real, just its
   downstream MCP dispatch (item 2 above) is the stub.

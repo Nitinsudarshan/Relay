@@ -35,6 +35,21 @@ pub const FAST_MODEL_URL: &str =
 
 /// Checks if a configured model path represents a legacy default model
 /// (e.g. `ggml-tiny.en.bin`) so Relay can seamlessly promote to `ggml-small.bin`.
+/// The Whisper model a meeting recording would use, or `None` when none is
+/// available.
+///
+/// Factored out of the meetings engine so the diagnostics self-test asks the
+/// *same* model a real recording would. A self-test that ran against a
+/// different model than the app uses would be worse than none: it would report
+/// green for a model the user never records with.
+pub fn resolve_meeting_model_path(models_dir: &Path, configured: Option<&str>) -> Option<PathBuf> {
+    if let Some(path) = configured.map(str::trim).filter(|p| !p.is_empty()) {
+        return Some(PathBuf::from(path));
+    }
+    let default_path = models_dir.join(DEFAULT_MODEL_FILENAME);
+    default_path.exists().then_some(default_path)
+}
+
 pub fn is_legacy_default_model(path: &Path) -> bool {
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
         name == "ggml-tiny.en.bin"
