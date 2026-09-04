@@ -91,6 +91,8 @@ function originNote(participant: Participant): string {
       return 'named in the meeting, not matched to a voice';
     case 'STATED':
       return 'you said they were here';
+    case 'INVITED':
+      return 'invited, from the calendar';
   }
 }
 

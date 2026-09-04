@@ -7,7 +7,7 @@ state of play. CI runs all of it on every push and pull request —
 
 ## 1. Rust backend (`native/src-tauri/`)
 
-1060 tests (+4 ignored benchmarks), `cargo test`.
+1117 tests (+4 ignored benchmarks), `cargo test`.
 
 ```bash
 cd native/src-tauri
@@ -39,11 +39,19 @@ Where the coverage sits:
   gate test proves something rather than passing on a quiet fixture. Both
   directions of the filler rule are covered: the same phrase is rejected over
   silence and kept over speech.
-- `meetings_v2/diarize/` — the FFT and mel filterbank against a known tone,
-  pitch recovery at three fundamentals, three voices splitting, one voice *not*
-  splitting, the elbow rule on the measured distance scales, and the roster cap.
-  `diarize/mod.rs` also drives the whole path against real WAVs in a temporary
-  vault, including an assertion that it never writes to `transcript.jsonl`.
+- `meetings_v2/diarize/` — `fixtures.rs` synthesizes voices that behave like
+  real ones (conversational pitch spread, overlapping formants, one shared
+  recording chain) and is the ground truth every engine is calibrated against;
+  it exists because the fixtures it replaces were an octave apart, which is why
+  a three-person meeting shipped reporting one speaker. On top of it: three
+  voices separating, one wandering voice staying one, two similar voices
+  merging rather than risking an invented speaker, the expected count
+  recovering a forced split, and the ceiling capping rather than collapsing.
+  `incremental.rs` covers a registry finding voices as they arrive and
+  identifying the local user by comparison; `engine.rs` runs all three methods
+  over one on-disk recording. `diarize/mod.rs` drives the whole path against
+  real WAVs in a temporary vault, including an assertion that it never writes
+  to `transcript.jsonl`.
 - `meetings_v2/selftest.rs` — asserts every check the Diagnostics panel offers
   passes on a correct build, and that each one reports a measurement rather
   than a bare verdict. A red panel a user cannot interpret is worse than none.
@@ -75,7 +83,7 @@ never a live Ollama instance or a cloud API.
 
 ## 2. Native frontend (`native/src/`)
 
-409 tests, Vitest + React Testing Library, jsdom.
+417 tests, Vitest + React Testing Library, jsdom.
 
 ```bash
 cd native
@@ -120,6 +128,10 @@ Where the coverage sits:
 - `diagnostics/MeetingPipelineDiagnostics.tsx` — that nothing runs until asked,
   that each verdict arrives with the measurement behind it, and that what the
   installed Whisper model invented on room tone is shown.
+- `diagnostics/SpeakerEngineComparison.tsx` — that all three separation methods
+  are run over one existing recording, that the one in use is marked, that a
+  method which could not run is reported rather than dropped, and that a
+  confident roster reads differently from one worth checking.
 - `scribble/graph/graphPhysics.ts` — layout invariants: pinned nodes never
   drift, alpha always decays to zero, coincident nodes separate rather than
   producing `NaN`.

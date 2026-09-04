@@ -14,7 +14,7 @@
 //! nothing to show.
 
 use super::length::{budget_guidance, SummaryBudget};
-use super::llm::{LlmRequest, MeetingLlm};
+use super::llm::{LlmError, LlmRequest, MeetingLlm};
 use super::model::{
     ActionItem, KeyPointKind, MeetingExtension, MeetingFacts, OwnerType, Speaker, SummaryMode,
     SummarySource,
@@ -86,15 +86,124 @@ async fn run(
     feedback: Option<&str>,
 ) -> SummaryOutput {
     let user_prompt = build_user_prompt(input, feedback);
-    let system_prompt = build_summary_prompt(input);
     // Words to tokens, with room for Markdown structure. Generous enough that
     // the cap never truncates a summary the budget itself allows.
     let max_output_tokens = ((input.budget.max_words as f64 * 2.0) as u32 + 400).max(600);
 
+    let full = build_summary_prompt(input);
+    let first = attempt(llm, &full, &user_prompt, max_output_tokens).await;
+    if let Some(output) = first.as_summary(&user_prompt) {
+        return output;
+    }
+
+    // The full contract is sixteen numbered sections, and a small local model
+    // handed all of it sometimes answers with nothing at all — which is the
+    // "model returned an empty response" a user sees on a short meeting. An
+    // empty answer is not a refusal and not an opinion about the facts, so the
+    // same facts are put again behind a contract short enough to follow.
+    //
+    // Only an *empty* answer earns this. A provider that could not be reached
+    // will not be reached by a shorter prompt either, and retrying there just
+    // doubles the wait before the fallback the user was always going to get.
+    let last = if matches!(first, Attempt::Empty { .. }) {
+        tracing::warn!(
+            "meeting_summary: empty prose from {}; retrying with the compact contract",
+            llm.model_name()
+        );
+        let compact = build_compact_summary_prompt(input);
+        let second = attempt(llm, &compact, &user_prompt, max_output_tokens).await;
+        if let Some(output) = second.as_summary(&user_prompt) {
+            return output;
+        }
+        second
+    } else {
+        first
+    };
+
+    SummaryOutput {
+        markdown: render_markdown(input.facts, input.speakers, input.budget.mode),
+        provider: last.provider(llm),
+        model: last.model(llm),
+        deterministic: true,
+        llm_error: Some(last.reason()),
+        input_chars: user_prompt.len(),
+    }
+}
+
+/// One model call and what came back, before the pipeline decides what it means.
+enum Attempt {
+    /// Prose that survived fence-stripping and is not blank.
+    Prose {
+        markdown: String,
+        provider: String,
+        model: String,
+    },
+    /// The model answered with nothing usable. Worth trying again differently.
+    Empty { provider: String, model: String },
+    /// No answer at all. Trying again differently would not help.
+    Failed(String),
+}
+
+impl Attempt {
+    /// The finished summary, when this attempt produced one.
+    fn as_summary(&self, user_prompt: &str) -> Option<SummaryOutput> {
+        match self {
+            Self::Prose {
+                markdown,
+                provider,
+                model,
+            } => Some(SummaryOutput {
+                markdown: markdown.clone(),
+                provider: provider.clone(),
+                model: model.clone(),
+                deterministic: false,
+                llm_error: None,
+                input_chars: user_prompt.len(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// The provider that answered, or the one that was asked.
+    fn provider(&self, llm: &dyn MeetingLlm) -> String {
+        match self {
+            Self::Prose { provider, .. } | Self::Empty { provider, .. } => provider.clone(),
+            Self::Failed(_) => llm.provider_name(),
+        }
+    }
+
+    fn model(&self, llm: &dyn MeetingLlm) -> String {
+        match self {
+            Self::Prose { model, .. } | Self::Empty { model, .. } => model.clone(),
+            Self::Failed(_) => llm.model_name(),
+        }
+    }
+
+    /// What to record about why no model wrote this summary.
+    fn reason(&self) -> String {
+        match self {
+            // Said in full, because "empty response" alone reads as a bug in
+            // Relay. It is a model declining to write, twice.
+            Self::Empty { .. } | Self::Prose { .. } => {
+                "model returned empty prose, twice — once from the full contract and once from \
+a shortened one"
+                    .to_string()
+            }
+            Self::Failed(reason) => reason.clone(),
+        }
+    }
+}
+
+async fn attempt(
+    llm: &dyn MeetingLlm,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_output_tokens: u32,
+) -> Attempt {
     match llm
         .complete_request(LlmRequest::prose(
-            &system_prompt,
-            &user_prompt,
+            system_prompt,
+            user_prompt,
             max_output_tokens,
         ))
         .await
@@ -102,34 +211,76 @@ async fn run(
         Ok(outcome) => {
             let cleaned = strip_code_fence(&outcome.text);
             if cleaned.trim().is_empty() {
-                SummaryOutput {
-                    markdown: render_markdown(input.facts, input.speakers, input.budget.mode),
+                Attempt::Empty {
                     provider: outcome.provider,
                     model: outcome.model,
-                    deterministic: true,
-                    llm_error: Some("model returned empty prose".to_string()),
-                    input_chars: user_prompt.len(),
                 }
             } else {
-                SummaryOutput {
+                Attempt::Prose {
                     markdown: cleaned,
                     provider: outcome.provider,
                     model: outcome.model,
-                    deterministic: false,
-                    llm_error: None,
-                    input_chars: user_prompt.len(),
                 }
             }
         }
-        Err(err) => SummaryOutput {
-            markdown: render_markdown(input.facts, input.speakers, input.budget.mode),
+        Err(LlmError::Empty) => Attempt::Empty {
             provider: llm.provider_name(),
             model: llm.model_name(),
-            deterministic: true,
-            llm_error: Some(err.to_string()),
-            input_chars: user_prompt.len(),
         },
+        Err(err) => Attempt::Failed(err.to_string()),
     }
+}
+
+/// The summary contract, reduced to what cannot be dropped.
+///
+/// The second attempt after an empty first one. It keeps the accuracy rules and
+/// the output shape — those are why the summary is trustworthy — and drops the
+/// taste, the rationale, and the worked examples, which are why it is long. The
+/// user's own instructions and the chosen extension are kept too: dropping them
+/// would silently produce a summary shaped differently from the one asked for,
+/// and the user has no way of knowing a retry happened.
+fn build_compact_summary_prompt(input: &SummaryInput<'_>) -> String {
+    let mut out = String::from(
+        "You write the summary a person reads tomorrow, from structured facts already \
+extracted from their meeting.\n\n\
+RULES\n\
+- Write only what the facts contain. Never invent a decision, owner, deadline, date, \
+number, or name.\n\
+- A point marked \"proposal\" or \"recommendation\" was floated, not adopted. Never write \
+it as a decision.\n\
+- Where the facts say an owner is \"Unassigned\", write \"Unassigned\".\n\
+- Be specific. \"The launch moved to Monday because QA needs three more days\" is the \
+summary; \"the team discussed the timeline\" is a wasted line.\n\
+- Leave out greetings, logistics, audio checks, and small talk.\n\n\
+OUTPUT — GitHub-flavored Markdown, and nothing else. No preamble, no code fence.\n\
+Begin with `## Overview` — one short paragraph on why they met and what came of it.\n\
+Then, only where the facts carry content: `## Discussion` (a `###` per topic), \
+`## Decisions`, `## Action Items` (as `- [ ] Action — **Owner** · Due: YYYY-MM-DD`, \
+omitting the due part when there is no date), `## Risks & Blockers`, \
+`## Open Questions`.\n\
+Omit a section that would be empty. Never write \"None\" under a heading.\n\
+Write something for `## Overview` even when the facts are thin — a two-line meeting \
+gets a two-line summary, not a blank one.\n",
+    );
+
+    if !input.extension.instructions.trim().is_empty() {
+        out.push_str(&format!(
+            "\nPRESENTATION — {}\n{}\nArrangement and tone only; never a claim the facts \
+do not carry.\n",
+            input.extension.name,
+            input.extension.instructions.trim()
+        ));
+    }
+
+    if let Some(instructions) = input.user_instructions.map(str::trim).filter(|i| !i.is_empty()) {
+        out.push_str(&format!(
+            "\nTHE USER'S OWN INSTRUCTIONS\n{}\nFollow these for structure, tone, emphasis and \
+length. They never permit inventing something the facts do not contain.\n",
+            instructions
+        ));
+    }
+
+    out
 }
 
 /// The summary contract.
@@ -1034,7 +1185,8 @@ mod tests {
 
     #[tokio::test]
     async fn empty_model_prose_falls_back_rather_than_showing_a_blank_summary() {
-        let llm = ScriptedLlm::new(vec![Ok("   \n  ".to_string())]);
+        // Empty twice: once from the full contract, once from the compact one.
+        let llm = ScriptedLlm::new(vec![Ok("   \n  ".to_string()), Ok(String::new())]);
         let default = builtin_extensions()[0].clone();
         let facts = facts();
         let roster = roster();
@@ -1047,6 +1199,103 @@ mod tests {
         .await;
         assert!(out.deterministic);
         assert!(out.markdown.contains("## Overview"));
+        // The recorded reason has to say a model declined to write, twice —
+        // "empty response" alone reads to a user as a fault in Relay.
+        let reason = out.llm_error.expect("the fallback records why it happened");
+        assert!(reason.contains("twice"), "{reason}");
+    }
+
+    #[tokio::test]
+    async fn an_empty_answer_is_retried_against_a_shorter_contract() {
+        // The reported failure: a short meeting, a 3B local model, and
+        // "Summary unavailable — model returned an empty response". An empty
+        // answer is not an opinion about the facts, so the same facts go back
+        // behind a contract short enough for a small model to follow.
+        let llm = ScriptedLlm::new(vec![
+            Ok(String::new()),
+            Ok("## Overview\n\nThe launch moved to Monday.".to_string()),
+        ]);
+        let default = builtin_extensions()[0].clone();
+        let facts = facts();
+        let roster = roster();
+        let notes = MeetingNotes::default();
+
+        let out = generate_summary(
+            &llm,
+            &input(&facts, &roster, &default, &notes, SummaryMode::Standard),
+        )
+        .await;
+
+        assert!(
+            !out.deterministic,
+            "the retry answered, so this is a model's summary: {}",
+            out.markdown
+        );
+        assert!(out.markdown.contains("The launch moved to Monday"));
+        assert_eq!(out.llm_error, None);
+
+        let calls = llm.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2, "one full attempt and one compact retry");
+        assert!(
+            calls[1].0.len() < calls[0].0.len() / 2,
+            "the retry contract must actually be shorter: {} vs {}",
+            calls[1].0.len(),
+            calls[0].0.len()
+        );
+        // Same facts, both times. A retry that changed the input would be a
+        // different summary, not a second attempt at this one.
+        assert_eq!(calls[0].1, calls[1].1);
+    }
+
+    #[tokio::test]
+    async fn the_compact_retry_keeps_the_accuracy_rules_and_the_users_instructions() {
+        let llm = ScriptedLlm::new(vec![
+            Ok(String::new()),
+            Ok("## Overview\n\nShort.".to_string()),
+        ]);
+        let default = builtin_extensions()[0].clone();
+        let facts = facts();
+        let roster = roster();
+        let notes = MeetingNotes::default();
+        let mut summary_input = input(&facts, &roster, &default, &notes, SummaryMode::Standard);
+        summary_input.user_instructions = Some("Lead with anything affecting the release date.");
+
+        generate_summary(&llm, &summary_input).await;
+
+        let calls = llm.calls.lock().unwrap();
+        let compact = &calls[1].0;
+        // Shorter, not laxer. Dropping the invention rules to save tokens would
+        // trade a blank summary for a wrong one.
+        assert!(compact.contains("Never invent"), "{compact}");
+        assert!(compact.contains("Unassigned"), "{compact}");
+        assert!(compact.contains("proposal"), "{compact}");
+        assert!(compact.contains("## Overview"), "{compact}");
+        // The user asked for a shape; a silent retry must not quietly drop it.
+        assert!(compact.contains("release date"), "{compact}");
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_provider_is_not_retried() {
+        // A shorter prompt does not make a provider reachable. Retrying there
+        // only doubles the wait before the fallback the user was always getting.
+        let llm = ScriptedLlm::new(vec![
+            Err(LlmError::Unavailable("connection refused".to_string())),
+            Ok("## Overview\n\nShould never be reached.".to_string()),
+        ]);
+        let default = builtin_extensions()[0].clone();
+        let facts = facts();
+        let roster = roster();
+        let notes = MeetingNotes::default();
+
+        let out = generate_summary(
+            &llm,
+            &input(&facts, &roster, &default, &notes, SummaryMode::Standard),
+        )
+        .await;
+
+        assert!(out.deterministic);
+        assert_eq!(llm.calls.lock().unwrap().len(), 1);
+        assert!(out.llm_error.unwrap().contains("connection refused"));
     }
 
     #[tokio::test]

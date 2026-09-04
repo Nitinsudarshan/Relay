@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { CalendarDays, Plus, Trash2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import type {
   AppSettings,
+  CalendarConnection,
   DefaultSummaryModeSetting,
+  DiarizationEngineId,
   MeetingExtensionSetting,
   MeetingSettings,
   SpeakerIdentificationSetting,
@@ -24,6 +27,8 @@ export const DEFAULT_MEETING_SETTINGS: MeetingSettings = {
   speaker_identification: 'automatic',
   identify_individual_speakers: true,
   expected_speakers: null,
+  diarization_engine: 'VOICEPRINT',
+  meetings_are_in_person: false,
   extensions: [],
   summary_instructions: '',
 };
@@ -56,6 +61,51 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
     instructions: '',
   });
   const [extensionError, setExtensionError] = useState<string | null>(null);
+  const [calendar, setCalendar] = useState<CalendarConnection | null>(null);
+  const [calendarBusy, setCalendarBusy] = useState(false);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
+
+  const loadCalendar = useCallback(async () => {
+    try {
+      setCalendar(await invoke<CalendarConnection>('get_calendar_connection'));
+    } catch {
+      // A connection that cannot be read is reported as disconnected rather
+      // than as an error: nothing is broken until someone tries to use it.
+      setCalendar({ connected: false });
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCalendar();
+  }, [loadCalendar]);
+
+  const connectCalendar = async () => {
+    setCalendarBusy(true);
+    setCalendarError(null);
+    try {
+      setCalendar(await invoke<CalendarConnection>('connect_google_calendar'));
+    } catch (error) {
+      setCalendarError(
+        error instanceof Error ? error.message : String(error ?? 'Connecting failed.'),
+      );
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
+
+  const disconnectCalendar = async () => {
+    setCalendarBusy(true);
+    setCalendarError(null);
+    try {
+      setCalendar(await invoke<CalendarConnection>('disconnect_google_calendar'));
+    } catch (error) {
+      setCalendarError(
+        error instanceof Error ? error.message : String(error ?? 'Disconnecting failed.'),
+      );
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
 
   const update = (patch: Partial<MeetingSettings>) =>
     onChange({ ...settings, meetings: { ...meetings, ...patch } });
@@ -217,6 +267,60 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-xs font-medium text-foreground">
+                  How speakers are told apart
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Three methods, because they fail differently. Diagnostics ›
+                  Meeting Pipeline runs all three over one recording so this can
+                  be chosen on evidence rather than guesswork.
+                </p>
+              </div>
+              <select
+                value={meetings.diarization_engine ?? 'VOICEPRINT'}
+                onChange={(e) =>
+                  update({
+                    diarization_engine: e.target.value as DiarizationEngineId,
+                  })
+                }
+                className="text-xs bg-input border border-border rounded-md px-2 py-1.5 text-foreground"
+                aria-label="How speakers are told apart"
+              >
+                <option value="VOICEPRINT">Voice separation</option>
+                <option value="LIVE">Live (as recorded)</option>
+                <option value="CHANNEL">Channel only</option>
+              </select>
+            </div>
+          )}
+
+        {meetings.speaker_identification !== 'off' && (
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-medium text-foreground">
+                Everyone shares one microphone
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                For meetings held in a room rather than on a call. Relay stops
+                trying to work out which voice is yours, because the channel
+                split that normally finds it means nothing when every voice
+                arrives on the same input — name yourself in the conversation
+                tab instead.
+              </p>
+            </div>
+            <Switch
+              checked={meetings.meetings_are_in_person ?? false}
+              onCheckedChange={(checked) =>
+                update({ meetings_are_in_person: checked })
+              }
+              aria-label="Everyone shares one microphone"
+            />
+          </div>
+        )}
+
+        {meetings.identify_individual_speakers &&
+          meetings.speaker_identification !== 'off' && (
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-medium text-foreground">
                   Expected speakers
                 </p>
                 <p className="text-[11px] text-muted-foreground">
@@ -244,6 +348,56 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
               />
             </div>
           )}
+      </div>
+
+      <div className="flex flex-col gap-3 p-4 rounded-lg border border-border/60 bg-card/40">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+              <CalendarDays className="w-3.5 h-3.5" />
+              Google Calendar
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Read-only. Gives a recording the name it was invited under, the
+              people who were invited to it, and whatever the agenda said —
+              three things audio alone cannot supply. Relay cannot create, move
+              or delete anything on your calendar.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={calendar?.connected ? disconnectCalendar : connectCalendar}
+            disabled={calendarBusy}
+            className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-opacity disabled:opacity-50 ${
+              calendar?.connected
+                ? 'border border-border text-foreground hover:bg-muted'
+                : 'bg-primary text-primary-foreground hover:opacity-90'
+            }`}
+          >
+            {calendarBusy
+              ? 'Working…'
+              : calendar?.connected
+                ? 'Disconnect'
+                : 'Connect'}
+          </button>
+        </div>
+
+        {calendar?.connected && (
+          <p className="text-[11px] text-muted-foreground">
+            Connected as{' '}
+            <span className="text-foreground">
+              {calendar.account_email ?? calendar.account_name ?? 'your Google account'}
+            </span>
+            . Open a finished meeting and choose “Match to calendar” to attach
+            its event.
+          </p>
+        )}
+        {calendar?.problem && (
+          <p className="text-[11px] text-destructive">{calendar.problem}</p>
+        )}
+        {calendarError && (
+          <p className="text-[11px] text-destructive">{calendarError}</p>
+        )}
       </div>
 
       <div className="flex flex-col gap-3 p-4 rounded-lg border border-border/60 bg-card/40">

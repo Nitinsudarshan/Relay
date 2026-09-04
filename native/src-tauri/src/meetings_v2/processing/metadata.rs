@@ -52,6 +52,11 @@ pub enum ParticipantOrigin {
     Mentioned,
     /// The user said they were there.
     Stated,
+    /// Invited, per the calendar event this meeting was matched to.
+    ///
+    /// Distinct from `Stated` because an invitation is weaker evidence than a
+    /// person typing a name: people are invited to meetings they do not attend.
+    Invited,
 }
 
 impl ParticipantOrigin {
@@ -72,6 +77,7 @@ impl ParticipantOrigin {
             Self::SelfIntroduced => "introduced themselves in the meeting",
             Self::Mentioned => "named in the meeting, not matched to a voice",
             Self::Stated => "you said they were here",
+            Self::Invited => "invited, from the calendar",
         }
     }
 }
@@ -292,6 +298,8 @@ pub struct MetadataInput<'a> {
     pub speakers: &'a [Speaker],
     pub names: &'a NameFindings,
     pub notes: &'a MeetingNotes,
+    /// The calendar event this recording was matched to, if any.
+    pub calendar: Option<&'a crate::calendar::CalendarEvent>,
     pub diarized: bool,
     /// Spans withheld at read time, by reason key.
     pub withheld_on_read: BTreeMap<String, usize>,
@@ -466,6 +474,35 @@ fn build_participants(input: &MetadataInput<'_>) -> Vec<Participant> {
 
     let mut known: Vec<String> = participants.iter().map(|p| p.label.to_lowercase()).collect();
 
+    // People the calendar says were invited.
+    //
+    // Added after the voices and before the mentions: an invitation is better
+    // evidence than a name somebody happened to say, and worse than a voice
+    // actually heard. Anyone who declined is left out — a summary attributing a
+    // commitment to somebody who was not there is a specific kind of wrong.
+    if let Some(event) = input.calendar {
+        for attendee in event.likely_attendees() {
+            let name = attendee.name.trim();
+            if name.is_empty() || known.contains(&name.to_lowercase()) {
+                continue;
+            }
+            known.push(name.to_lowercase());
+            participants.push(Participant {
+                speaker_id: None,
+                label: name.to_string(),
+                is_named: true,
+                // The calendar is a record, not somebody's judgement about who
+                // spoke. Marking it confirmed would imply Relay heard them.
+                is_confirmed: false,
+                origin: ParticipantOrigin::Invited,
+                is_local_user: attendee.is_self,
+                speaking_seconds: 0.0,
+                turn_count: 0,
+                share_of_talk: 0.0,
+            });
+        }
+    }
+
     // People the user said were there.
     for directive in input.notes.directives_of(DirectiveKind::Participant) {
         let name = directive.value.trim();
@@ -614,6 +651,7 @@ mod tests {
             speakers,
             names,
             notes,
+            calendar: None,
             diarized,
             withheld_on_read: BTreeMap::new(),
             withheld_word_count: 0,
@@ -971,6 +1009,7 @@ mod tests {
             speakers: &[],
             names: &names,
             notes: &notes,
+            calendar: None,
             diarized: false,
             withheld_on_read: withheld,
             withheld_word_count: 1314,

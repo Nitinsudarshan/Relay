@@ -40,47 +40,73 @@ const STD_WEIGHT: f32 = 0.5;
 /// the strongest cue a human would use contributes almost nothing.
 const PITCH_WEIGHT: f32 = 8.0;
 
-/// Distance below which two clusters are never treated as different speakers,
-/// in per-dimension RMS feature units.
+/// Mean silhouette below which a recording is treated as holding one voice.
 ///
-/// This is the floor that stops the elbow rule from splitting on jitter: a
-/// large ratio between two very small distances is noise, not a speaker change.
+/// The clusterer chooses how many speakers there were by scoring each candidate
+/// partition and keeping the best, rather than by testing merge distances
+/// against a threshold. Two earlier designs did the latter and both failed, in
+/// instructive ways:
 ///
-/// Calibrated by measurement, not taste. On the synthetic voices in
-/// `diarize::tests` one speaker's utterances scatter about 0.4 from their own
-/// centroid, three distinct speakers sit about 5.7 apart, and forcing those
-/// three into one cluster gives a within-distance of 3.9. So the two regimes
-/// are an order of magnitude apart and this sits between them, closer to the
-/// same-speaker end because leaving two people merged is the more legible
-/// failure: "Speaker 2 said both of these" is wrong but readable, whereas a
-/// split invents a person who was never in the room.
+/// * **An absolute distance floor.** Calibrated on synthetic voices an octave
+///   apart, it sat at 2.0 while real voices separate at 0.55–1.47 — above every
+///   distance real speech produces, so nothing ever split and a meeting of
+///   twenty came back as one speaker.
+/// * **A floor derived from the cheapest merges, plus an elbow ratio.** Better,
+///   and still wrong in both directions. Measured through the actual recording
+///   path, one person's utterances span 0.031–0.422 across a meeting — four
+///   times the floor the cheapest merges suggested — so a single speaker split
+///   into three. And the elbow gate rejects the correct answer for two similar
+///   voices, whose crossing is only a 1.37x step.
 ///
-/// Real audio is noisier on both sides than a synthesized vowel, so this is a
-/// starting point rather than a settled constant. Two things make that safe:
-/// [`Clustering::is_well_separated`] reports when a roster should not be
-/// presented as fact, and the expected-speaker hint overrides the rule outright.
-const MIN_SPLIT_DISTANCE: f32 = 2.0;
+/// The property that distinguishes a real speaker boundary from a wide-but-
+/// single voice is not the size of any distance. It is whether the resulting
+/// groups are *tighter internally than they are far apart* — which is what a
+/// silhouette measures, and it is scale-free, so it needs no calibration
+/// against a microphone, a room, or a codec.
+///
+/// Set at 0.7 — the conventional reading of "strong structure" — and that
+/// choice encodes a limitation worth stating plainly rather than a tuning
+/// preference. Measured on the fixtures:
+///
+/// | recording | best score |
+/// |---|---|
+/// | one voice across a meeting | 0.52–0.57 |
+/// | **two deliberately similar voices** | **0.54** |
+/// | two ordinary voices | 0.89 |
+/// | three ordinary voices | 0.90 |
+///
+/// One voice that wanders and two voices that resemble each other score the
+/// same. No threshold separates them, because with cepstral features they are
+/// not distinguishable — that is a property of the features, not of where the
+/// bar is put, and moving the bar only chooses which mistake to make.
+///
+/// So the bar is placed to make the safer one. Merging two similar voices reads
+/// as "Speaker 2 said both of these": wrong, legible, and recoverable — the
+/// expected-speaker count forces the split when the user knows better.
+/// Splitting one person in two invents somebody who was never in the room, puts
+/// their name on commitments, and gives the user nothing to correct. A neural
+/// speaker embedding is what actually resolves the ambiguity; until then this
+/// fails toward the answer a person can fix.
+const MIN_SILHOUETTE_TO_SPLIT: f32 = 0.70;
 
-/// Absolute distance the *first* merge must clear to count as a speaker
-/// boundary on its own.
+/// Silhouette above which a roster is presented as fact rather than as a
+/// provisional reading.
 ///
-/// An elbow is a step up from something. The first merge has nothing before it,
-/// so a ratio cannot be computed and only an unambiguous absolute distance will
-/// do. This is the case where every stretch sounds different from every other:
-/// either each one really is a different person, or the features are noise, and
-/// a bounded roster with its separation reported is the honest output either way.
-const FIRST_MERGE_SPLIT_DISTANCE: f32 = MIN_SPLIT_DISTANCE * 2.0;
-
-/// How much a merge distance must jump, relative to the merge before it, to be
-/// read as the boundary between two speakers.
-const ELBOW_MIN_RATIO: f32 = 1.6;
+/// Ordinary voices score around 0.89 once separated, so a partition between
+/// this and [`MIN_SILHOUETTE_TO_SPLIT`] sits below what a clean recording
+/// produces. The split is worth making and worth checking, and the UI says so
+/// rather than presenting the roster plainly.
+const CONFIDENT_SILHOUETTE: f32 = 0.80;
 
 /// Hard cap on discovered speakers, when no expected count was given.
 ///
-/// Not a claim about meeting sizes. Past this point MFCC statistics cannot
-/// support the distinction and further clusters are noise, so the honest output
-/// is a bounded roster plus unattributed stretches.
-pub const MAX_DISCOVERED_SPEAKERS: usize = 12;
+/// A bound on the search, not a claim about meeting sizes: it stops the scan
+/// from considering a partition per utterance in a long recording. Set at
+/// twenty because meetings of that size are the case this module was rebuilt
+/// for, and a cap that bites in an ordinary meeting is a cap in the wrong
+/// place. Quality at any given count is reported by the silhouette rather than
+/// asserted by this number.
+pub const MAX_DISCOVERED_SPEAKERS: usize = 20;
 
 /// One stretch of speech to be assigned a speaker.
 #[derive(Debug, Clone)]
@@ -115,6 +141,21 @@ pub struct Clustering {
     /// Smallest distance between two surviving cluster centroids.
     pub min_between_distance: f32,
     pub unplaced_count: usize,
+    /// Clusters holding exactly one utterance.
+    ///
+    /// Reported because a single stray utterance is the shape a false speaker
+    /// takes: agglomerative merging joins everything else cheaply and leaves
+    /// the outlier to the end, where it can clear the split gate on its own. A
+    /// person who spoke once is also real, so this is surfaced rather than
+    /// suppressed — the UI can say "heard once" instead of Relay guessing.
+    pub singleton_cluster_count: usize,
+    /// How well the chosen partition actually describes the recording, as a
+    /// mean silhouette in `-1.0..=1.0`.
+    ///
+    /// This is the number the speaker count was decided on, so it is the number
+    /// to look at when a roster is wrong. Zero means the answer was one
+    /// speaker, where a silhouette is undefined.
+    pub silhouette: f32,
 }
 
 impl Clustering {
@@ -126,7 +167,16 @@ impl Clustering {
     /// still returned — it is better than one bucket for twenty people — but
     /// the caller is expected to mark it unconfirmed.
     pub fn is_well_separated(&self) -> bool {
-        self.cluster_count <= 1 || self.min_between_distance > self.mean_within_distance * 1.5
+        if self.cluster_count <= 1 {
+            // Nothing was split, so there is no separation to be wrong about.
+            return true;
+        }
+        if self.singleton_cluster_count > 0 && self.cluster_count > 2 {
+            // A roster resting on an utterance heard once is not a confident
+            // roster, however cleanly the rest of the partition scores.
+            return false;
+        }
+        self.silhouette >= CONFIDENT_SILHOUETTE
     }
 }
 
@@ -140,8 +190,8 @@ impl Clustering {
 /// weights are fixed, so a distance means the same thing in every meeting.
 ///
 /// Dividing by the dimension count makes the result a per-dimension RMS
-/// difference, which is what lets [`MIN_SPLIT_DISTANCE`] be stated in units
-/// anyone can reason about.
+/// difference, so a distance can be compared against the within-speaker scatter
+/// of the same recording in the same units.
 pub fn distance(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len().min(b.len());
     if n == 0 {
@@ -153,6 +203,24 @@ pub fn distance(a: &[f32], b: &[f32]) -> f32 {
         sum_sq += d * d;
     }
     (sum_sq / n as f64).sqrt() as f32
+}
+
+/// Distance between two voices, in the same units the clusterer uses.
+///
+/// Exposed because every consumer that has to decide "is this the same person"
+/// — the incremental engine, the fixtures, the diagnostics — must measure it
+/// exactly as the clusterer does, or their thresholds mean different things.
+pub fn feature_distance(a: &VoiceFeatures, b: &VoiceFeatures) -> f32 {
+    distance(&weighted(a), &weighted(b))
+}
+
+/// The weighted comparison vector for a voice.
+///
+/// Public so the incremental registry compares in exactly the same space the
+/// global clusterer does. Two passes measuring in different units would make
+/// their thresholds incomparable and their disagreements unreadable.
+pub fn weighted_vector(features: &VoiceFeatures) -> Vec<f32> {
+    weighted(features)
 }
 
 /// Applies the fixed weighting to a raw feature vector.
@@ -205,6 +273,8 @@ pub fn cluster(utterances: &[Utterance], expected_speakers: Option<usize>) -> Cl
             mean_within_distance: 0.0,
             min_between_distance: 0.0,
             unplaced_count,
+            singleton_cluster_count: 0,
+            silhouette: 0.0,
         };
     }
 
@@ -216,12 +286,13 @@ pub fn cluster(utterances: &[Utterance], expected_speakers: Option<usize>) -> Cl
     // Merge all the way down, recording what each merge cost. The sequence is
     // what the stopping rule reads; stopping early would throw away exactly the
     // evidence needed to choose where to stop.
-    let (snapshots, merge_distances) = merge_all(&vectors);
-    let k = choose_cluster_count(&merge_distances, vectors.len(), expected_speakers);
+    let distances = distance_matrix(&vectors);
+    let (snapshots, _) = merge_all(&vectors);
+    let chosen = choose_cluster_count(&snapshots, &distances, vectors.len(), expected_speakers);
 
     // `snapshots[i]` is the partition with `i + 1` clusters.
     let mut members = snapshots
-        .get(k.saturating_sub(1))
+        .get(chosen.k.saturating_sub(1))
         .cloned()
         .unwrap_or_else(|| vec![(0..vectors.len()).collect()]);
 
@@ -268,6 +339,7 @@ pub fn cluster(utterances: &[Utterance], expected_speakers: Option<usize>) -> Cl
     }
 
     Clustering {
+        singleton_cluster_count: members.iter().filter(|g| g.len() == 1).count(),
         assignments,
         cluster_count: members.len(),
         mean_within_distance: if within_count == 0 {
@@ -281,6 +353,7 @@ pub fn cluster(utterances: &[Utterance], expected_speakers: Option<usize>) -> Cl
             min_between
         },
         unplaced_count,
+        silhouette: chosen.silhouette,
     }
 }
 
@@ -313,79 +386,170 @@ fn merge_all(vectors: &[Vec<f32>]) -> MergeTrace {
     (snapshots, merge_distances)
 }
 
-/// Chooses how many speakers the merge sequence supports.
+/// Mean silhouette of one partition, over a precomputed distance matrix.
 ///
-/// `merge_distances` is ordered cheapest-first: `merge_distances[i]` is the
-/// distance the *i*-th merge was made at, taking the partition from
-/// `point_count - i` clusters down to `point_count - i - 1`. So cutting the
-/// sequence just before merge *i* leaves `point_count - i` clusters.
+/// For each point: `a` is its mean distance to the rest of its own cluster and
+/// `b` the mean distance to the nearest other cluster; the score is
+/// `(b - a) / max(a, b)`, which is 1 when a point sits squarely inside a
+/// well-separated group and 0 or below when it does not belong where it is.
 ///
-/// Within one speaker those distances rise smoothly; the first merge that
-/// crosses between two speakers jumps. The largest jump that clears both the
-/// absolute floor and the ratio is the boundary.
+/// A point alone in its cluster scores 0 by convention, and that convention is
+/// load-bearing here: it is what stops one stray utterance from being promoted
+/// to a speaker, because doing so drags the whole partition's score down rather
+/// than leaving it untouched.
+fn mean_silhouette(members: &[Vec<usize>], distances: &[Vec<f32>]) -> f32 {
+    if members.len() < 2 {
+        return 0.0;
+    }
+
+    let mut total = 0.0f64;
+    let mut counted = 0usize;
+
+    for (own_index, own) in members.iter().enumerate() {
+        for &point in own {
+            if own.len() <= 1 {
+                counted += 1;
+                continue;
+            }
+
+            let a: f32 = own
+                .iter()
+                .filter(|&&other| other != point)
+                .map(|&other| distances[point][other])
+                .sum::<f32>()
+                / (own.len() - 1) as f32;
+
+            let b = members
+                .iter()
+                .enumerate()
+                .filter(|(index, group)| *index != own_index && !group.is_empty())
+                .map(|(_, group)| {
+                    group.iter().map(|&other| distances[point][other]).sum::<f32>()
+                        / group.len() as f32
+                })
+                .fold(f32::MAX, f32::min);
+
+            if b == f32::MAX {
+                counted += 1;
+                continue;
+            }
+            let denominator = a.max(b);
+            if denominator > 0.0 {
+                total += ((b - a) / denominator) as f64;
+            }
+            counted += 1;
+        }
+    }
+
+    if counted == 0 {
+        return 0.0;
+    }
+    (total / counted as f64) as f32
+}
+
+/// Every pairwise distance, computed once.
 ///
-/// When no merge clears both bars the answer is one speaker. That includes the
-/// case where every merge is expensive — points spread uniformly with no
-/// grouping in them — because a roster invented from uniform spread would be a
-/// guess dressed as a finding. The run's within-cluster distance is reported so
-/// the diagnostics surface can show that the audio supported no separation.
+/// Scoring every candidate partition re-reads these many times over; computing
+/// them per comparison would make the search quadratic in cluster count for no
+/// reason.
+fn distance_matrix(vectors: &[Vec<f32>]) -> Vec<Vec<f32>> {
+    let n = vectors.len();
+    let mut matrix = vec![vec![0.0f32; n]; n];
+    for i in 0..n {
+        for j in i + 1..n {
+            let d = distance(&vectors[i], &vectors[j]);
+            matrix[i][j] = d;
+            matrix[j][i] = d;
+        }
+    }
+    matrix
+}
+
+/// How many speakers the recording supports, and how clearly.
+struct SpeakerCount {
+    k: usize,
+    /// Mean silhouette of the chosen partition. Zero when the answer is one
+    /// speaker, where a silhouette is undefined.
+    silhouette: f32,
+}
+
+/// Chooses how many speakers there were by scoring each candidate partition.
+///
+/// Walks every cut of the merge tree from two clusters up to the ceiling,
+/// scores each, and keeps the best. A partition that scores below
+/// [`MIN_SILHOUETTE_TO_SPLIT`] is not describing separate voices, so the answer
+/// is one speaker — which is how a single person talking for an hour stays one
+/// person even though their voice wanders.
 fn choose_cluster_count(
-    merge_distances: &[f32],
+    snapshots: &[Vec<Vec<usize>>],
+    distances: &[Vec<f32>],
     point_count: usize,
     expected_speakers: Option<usize>,
-) -> usize {
+) -> SpeakerCount {
     if point_count == 0 {
-        return 0;
+        return SpeakerCount { k: 0, silhouette: 0.0 };
     }
     if let Some(expected) = expected_speakers.filter(|&n| n > 0) {
-        return expected.min(point_count);
-    }
-    if merge_distances.is_empty() {
-        return 1;
+        let k = expected.min(point_count);
+        let silhouette = snapshots
+            .get(k.saturating_sub(1))
+            .map(|members| mean_silhouette(members, distances))
+            .unwrap_or(0.0);
+        return SpeakerCount { k, silhouette };
     }
 
     let ceiling = MAX_DISCOVERED_SPEAKERS.min(point_count);
+    let mut scored: Vec<SpeakerCount> = Vec::new();
 
-    let mut best: Option<(usize, f32)> = None;
-    // Set when the boundary the sequence points at needs more speakers than can
-    // be resolved. Cutting at the ceiling is then more honest than collapsing
-    // to one, because the audio did say there were several voices.
-    let mut boundary_above_ceiling = false;
-
-    for (i, &d) in merge_distances.iter().enumerate() {
-        if d < MIN_SPLIT_DISTANCE {
+    for k in 2..=ceiling {
+        let Some(members) = snapshots.get(k - 1) else {
             continue;
-        }
-        let ratio = match i {
-            0 if d >= FIRST_MERGE_SPLIT_DISTANCE => f32::INFINITY,
-            0 => continue,
-            _ if merge_distances[i - 1] <= 0.0 => f32::INFINITY,
-            _ => d / merge_distances[i - 1],
         };
-        if ratio < ELBOW_MIN_RATIO {
+        if members.len() != k {
             continue;
         }
-
-        // This merge joined two speakers, so cutting before it leaves the
-        // clusters that existed going into it.
-        let clusters = point_count - i;
-        if clusters < 2 {
-            continue;
-        }
-        if clusters > ceiling {
-            boundary_above_ceiling = true;
-            continue;
-        }
-        if best.as_ref().is_none_or(|&(_, r)| ratio > r) {
-            best = Some((clusters, ratio));
-        }
+        scored.push(SpeakerCount {
+            k,
+            silhouette: mean_silhouette(members, distances),
+        });
     }
 
-    match best {
-        Some((k, _)) => k,
-        None if boundary_above_ceiling => ceiling,
-        None => 1,
+    let Some(best) = scored
+        .iter()
+        .max_by(|a, b| {
+            a.silhouette
+                .partial_cmp(&b.silhouette)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|found| SpeakerCount {
+            k: found.k,
+            silhouette: found.silhouette,
+        })
+    else {
+        return SpeakerCount { k: 1, silhouette: 0.0 };
+    };
+
+    if best.silhouette >= MIN_SILHOUETTE_TO_SPLIT {
+        return best;
     }
+
+    // Scoring below the bar normally means there is one voice here. It means
+    // something else when the best score sits at the ceiling and is still
+    // rising: the recording holds more distinct voices than the search was
+    // allowed to consider, and every partition it *could* consider merges some
+    // of them. Collapsing to one speaker there would be the failure this module
+    // was rebuilt to fix, reappearing through the cap.
+    let still_rising = best.k == ceiling
+        && scored
+            .iter()
+            .find(|c| c.k + 1 == ceiling)
+            .is_some_and(|previous| best.silhouette > previous.silhouette);
+
+    if still_rising {
+        return best;
+    }
+
+    SpeakerCount { k: 1, silhouette: 0.0 }
 }
 
 /// The closest pair of clusters under average linkage, and their distance.
@@ -431,179 +595,339 @@ fn centroid(group: &[usize], vectors: &[Vec<f32>]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::meetings_v2::diarize::fixtures;
 
-    /// A feature vector built directly, so clustering is tested independently
-    /// of feature extraction.
-    fn features(mfcc: &[f32], pitch: f32, frames: usize) -> VoiceFeatures {
-        let width = super::super::features::MFCC_COEFFS;
-        let mut mean = mfcc.to_vec();
-        mean.resize(width, 0.0);
-        VoiceFeatures {
-            mfcc_mean: mean,
-            mfcc_std: vec![1.0; width],
-            pitch_hz: Some(pitch),
-            voiced_fraction: 0.7,
-            frame_count: frames,
-        }
-    }
-
-    fn utterance(id: &str, start: f64, mfcc: &[f32], pitch: f32) -> Utterance {
-        Utterance {
-            id: id.to_string(),
-            start_time_s: start,
-            end_time_s: start + 5.0,
-            features: features(mfcc, pitch, 200),
-        }
-    }
-
-    /// Three clearly distinct voices, four turns each, interleaved the way a
-    /// real conversation is.
-    fn three_speaker_meeting() -> Vec<Utterance> {
-        let voices: [(&[f32], f32); 3] = [
-            (&[8.0, -3.0, 2.0, 1.0, -1.0], 105.0),
-            (&[-6.0, 5.0, -3.0, 2.0, 1.0], 210.0),
-            (&[1.0, 1.0, 7.0, -5.0, 3.0], 155.0),
-        ];
-        let mut out = Vec::new();
-        for turn in 0..4 {
-            for (v, (mfcc, pitch)) in voices.iter().enumerate() {
-                let t = (turn * 3 + v) as f64 * 10.0;
-                // A little jitter, so identical vectors are not what makes the
-                // clustering work.
-                let jittered: Vec<f32> = mfcc
-                    .iter()
-                    .map(|&x| x + (turn as f32 * 0.13 - 0.2))
-                    .collect();
-                out.push(utterance(
-                    &format!("u{}_{}", turn, v),
-                    t,
-                    &jittered,
-                    *pitch + turn as f32,
-                ));
-            }
-        }
-        out
-    }
+    // -----------------------------------------------------------------------
+    // Against voices that behave like real ones.
+    //
+    // These are the tests that would have caught the shipped bug. The suite
+    // they replace used synthetic voices an octave apart, which every
+    // threshold separates; a meeting of twenty real people reported one
+    // speaker and nothing here went red.
+    // -----------------------------------------------------------------------
 
     #[test]
-    fn three_distinct_voices_produce_three_speakers() {
-        let clustering = cluster(&three_speaker_meeting(), None);
+    fn three_real_voices_are_separated_into_three_speakers() {
+        let meeting = fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS, 3);
+        let clustering = cluster(&meeting, None);
+
         assert_eq!(
             clustering.cluster_count, 3,
-            "within {} between {}",
-            clustering.mean_within_distance, clustering.min_between_distance
+            "silhouette {:.3}, within {:.3}, between {:.3}",
+            clustering.silhouette,
+            clustering.mean_within_distance,
+            clustering.min_between_distance
+        );
+        assert!(
+            fixtures::partition_matches(&clustering.assignments, &fixtures::truth(&meeting)),
+            "every turn of one voice must land together"
         );
         assert!(clustering.is_well_separated());
-        assert_eq!(clustering.unplaced_count, 0);
+        assert_eq!(clustering.singleton_cluster_count, 0);
     }
 
     #[test]
-    fn every_turn_of_one_voice_lands_in_the_same_cluster() {
-        let meeting = three_speaker_meeting();
+    fn one_real_voice_stays_one_speaker() {
+        // The failure in the other direction, and the worse one: a split
+        // invents somebody who was never in the room.
+        let meeting = fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS[..1], 6);
         let clustering = cluster(&meeting, None);
-        for voice in 0..3 {
-            let clusters: Vec<Option<usize>> = (0..4)
-                .map(|turn| {
-                    let id = format!("u{}_{}", turn, voice);
-                    clustering
-                        .assignments
-                        .iter()
-                        .find(|a| a.id == id)
-                        .unwrap()
-                        .cluster
-                })
-                .collect();
-            assert!(
-                clusters.windows(2).all(|w| w[0] == w[1]),
-                "voice {voice} was split across {clusters:?}"
-            );
-        }
+        assert_eq!(
+            clustering.cluster_count, 1,
+            "silhouette {:.3}",
+            clustering.silhouette
+        );
+    }
+
+    #[test]
+    fn two_similar_voices_merge_rather_than_risk_inventing_a_speaker() {
+        // A limitation, recorded as a test so it cannot quietly change.
+        //
+        // Two voices this close score the same as one voice that wanders across
+        // a meeting, so no threshold tells them apart with cepstral features.
+        // Given the choice, Relay merges: "Speaker 2 said both of these" is
+        // wrong but legible and the user can force the split, whereas inventing
+        // a person puts their name on somebody else's commitments.
+        let meeting = fixtures::interleaved_meeting(&fixtures::TWO_SIMILAR_SPEAKERS, 3);
+        let clustering = cluster(&meeting, None);
+        assert_eq!(
+            clustering.cluster_count, 1,
+            "silhouette {:.3}",
+            clustering.silhouette
+        );
+    }
+
+    #[test]
+    fn the_expected_count_recovers_a_split_the_audio_could_not_justify() {
+        // The escape hatch that makes the merge above acceptable: a user who
+        // knows there were two people says so, and gets two.
+        let meeting = fixtures::interleaved_meeting(&fixtures::TWO_SIMILAR_SPEAKERS, 3);
+        let clustering = cluster(&meeting, Some(2));
+
+        assert_eq!(clustering.cluster_count, 2);
+        assert!(
+            fixtures::partition_matches(&clustering.assignments, &fixtures::truth(&meeting)),
+            "and the split it produces is the correct one"
+        );
+        assert!(
+            !clustering.is_well_separated(),
+            "a split the audio did not justify on its own must not claim confidence"
+        );
+    }
+
+    #[test]
+    fn a_clean_split_is_presented_as_fact_and_a_forced_one_is_not() {
+        let distinct = cluster(
+            &fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS, 3),
+            None,
+        );
+        assert!(
+            distinct.is_well_separated(),
+            "silhouette {:.3}",
+            distinct.silhouette
+        );
+
+        let forced = cluster(
+            &fixtures::interleaved_meeting(&fixtures::TWO_SIMILAR_SPEAKERS, 3),
+            Some(2),
+        );
+        assert!(!forced.is_well_separated());
+    }
+
+    #[test]
+    fn a_two_person_call_is_separated() {
+        // The commonest meeting there is, and the one the shipped build turned
+        // into a single "Speaker 1".
+        let meeting = fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS[..2], 4);
+        let clustering = cluster(&meeting, None);
+        assert_eq!(clustering.cluster_count, 2);
+        assert!(fixtures::partition_matches(
+            &clustering.assignments,
+            &fixtures::truth(&meeting)
+        ));
+    }
+
+    #[test]
+    fn a_speaker_who_spoke_once_is_found_but_reported_as_thin_evidence() {
+        let mut meeting = fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS[..2], 3);
+        meeting.push(fixtures::utterance(&fixtures::THREE_SPEAKERS[2], 0, 100.0, 3.0));
+
+        let clustering = cluster(&meeting, None);
+        assert_eq!(clustering.cluster_count, 3);
+        assert_eq!(clustering.singleton_cluster_count, 1);
+        assert!(
+            !clustering.is_well_separated(),
+            "a roster resting on one utterance is not a confident roster"
+        );
     }
 
     #[test]
     fn speaker_numbers_follow_the_order_people_first_spoke() {
-        let meeting = three_speaker_meeting();
+        let meeting = fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS, 2);
         let clustering = cluster(&meeting, None);
         let first = clustering
             .assignments
             .iter()
-            .find(|a| a.id == "u0_0")
+            .find(|a| a.id == "A0")
             .unwrap();
-        assert_eq!(
-            first.cluster,
-            Some(0),
-            "the first voice heard must be the first speaker"
-        );
+        assert_eq!(first.cluster, Some(0));
     }
 
     #[test]
-    fn one_voice_produces_one_speaker_not_many() {
-        // The failure mode a distance threshold has to avoid: splitting a
-        // single person into a roster.
+    fn an_expected_count_is_honoured_over_what_the_audio_suggests() {
+        let meeting = fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS, 3);
+        assert_eq!(cluster(&meeting, Some(2)).cluster_count, 2);
+        assert_eq!(cluster(&meeting, Some(3)).cluster_count, 3);
+    }
+
+    #[test]
+    fn an_expected_count_cannot_invent_a_speaker_the_audio_lacks() {
+        // Twenty in the room, three on the recording, is still three.
+        let meeting = fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS, 2);
+        let clustering = cluster(&meeting, Some(20));
+        assert!(clustering.cluster_count <= meeting.len());
+    }
+
+    // -----------------------------------------------------------------------
+    // Choosing the speaker count.
+    //
+    // The criterion is scale-free, so these test it on the fixtures rather than
+    // on hand-written distance sequences. Two previous designs passed
+    // hand-written sequences and failed on real recordings, which is the
+    // argument for testing it this way.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn one_voice_that_wanders_across_a_meeting_stays_one_voice() {
+        // Measured through the recording path, one person's utterances span
+        // 0.031 to 0.422 over a meeting — four times what the cheapest merges
+        // suggest. The design this replaces read that spread as three speakers.
         let mut meeting = Vec::new();
-        for i in 0..10 {
-            meeting.push(utterance(
-                &format!("u{i}"),
-                i as f64 * 8.0,
-                &[5.0 + i as f32 * 0.1, -2.0, 1.5, 0.5, -0.5],
-                140.0 + i as f32,
+        for turn in 0..8 {
+            meeting.push(fixtures::utterance(
+                &fixtures::THREE_SPEAKERS[0],
+                turn,
+                turn as f64 * 10.0,
+                3.0,
             ));
         }
-        assert_eq!(cluster(&meeting, None).cluster_count, 1);
-    }
-
-    #[test]
-    fn an_expected_speaker_count_is_a_hint_not_an_invention() {
-        // Two voices in the audio, twenty people in the room. Twenty clusters
-        // would be twenty claims the recording cannot support.
-        let mut meeting = Vec::new();
-        for i in 0..6 {
-            let (mfcc, pitch): (&[f32], f32) = if i % 2 == 0 {
-                (&[9.0, -4.0, 2.0, 1.0, 0.0], 100.0)
-            } else {
-                (&[-7.0, 6.0, -3.0, 1.0, 2.0], 215.0)
-            };
-            meeting.push(utterance(&format!("u{i}"), i as f64 * 10.0, mfcc, pitch));
-        }
-        let clustering = cluster(&meeting, Some(20));
-        assert!(
-            clustering.cluster_count <= 6,
-            "cannot exceed the number of stretches, got {}",
-            clustering.cluster_count
-        );
-        assert!(clustering.cluster_count >= 2);
-    }
-
-    #[test]
-    fn an_expected_count_can_merge_below_the_threshold() {
-        // The user says two; the features would have found three. Honouring the
-        // hint is the point of asking for it.
-        let clustering = cluster(&three_speaker_meeting(), Some(2));
-        assert_eq!(clustering.cluster_count, 2);
-    }
-
-    #[test]
-    fn stretches_with_too_little_voice_are_left_unplaced() {
-        let mut meeting = three_speaker_meeting();
-        meeting.push(Utterance {
-            id: "noise".to_string(),
-            start_time_s: 500.0,
-            end_time_s: 501.0,
-            // Ten frames and almost no voicing: not evidence about anyone.
-            features: features(&[0.0, 0.0, 0.0], 0.0, 10),
-        });
-
         let clustering = cluster(&meeting, None);
-        let noise = clustering
-            .assignments
-            .iter()
-            .find(|a| a.id == "noise")
-            .unwrap();
         assert_eq!(
-            noise.cluster, None,
-            "a stretch with no voice must not be assigned to a person"
+            clustering.cluster_count, 1,
+            "silhouette {:.3}",
+            clustering.silhouette
         );
-        assert_eq!(clustering.unplaced_count, 1);
+    }
+
+    #[test]
+    fn the_silhouette_is_reported_so_a_wrong_roster_is_diagnosable() {
+        let distinct = cluster(
+            &fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS, 3),
+            None,
+        );
+        assert!(
+            distinct.silhouette >= CONFIDENT_SILHOUETTE,
+            "three clearly different voices should score strongly, got {:.3}",
+            distinct.silhouette
+        );
+
+        let single = cluster(
+            &fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS[..1], 6),
+            None,
+        );
+        assert_eq!(
+            single.silhouette, 0.0,
+            "a silhouette is undefined for one cluster and must not be invented"
+        );
+    }
+
+    #[test]
+    fn a_partition_that_describes_nothing_is_rejected_in_favour_of_one_speaker() {
+        // Direct test of the gate: scoring below the bar means the split is not
+        // describing separate voices, whatever the distances happen to be.
+        let meeting = fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS[..1], 6);
+        let clustering = cluster(&meeting, None);
+        assert_eq!(clustering.cluster_count, 1);
+        assert!(clustering.is_well_separated());
+    }
+
+    #[test]
+    fn an_expected_count_is_honoured_even_when_it_scores_poorly() {
+        // The user said two. Overruling them because the audio disagrees would
+        // make the setting pointless.
+        let meeting = fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS[..1], 6);
+        assert_eq!(cluster(&meeting, Some(2)).cluster_count, 2);
+    }
+
+    #[test]
+    fn a_meeting_of_several_distinct_voices_finds_all_of_them() {
+        let voices = fixtures::distinct_voices(6);
+        let meeting = fixtures::interleaved_meeting(&voices, 3);
+        let clustering = cluster(&meeting, None);
+
+        assert_eq!(
+            clustering.cluster_count,
+            voices.len(),
+            "silhouette {:.3}",
+            clustering.silhouette
+        );
+        assert!(fixtures::partition_matches(
+            &clustering.assignments,
+            &fixtures::truth(&meeting)
+        ));
+    }
+
+    #[test]
+    fn more_voices_than_the_search_can_consider_are_capped_not_collapsed() {
+        // The ceiling must not reintroduce the failure this module was rebuilt
+        // to fix. When the best partition sits at the ceiling and is still
+        // improving, the recording holds more voices than the search was
+        // allowed to look for — which is the opposite of holding one.
+        //
+        // Driven from vectors through the real merge tree rather than from
+        // fixture audio, because synthesizing twenty-odd voices this feature
+        // space can tell apart is not possible, and a fixture pretending
+        // otherwise would be testing a capability Relay does not have.
+        let group_count = MAX_DISCOVERED_SPEAKERS + 3;
+        let mut vectors: Vec<Vec<f32>> = Vec::new();
+        for group in 0..group_count {
+            // Two near-identical points per group, groups far apart.
+            for nudge in [0.0f32, 0.02] {
+                let mut v = vec![0.0f32; 8];
+                v[group % 8] = group as f32 * 10.0 + nudge;
+                v[(group + 3) % 8] = group as f32 * 4.0;
+                vectors.push(v);
+            }
+        }
+
+        let distances = distance_matrix(&vectors);
+        let (snapshots, _) = merge_all(&vectors);
+        let chosen = choose_cluster_count(&snapshots, &distances, vectors.len(), None);
+
+        assert!(
+            chosen.k > 1,
+            "a recording of many distinct voices must not read as one (k={}, \
+silhouette {:.3})",
+            chosen.k,
+            chosen.silhouette
+        );
+        assert!(chosen.k <= MAX_DISCOVERED_SPEAKERS, "got {}", chosen.k);
+    }
+
+    #[test]
+    fn the_silhouette_of_a_single_cluster_partition_is_zero() {
+        let distances = vec![vec![0.0, 0.2], vec![0.2, 0.0]];
+        assert_eq!(mean_silhouette(&[vec![0, 1]], &distances), 0.0);
+    }
+
+    #[test]
+    fn a_singleton_cluster_drags_the_score_down_rather_than_being_free() {
+        // The convention that stops one stray utterance becoming a speaker.
+        let distances = vec![
+            vec![0.0, 0.1, 0.1, 1.0],
+            vec![0.1, 0.0, 0.1, 1.0],
+            vec![0.1, 0.1, 0.0, 1.0],
+            vec![1.0, 1.0, 1.0, 0.0],
+        ];
+        let together = mean_silhouette(&[vec![0, 1, 2], vec![3]], &distances);
+        let split_evenly = mean_silhouette(&[vec![0, 1], vec![2, 3]], &distances);
+        assert!(
+            together < 1.0,
+            "the singleton must not score a free 1.0, got {together:.3}"
+        );
+        assert!(together > split_evenly);
+    }
+
+    #[test]
+    fn the_distance_matrix_is_symmetric_with_a_zero_diagonal() {
+        let vectors = vec![vec![1.0, 2.0], vec![3.0, 1.0], vec![0.0, 0.0]];
+        let matrix = distance_matrix(&vectors);
+        for (i, row) in matrix.iter().enumerate() {
+            assert_eq!(row[i], 0.0);
+            for (j, &value) in row.iter().enumerate() {
+                assert_eq!(value, matrix[j][i]);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Distance and degenerate inputs.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn the_distance_is_a_per_dimension_rms_difference() {
+        assert_eq!(distance(&[1.0, 0.0], &[1.0, 0.0]), 0.0);
+        assert!((distance(&[0.0, 0.0], &[2.0, 2.0]) - 2.0).abs() < 1e-5);
+        assert_eq!(distance(&[], &[]), 0.0);
+    }
+
+    #[test]
+    fn a_shared_channel_component_cancels_out_of_the_distance() {
+        // The room, the microphone and the codec are the same for everyone in
+        // one recording, so they must not affect who looks like whom.
+        let bare = [vec![1.0f32, 0.0], vec![-1.0f32, 0.5]];
+        let offset = [vec![101.0f32, 50.0], vec![99.0f32, 50.5]];
+        assert!((distance(&bare[0], &bare[1]) - distance(&offset[0], &offset[1])).abs() < 1e-4);
     }
 
     #[test]
@@ -615,121 +939,24 @@ mod tests {
     }
 
     #[test]
-    fn a_meeting_of_only_unusable_stretches_assigns_nobody() {
-        let meeting = vec![Utterance {
-            id: "u0".into(),
-            start_time_s: 0.0,
-            end_time_s: 1.0,
-            features: features(&[1.0], 0.0, 5),
-        }];
+    fn a_stretch_with_too_little_voice_is_left_unplaced() {
+        let mut meeting = fixtures::interleaved_meeting(&fixtures::THREE_SPEAKERS, 2);
+        meeting.push(Utterance {
+            id: "noise".into(),
+            start_time_s: 500.0,
+            end_time_s: 501.0,
+            features: VoiceFeatures {
+                mfcc_mean: vec![0.0; 13],
+                mfcc_std: vec![0.0; 13],
+                pitch_hz: None,
+                voiced_fraction: 0.0,
+                frame_count: 5,
+            },
+        });
+
         let clustering = cluster(&meeting, None);
-        assert_eq!(clustering.cluster_count, 0);
-        assert_eq!(clustering.assignments[0].cluster, None);
+        let noise = clustering.assignments.iter().find(|a| a.id == "noise").unwrap();
+        assert_eq!(noise.cluster, None);
         assert_eq!(clustering.unplaced_count, 1);
-    }
-
-    #[test]
-    fn the_distance_is_a_per_dimension_rms_difference() {
-        assert_eq!(distance(&[1.0, 0.0], &[1.0, 0.0]), 0.0);
-        // Two dimensions differing by 2 each: RMS is 2, not 2·√2.
-        assert!((distance(&[0.0, 0.0], &[2.0, 2.0]) - 2.0).abs() < 1e-5);
-        assert_eq!(distance(&[], &[]), 0.0);
-    }
-
-    #[test]
-    fn a_shared_channel_component_cancels_out_of_the_distance() {
-        // The room, the microphone and the codec are the same for everyone in
-        // one recording, so they must not affect who looks like whom. Not
-        // centring the data is what makes this hold without any normalization
-        // step that could rescale one speaker's jitter into a roster.
-        let bare = [vec![1.0f32, 0.0], vec![-1.0f32, 0.5]];
-        let offset = [vec![101.0f32, 50.0], vec![99.0f32, 50.5]];
-        assert!(
-            (distance(&bare[0], &bare[1]) - distance(&offset[0], &offset[1])).abs() < 1e-4
-        );
-    }
-
-    #[test]
-    fn the_elbow_rule_reads_a_smooth_sequence_as_one_speaker() {
-        // Distances that rise gently are one voice varying, not two voices.
-        let smooth = vec![0.10, 0.13, 0.16, 0.19, 0.22, 0.26];
-        assert_eq!(choose_cluster_count(&smooth, 7, None), 1);
-    }
-
-    #[test]
-    fn the_elbow_rule_finds_the_jump_between_speakers() {
-        // Four cheap within-speaker merges on the measured same-voice scale,
-        // then one on the measured different-voice scale. The partition going
-        // into that merge had two clusters.
-        let jumpy = vec![0.30, 0.38, 0.44, 0.52, 5.70];
-        assert_eq!(choose_cluster_count(&jumpy, 6, None), 2);
-    }
-
-    #[test]
-    fn a_jump_that_stays_inside_one_voices_scatter_is_not_a_speaker_change() {
-        // A fourfold rise, and still an order of magnitude below where two
-        // voices actually sit. This is the failure the measured floor prevents.
-        let within_scatter = vec![0.20, 0.24, 0.26, 0.30, 1.20];
-        assert_eq!(choose_cluster_count(&within_scatter, 6, None), 1);
-    }
-
-    #[test]
-    fn a_large_ratio_between_two_tiny_distances_is_not_a_speaker_change() {
-        // 0.02 to 0.2 is a tenfold jump and still well inside one voice.
-        let tiny = vec![0.01, 0.02, 0.20];
-        assert_eq!(choose_cluster_count(&tiny, 4, None), 1);
-    }
-
-    #[test]
-    fn a_roster_larger_than_can_be_resolved_is_capped_not_collapsed() {
-        // Every merge expensive from the first: forty-one stretches that sound
-        // nothing like each other. One cluster would be a lie in the other
-        // direction, so the answer is the ceiling.
-        let all_far: Vec<f32> = (0..40).map(|i| 5.0 + i as f32).collect();
-        assert_eq!(
-            choose_cluster_count(&all_far, 41, None),
-            MAX_DISCOVERED_SPEAKERS
-        );
-    }
-
-    #[test]
-    fn a_first_merge_inside_one_voices_scatter_is_not_a_roster() {
-        // Two stretches, close together: one person, not two.
-        assert_eq!(choose_cluster_count(&[0.6], 2, None), 1);
-        // Two stretches, unmistakably far apart: two people.
-        assert_eq!(choose_cluster_count(&[6.0], 2, None), 2);
-    }
-
-    #[test]
-    fn an_expected_count_is_honoured_over_the_elbow() {
-        let smooth = vec![0.10, 0.13, 0.16, 0.19];
-        assert_eq!(choose_cluster_count(&smooth, 5, Some(3)), 3);
-        // But it can never exceed the number of stretches available.
-        assert_eq!(choose_cluster_count(&smooth, 5, Some(50)), 5);
-    }
-
-    #[test]
-    fn no_points_means_no_speakers() {
-        assert_eq!(choose_cluster_count(&[], 0, None), 0);
-        assert_eq!(choose_cluster_count(&[], 1, None), 1);
-    }
-
-    #[test]
-    fn poorly_separated_clusters_report_themselves_as_such() {
-        // Two nearly identical voices: the roster may still split them, but it
-        // must not claim to be sure.
-        let meeting = vec![
-            utterance("a", 0.0, &[1.0, 1.0, 1.0], 150.0),
-            utterance("b", 10.0, &[1.02, 0.98, 1.01], 151.0),
-            utterance("c", 20.0, &[0.99, 1.01, 0.99], 149.0),
-            utterance("d", 30.0, &[1.01, 1.0, 1.02], 150.5),
-        ];
-        let clustering = cluster(&meeting, None);
-        if clustering.cluster_count > 1 {
-            assert!(
-                !clustering.is_well_separated(),
-                "a marginal split must be reported as marginal"
-            );
-        }
     }
 }

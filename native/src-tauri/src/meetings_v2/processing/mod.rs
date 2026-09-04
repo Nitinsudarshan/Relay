@@ -82,7 +82,7 @@ pub mod tasks;
 pub mod validate;
 
 use super::session_store::SessionStore;
-use super::diarize::{diarize_session, Diarization};
+use super::diarize::{self, Diarization};
 use super::transcript_health::{self, DecodeEvidence};
 use super::types::{MeetingNotes, TranscriptSegment, TranscriptSegmentStatus};
 use llm::MeetingLlm;
@@ -115,6 +115,11 @@ pub struct ProcessingOptions {
     pub diarize_speakers: bool,
     /// Clustering hint. `None` means "work it out from the audio".
     pub expected_speakers: Option<usize>,
+    /// Which method decides who spoke.
+    pub diarization_engine: crate::meetings_v2::diarize::engine::DiarizationEngine,
+    /// Everybody shares one microphone, so the channel cannot identify the
+    /// local user.
+    pub assume_in_person: bool,
     pub summary_mode: SummaryMode,
     pub extension_id: String,
     pub user_extensions: Vec<MeetingExtension>,
@@ -132,6 +137,8 @@ impl Default for ProcessingOptions {
             speaker_identification: SpeakerIdentificationMode::Automatic,
             diarize_speakers: true,
             expected_speakers: None,
+            diarization_engine: Default::default(),
+            assume_in_person: false,
             summary_mode: SummaryMode::Standard,
             extension_id: modes::DEFAULT_EXTENSION_ID.to_string(),
             user_extensions: Vec::new(),
@@ -245,6 +252,11 @@ impl MeetingProcessor {
             .sessions
             .get_transcript_segments(meeting_id)
             .unwrap_or_default();
+        // The calendar's answer to what this meeting was called and who was
+        // invited, when a recording was matched to an event.
+        let calendar_link = self.sessions.get_calendar_link(meeting_id);
+        let calendar_event = calendar_link.as_ref().and_then(|link| link.event());
+
         let meeting_metadata = metadata::build(metadata::MetadataInput {
             session: &session,
             raw_segments: &raw_segments,
@@ -253,6 +265,7 @@ impl MeetingProcessor {
             speakers: &roster,
             names: &name_findings,
             notes: &notes,
+            calendar: calendar_event,
             diarized: diarization
                 .as_ref()
                 .is_some_and(|d| d.report.cluster_count > 0),
@@ -416,6 +429,12 @@ audio are unaffected."
         // Step 3 — speaker data, however incomplete. An empty roster is valid.
         let roster = processing.speakers.clone();
 
+        // What the invitation said this meeting was: its scheduled title, who
+        // was invited, and the agenda. Absent whenever no event was matched,
+        // which is the common case and changes nothing else.
+        let summary_calendar_link = self.sessions.get_calendar_link(meeting_id);
+        let calendar_event = summary_calendar_link.as_ref().and_then(|link| link.event());
+
         // Step 4 — the canonical meeting context: everything a model is told
         // about this meeting, assembled in one place.
         //
@@ -450,6 +469,7 @@ audio are unaffected."
             speakers: &roster,
             segments: &normalized.segments,
             notes: &notes,
+            calendar: calendar_event,
             glossary: &options.glossary,
         };
 
@@ -978,7 +998,13 @@ audio are unaffected."
             }
         }
 
-        match diarize_session(&self.sessions, meeting_id, options.expected_speakers) {
+        match diarize::engine::run(
+            options.diarization_engine,
+            &self.sessions,
+            meeting_id,
+            options.expected_speakers,
+            options.assume_in_person,
+        ) {
             Ok(diarization) => Some(diarization),
             Err(e) => {
                 // Not a failure of the meeting: attribution falls back to the
@@ -1004,7 +1030,13 @@ attributing by capture channel alone",
         meeting_id: &str,
         options: &ProcessingOptions,
     ) -> Result<MeetingProcessing, String> {
-        let diarization = diarize_session(&self.sessions, meeting_id, options.expected_speakers)?;
+        let diarization = diarize::engine::run(
+            options.diarization_engine,
+            &self.sessions,
+            meeting_id,
+            options.expected_speakers,
+            options.assume_in_person,
+        )?;
         self.store.update(meeting_id, |processing| {
             processing.diarization = Some(diarization.clone());
         })?;
@@ -1074,6 +1106,26 @@ attributing by capture channel alone",
             contents: markdown,
             includes: share::describe(options),
         })
+    }
+
+    /// Runs every speaker-separation method over one recording.
+    ///
+    /// Exists because a meeting is expensive to produce and cheap to
+    /// re-analyse. Judging which method works meant holding a new meeting for
+    /// each one; this way a single recording the user recognises answers the
+    /// question for all of them at once.
+    pub fn compare_engines(
+        &self,
+        meeting_id: &str,
+        options: &ProcessingOptions,
+    ) -> diarize::engine::EngineComparison {
+        diarize::engine::compare(
+            &self.sessions,
+            meeting_id,
+            options.expected_speakers,
+            options.assume_in_person,
+            options.diarization_engine,
+        )
     }
 
     /// Reads the user's notes, treating an unreadable file as no notes.

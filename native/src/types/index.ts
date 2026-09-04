@@ -743,6 +743,14 @@ export interface MeetingSettings {
    * it out. Setting it cannot invent a speaker the audio does not support.
    */
   expected_speakers?: number | null;
+  /** Which method decides who spoke. */
+  diarization_engine?: DiarizationEngineId;
+  /**
+   * Meetings are recorded with everybody sharing one microphone. Turns off the
+   * local-user inference, because the channel split that finds the person at
+   * this machine means nothing when every voice arrives on the same input.
+   */
+  meetings_are_in_person?: boolean;
   extensions: MeetingExtensionSetting[];
   /**
    * Standing instructions for how summaries should read. Presentation only —
@@ -1043,6 +1051,12 @@ export interface MeetingSession {
   rejected_chunk_count?: number;
   /** Voiced seconds across the whole recording. Against `duration_seconds`, the talk-to-silence ratio. */
   voiced_seconds?: number;
+  /**
+   * Distinct voices the recorder had heard by the time it last wrote this.
+   * Live rather than final — the post-hoc pass may revise it — so the recording
+   * pill can show speakers appearing during the meeting.
+   */
+  live_speaker_count?: number;
   error_message?: string | null;
 }
 
@@ -1424,9 +1438,26 @@ export interface DiarizationReport {
   placed_count: number;
   unplaced_count: number;
   skipped_count: number;
+  /**
+   * Which cluster is the person using this machine, decided by comparing
+   * microphone share between clusters rather than by any single threshold.
+   * Null when no voice stands out — an in-person meeting through one mic, or a
+   * recording where the user never spoke.
+   */
+  local_cluster?: number | null;
   well_separated: boolean;
   mean_within_distance: number;
   min_between_distance: number;
+  /** Speakers heard exactly once — real, or a stray utterance that looked like one. */
+  singleton_speaker_count?: number;
+  /**
+   * How well the roster describes the recording, as a mean silhouette in
+   * -1..1. The number the speaker count was decided on, so the number to look
+   * at when a roster is wrong. Above 0.8 the voices are clearly separate;
+   * 0.7-0.8 is worth checking; below 0.7 no split is made. Zero means one
+   * speaker, where a silhouette is undefined.
+   */
+  silhouette?: number;
   expected_speakers?: number | null;
   duration_ms: number;
 }
@@ -1442,6 +1473,40 @@ export interface Diarization {
   assignments: VoiceAssignment[];
 }
 
+/**
+ * Which method decides who spoke.
+ *
+ * Three, and selectable, because speaker identity is the part of meetings that
+ * has been hardest to get right and they fail differently. `CHANNEL` reads only
+ * which input carried the sound, so everyone remote shares one label.
+ * `VOICEPRINT` clusters the whole recording after it ends — the most accurate,
+ * and what summaries are built from. `LIVE` is the registry the recorder builds
+ * as chunks land: available during the call, less certain.
+ */
+export type DiarizationEngineId = 'CHANNEL' | 'VOICEPRINT' | 'LIVE';
+
+/** One engine's answer for a recording, with enough detail to compare it. */
+export interface EngineOutcome {
+  engine: DiarizationEngineId;
+  id: string;
+  label: string;
+  summary: string;
+  diarization: Diarization;
+  /** Utterances per speaker, largest first — the shape of the answer at a glance. */
+  speaker_sizes: number[];
+  /** Set when the engine could not run. Reported rather than the row being dropped. */
+  error?: string | null;
+}
+
+/** Every engine's answer for one recording. */
+export interface EngineComparison {
+  meeting_id: string;
+  outcomes: EngineOutcome[];
+  /** The engine in force now, so the comparison says what is used as well as what is possible. */
+  active: DiarizationEngineId;
+  expected_speakers?: number | null;
+}
+
 /** How a participant came to be on the list. */
 export type ParticipantOrigin =
   | 'LOCAL_USER'
@@ -1449,7 +1514,9 @@ export type ParticipantOrigin =
   | 'DIARIZATION'
   | 'SELF_INTRODUCED'
   | 'MENTIONED'
-  | 'STATED';
+  | 'STATED'
+  /** Invited, per the calendar event. Weaker evidence than a voice actually heard. */
+  | 'INVITED';
 
 /** One person the meeting involved, whether or not they were heard. */
 export interface Participant {
@@ -1576,6 +1643,76 @@ export interface MeetingSelfTestReport {
    * machine.
    */
   whisper_on_silence?: string | null;
+}
+
+// =========================================================================
+// CALENDAR
+// =========================================================================
+
+/** Whether somebody said they were coming. */
+export type AttendanceResponse = 'ACCEPTED' | 'DECLINED' | 'TENTATIVE' | 'NO_RESPONSE';
+
+export interface CalendarAttendee {
+  /** A display name, or one recovered from the address. Never a bare email. */
+  name: string;
+  email?: string | null;
+  response: AttendanceResponse;
+  is_organizer: boolean;
+  /** True for the account that authorized Relay — the person recording. */
+  is_self: boolean;
+}
+
+/**
+ * One event, reduced to what a meeting record needs: what it was called, who
+ * was invited, and what it was for.
+ *
+ * External content. Titles and descriptions are written by whoever sent the
+ * invitation, and are shown as data rather than followed as instructions.
+ */
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  starts_at: string;
+  ends_at: string;
+  description?: string | null;
+  location?: string | null;
+  attendees: CalendarAttendee[];
+  conference_url?: string | null;
+  organizer?: string | null;
+}
+
+export interface EventMatch {
+  event: CalendarEvent;
+  /** Share of the recording that fell inside the event, 0..1. */
+  overlap: number;
+}
+
+/**
+ * Why no event was matched. Three reasons rather than a bare null, because
+ * "nothing was scheduled" and "two things fit equally" need different responses
+ * from the user.
+ */
+export type NoMatchReason = 'NOTHING_SCHEDULED' | 'TOO_LITTLE_OVERLAP' | 'AMBIGUOUS';
+
+export type MatchOutcome =
+  | ({ kind: 'MATCHED' } & EventMatch)
+  | { kind: 'NONE'; reason: NoMatchReason; candidates: EventMatch[] };
+
+/** What the calendar had to say about one recording. */
+export interface MeetingCalendarLink {
+  outcome: MatchOutcome;
+  linked_at: string;
+  /** True when a person chose this event rather than Relay matching it. */
+  chosen_by_user: boolean;
+}
+
+/** Whether Relay can read the calendar, and as whom. */
+export interface CalendarConnection {
+  connected: boolean;
+  account_email?: string | null;
+  account_name?: string | null;
+  /** A stored connection that cannot currently be used, in words naming the fix. */
+  problem?: string | null;
 }
 
 /** A meeting rendered as one Markdown document, for sharing. */
@@ -1782,6 +1919,20 @@ export interface TranscriptUtterance {
   sys_had_audio: boolean;
   /** Whisper's own no-speech probability for the span, for diagnostics. */
   no_speech_prob?: number;
+  /**
+   * Loudness of each source over this utterance's span. The booleans above are
+   * this measurement already reduced to a verdict, and the reduction throws
+   * away what identifying the local user needs: on speakers rather than
+   * headphones both sources register on nearly every utterance.
+   */
+  mic_rms?: number;
+  sys_rms?: number;
+  /**
+   * The speaker the recorder assigned while the meeting was still running.
+   * Refined by the global pass afterwards; null where there was too little
+   * voice to place the span.
+   */
+  live_speaker?: number | null;
 }
 
 /** The outcome of adding one meeting to-do to the Kanban board. */

@@ -1457,6 +1457,7 @@ script review with the platform team as soon as the release is out",
             speakers,
             segments,
             notes,
+            calendar: None,
             glossary: &[],
         }
     }

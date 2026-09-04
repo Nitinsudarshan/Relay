@@ -102,11 +102,19 @@ pub fn attribute_speakers_with_voices(
         .map(|d| d.cluster_map())
         .unwrap_or_default();
 
-    // Which clusters are the local user's, so a cluster that is really "me"
-    // does not also appear as a remote speaker. Decided by majority: the
-    // channel is certain per segment, so the cluster that most often coincides
-    // with microphone-only audio is the local user's voice.
-    let local_clusters = local_user_clusters(segments, &clusters);
+    // Which cluster is the person using this machine.
+    //
+    // Two sources, in order of how much they can be trusted. The diarization
+    // run compares microphone share *between* clusters and always has an
+    // answer where one exists; the channel-only reading below it needs a
+    // microphone-exclusive utterance to exist at all, which on speakers rather
+    // than headphones it never does. That is the reported failure — a user's
+    // own voice coming back as `Speaker 1` — so the comparison is preferred and
+    // the channel reading is the fallback for a run that could not decide.
+    let local_clusters = diarization
+        .and_then(|d| d.report.local_cluster)
+        .map(|index| vec![index])
+        .unwrap_or_else(|| local_user_clusters(segments, &clusters));
 
     let mut counts: HashMap<String, usize> = HashMap::new();
 
@@ -144,10 +152,11 @@ fn resolve_segment_speaker(
 
 /// Clusters that coincide with microphone-only audio more often than not.
 ///
-/// A diarization run does not know which voice belongs to the person using the
-/// app; the channel does. Intersecting the two is what stops the local user
-/// appearing twice — once as "Me" from the channel and once as a `Speaker N`
-/// from their own cluster.
+/// The fallback reading, used when a diarization run could not decide which
+/// voice is the local user's — or when there was no run at all. It needs a
+/// genuinely microphone-exclusive utterance to exist, which is why it cannot be
+/// the primary: with speakers rather than headphones every utterance registers
+/// both sources and this finds nothing.
 fn local_user_clusters(segments: &[NormalizedSegment], clusters: &HashMap<&str, usize>) -> Vec<usize> {
     let mut mic_hits: HashMap<usize, usize> = HashMap::new();
     let mut other_hits: HashMap<usize, usize> = HashMap::new();
@@ -489,9 +498,12 @@ mod tests {
                 placed_count: clusters.iter().filter(|(_, c)| c.is_some()).count(),
                 unplaced_count: clusters.iter().filter(|(_, c)| c.is_none()).count(),
                 skipped_count: 0,
+                local_cluster: None,
                 well_separated: true,
                 mean_within_distance: 0.2,
                 min_between_distance: 1.4,
+                singleton_speaker_count: 0,
+                silhouette: 0.81,
                 expected_speakers: None,
                 duration_ms: 40,
             },
@@ -804,6 +816,108 @@ mod tests {
             Some(&voices),
         );
         assert!(segments.iter().all(|s| s.speaker_id.is_none()));
+    }
+
+    #[test]
+    fn the_local_user_is_identified_from_relative_microphone_share() {
+        // The reported failure, end to end: a call taken on speakers, where
+        // every utterance registers both sources and nothing is ever cleanly
+        // microphone-only. The channel alone finds no local user and the
+        // roster came back as Speaker 1, Speaker 2, Speaker 3 with no "Me".
+        let raws = vec![
+            raw(0, "Shall we start with the placement numbers", true, true),
+            raw(1, "We closed forty-one this month", true, true),
+            raw(2, "That is ahead of where we were in July", true, true),
+        ];
+        let mut segments = normalize_transcript(&raws, &[]).segments;
+
+        let mut voices = diarization(
+            &[
+                ("seg_00000", Some(0)),
+                ("seg_00001", Some(1)),
+                ("seg_00002", Some(2)),
+            ],
+            3,
+        );
+        // The run compared microphone share and found cluster 0 dominant.
+        voices.report.local_cluster = Some(0);
+
+        let roster = attribute_speakers_with_voices(
+            &mut segments,
+            &[],
+            SpeakerIdentificationMode::Automatic,
+            Some(&voices),
+        );
+
+        assert_eq!(segments[0].speaker_id.as_deref(), Some(SPEAKER_ID_ME));
+        assert_eq!(
+            roster.iter().filter(|s| s.is_local_user).count(),
+            1,
+            "exactly one speaker is the person using this machine: {:?}",
+            roster.iter().map(|s| s.label()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            roster
+                .iter()
+                .filter(|s| !s.is_local_user)
+                .map(|s| s.label())
+                .collect::<Vec<_>>(),
+            vec!["Speaker 1", "Speaker 2"]
+        );
+    }
+
+    #[test]
+    fn a_run_that_could_not_decide_falls_back_to_the_channel() {
+        // In-person, or a meeting the user never spoke in. The channel reading
+        // still applies where a microphone-exclusive utterance exists.
+        let raws = vec![
+            raw(0, "My own voice on the microphone alone", true, false),
+            raw(1, "Somebody arriving through the call", false, true),
+        ];
+        let mut segments = normalize_transcript(&raws, &[]).segments;
+
+        let mut voices = diarization(&[("seg_00000", Some(0)), ("seg_00001", Some(1))], 2);
+        voices.report.local_cluster = None;
+
+        attribute_speakers_with_voices(
+            &mut segments,
+            &[],
+            SpeakerIdentificationMode::Automatic,
+            Some(&voices),
+        );
+
+        assert_eq!(segments[0].speaker_id.as_deref(), Some(SPEAKER_ID_ME));
+        assert_eq!(segments[1].speaker_id.as_deref(), Some(SPEAKER_ID_REMOTE));
+    }
+
+    #[test]
+    fn the_local_user_never_also_appears_as_a_remote_speaker() {
+        let raws = vec![
+            raw(0, "Me talking", true, true),
+            raw(1, "Me again", true, true),
+            raw(2, "Somebody else", true, true),
+        ];
+        let mut segments = normalize_transcript(&raws, &[]).segments;
+        let mut voices = diarization(
+            &[
+                ("seg_00000", Some(0)),
+                ("seg_00001", Some(0)),
+                ("seg_00002", Some(1)),
+            ],
+            2,
+        );
+        voices.report.local_cluster = Some(0);
+
+        let roster = attribute_speakers_with_voices(
+            &mut segments,
+            &[],
+            SpeakerIdentificationMode::Automatic,
+            Some(&voices),
+        );
+
+        assert_eq!(roster.len(), 2);
+        assert_eq!(roster.iter().filter(|s| s.is_local_user).count(), 1);
+        assert_eq!(segments[2].speaker_id.as_deref(), Some(SPEAKER_ID_REMOTE));
     }
 
     #[test]

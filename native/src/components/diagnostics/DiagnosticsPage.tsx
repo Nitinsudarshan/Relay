@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MeetingPipelineDiagnostics } from './MeetingPipelineDiagnostics';
+import { SpeakerEngineComparison } from './SpeakerEngineComparison';
 import { KnowledgeArchitectureDiagnostics } from './KnowledgeArchitectureDiagnostics';
 import {
   AppSettings,
@@ -474,6 +475,7 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
 
       {activeTab === 'meetings' && (
         <div className="space-y-6 animate-in fade-in-50">
+          <SpeakerEngineComparison />
           <MeetingPipelineDiagnostics />
         </div>
       )}

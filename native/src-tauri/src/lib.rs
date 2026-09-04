@@ -1,4 +1,6 @@
 pub mod actions;
+/// Google Calendar: what a meeting was called, who was invited, and what for.
+pub mod calendar;
 pub mod capture;
 pub mod commands;
 pub mod context;
@@ -295,6 +297,13 @@ pub fn run() {
             commands::generate_meeting_v2_summary,
             commands::rename_meeting_v2_speaker,
             commands::identify_meeting_v2_speakers,
+            commands::compare_meeting_v2_speaker_engines,
+            commands::get_calendar_connection,
+            commands::connect_google_calendar,
+            commands::disconnect_google_calendar,
+            commands::link_meeting_v2_to_calendar,
+            commands::set_meeting_v2_calendar_event,
+            commands::get_meeting_v2_calendar_link,
             commands::share_meeting_v2,
             commands::run_meeting_pipeline_selftest,
             commands::get_meeting_v2_transcript_health,

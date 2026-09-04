@@ -518,6 +518,38 @@ const CHANNEL_DOMINANCE_RATIO: f32 = 3.0;
 /// contributes to both neighbours in proportion rather than marking both of them
 /// ambiguous. `(false, false)` means the span was silent or fell outside the
 /// track; the caller decides what to do with that.
+/// Mean loudness of each source across one utterance's span.
+///
+/// Returned alongside the audible/not verdict because the verdict alone cannot
+/// answer "whose voice is this": with speakers rather than headphones both
+/// sources register on nearly every utterance, and only their *relative*
+/// loudness separates the person at this machine from the people on the call.
+pub fn utterance_channel_energy(
+    track: &[ChannelEnergy],
+    start_offset_s: f64,
+    end_offset_s: f64,
+) -> (f32, f32) {
+    let mut mic_weighted = 0.0_f64;
+    let mut sys_weighted = 0.0_f64;
+    let mut weight = 0.0_f64;
+
+    for bucket in track {
+        let bucket_end = bucket.offset_s + bucket.duration_s;
+        let overlap = end_offset_s.min(bucket_end) - start_offset_s.max(bucket.offset_s);
+        if overlap <= 0.0 {
+            continue;
+        }
+        mic_weighted += bucket.mic_rms as f64 * overlap;
+        sys_weighted += bucket.sys_rms as f64 * overlap;
+        weight += overlap;
+    }
+
+    if weight <= 0.0 {
+        return (0.0, 0.0);
+    }
+    ((mic_weighted / weight) as f32, (sys_weighted / weight) as f32)
+}
+
 pub fn resolve_utterance_channel(
     track: &[ChannelEnergy],
     start_offset_s: f64,

@@ -2224,6 +2224,8 @@ fn meeting_processing_options(
         },
         diarize_speakers: settings.meetings.identify_individual_speakers,
         expected_speakers: settings.meetings.expected_speakers.filter(|&n| n > 0),
+        diarization_engine: settings.meetings.diarization_engine,
+        assume_in_person: settings.meetings.meetings_are_in_person,
         summary_mode: summary_mode.map(SummaryMode::parse).unwrap_or(default_mode),
         extension_id: extension_id
             .filter(|id| !id.trim().is_empty())
@@ -2519,6 +2521,240 @@ pub async fn run_meeting_pipeline_selftest(
     })
     .await
     .map_err(|e| CommandError::new("MEETING_SELFTEST_FAILED", &e.to_string()))
+}
+
+/// Whether Relay can read the calendar, and as whom.
+#[tauri::command]
+pub async fn get_calendar_connection(
+    state: State<'_, AppState>,
+) -> Result<crate::calendar::CalendarConnection, CommandError> {
+    use crate::oauth::{KeyringTokenStore, TokenNamespace};
+
+    Ok(
+        match KeyringTokenStore::load(&state.config_dir, TokenNamespace::Calendar) {
+            Some(tokens) => crate::calendar::CalendarConnection {
+                connected: true,
+                account_email: tokens.account_email,
+                account_name: tokens.account_name,
+                // A stored grant with no refresh token stops working at the
+                // next expiry and cannot recover on its own. Saying so now
+                // beats a confusing failure later.
+                problem: tokens.refresh_token.is_none().then(|| {
+                    "This connection cannot renew itself and will stop working. Reconnect it."
+                        .to_string()
+                }),
+            },
+            None => crate::calendar::CalendarConnection::disconnected(),
+        },
+    )
+}
+
+/// Connects Google Calendar, read-only.
+///
+/// A separate grant from the identity sign-in, and a separate scope: reading
+/// somebody's calendar is a bigger ask than knowing their email, and bundling
+/// the two would mean anyone signing in hands over their schedule.
+#[tauri::command]
+pub async fn connect_google_calendar(
+    state: State<'_, AppState>,
+) -> Result<crate::calendar::CalendarConnection, CommandError> {
+    use crate::oauth::{
+        start_desktop_oauth_flow, KeyringTokenStore, TokenNamespace, SCOPE_CALENDAR_READONLY,
+    };
+
+    let result = start_desktop_oauth_flow(None, None, SCOPE_CALENDAR_READONLY)
+        .await
+        .map_err(|e| CommandError::new("CALENDAR_CONNECT_FAILED", &e))?;
+
+    KeyringTokenStore::save(&state.config_dir, TokenNamespace::Calendar, &result.tokens)
+        .map_err(|e| CommandError::new("CALENDAR_TOKEN_SAVE_FAILED", &e))?;
+
+    Ok(crate::calendar::CalendarConnection {
+        connected: true,
+        account_email: result.tokens.account_email.clone(),
+        account_name: result.tokens.account_name.clone(),
+        problem: None,
+    })
+}
+
+/// Forgets the calendar connection.
+///
+/// Deletes the stored grant. Events already matched to meetings stay, because
+/// they are a record of what happened rather than live data — disconnecting
+/// should not rewrite past meetings.
+#[tauri::command]
+pub async fn disconnect_google_calendar(
+    state: State<'_, AppState>,
+) -> Result<crate::calendar::CalendarConnection, CommandError> {
+    use crate::oauth::{KeyringTokenStore, TokenNamespace};
+
+    KeyringTokenStore::delete(&state.config_dir, TokenNamespace::Calendar)
+        .map_err(|e| CommandError::new("CALENDAR_DISCONNECT_FAILED", &e))?;
+    Ok(crate::calendar::CalendarConnection::disconnected())
+}
+
+/// Matches a recording to the calendar event it was, and stores the link.
+///
+/// Scores the events overlapping the recording rather than taking the first
+/// that contains its start time, and refuses to choose between two that fit
+/// equally well: a wrong match retitles the meeting and fills its participant
+/// list with people who were not there.
+#[tauri::command]
+pub async fn link_meeting_v2_to_calendar(
+    app: AppHandle,
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::calendar::MeetingCalendarLink, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+
+    let sessions = state.meetings_v2.store();
+    let session = sessions
+        .get_session(&session_id)
+        .map_err(|e| CommandError::new("MEETING_NOT_FOUND", &e))?;
+
+    let started = session
+        .started_at
+        .as_deref()
+        .and_then(|raw| chrono::DateTime::parse_from_rfc3339(raw).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .ok_or_else(|| {
+            CommandError::new(
+                "MEETING_HAS_NO_START",
+                "This recording has no start time, so it cannot be matched to an event.",
+            )
+        })?;
+    let ended = started + chrono::Duration::seconds(session.duration_seconds.max(1.0) as i64);
+
+    // A window either side, so a recording started before the invitation or
+    // running past it still sees the event it belongs to.
+    let events = crate::calendar::google::events_between(
+        &state.config_dir,
+        started - chrono::Duration::hours(2),
+        ended + chrono::Duration::hours(2),
+    )
+    .await
+    .map_err(|e| CommandError::new("CALENDAR_READ_FAILED", &e))?;
+
+    let link = crate::calendar::MeetingCalendarLink {
+        outcome: crate::calendar::match_recording(&events, started, ended),
+        linked_at: chrono::Utc::now().to_rfc3339(),
+        chosen_by_user: false,
+    };
+    sessions
+        .save_calendar_link(&session_id, &link)
+        .map_err(|e| CommandError::new("CALENDAR_LINK_SAVE_FAILED", &e))?;
+
+    reprepare_after_directive_change(&app, &state, &session_id);
+    Ok(link)
+}
+
+/// Pins a meeting to a specific event the user chose.
+///
+/// The answer to an ambiguous match, and to a wrong one. Passing no event id
+/// clears the link entirely.
+#[tauri::command]
+pub async fn set_meeting_v2_calendar_event(
+    app: AppHandle,
+    session_id: String,
+    event_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::calendar::MeetingCalendarLink>, CommandError> {
+    use crate::calendar::{EventMatch, MatchOutcome};
+
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+    let sessions = state.meetings_v2.store();
+
+    let Some(event_id) = event_id.filter(|id| !id.trim().is_empty()) else {
+        sessions
+            .clear_calendar_link(&session_id)
+            .map_err(|e| CommandError::new("CALENDAR_LINK_CLEAR_FAILED", &e))?;
+        reprepare_after_directive_change(&app, &state, &session_id);
+        return Ok(None);
+    };
+
+    // The candidates from the last match attempt are what the user is choosing
+    // between, so the pick needs no second call to Google.
+    let existing = sessions.get_calendar_link(&session_id).ok_or_else(|| {
+        CommandError::new(
+            "NO_CALENDAR_CANDIDATES",
+            "Match this meeting to the calendar first, then choose from what it found.",
+        )
+    })?;
+
+    let chosen: Option<EventMatch> = match &existing.outcome {
+        MatchOutcome::Matched(found) if found.event.id == event_id => Some(found.clone()),
+        MatchOutcome::None { candidates, .. } => candidates
+            .iter()
+            .find(|c| c.event.id == event_id)
+            .cloned(),
+        _ => None,
+    };
+
+    let chosen = chosen.ok_or_else(|| {
+        CommandError::new(
+            "UNKNOWN_CALENDAR_EVENT",
+            "That event was not among the ones found for this recording.",
+        )
+    })?;
+
+    let link = crate::calendar::MeetingCalendarLink {
+        outcome: MatchOutcome::Matched(chosen),
+        linked_at: chrono::Utc::now().to_rfc3339(),
+        chosen_by_user: true,
+    };
+    sessions
+        .save_calendar_link(&session_id, &link)
+        .map_err(|e| CommandError::new("CALENDAR_LINK_SAVE_FAILED", &e))?;
+
+    reprepare_after_directive_change(&app, &state, &session_id);
+    Ok(Some(link))
+}
+
+/// The calendar link a meeting already has, if any.
+#[tauri::command]
+pub async fn get_meeting_v2_calendar_link(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::calendar::MeetingCalendarLink>, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+    Ok(state.meetings_v2.store().get_calendar_link(&session_id))
+}
+
+/// Runs every speaker-separation method over one recording and reports each.
+///
+/// The answer to "which of these actually works" without holding three
+/// meetings to find out. Reads the stored audio and the transcript; writes
+/// nothing, so running it can never make a meeting worse.
+#[tauri::command]
+pub async fn compare_meeting_v2_speaker_engines(
+    session_id: String,
+    expected_speakers: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::diarize::engine::EngineComparison, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+
+    let mut options = {
+        let settings = state.settings.lock_or_recover();
+        meeting_processing_options(&settings, None, None)
+    };
+    if let Some(count) = expected_speakers.filter(|&n| n > 0) {
+        options.expected_speakers = Some(count);
+    }
+
+    let processor = state.meeting_processor.clone();
+    // Three passes over the recorded audio: CPU-bound, and not the async
+    // runtime's work.
+    tauri::async_runtime::spawn_blocking(move || processor.compare_engines(&session_id, &options))
+        .await
+        .map_err(|e| CommandError::new("COMPARE_ENGINES_FAILED", &e.to_string()))
 }
 
 /// A meeting's transcript health: what became of every recorded chunk.
