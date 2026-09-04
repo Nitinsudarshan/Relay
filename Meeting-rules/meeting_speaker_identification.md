@@ -17,8 +17,17 @@ Two things are deliberately kept separate throughout:
 Conflating them is the most common design error. Diarization can succeed completely while identification fails, and the UI must be able to show that state honestly.
 
 > [!NOTE]
-> **What is implemented today** (v0.31.0). Rungs **1**, **4**, **5** and **6**
+> **What is implemented today** (v0.33.0). Rungs **1**, **4**, **5** and **6**
 > are built. Rungs 2 and 3 are not.
+>
+> **v0.31.0 shipped rung 4 broken**, and the correction is worth reading before
+> the description below: a three-person meeting reported one speaker, because
+> the split threshold was calibrated against synthetic voices an octave apart
+> and sat above every distance real speech produces. See
+> `docs/meetings/TRANSCRIPT_AND_SPEAKER_REBUILD.md` §2.0. Two things changed as
+> a result — the count is now chosen by scoring partitions rather than by any
+> threshold, and §3's identification is a *comparison* of three methods over one
+> recording rather than a single implementation judged by holding meetings.
 >
 > - **Rung 1 — channel** (`processing/speakers.rs`): microphone input is the
 >   local user (`speaker_me`), system audio is everyone else. Always on, and it
@@ -30,10 +39,17 @@ Conflating them is the most common design error. Diarization can succeed complet
 >   `Speaker 1`, `Speaker 2`, … Features are MFCC statistics plus a pitch
 >   estimate, **not** a neural embedding, so no biometric data is created:
 >   features live for the duration of one run and are never stored or matched
->   across meetings. What that costs is stated in the module's own docs and
->   tracked as `maybe_later.md` item 18 — two similar voices on one channel are
->   beyond it, and `DiarizationReport::well_separated` is how the UI knows to
->   present such a roster as provisional rather than as fact.
+>   across meetings. Three engines implement the decision — channel only,
+>   whole-recording clustering, and a registry built live as chunks land — and
+>   §3's identification command can run all of them over one recording for
+>   comparison.
+>
+>   The limitation is measured rather than asserted: two deliberately similar
+>   voices score the same as one voice wandering across a meeting, so they
+>   cannot be told apart at all, and Relay merges them rather than risk
+>   inventing a speaker. §2.2's expected-speaker count is the override, and it
+>   recovers the correct split. `maybe_later.md` item 18 tracks the neural
+>   embedding that would resolve it.
 > - **Rung 5 — contextual inference** (`processing/names.rs`): deterministic
 >   patterns over self-introductions and direct address, deliberately *not* the
 >   model pass §4 specifies. A model asked who Speaker 2 is will always produce
@@ -64,8 +80,15 @@ Conflating them is the most common design error. Diarization can succeed complet
 > exists as the **Identify speakers** action in the conversation tab, with its
 > own expected-speaker field.
 >
-> Also outstanding from §2.2: the **In person** marking that would disable rung
-> 1 and make diarization the primary path.
+> §2.2's **In person** marking is built as a setting: it disables the local-user
+> inference, because the channel split that identifies the person at this
+> machine means nothing when every voice arrives on one microphone, and a guess
+> there mislabels whoever it lands on.
+>
+> §2.3's states are all reachable: a name a person typed is marked confirmed, a
+> cluster nobody has named shows as `Speaker N`, a roster the clustering is
+> unsure of is reported as provisional, and a stretch that could not be placed
+> is left blank.
 
 
 ---

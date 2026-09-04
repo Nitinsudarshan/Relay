@@ -527,6 +527,22 @@ pub struct MeetingSettings {
     /// three on the recording still yields three.
     #[serde(default, alias = "expectedSpeakers")]
     pub expected_speakers: Option<usize>,
+    /// Which method decides who spoke.
+    ///
+    /// A setting rather than a constant because speaker identity is the part of
+    /// this feature that has been hardest to get right, and the three methods
+    /// fail differently — a user whose meetings the default handles badly can
+    /// switch rather than wait. Diagnostics can run all three over one
+    /// recording to make that choice on evidence.
+    #[serde(default, alias = "diarizationEngine")]
+    pub diarization_engine: crate::meetings_v2::diarize::engine::DiarizationEngine,
+    /// Whether meetings are recorded with everybody sharing one microphone.
+    ///
+    /// Turns off the local-user inference, because the channel split that finds
+    /// the person at this machine means nothing when every voice arrives on the
+    /// same input — and a guess there mislabels whoever it lands on.
+    #[serde(default, alias = "meetingsAreInPerson")]
+    pub meetings_are_in_person: bool,
     /// The user's own extensions. The shipped ones live in code and are always
     /// available; this list only adds to them.
     #[serde(default)]
@@ -563,6 +579,8 @@ impl Default for MeetingSettings {
             speaker_identification: SpeakerIdentification::default(),
             identify_individual_speakers: true,
             expected_speakers: None,
+            diarization_engine: Default::default(),
+            meetings_are_in_person: false,
             extensions: Vec::new(),
             summary_instructions: String::new(),
         }

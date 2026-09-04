@@ -1,5 +1,31 @@
 # Relay — Changelog
 
+## [0.33.0] - 2026-09-04
+
+### Speaker Separation Rebuilt — Realistic Calibration, Live Speakers, and Three Comparable Engines
+
+**Type**: minor — the speaker-identity half of meetings rebuilt after it shipped broken: a three-person meeting reported "1 spoke · Speaker 1 100%", and the user's own voice was labelled a remote speaker. Both failures came from calibrating against fixtures that did not resemble speech (`native/src-tauri/src/meetings_v2/diarize/*`, `native/src-tauri/src/meetings_v2/worker.rs`, `native/src-tauri/src/meetings_v2/types.rs`, `native/src-tauri/src/meetings_v2/capture.rs`, `native/src-tauri/src/meetings_v2/processing/speakers.rs`, `native/src-tauri/src/meetings_v2/processing/mod.rs`, `native/src-tauri/src/settings/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`, `native/src/types/index.ts`, `native/src/components/diagnostics/SpeakerEngineComparison.tsx`, `native/src/components/settings/MeetingsSettings.tsx`).
+
+#### Fixes
+
+- **Three people no longer report as one speaker (`diarize/cluster.rs`, `diarize/fixtures.rs`)**: The split threshold shipped at 2.0, calibrated against synthetic voices an octave apart which sat 5.7 apart in feature space. Measured against voices shaped like real ones — conversational pitch spread, overlapping formants, one shared recording chain — different people sit at 0.55–1.47 and the same person at 0.03–0.42. The threshold was above every distance real speech produces and could never split anything. `diarize::fixtures` makes that measurement permanent and is now what every engine is calibrated against.
+- **The threshold is gone rather than retuned**: two replacements failed first, and both are recorded in the source because the reasons generalise. A floor derived from the cheapest merges underestimates how far one voice wanders across a meeting (0.42 against an estimate of 0.10, so one person split into three); an elbow ratio rejects the correct answer for two similar voices, whose crossing is only a 1.37× step. The count is now chosen by scoring each candidate partition with a silhouette — scale-free, so it needs no calibration against a microphone, a room or a codec.
+- **A known limitation, stated rather than hidden**: one voice that wanders scores 0.52–0.57 and two deliberately similar voices score 0.54. Nothing separates them, because with cepstral features they are not separable. The bar sits at 0.70, which merges the similar pair rather than risking splitting one person in two — "Speaker 2 said both of these" is wrong, legible and recoverable with the expected-speaker count, whereas an invented speaker puts a name on somebody else's commitments. Both behaviours are pinned by tests.
+- **"Me" is identified again (`diarize/mod.rs`, `processing/speakers.rs`, `capture.rs`, `types.rs`)**: the old rule needed an utterance the microphone heard *exclusively*, which on speakers rather than headphones never happens — so nothing resolved to the local user and their own voice became `Speaker 1`. Utterances now carry the measured energy of each source, and the cluster with the highest microphone share is the user, which always has an answer. Where no voice stands out, it reports nobody rather than mislabelling whoever it landed on.
+- **The speaker cap no longer reintroduces the original bug**: a recording holding more voices than the search can consider is capped, not collapsed to one.
+
+#### Features
+
+- **Speakers are assigned live, on every chunk (`diarize/incremental.rs`, `worker.rs`)**: the recorder keeps a running speaker registry, so a 30-second chunk carries who spoke as it lands rather than the conversation existing only after the recording ends. Identity stays global — a voice heard in chunk 1 and again in chunk 40 is one person, which per-chunk clustering could not express. The threshold self-calibrates from the same-speaker distances observed so far. The post-hoc pass still runs and may overrule it: online sees less evidence, and the summary is built from the better answer.
+- **Three swappable engines (`diarize/engine.rs`)**: `Channel` (which input carried the sound — free, and everyone remote shares one label), `Voiceprint` (clustering the whole recording after it ends — the most accurate, and what summaries use), and `Live` (the running registry — available during the call, less certain). Selectable in Settings › Meetings.
+- **Compare all three on one recording (`SpeakerEngineComparison.tsx`, `compare_meeting_v2_speaker_engines`)**: the reason two wrong implementations shipped is that judging speaker separation meant holding a new meeting per attempt. Diagnostics now runs every method over a recording the user already has and shows the answers side by side, with the shape of each (`turns per speaker: 6 3` versus `3 3 3`), who it thinks the user is, and whether it is confident. Reads stored audio; writes nothing.
+- **In-person mode (`settings/mod.rs`)**: for meetings held in a room, where every voice arrives on one microphone. Turns off the local-user inference rather than guessing which voice is the user's.
+
+#### Testing
+
+- **Backend — 1117 tests (from 1107), `cargo clippy --all-targets -- -D warnings` clean.** `diarize::fixtures` provides voices that behave like real ones and is the shared ground truth; `cluster` covers three voices separating, one wandering voice staying one, similar voices merging, the expected count recovering a forced split, and the ceiling not collapsing; `incremental` covers a registry finding three voices as they arrive and identifying the local user by comparison; `engine` covers all three methods over one on-disk recording and the comparison reporting a method that could not run rather than dropping it.
+- **Frontend — 417 tests (from 409), `tsc --noEmit` clean.** New suite for the comparison view, including that a confident roster reads differently from one worth checking.
+
 ## [0.32.0] - 2026-09-04
 
 ### Foundation Roadmap 11–20: Retrieval, Relationships, Entities, Memory, Context Packs & Universal Actions

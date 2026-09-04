@@ -2223,6 +2223,8 @@ fn meeting_processing_options(
         },
         diarize_speakers: settings.meetings.identify_individual_speakers,
         expected_speakers: settings.meetings.expected_speakers.filter(|&n| n > 0),
+        diarization_engine: settings.meetings.diarization_engine,
+        assume_in_person: settings.meetings.meetings_are_in_person,
         summary_mode: summary_mode.map(SummaryMode::parse).unwrap_or(default_mode),
         extension_id: extension_id
             .filter(|id| !id.trim().is_empty())
@@ -2518,6 +2520,37 @@ pub async fn run_meeting_pipeline_selftest(
     })
     .await
     .map_err(|e| CommandError::new("MEETING_SELFTEST_FAILED", &e.to_string()))
+}
+
+/// Runs every speaker-separation method over one recording and reports each.
+///
+/// The answer to "which of these actually works" without holding three
+/// meetings to find out. Reads the stored audio and the transcript; writes
+/// nothing, so running it can never make a meeting worse.
+#[tauri::command]
+pub async fn compare_meeting_v2_speaker_engines(
+    session_id: String,
+    expected_speakers: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<crate::meetings_v2::diarize::engine::EngineComparison, CommandError> {
+    if session_id.trim().is_empty() {
+        return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
+    }
+
+    let mut options = {
+        let settings = state.settings.lock_or_recover();
+        meeting_processing_options(&settings, None, None)
+    };
+    if let Some(count) = expected_speakers.filter(|&n| n > 0) {
+        options.expected_speakers = Some(count);
+    }
+
+    let processor = state.meeting_processor.clone();
+    // Three passes over the recorded audio: CPU-bound, and not the async
+    // runtime's work.
+    tauri::async_runtime::spawn_blocking(move || processor.compare_engines(&session_id, &options))
+        .await
+        .map_err(|e| CommandError::new("COMPARE_ENGINES_FAILED", &e.to_string()))
 }
 
 /// A meeting's transcript health: what became of every recorded chunk.

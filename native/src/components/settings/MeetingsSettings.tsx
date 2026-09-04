@@ -4,6 +4,7 @@ import { Switch } from '@/components/ui/switch';
 import type {
   AppSettings,
   DefaultSummaryModeSetting,
+  DiarizationEngineId,
   MeetingExtensionSetting,
   MeetingSettings,
   SpeakerIdentificationSetting,
@@ -24,6 +25,8 @@ export const DEFAULT_MEETING_SETTINGS: MeetingSettings = {
   speaker_identification: 'automatic',
   identify_individual_speakers: true,
   expected_speakers: null,
+  diarization_engine: 'VOICEPRINT',
+  meetings_are_in_person: false,
   extensions: [],
   summary_instructions: '',
 };
@@ -211,6 +214,60 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
             aria-label="Separate individual speakers"
           />
         </div>
+
+        {meetings.identify_individual_speakers &&
+          meetings.speaker_identification !== 'off' && (
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-medium text-foreground">
+                  How speakers are told apart
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Three methods, because they fail differently. Diagnostics ›
+                  Meeting Pipeline runs all three over one recording so this can
+                  be chosen on evidence rather than guesswork.
+                </p>
+              </div>
+              <select
+                value={meetings.diarization_engine ?? 'VOICEPRINT'}
+                onChange={(e) =>
+                  update({
+                    diarization_engine: e.target.value as DiarizationEngineId,
+                  })
+                }
+                className="text-xs bg-input border border-border rounded-md px-2 py-1.5 text-foreground"
+                aria-label="How speakers are told apart"
+              >
+                <option value="VOICEPRINT">Voice separation</option>
+                <option value="LIVE">Live (as recorded)</option>
+                <option value="CHANNEL">Channel only</option>
+              </select>
+            </div>
+          )}
+
+        {meetings.speaker_identification !== 'off' && (
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-medium text-foreground">
+                Everyone shares one microphone
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                For meetings held in a room rather than on a call. Relay stops
+                trying to work out which voice is yours, because the channel
+                split that normally finds it means nothing when every voice
+                arrives on the same input — name yourself in the conversation
+                tab instead.
+              </p>
+            </div>
+            <Switch
+              checked={meetings.meetings_are_in_person ?? false}
+              onCheckedChange={(checked) =>
+                update({ meetings_are_in_person: checked })
+              }
+              aria-label="Everyone shares one microphone"
+            />
+          </div>
+        )}
 
         {meetings.identify_individual_speakers &&
           meetings.speaker_identification !== 'off' && (

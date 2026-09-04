@@ -28,6 +28,9 @@
 //!   channel are beyond what MFCC statistics can resolve.
 
 pub mod cluster;
+/// The three ways Relay can decide who spoke, and a way to compare them on one
+/// recording rather than by holding another meeting.
+pub mod engine;
 pub mod features;
 /// Speaker assignment while a meeting is still being recorded.
 pub mod incremental;
@@ -341,7 +344,7 @@ fn local_cluster_from_mic_share(
 
 /// One stretch of audio to characterise, located within its chunk.
 #[derive(Debug, Clone, PartialEq)]
-struct UtteranceSpan {
+pub(crate) struct UtteranceSpan {
     segment_id: String,
     chunk_index: usize,
     /// Session-clock bounds, as the transcript records them.
@@ -361,7 +364,7 @@ struct UtteranceSpan {
 /// back to the whole chunk where it did not — a pre-v2.5 transcript, or a chunk
 /// Whisper returned no timed spans for. Rejected and empty chunks are skipped:
 /// there is no voice in them to attribute.
-fn collect_spans(segments: &[TranscriptSegment]) -> Vec<UtteranceSpan> {
+pub(crate) fn collect_spans(segments: &[TranscriptSegment]) -> Vec<UtteranceSpan> {
     let mut spans = Vec::new();
 
     for segment in segments {
@@ -408,7 +411,7 @@ fn collect_spans(segments: &[TranscriptSegment]) -> Vec<UtteranceSpan> {
 
 /// The samples covering one span, or `None` when the span falls outside the
 /// audio that was actually written.
-fn slice_for<'a>(samples: &'a [f32], span: &UtteranceSpan) -> Option<&'a [f32]> {
+pub(crate) fn slice_for<'a>(samples: &'a [f32], span: &UtteranceSpan) -> Option<&'a [f32]> {
     let start = (span.offset_in_chunk_s * 16_000.0) as usize;
     let len = (span.duration_s * 16_000.0) as usize;
     if start >= samples.len() || len == 0 {
@@ -420,7 +423,7 @@ fn slice_for<'a>(samples: &'a [f32], span: &UtteranceSpan) -> Option<&'a [f32]> 
 }
 
 /// Reads a 16-bit mono chunk WAV back into normalized floats.
-fn read_chunk_samples(path: &Path) -> Result<Vec<f32>, String> {
+pub(crate) fn read_chunk_samples(path: &Path) -> Result<Vec<f32>, String> {
     let mut reader = WavReader::open(path).map_err(|e| e.to_string())?;
     Ok(reader
         .samples::<i16>()

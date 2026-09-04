@@ -186,6 +186,34 @@ The zeroth cepstral coefficient is dropped, which is not incidental: it is
 total log energy, so keeping it would make somebody leaning toward the
 microphone read as a new person.
 
+### 2.0 It shipped broken, and why
+
+Everything in §2 below was written against v0.31.0 and describes a build that
+did not work. A three-person meeting reported `1 spoke · Speaker 1 100%`, and
+the local user was one of the voices labelled as remote. Both failures trace to
+one mistake, recorded here because it is the more useful lesson than any of the
+code:
+
+**The fixtures were not speech.** They were sine stacks an octave apart with
+formants scaled by 55%, which put two "different speakers" 5.7 apart. Every
+threshold separates voices that different. Measured against fixtures shaped
+like real ones — conversational pitch spread, overlapping formants, one shared
+recording chain — the real numbers are:
+
+| | distance |
+|---|---|
+| Same speaker, across a meeting | 0.031 – 0.422 |
+| Different speakers | 0.546 – 1.467 |
+| **The shipped threshold** | **2.0** |
+
+The threshold sat above every distance real speech produces. It could not split
+anything, ever, and no test said so because every test used the fixtures that
+made it look right.
+
+`diarize::fixtures` exists so that cannot recur. It is the shared ground truth
+for every engine, its header records why the previous calibration was wrong, and
+the numbers above are asserted rather than remembered.
+
 ### 2.1 Two designs that were wrong before the third
 
 **Cosine distance on per-meeting normalized features.** The first draft
@@ -235,18 +263,98 @@ whereas a split invents somebody who was never in the room. The constant's doc
 comment records this measurement so the next person to touch it knows how to
 recalibrate.
 
+### 2.1a And two more that were wrong after it
+
+Replacing the fixed floor took three attempts, and the failures are worth
+keeping because each was a reasonable idea that measurement killed.
+
+**A floor derived from the cheapest merges.** Estimate the within-speaker
+scatter from the tightest merges in the recording, require a multiple of it.
+Scale-free, self-calibrating, and wrong: the cheapest merges describe a
+speaker's *most similar* pair of utterances, not their spread. Measured through
+the real recording path, one person spans 0.031–0.422 while the estimate
+suggests 0.10 — so one voice split into three.
+
+**An elbow ratio as a second gate.** Require the crossing merge to be a sharp
+step up from the one before it. Correct for ordinary voices, and it vetoes the
+right answer for two similar ones, whose crossing is a 1.37× step.
+
+**What survived: scoring the partitions.** The question is not how big any
+distance is. It is whether the resulting groups are tighter inside than they are
+apart — a silhouette. Scale-free, standard, and it needs no calibration against
+a microphone, a room, or a codec. Measured:
+
+| recording | best score |
+|---|---|
+| one voice across a meeting | 0.52 – 0.57 |
+| **two deliberately similar voices** | **0.54** |
+| two ordinary voices | 0.89 |
+| three ordinary voices | 0.90 |
+
+One wandering voice and two similar voices score the same. **No threshold
+separates them**, because with cepstral features they are not separable — that
+is a property of the features, and moving the bar only chooses which mistake to
+make.
+
+The bar sits at 0.70, making the safer mistake. Merging two similar voices reads
+as "Speaker 2 said both of these": wrong, legible, and recoverable, because the
+expected-speaker count forces the split. Splitting one person in two invents
+somebody who was never in the room, attaches their name to commitments, and
+leaves the user nothing to correct. A neural speaker embedding is what actually
+resolves the ambiguity (`maybe_later.md` item 18); until then this fails toward
+the answer a person can fix.
+
 ### 2.2 Rung 1 still wins for the local user
 
 Where the channel and a cluster disagree about the *local* user, the channel
 wins: it is what the audio device reported, and a cluster is an inference about
 it.
 
-There is a subtler problem. The local user's voice also arrives through the
-loopback in many setups, so it forms a cluster of its own — and without
-intersecting the two sources, the user appears twice: once as "Me" from the
-channel and once as a `Speaker N` from their own voice.
-`local_user_clusters` resolves it by majority: the cluster that most often
-coincides with microphone-only audio is the local user's. A test pins it.
+There is a subtler problem, and v0.31.0 got it wrong. The rule required an
+utterance the microphone heard *exclusively*. On a laptop using speakers rather
+than headphones, the microphone picks up the remote party on every utterance, so
+that condition is never met — nothing resolved to the local user, and their own
+voice came back as `Speaker 1`.
+
+A threshold was the wrong instrument. Utterances now carry the measured energy
+of each source, and the local user is the cluster with the highest microphone
+*share* relative to the others. A comparison always has an answer where a
+threshold may never be crossed. Where no cluster stands out — one microphone in
+a room — it reports nobody, because a coin flip about which voice is the user's
+attaches their name to somebody else's commitments.
+
+### 2.3 Speakers while the meeting is still running
+
+Diarization ran only after a recording finished, so a 30-second chunk carried no
+speaker information and the readable conversation could not exist until the end.
+
+The obvious reading of "do it live" — cluster each chunk on its own — is worse
+than doing nothing: a speaker found in chunk 1 and the same speaker in chunk 40
+would be different people as far as the data is concerned. Identity has to be
+global even when the decision is local. `diarize::incremental` keeps a running
+registry; each new utterance either joins a speaker heard before or opens a new
+one, and the threshold self-calibrates from the same-speaker distances observed
+so far.
+
+What it costs, stated plainly: an online decision sees less evidence than a
+global one, and early utterances are placed against a nearly empty registry.
+The post-hoc pass still runs and is allowed to overrule it. Live assignment is
+for watching the meeting happen; the global pass is what the summary is built
+from.
+
+### 2.4 Three engines, comparable on one recording
+
+Speaker identity has been wrong twice, and both times the reason was the test
+loop: judging it meant holding a real meeting and reading the result. One
+recording, one answer, no way to tell whether a different approach would have
+done better on the *same* audio.
+
+So the decision is a swappable engine — `Channel`, `Voiceprint`, `Live` — and
+Diagnostics runs all three over one recording the user already has. They share
+the feature extraction and the audio path deliberately: what differs is only the
+decision, which is the thing under test. An engine that cannot run is reported
+as failed rather than omitted, because "this one could not run" is a comparison
+result.
 
 Cluster 0 maps to `speaker_1` rather than `speaker_2`, so a name the user gave
 before diarization existed survives running it.

@@ -293,6 +293,7 @@ pub fn run() {
             commands::generate_meeting_v2_summary,
             commands::rename_meeting_v2_speaker,
             commands::identify_meeting_v2_speakers,
+            commands::compare_meeting_v2_speaker_engines,
             commands::share_meeting_v2,
             commands::run_meeting_pipeline_selftest,
             commands::get_meeting_v2_transcript_health,

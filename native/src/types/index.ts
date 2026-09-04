@@ -743,6 +743,14 @@ export interface MeetingSettings {
    * it out. Setting it cannot invent a speaker the audio does not support.
    */
   expected_speakers?: number | null;
+  /** Which method decides who spoke. */
+  diarization_engine?: DiarizationEngineId;
+  /**
+   * Meetings are recorded with everybody sharing one microphone. Turns off the
+   * local-user inference, because the channel split that finds the person at
+   * this machine means nothing when every voice arrives on the same input.
+   */
+  meetings_are_in_person?: boolean;
   extensions: MeetingExtensionSetting[];
   /**
    * Standing instructions for how summaries should read. Presentation only —
@@ -1463,6 +1471,40 @@ export interface VoiceAssignment {
 export interface Diarization {
   report: DiarizationReport;
   assignments: VoiceAssignment[];
+}
+
+/**
+ * Which method decides who spoke.
+ *
+ * Three, and selectable, because speaker identity is the part of meetings that
+ * has been hardest to get right and they fail differently. `CHANNEL` reads only
+ * which input carried the sound, so everyone remote shares one label.
+ * `VOICEPRINT` clusters the whole recording after it ends — the most accurate,
+ * and what summaries are built from. `LIVE` is the registry the recorder builds
+ * as chunks land: available during the call, less certain.
+ */
+export type DiarizationEngineId = 'CHANNEL' | 'VOICEPRINT' | 'LIVE';
+
+/** One engine's answer for a recording, with enough detail to compare it. */
+export interface EngineOutcome {
+  engine: DiarizationEngineId;
+  id: string;
+  label: string;
+  summary: string;
+  diarization: Diarization;
+  /** Utterances per speaker, largest first — the shape of the answer at a glance. */
+  speaker_sizes: number[];
+  /** Set when the engine could not run. Reported rather than the row being dropped. */
+  error?: string | null;
+}
+
+/** Every engine's answer for one recording. */
+export interface EngineComparison {
+  meeting_id: string;
+  outcomes: EngineOutcome[];
+  /** The engine in force now, so the comparison says what is used as well as what is possible. */
+  active: DiarizationEngineId;
+  expected_speakers?: number | null;
 }
 
 /** How a participant came to be on the list. */
