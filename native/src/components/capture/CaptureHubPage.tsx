@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Scribble } from '../../types';
+import { AppSettings, Scribble } from '../../types';
 import {
   Mic,
   FileText,
@@ -19,16 +19,25 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
+/**
+ * The capture methods this hub can open on. `voice` is deliberately absent:
+ * dictation is a global hotkey and a separate surface, not a panel here.
+ */
+export type CaptureMethod = 'text' | 'file' | 'clipboard';
+
 interface CaptureHubPageProps {
   onCaptureSuccess: (scribble: Scribble) => void;
   onNavigateToScribbles: () => void;
+  /** Method to open on. Set by a Home shortcut card; defaults to typed text. */
+  initialMethod?: CaptureMethod | null;
 }
 
 export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
   onCaptureSuccess,
   onNavigateToScribbles,
+  initialMethod = null,
 }) => {
-  const [selectedMethod, setSelectedMethod] = useState<'text' | 'file' | 'clipboard'>('text');
+  const [selectedMethod, setSelectedMethod] = useState<CaptureMethod>(initialMethod ?? 'text');
   const [textContent, setTextContent] = useState('');
   const [textTitle, setTextTitle] = useState('');
   const [topicInput, setTopicInput] = useState('');
@@ -37,6 +46,16 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
   const [lastCaptured, setLastCaptured] = useState<Scribble | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // The accelerator is read rather than assumed: it is user-configurable, and a
+  // card that names the wrong key is worse than one that names none.
+  const [dictationHotkey, setDictationHotkey] = useState<string | null>(null);
+
+  useEffect(() => {
+    invoke<AppSettings>('get_settings')
+      .then((s) => setDictationHotkey(s?.hotkeys?.dictation_hotkey ?? null))
+      .catch(() => setDictationHotkey(null));
+  }, []);
 
   const handleAddTopic = () => {
     const trimmed = topicInput.trim();
@@ -135,7 +154,7 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
           </div>
           <div className="pt-1">
             <kbd className="font-mono text-[9px] bg-background/80 px-1.5 py-0.5 rounded-lg border border-border flex items-center gap-1 w-fit">
-              <Command className="w-2.5 h-2.5" /> Ctrl + Space
+              <Command className="w-2.5 h-2.5" /> {dictationHotkey ?? 'Set in Settings'}
             </kbd>
           </div>
         </div>

@@ -83,7 +83,7 @@ never a live Ollama instance or a cloud API.
 
 ## 2. Native frontend (`native/src/`)
 
-417 tests, Vitest + React Testing Library, jsdom.
+461 tests, Vitest + React Testing Library, jsdom.
 
 ```bash
 cd native
@@ -132,9 +132,24 @@ Where the coverage sits:
   are run over one existing recording, that the one in use is marked, that a
   method which could not run is reported rather than dropped, and that a
   confident roster reads differently from one worth checking.
-- `scribble/graph/graphPhysics.ts` — layout invariants: pinned nodes never
+- `knowledge/graph/graphPhysics.ts` — layout invariants: pinned nodes never
   drift, alpha always decays to zero, coincident nodes separate rather than
   producing `NaN`.
+- `knowledge/KnowledgeGraphPage.tsx` — that the surface reads the graph itself
+  rather than depending on Scribbles, that it summarises what the canvas
+  toolbar does not, and that an empty or unreadable graph says so instead of
+  drawing a blank canvas.
+- `home/homeStats.ts` — every figure Home shows: week deltas that refuse to
+  count an unparseable date, transcribed-word and recording-time sums, the
+  promotion and enrichment backlogs, case-insensitive topic distinctness, the
+  cross-surface activity merge (an unreadable timestamp sorts last rather than
+  vanishing), and each formatter's degenerate input.
+- `home/HomePage.tsx` — the wiring rather than the layout: that a capture card
+  opens the mode it names instead of capturing on the landing page, that a
+  counter navigates to its own surface, that the dictation hotkey shown is the
+  configured one, that an unconfigured capability offers the control that fixes
+  it, and that one failing vault read degrades that surface without hiding the
+  others.
 - `lib/soundEffects.ts` — the only code path behind the `dictation_sounds`
   setting, over a stubbed Web Audio API.
 - `webcapture/` — the browser extension's extraction layer, tested against

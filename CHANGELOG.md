@@ -1,5 +1,31 @@
 # Relay — Changelog
 
+## [0.37.0] - 2026-09-04
+
+### App Restructure: A Home Surface, and the Knowledge Graph Promoted Out of Scribbles
+
+**Type**: minor — two new top-level surfaces in the native frontend and a folder move, with no Rust or schema change (`native/src/components/home/*`, `native/src/components/knowledge/*`, `native/src/App.tsx`, `native/src/components/common/NativeSidebar.tsx`, `native/src/components/scribble/ScribbleViewer.tsx`, `native/src/components/capture/CaptureHubPage.tsx`).
+
+#### Features
+
+- **Home is the landing surface (`native/src/components/home/HomePage.tsx`, `native/src/App.tsx`)**: Relay now opens on `Home` rather than on Voice Notes — one of the six capture modes. `MainTabType` and the sidebar gained a `home` tab, ordered first, and Home composes four sections that are handed finished props rather than fetching inside the JSX.
+- **Capture shortcuts that navigate rather than re-implement (`native/src/components/home/HomeCaptureShortcuts.tsx`)**: The same six modes as `Scribbles › Capture`, in the same order. Typed Text, Clipboard and Files & Docs carry the requested mode through `App`'s `navigateTo` into `CaptureHubPage`'s new `initialMethod` prop, so "Clipboard" on Home lands on the clipboard capture; Voice, Meeting and Web Capture open their own surfaces. Home performs no `create_scribble` of its own, deliberately — a second call site would be a second implementation of every mode. Two further cards open Talkback and the Knowledge Graph.
+- **Library counters, each one the way into its surface (`native/src/components/home/HomeLibraryStats.tsx`)**: Eight clickable counts — voice notes, scribbles, meetings, documents, web captures, entities, connections, active memories — with a seven-day delta on the five that carry creation timestamps. Below them: words transcribed (voice notes plus meeting transcripts), total recorded time, connected thoughts and distinct topics. Backlog prompts appear only when there is a backlog: captures and documents with no Scribble yet, and scribbles still awaiting enrichment.
+- **Latest activity across every surface (`native/src/components/home/HomeRecentActivity.tsx`)**: The seven newest records from all five artifact types, merged and sorted newest-first, each row opening the surface that owns it. A record with an unreadable timestamp sorts last rather than being dropped.
+- **An honest machine readout (`native/src/components/home/HomeSystemPanel.tsx`)**: Storage mode, vault path with its real accessibility probe, language model, Whisper model and Talkback voice engine. Rows report what is *configured* and say so in those words — the panel does not probe a model and does not imply it did. An unconfigured capability carries the control that fixes it (`Configure`, `Install`) rather than a bare warning, per `rules/ui-components.md`.
+- **The Knowledge Graph is its own surface (`native/src/components/knowledge/KnowledgeGraphPage.tsx`)**: Promoted out of `Scribbles`' third sub-tab to a top-level `graph` tab. `KnowledgeGraphView` and its `graph/` internals moved from `components/scribble/` to `components/knowledge/` unchanged apart from import paths. The page reads `get_knowledge_graph`, `get_scribbles` and `get_knowledge_telemetry` itself, summarises what the canvas toolbar does not (links, unconnected nodes, resolved entities/relationships/memories), offers an explicit rebuild, and shows an empty state instead of drawing a blank canvas. Double-clicking a scribble node opens it in Scribbles as a cross-surface navigation.
+
+#### Improvements
+
+- **Scribbles no longer fetches a graph to render a list (`native/src/components/scribble/ScribbleViewer.tsx`)**: The viewer dropped its `get_knowledge_graph` call, its `graphData` state and the `graph` sub-tab, leaving `Capture | Workspace`. It gained `initialCaptureMethod` and `focusScribbleId` props, and its list now says "Loading thoughts…" while reading rather than claiming an empty vault.
+- **One navigation entry point (`native/src/App.tsx`)**: Every tab change goes through `navigateTo`, which clears one-shot intents (a capture mode, a scribble to reveal) so arriving at Scribbles from the sidebar never lands on another surface's request. Backend and DOM `navigate-tab` events clear the same state.
+- **The Capture Hub names the real hotkey (`native/src/components/capture/CaptureHubPage.tsx`)**: The voice card read `Ctrl + Space` from a hardcoded string; it now reads `hotkeys.dictation_hotkey` from settings and says `Set in Settings` when settings cannot be read. Home's voice card does the same, and its web-capture card reports whether the capture bridge is actually listening.
+- **Hero headers for the surfaces that had none (`native/src/App.tsx`)**: `home`, `graph` and `captures` gained `PageHeader` banners; the Scribbles description no longer promises a knowledge graph that has moved out of it. Four dead imports and one unused state hook were removed from `App.tsx`.
+
+#### Testing
+
+- **32 new frontend tests (`native/src/components/home/homeStats.test.ts`, `native/src/components/home/HomePage.test.tsx`, `native/src/components/knowledge/KnowledgeGraphPage.test.tsx`)**: 22 over the pure derivations — week deltas that refuse to count an unparseable date, word and duration sums, backlog counts, case-insensitive topic distinctness, activity merge ordering, and every formatter's degenerate input; 10 over Home's wiring — that a capture card calls the mode it names, a counter navigates to its surface, the configured hotkey is shown rather than an assumed one, an unconfigured capability offers its fix, and a failing read degrades one surface without hiding the others; 5 over the graph page's own reads, summary, rebuild and empty state. Full native suite: 461 passed across 37 files, `tsc --noEmit` and `npm run build` clean. `docs/testing.md`'s stated frontend test count was stale at 417 and is corrected to 461, and its graph-physics entry now points at the moved path.
+
 ## [0.36.0] - 2026-09-05
 
 ### Meetings Intelligence v2: Canonical Utterance Turns, Speaker Intelligence, Self-Voice Anchoring, Google Calendar Candidate Reconciliation, and Deterministic Floor UX
