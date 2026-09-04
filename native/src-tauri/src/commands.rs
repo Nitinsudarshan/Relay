@@ -1335,6 +1335,12 @@ pub async fn test_stt_model(
 }
 
 #[tauri::command]
+pub async fn copy_to_clipboard(text: String) -> Result<(), CommandError> {
+    crate::hotkeys::injection::copy_to_clipboard(&text)
+        .map_err(|e| CommandError::new("CLIPBOARD_COPY_FAILED", &e.to_string()))
+}
+
+#[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, CommandError> {
     Ok(state.settings.lock_or_recover().clone())
 }

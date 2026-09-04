@@ -587,22 +587,26 @@ fn stop_dictation_session(
         if !text_res.trim().is_empty() {
             let expanded_text = state.settings.lock_or_recover().expand_snippets(&text_res);
             let final_text = if !expanded_text.trim().is_empty() { expanded_text } else { text_res };
-
             let t_snippet_complete = std::time::Instant::now();
-
-            crate::commands::save_voice_note(&app, &state.vault, &final_text);
-
-            let t_vault_complete = std::time::Instant::now();
 
             let (auto_paste, copy_to_clipboard) = {
                 let s = state.settings.lock_or_recover();
                 (s.clipboard.auto_paste, s.clipboard.copy_to_clipboard)
             };
 
+            // 1. Copy to OS clipboard FIRST and NATIVELY in Rust.
+            // Using arboard directly at the OS level ensures the transcription is in the
+            // clipboard unconditionally, bypassing webview focus restrictions.
             if copy_to_clipboard {
+                if let Err(e) = injection::copy_to_clipboard(&final_text) {
+                    tracing::warn!("Native dictation clipboard copy failed: {}", e);
+                } else {
+                    tracing::debug!("Native dictation clipboard copy succeeded ({} chars)", final_text.len());
+                }
                 let _ = app.emit("dictation-clipboard-copy", &final_text);
             }
 
+            // 2. Inject text into the active field immediately, minimizing delay
             let t_injection_start = std::time::Instant::now();
 
             if auto_paste {
@@ -626,6 +630,11 @@ fn stop_dictation_session(
             }
 
             let t_injection_complete = std::time::Instant::now();
+
+            // 3. Persist voice note in vault after injection so vault disk I/O does not delay paste
+            let t_vault_start = std::time::Instant::now();
+            crate::commands::save_voice_note(&app, &state.vault, &final_text);
+            let t_vault_complete = std::time::Instant::now();
 
             let metrics = captured.timing_metrics.clone().unwrap_or_default();
             let recording_to_audio_ready = t_recorder_stop_complete.duration_since(t_release).as_millis();
@@ -681,7 +690,7 @@ fn stop_dictation_session(
                 recording_to_audio_ready,
                 metrics.vad_ms,
                 metrics.wav_write_ms,
-                t_vault_complete.duration_since(t_snippet_complete).as_millis(),
+                t_vault_complete.duration_since(t_vault_start).as_millis(),
                 injection_duration
             );
         } else {

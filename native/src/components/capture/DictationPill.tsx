@@ -279,10 +279,10 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     });
 
     const unlistenClipboardCopy = listen<string>('dictation-clipboard-copy', ({ payload }) => {
-      if (payload) {
-        navigator.clipboard.writeText(payload).catch((err) => {
-          console.warn('Could not copy transcript to clipboard', err);
-        });
+      // The native Rust backend sets the OS clipboard directly via arboard.
+      // If the webview happens to be focused, sync web clipboard silently without noisy DOMExceptions.
+      if (payload && typeof document !== 'undefined' && document.hasFocus()) {
+        navigator.clipboard.writeText(payload).catch(() => {});
       }
     });
 
@@ -304,6 +304,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
       unlistenThemePromise.then((unlisten) => unlisten());
       unlistenPositionPromise.then((unlisten) => unlisten());
       unlistenSettingsPromise.then((unlisten) => unlisten());
+      unlistenClipboardCopy.then((unlisten) => unlisten());
       window.removeEventListener('storage', handleStorageChange);
       mediaQuery.removeEventListener('change', handleMediaChange);
     };

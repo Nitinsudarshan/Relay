@@ -1,5 +1,17 @@
 # Relay — Changelog
 
+## [0.31.1] - 2026-09-04
+
+### Native OS Clipboard Dictation Copy & Latency Optimization
+
+**Type**: patch — replaced failing webview-dependent clipboard copying with native host OS clipboard integration via `arboard`, eliminated vault disk I/O latency before text injection, and exposed `copy_to_clipboard` command (`native/src-tauri/src/hotkeys/injection.rs`, `native/src-tauri/src/hotkeys/mod.rs`, `native/src-tauri/src/commands.rs`, `native/src-tauri/src/lib.rs`, `native/src/components/capture/DictationPill.tsx`, `native/src-tauri/Cargo.toml`).
+
+#### Fixes & Improvements
+
+- **Reliable Native OS Clipboard Dictation (`injection.rs`, `hotkeys/mod.rs`)**: Fixed an issue where dictated text was not present on the clipboard when "Keep transcription in clipboard" was enabled. Previously, the backend emitted `dictation-clipboard-copy` to the `DictationPill` webview, where `navigator.clipboard.writeText` failed with `DOMException: Document is not focused` whenever the user dictated into external applications (Chrome, Notepad, Slack, etc.). Clipboard writing is now executed directly in the Rust backend via `arboard`, working unconditionally across the entire OS.
+- **Fast Text Injection Sequence (`hotkeys/mod.rs`)**: Reordered the post-transcription pipeline so that native clipboard copying and text injection occur immediately before writing voice notes to the vault. Eliminating vault disk I/O ahead of injection significantly reduces the window in which a user might click away, switch tabs, or lose focus in their target input field before text injection completes.
+- **Tauri Command & Webview Cleanup (`commands.rs`, `lib.rs`, `DictationPill.tsx`)**: Registered `commands::copy_to_clipboard` for native backend clipboard operations from any surface. Removed failing unfocused clipboard write attempts and added proper listener unsubscription in `DictationPill`.
+
 ## [0.31.0] - 2026-09-04
 
 ### Meetings Rebuild — Hallucination Screening, Multi-Speaker Diarization, Counted Metadata, Typed Notes
