@@ -1,5 +1,27 @@
 # Relay — Changelog
 
+## [0.35.1] - 2026-09-04
+
+### Eight Rule Files Distilled From Ponytail and GSD Core
+
+**Type**: patch — documentation and agent-rules only, no source or behaviour change. Two external MIT rulesets were reviewed and the portable parts rewritten against Relay's three surfaces rather than vendored (`rules/lazy-code-ladder.md`, `rules/over-engineering-review.md`, `rules/verification-honesty.md`, `rules/debugging.md`, `rules/untrusted-input.md`, `rules/context-engineering.md`, `rules/task-scoping.md`, `rules/response-style.md`, `rules/global.md`).
+
+#### Improvements
+
+- **Ponytail's laziness ladder, scoped to this repo (`rules/lazy-code-ladder.md`)**: the seven rungs — YAGNI, reuse, stdlib, platform, installed dependency, one line, minimum — with rung 2 pointed at Relay's actual reuse surfaces (the Rust domain modules, `native/src/lib`, the generated shadcn primitives, the graphify graph) and rung 5 noting that a new crate is also a new toolchain risk for the whisper.cpp build. Deliberate shortcuts carry a greppable `ponytail:` marker naming both the ceiling and the trigger to revisit it; a marker with no named trigger is the one that rots.
+- **A review format that produces cuts rather than paragraphs (`rules/over-engineering-review.md`)**: five tags (`delete:`, `stdlib:`, `native:`, `yagni:`, `shrink:`), one line per finding with the replacement named, a `net: -N lines` total, and an explicit boundary — complexity only, with correctness, security and performance routed to a normal review. Never flags a required test or the one runnable check as bloat, and never reports a per-repo savings figure, since the unbuilt version was never written.
+- **Existence is not implementation (`rules/verification-honesty.md`)**: the four levels a change can reach — exists, substantive, wired, functional — with stub patterns for each surface (`todo!()`, a command returning a hardcoded shape, `onClick={() => {}}`, a gate that always returns the same verdict). Every verification command must state its failing direction, because a command that exits 0 on a no-op passes green and silently. Anything not observed is reported unverified, never passed. The prohibited-phrase list ("v1", "static for now", "wired later") makes silent scope reduction visible, and routes the real deferrals to `maybe_later.md`.
+- **Debugging discipline (`rules/debugging.md`)**: the bug-pattern checklist to scan before hypothesizing, instantiated for this repo — the Tauri IPC serde boundary as the most common shape mismatch, stale closures over chunk arrivals, path case sensitivity between a Windows build and Linux CI, and Whisper inventing subtitle filler over room tone as a thing that is not a code bug. Plus the cognitive-bias table and the restart triggers.
+- **The agent-side untrusted-input boundary (`rules/untrusted-input.md`)**: `docs/capture.md` stays the authority on Relay's own trust model; this is its companion for anything an agent fetches or reads, and for any code path that assembles a prompt. Adds fresh random per-wrap delimiters over a fixed `DATA_START`/`DATA_END`, since a predictable marker is spoofable — the prompt-assembly counterpart to the forged-closing-marker case already under test.
+- **Context budget as a stated rule (`rules/context-engineering.md`)**: the repo's own large files named with what to read instead — `CHANGELOG.md` at ~312 KB, `maybe_later.md` at ~36 KB, `rules/readme.md` at ~32 KB, `docs/` at ~520 KB across 23 files — plus the degradation tiers, the early warning signs (increasing vagueness, silent partial completion, skipped steps), and the per-turn MCP schema tax as a session setting distinct from Relay's own MCP client wiring.
+- **Sizing and gates (`rules/task-scoping.md`)**: split signals with the three surfaces treated as separate units of work, the specificity test ("could a different agent execute this without asking a question?") with a Relay-specific vague/right table, and the four gate kinds — pre-flight, revision, escalation, abort — each with the failure behaviour that follows from naming it.
+- **A verbosity contract per mode (`rules/response-style.md`)**: dev is terse and leads with the change, review is severity-ordered and cites lines, research enumerates before narrowing. Fills the gap ponytail explicitly leaves — it governs what gets built, not what gets said.
+- **`rules/global.md` updated**: all eight files added to the index, folded into an eight-tier precedence order, with the three predictable conflicts resolved up front — brevity never overrides architecture, never overrides required tests or doc comments, and never leaves a deferral in the UI as a stub. A provenance table records both sources, their versions and commits, and their MIT licences.
+
+#### Testing
+
+- No source changed, so no test run applies. Frontmatter and every cross-reference in the new files were checked against the repo; three path references were corrected to match the tree as it actually is (`native/src/lib`, the in-module Rust test layout, the capture fixtures directory).
+
 ## [0.35.0] - 2026-09-04
 
 ### Google Calendar: the Meeting's Name, Its Invitees, and Its Agenda — Plus a Summary That Stops Coming Back Blank
