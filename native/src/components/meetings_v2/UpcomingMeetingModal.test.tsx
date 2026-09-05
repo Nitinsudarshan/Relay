@@ -170,4 +170,53 @@ describe('UpcomingMeetingModal', () => {
     await user.click(closeButtons[0]);
     expect(handleClose).toHaveBeenCalled();
   });
+
+  it('renders clean conferencing link button and copies link to clipboard', async () => {
+    const user = userEvent.setup();
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeTextMock);
+
+    render(
+      <UpcomingMeetingModal
+        event={sampleEvent}
+        isOpen={true}
+        onClose={vi.fn()}
+        onStartRecording={vi.fn()}
+        onJoinAndRecord={vi.fn()}
+      />,
+    );
+
+    // Clean "Join Video Call" link and "Copy" button
+    expect(screen.getByText('Join Video Call')).toBeInTheDocument();
+    const copyButton = screen.getByRole('button', { name: /copy/i });
+    expect(copyButton).toBeInTheDocument();
+
+    await user.click(copyButton);
+    expect(writeTextMock).toHaveBeenCalledWith('https://meet.google.com/abc-defg-hij');
+    expect(await screen.findByText('Copied')).toBeInTheDocument();
+  });
+
+  it('sanitizes and wraps HTML descriptions without showing literal HTML tags', () => {
+    const htmlEvent: CalendarEvent = {
+      ...sampleEvent,
+      description: "We have scheduled a class.<br><a href='https://example.com/session?token=12345'>Click here to join</a><br><b>Please NOTE:</b> attendance is required.",
+    };
+
+    render(
+      <UpcomingMeetingModal
+        event={htmlEvent}
+        isOpen={true}
+        onClose={vi.fn()}
+        onStartRecording={vi.fn()}
+        onJoinAndRecord={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/We have scheduled a class/)).toBeInTheDocument();
+    expect(screen.getByText('Click here to join')).toBeInTheDocument();
+    expect(screen.getByText(/Please NOTE:/)).toBeInTheDocument();
+    // Raw HTML tags should NOT be displayed verbatim
+    expect(screen.queryByText(/<a href=/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/<b>/)).not.toBeInTheDocument();
+  });
 });
