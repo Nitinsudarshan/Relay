@@ -60,6 +60,11 @@ import {
 } from './meetingsViewState';
 import { EmptyState } from '../common/EmptyState';
 import { Badge } from '@/components/ui/badge';
+import {
+  UpcomingMeetingModal,
+  formatRelativeTimeToMeeting,
+  getMeetingJoinUrl,
+} from './UpcomingMeetingModal';
 
 /** See the recording pill: events alone cannot keep a long-lived view honest. */
 const RECONCILE_INTERVAL_MS = 1000;
@@ -121,6 +126,7 @@ export const MeetingsV2View: React.FC = () => {
   const [calendar, setCalendar] = useState<CalendarConnection | null>(null);
   const [calendarLink, setCalendarLink] = useState<MeetingCalendarLink | null>(null);
   const [upcomingEvents, setUpcomingEvents] = useState<CalendarEvent[]>([]);
+  const [selectedUpcomingEvent, setSelectedUpcomingEvent] = useState<CalendarEvent | null>(null);
   const [busyActionItemId, setBusyActionItemId] = useState<string | null>(null);
   const [isAddingAllTasks, setIsAddingAllTasks] = useState<boolean>(false);
   const [isPromoting, setIsPromoting] = useState<boolean>(false);
@@ -436,43 +442,10 @@ export const MeetingsV2View: React.FC = () => {
     };
   }, [loadRelated]);
 
-  const getMeetingJoinUrl = useCallback((evt: CalendarEvent): string | null => {
-    if (
-      evt.conference_url &&
-      (evt.conference_url.startsWith('https://') || evt.conference_url.startsWith('http://'))
-    ) {
-      return evt.conference_url.trim();
-    }
-    if (
-      evt.location &&
-      (evt.location.startsWith('https://') || evt.location.startsWith('http://'))
-    ) {
-      return evt.location.trim();
-    }
-    if (evt.description) {
-      const urlMatch = evt.description.match(/https?:\/\/[^\s<>"')]+/);
-      if (urlMatch) {
-        return urlMatch[0].trim();
-      }
-    }
-    return null;
-  }, []);
-
-  const handleStartUpcomingMeeting = async (evt: CalendarEvent) => {
+  const handleStartRecordingUpcomingMeeting = async (evt: CalendarEvent) => {
     if (isStarting) return;
     setIsStarting(true);
     try {
-      // 1. If the meeting event carries a conferencing URL, launch it in the OS browser
-      const joinUrl = getMeetingJoinUrl(evt);
-      if (joinUrl) {
-        try {
-          await invoke('open_external_url', { url: joinUrl });
-        } catch (err) {
-          console.error('Failed to open meeting URL:', err);
-        }
-      }
-
-      // 2. Start recording the meeting session if one is not already running
       if (!activeSession) {
         const newSession = await invoke<MeetingSession>('start_meeting_v2', {
           title: evt.title,
@@ -483,8 +456,40 @@ export const MeetingsV2View: React.FC = () => {
         setMeetingTitleInput('');
         loadSessions();
       }
+      setSelectedUpcomingEvent(null);
     } catch (err) {
-      console.error('Failed to start meeting from upcoming calendar event:', err);
+      console.error('Failed to start meeting recording from upcoming event:', err);
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  const handleJoinAndRecordUpcomingMeeting = async (evt: CalendarEvent) => {
+    if (isStarting) return;
+    setIsStarting(true);
+    try {
+      const joinUrl = getMeetingJoinUrl(evt);
+      if (joinUrl) {
+        try {
+          await invoke('open_external_url', { url: joinUrl });
+        } catch (err) {
+          console.error('Failed to open meeting URL:', err);
+        }
+      }
+
+      if (!activeSession) {
+        const newSession = await invoke<MeetingSession>('start_meeting_v2', {
+          title: evt.title,
+        });
+        applyActiveSession(newSession);
+        setSelectedSessionId(newSession.id);
+        setLiveUpdates([]);
+        setMeetingTitleInput('');
+        loadSessions();
+      }
+      setSelectedUpcomingEvent(null);
+    } catch (err) {
+      console.error('Failed to join and record meeting:', err);
     } finally {
       setIsStarting(false);
     }
@@ -1013,25 +1018,21 @@ export const MeetingsV2View: React.FC = () => {
                 const timeStr = isNaN(start.getTime())
                   ? ''
                   : start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                const joinUrl = getMeetingJoinUrl(evt);
+                const relativeTime = formatRelativeTimeToMeeting(evt.starts_at, evt.ends_at);
 
                 return (
                   <div
                     key={evt.id}
-                    onClick={() => handleStartUpcomingMeeting(evt)}
+                    onClick={() => setSelectedUpcomingEvent(evt)}
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        handleStartUpcomingMeeting(evt);
+                        setSelectedUpcomingEvent(evt);
                       }
                     }}
-                    title={
-                      joinUrl
-                        ? `Open ${evt.title} and start recording`
-                        : `Start recording ${evt.title}`
-                    }
+                    title={`View details for ${evt.title}`}
                     className={`group p-2 rounded-md bg-card hover:bg-muted/70 border border-border/60 hover:border-primary/50 text-[11px] flex flex-col gap-1 cursor-pointer transition-all shadow-2xs hover:shadow-xs ${
                       isStarting ? 'opacity-60 pointer-events-none' : ''
                     }`}
@@ -1050,15 +1051,10 @@ export const MeetingsV2View: React.FC = () => {
                           ? `${evt.attendees.length} participant${evt.attendees.length === 1 ? '' : 's'}`
                           : 'No other participants'}
                       </span>
-                      {joinUrl ? (
+                      {relativeTime && (
                         <span className="inline-flex items-center gap-1 text-primary font-medium bg-primary/10 px-1.5 py-0.5 rounded group-hover:bg-primary/20 transition-colors">
-                          <Video className="w-3 h-3" />
-                          <span>Join & Record</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded group-hover:text-foreground transition-colors">
-                          <Play className="w-2.5 h-2.5 fill-current" />
-                          <span>Record</span>
+                          <Clock className="w-2.5 h-2.5" />
+                          <span>{relativeTime}</span>
                         </span>
                       )}
                     </div>
@@ -1443,6 +1439,15 @@ export const MeetingsV2View: React.FC = () => {
         isBusy={!!deletingId}
         onConfirm={() => pendingDeleteId && handleDeleteSession(pendingDeleteId)}
         onCancel={() => setPendingDeleteId(null)}
+      />
+
+      <UpcomingMeetingModal
+        event={selectedUpcomingEvent}
+        isOpen={Boolean(selectedUpcomingEvent)}
+        onClose={() => setSelectedUpcomingEvent(null)}
+        onStartRecording={handleStartRecordingUpcomingMeeting}
+        onJoinAndRecord={handleJoinAndRecordUpcomingMeeting}
+        isStarting={isStarting}
       />
     </div>
   );

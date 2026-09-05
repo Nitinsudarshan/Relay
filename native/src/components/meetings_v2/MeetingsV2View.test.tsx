@@ -172,7 +172,7 @@ describe('MeetingsV2View', () => {
     expect(mockedInvoke).not.toHaveBeenCalledWith('delete_meeting_v2', expect.anything());
   });
 
-  it('opens conferencing link and starts recording when clicking an upcoming calendar event', async () => {
+  it('opens popup modal on clicking an upcoming calendar event, and supports join and record', async () => {
     const user = userEvent.setup();
     const upcomingEvent = {
       id: 'cal_event_1',
@@ -196,7 +196,17 @@ describe('MeetingsV2View', () => {
     const eventCard = await screen.findByText('Sprint Planning');
     expect(eventCard).toBeInTheDocument();
 
+    // Clicking card opens the upcoming meeting details modal
     await user.click(eventCard);
+
+    // Modal shows title, participants count/names, and action buttons
+    expect(await screen.findByRole('heading', { name: 'Sprint Planning' })).toBeInTheDocument();
+    expect(screen.getByText('Alex')).toBeInTheDocument();
+    expect(screen.getByText(/Participants \(1\)/i)).toBeInTheDocument();
+
+    // Click "Join and Record"
+    const joinAndRecordButton = screen.getByRole('button', { name: /join and record/i });
+    await user.click(joinAndRecordButton);
 
     expect(mockedInvoke).toHaveBeenCalledWith('open_external_url', {
       url: 'https://meet.google.com/abc-defg-hij',
