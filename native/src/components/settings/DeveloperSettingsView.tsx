@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 export const DeveloperSettingsView: React.FC = () => {
   const [devSettings, setDevSettings] = useState<DeveloperSettings>({
     force_onboarding_on_launch: false,
-    notification_surface_mode: 'both',
+    notification_surface_mode: 'tauri',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -80,13 +80,6 @@ export const DeveloperSettingsView: React.FC = () => {
     }
   };
 
-  /**
-   * What window detection can see right now.
-   *
-   * Rendered in place rather than through `alert`: the result is a list worth
-   * reading against what is actually open, and a modal dialog blocks the app
-   * while the very windows being detected are meant to stay on screen.
-   */
   const handleCheckDetection = async () => {
     setReminderError(null);
     try {
@@ -98,7 +91,7 @@ export const DeveloperSettingsView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in-50 duration-200">
+    <div className="space-y-6">
       <div className="border-b border-border/40 pb-5">
         <div className="flex items-center gap-3 mb-1.5">
           <div className="flex items-center gap-2">
@@ -115,18 +108,16 @@ export const DeveloperSettingsView: React.FC = () => {
         </p>
       </div>
 
-      {/* Notification Surface Mode Selector */}
+      {/* Surface Override Section */}
       <div className="p-5 rounded-lg border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Layers className="w-4 h-4 text-primary" />
-              Meeting Notification Surface Mode
+            <h3 className="text-sm font-semibold text-foreground">
+              Meeting Reminder Surface Mode
             </h3>
             {savedFeedback && (
-              <Badge variant="secondary" className="text-[10px] gap-1 bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
-                <Check className="w-3 h-3" />
-                <span>Saved</span>
+              <Badge variant="emerald" className="text-[10px] px-1.5 py-0 animate-in fade-in">
+                Saved
               </Badge>
             )}
           </div>
@@ -136,32 +127,7 @@ export const DeveloperSettingsView: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
-          {/* Both (Default) */}
-          <button
-            type="button"
-            onClick={() => handleSetSurfaceMode('both')}
-            disabled={loading || saving}
-            className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between gap-2 ${
-              devSettings.notification_surface_mode === 'both'
-                ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/40 shadow-xs'
-                : 'border-border/60 bg-background/50 hover:bg-secondary/40 text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-primary" />
-                <span className="text-xs font-semibold">Both (Default)</span>
-              </div>
-              {devSettings.notification_surface_mode === 'both' && (
-                <div className="w-2 h-2 rounded-full bg-primary" />
-              )}
-            </div>
-            <p className="text-[11px] leading-tight text-muted-foreground">
-              Shows the app overlay window plus native Windows OS toast.
-            </p>
-          </button>
-
-          {/* Tauri Overlay Only */}
+          {/* Tauri Overlay (Default) */}
           <button
             type="button"
             onClick={() => handleSetSurfaceMode('tauri')}
@@ -175,7 +141,7 @@ export const DeveloperSettingsView: React.FC = () => {
             <div className="flex items-center justify-between w-full">
               <div className="flex items-center gap-2">
                 <Monitor className="w-4 h-4 text-blue-500" />
-                <span className="text-xs font-semibold">Tauri Overlay Only</span>
+                <span className="text-xs font-semibold">Tauri Overlay (Default)</span>
               </div>
               {devSettings.notification_surface_mode === 'tauri' && (
                 <div className="w-2 h-2 rounded-full bg-primary" />
@@ -183,6 +149,31 @@ export const DeveloperSettingsView: React.FC = () => {
             </div>
             <p className="text-[11px] leading-tight text-muted-foreground">
               Only shows the floating desktop overlay card window.
+            </p>
+          </button>
+
+          {/* Both */}
+          <button
+            type="button"
+            onClick={() => handleSetSurfaceMode('both')}
+            disabled={loading || saving}
+            className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between gap-2 ${
+              devSettings.notification_surface_mode === 'both'
+                ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/40 shadow-xs'
+                : 'border-border/60 bg-background/50 hover:bg-secondary/40 text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-primary" />
+                <span className="text-xs font-semibold">Both (Overlay + Toast)</span>
+              </div>
+              {devSettings.notification_surface_mode === 'both' && (
+                <div className="w-2 h-2 rounded-full bg-primary" />
+              )}
+            </div>
+            <p className="text-[11px] leading-tight text-muted-foreground">
+              Shows the app overlay window plus native Windows OS toast.
             </p>
           </button>
 

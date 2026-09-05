@@ -18,6 +18,7 @@ import {
   NotebookPen,
   ListTodo,
   Calendar,
+  Video,
 } from 'lucide-react';
 import { ConfirmationModal } from '../common/ConfirmationModal';
 import {
@@ -434,6 +435,60 @@ export const MeetingsV2View: React.FC = () => {
       unlisten.then((f) => f());
     };
   }, [loadRelated]);
+
+  const getMeetingJoinUrl = useCallback((evt: CalendarEvent): string | null => {
+    if (
+      evt.conference_url &&
+      (evt.conference_url.startsWith('https://') || evt.conference_url.startsWith('http://'))
+    ) {
+      return evt.conference_url.trim();
+    }
+    if (
+      evt.location &&
+      (evt.location.startsWith('https://') || evt.location.startsWith('http://'))
+    ) {
+      return evt.location.trim();
+    }
+    if (evt.description) {
+      const urlMatch = evt.description.match(/https?:\/\/[^\s<>"')]+/);
+      if (urlMatch) {
+        return urlMatch[0].trim();
+      }
+    }
+    return null;
+  }, []);
+
+  const handleStartUpcomingMeeting = async (evt: CalendarEvent) => {
+    if (isStarting) return;
+    setIsStarting(true);
+    try {
+      // 1. If the meeting event carries a conferencing URL, launch it in the OS browser
+      const joinUrl = getMeetingJoinUrl(evt);
+      if (joinUrl) {
+        try {
+          await invoke('open_external_url', { url: joinUrl });
+        } catch (err) {
+          console.error('Failed to open meeting URL:', err);
+        }
+      }
+
+      // 2. Start recording the meeting session if one is not already running
+      if (!activeSession) {
+        const newSession = await invoke<MeetingSession>('start_meeting_v2', {
+          title: evt.title,
+        });
+        applyActiveSession(newSession);
+        setSelectedSessionId(newSession.id);
+        setLiveUpdates([]);
+        setMeetingTitleInput('');
+        loadSessions();
+      }
+    } catch (err) {
+      console.error('Failed to start meeting from upcoming calendar event:', err);
+    } finally {
+      setIsStarting(false);
+    }
+  };
 
   const handleStartRecording = async () => {
     if (isStarting) return;
@@ -952,28 +1007,61 @@ export const MeetingsV2View: React.FC = () => {
                 Upcoming Calendar ({upcomingEvents.length})
               </span>
             </div>
-            <div className="space-y-1 max-h-32 overflow-y-auto">
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
               {upcomingEvents.map((evt) => {
                 const start = new Date(evt.starts_at);
                 const timeStr = isNaN(start.getTime())
                   ? ''
                   : start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const joinUrl = getMeetingJoinUrl(evt);
+
                 return (
                   <div
                     key={evt.id}
-                    className="p-1.5 rounded-md bg-card border border-border/60 text-[11px] flex flex-col gap-0.5"
+                    onClick={() => handleStartUpcomingMeeting(evt)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleStartUpcomingMeeting(evt);
+                      }
+                    }}
+                    title={
+                      joinUrl
+                        ? `Open ${evt.title} and start recording`
+                        : `Start recording ${evt.title}`
+                    }
+                    className={`group p-2 rounded-md bg-card hover:bg-muted/70 border border-border/60 hover:border-primary/50 text-[11px] flex flex-col gap-1 cursor-pointer transition-all shadow-2xs hover:shadow-xs ${
+                      isStarting ? 'opacity-60 pointer-events-none' : ''
+                    }`}
                   >
                     <div className="flex items-center justify-between gap-1 font-medium text-foreground">
-                      <span className="truncate">{evt.title}</span>
+                      <span className="truncate group-hover:text-primary transition-colors">
+                        {evt.title}
+                      </span>
                       <span className="text-[10px] text-muted-foreground font-mono shrink-0">
                         {timeStr}
                       </span>
                     </div>
-                    {evt.attendees && evt.attendees.length > 0 && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {evt.attendees.length} participant{evt.attendees.length === 1 ? '' : 's'}
+                    <div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
+                      <span>
+                        {evt.attendees && evt.attendees.length > 0
+                          ? `${evt.attendees.length} participant${evt.attendees.length === 1 ? '' : 's'}`
+                          : 'No other participants'}
                       </span>
-                    )}
+                      {joinUrl ? (
+                        <span className="inline-flex items-center gap-1 text-primary font-medium bg-primary/10 px-1.5 py-0.5 rounded group-hover:bg-primary/20 transition-colors">
+                          <Video className="w-3 h-3" />
+                          <span>Join & Record</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded group-hover:text-foreground transition-colors">
+                          <Play className="w-2.5 h-2.5 fill-current" />
+                          <span>Record</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
                 );
               })}

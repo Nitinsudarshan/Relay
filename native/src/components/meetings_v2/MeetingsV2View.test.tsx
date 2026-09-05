@@ -171,4 +171,38 @@ describe('MeetingsV2View', () => {
     await user.click(deleteButtons[0]);
     expect(mockedInvoke).not.toHaveBeenCalledWith('delete_meeting_v2', expect.anything());
   });
+
+  it('opens conferencing link and starts recording when clicking an upcoming calendar event', async () => {
+    const user = userEvent.setup();
+    const upcomingEvent = {
+      id: 'cal_event_1',
+      title: 'Sprint Planning',
+      starts_at: new Date(Date.now() + 3600000).toISOString(),
+      ends_at: new Date(Date.now() + 7200000).toISOString(),
+      conference_url: 'https://meet.google.com/abc-defg-hij',
+      attendees: [{ name: 'Alex', response: 'ACCEPTED' }],
+    };
+    const createdSession = makeSession({ id: 'mtg_sprint', title: 'Sprint Planning' });
+
+    backend({
+      get_calendar_connection: { connected: true, account_email: 'test@example.com' },
+      get_upcoming_calendar_events: [upcomingEvent],
+      start_meeting_v2: createdSession,
+      open_external_url: null,
+    });
+
+    render(<MeetingsV2View />);
+
+    const eventCard = await screen.findByText('Sprint Planning');
+    expect(eventCard).toBeInTheDocument();
+
+    await user.click(eventCard);
+
+    expect(mockedInvoke).toHaveBeenCalledWith('open_external_url', {
+      url: 'https://meet.google.com/abc-defg-hij',
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith('start_meeting_v2', {
+      title: 'Sprint Planning',
+    });
+  });
 });

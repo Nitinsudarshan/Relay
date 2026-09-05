@@ -13,8 +13,8 @@ fn get_dev_settings_path(config_dir: &Path) -> PathBuf {
 #[derive(Default)]
 pub enum NotificationSurfaceMode {
     System,
-    Tauri,
     #[default]
+    Tauri,
     Both,
 }
 
@@ -102,7 +102,7 @@ mod tests {
         assert!(!toggled_off.force_onboarding_on_launch);
 
         // 4. Test Notification Surface Mode
-        assert_eq!(initial.notification_surface_mode, NotificationSurfaceMode::Both);
+        assert_eq!(initial.notification_surface_mode, NotificationSurfaceMode::Tauri);
         let mode_system = set_notification_surface_mode(&temp_dir, NotificationSurfaceMode::System)
             .expect("Should save system surface mode");
         assert_eq!(mode_system.notification_surface_mode, NotificationSurfaceMode::System);
