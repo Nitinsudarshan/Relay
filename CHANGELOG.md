@@ -1,5 +1,28 @@
 # Relay — Changelog
 
+## [0.41.0] - 2026-09-05
+
+### Meeting Reminders & Actionable Notifications Pipeline Restoration
+
+**Type**: minor — restoration and end-to-end integration of Relay's meeting reminder and notification pipeline across the Rust backend (`native/src-tauri/src/meetings_v2/*`, `native/src-tauri/src/settings/*`, `native/src-tauri/src/commands.rs`) and native desktop frontend (`native/src/App.tsx`, `native/src/components/settings/MeetingsSettings.tsx`), providing multi-signal meeting detection, persistent reminder state transitions, background tick evaluation, native Windows OS notifications with actionable buttons, and user-configurable reminder toggles.
+
+#### Features
+
+- **Actionable Native Windows OS Meeting Notifications (`native/src-tauri/src/meetings_v2/reminders.rs`, `native/src-tauri/src/meetings_v2/reminder_engine.rs`, `native/src/App.tsx`)**: Restored native Windows OS notifications dispatched with action type `meeting-reminder` and interactive action buttons (`▶ Record`, `◷ Snooze 5m`, `◷ Snooze 15m`, `Dismiss`). Notification clicks bring Relay to the foreground and navigate directly to the Meetings surface. Button clicks dispatch directly to backend state handlers (`start_meeting_recording`, `snooze_meeting_reminder`, `dismiss_meeting_reminder`).
+- **Idempotent Multi-Signal Reminder State Machine (`native/src-tauri/src/meetings_v2/reminders.rs`)**: Implemented a pure, deterministic reminder queue tracking `Pending`, `Fired`, `Snoozed`, `Dismissed`, and `Expired` states across three reminder signals:
+  1. *Upcoming* (5 minutes before scheduled Google Calendar meetings),
+  2. *Unrecorded* (fires 2–15 minutes after start if no active/completed session covers the event),
+  3. *Detection* (active conferencing windows detected with no active recording).
+- **Active Video Conferencing Window Detection (`native/src-tauri/src/meetings_v2/detection.rs`)**: Restored native Windows top-level window enumeration (`EnumWindows`, `GetWindowTextW`) to detect active conferencing sessions across Zoom, Google Meet, Microsoft Teams, and Cisco Webex with title cleaning, provider attribution, and confidence scoring.
+- **Background Periodic Tick Engine (`native/src-tauri/src/meetings_v2/reminder_engine.rs`, `native/src-tauri/src/lib.rs`)**: Background asynchronous worker evaluating reminders every 30 seconds, synchronizing against the calendar store, existing meeting sessions, active conferencing window matches, and user settings.
+- **Reminder Controls in Settings (`native/src-tauri/src/settings/mod.rs`, `native/src/types/index.ts`, `native/src/components/settings/MeetingsSettings.tsx`)**: Added independent toggles for `remind_before_meeting`, `remind_if_unrecorded`, and `remind_on_detection` with persistence, defaults, and dedicated switch controls in the Meetings Settings panel.
+- **Developer Testing Command (`native/src-tauri/src/commands.rs`)**: Added `trigger_mock_meeting_reminder` Tauri command allowing instant dispatch and verification of mock reminders and button actions without waiting for calendar events.
+
+#### Testing
+
+- **Reminder State Machine Unit Tests (`native/src-tauri/src/meetings_v2/reminders.rs`)**: Added comprehensive test coverage verifying window intervals, repeated tick idempotency, snooze durations, dismissal, expiration, recording-active suppression, multiple independent meetings, and toggle suppression (`all_off`).
+- **Full Test Suite & Linter Pass**: Verified 1,238 Rust backend tests (`cargo test`), strict Clippy checks with warnings treated as errors (`cargo clippy --all-targets -- -D warnings`), 467 native frontend unit tests (`npm test`), and TypeScript type checking across both native and web frontends (`tsc --noEmit`).
+
 ## [0.40.0] - 2026-09-05
 
 ### Meetings Intelligence v0.40.0: Final Quality Hardening & Capture Surfaces Restructure

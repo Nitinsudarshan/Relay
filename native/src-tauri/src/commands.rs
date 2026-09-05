@@ -2122,6 +2122,177 @@ pub async fn resume_meeting_v2(
         .map_err(|e: String| CommandError::new("RESUME_MEETING_FAILED", &e))
 }
 
+// =========================================================================
+// MEETING REMINDER COMMANDS
+//
+// These are the Rust-side handlers for native OS notification actions and
+// direct reminder manipulation. The frontend never owns reminder state —
+// it only calls these commands in response to user action.
+// =========================================================================
+
+/// Start recording for a meeting from a notification or the meetings list.
+///
+/// This is the single authoritative recording entry point for reminder-driven
+/// recording. It reuses the shared `MeetingsV2Engine` (and therefore the shared
+/// `AudioRecorder`) — no second capture path is introduced.
+///
+/// On success:
+/// 1. A new recording session is started (or the active one is returned).
+/// 2. The `ActiveMeetingRecording` is updated to the session ID.
+/// 3. All reminders keyed to `meeting_id` are marked `Actioned`.
+/// 4. The app navigates to the Meetings tab.
+///
+/// `meeting_id` is the calendar event ID or window-detection ID that the
+/// notification was generated for. It is used only to mark reminders as
+/// actioned; the actual recording session is new and unrelated to it.
+#[tauri::command]
+pub async fn start_meeting_recording(
+    meeting_id: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    use crate::meetings_v2::ActiveMeetingRecording;
+    use tauri::Manager;
+
+    // Start the recording session (or reuse the active one).
+    let settings = state.settings.lock_or_recover().clone();
+    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
+    let mut decoding_config =
+        crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
+    if decoding_config.initial_prompt.is_none() {
+        decoding_config.initial_prompt = settings.build_stt_prompt();
+    }
+    let models_dir = state.config_dir.join("models");
+    let whisper_model_path = settings.stt.whisper_model_path.clone();
+
+    let session = state
+        .meetings_v2
+        .start_session(
+            None, // title from engine, same as start_meeting_v2
+            &models_dir,
+            whisper_model_path,
+            language_config,
+            decoding_config,
+            Some(app.clone()),
+        )
+        .map_err(|e: String| CommandError::new("START_RECORDING_FAILED", &e))?;
+
+    // Track which session the reminder system is now recording for.
+    if let Some(active_rec) = app.try_state::<ActiveMeetingRecording>() {
+        *active_rec.0.lock().unwrap() = Some(session.id.clone());
+    }
+
+    // Mark every reminder for this meeting_id as Actioned.
+    if let Some(queue) = app.try_state::<crate::meetings_v2::ReminderQueue>() {
+        crate::meetings_v2::reminders::mark_meeting_actioned(&queue, &meeting_id);
+    }
+
+    // Surface the recording overlay and navigate to the Meetings tab.
+    crate::overlay::ensure_meeting_overlay(&app, true);
+    let _ = app.emit("meeting-session-state-changed", &session);
+    let _ = app.emit("navigate-tab", "meetings");
+
+    tracing::info!(
+        "[reminders] start_meeting_recording: session {} started for reminder id '{}'",
+        session.id,
+        meeting_id
+    );
+
+    Ok(())
+}
+
+/// Snooze a specific reminder. Transitions `Fired → Snoozed { until }`.
+///
+/// The reminder will re-fire when `minutes` have elapsed. This mutates Rust
+/// state only — no frontend timer is involved.
+#[tauri::command]
+pub async fn snooze_meeting_reminder(
+    meeting_id: String,
+    kind: crate::meetings_v2::ReminderKind,
+    minutes: i64,
+    app: tauri::AppHandle,
+) -> Result<(), CommandError> {
+    if let Some(queue) = app.try_state::<crate::meetings_v2::ReminderQueue>() {
+        crate::meetings_v2::reminders::snooze(&queue, &meeting_id, kind, minutes);
+        tracing::info!(
+            "[reminders] Snoozed reminder '{}' {:?} for {}m",
+            meeting_id,
+            kind,
+            minutes
+        );
+    }
+    Ok(())
+}
+
+/// Permanently dismiss a specific reminder.
+///
+/// A dismissed reminder does not re-appear on engine ticks, application
+/// restart, or calendar re-sync.
+#[tauri::command]
+pub async fn dismiss_meeting_reminder(
+    meeting_id: String,
+    kind: crate::meetings_v2::ReminderKind,
+    app: tauri::AppHandle,
+) -> Result<(), CommandError> {
+    if let Some(queue) = app.try_state::<crate::meetings_v2::ReminderQueue>() {
+        crate::meetings_v2::reminders::dismiss(&queue, &meeting_id, kind);
+        tracing::info!(
+            "[reminders] Dismissed reminder '{}' {:?}",
+            meeting_id,
+            kind
+        );
+    }
+    Ok(())
+}
+
+/// Developer / testing: inject a mock fired reminder and emit the real native
+/// OS notification via `dispatch_native_reminder_notification`.
+///
+/// This exercises the full production notification path — the same one a real
+/// reminder uses — rather than a synthetic frontend-only notification.
+/// `kind` must be one of: "upcoming", "unrecorded", "detected".
+#[tauri::command]
+pub async fn trigger_mock_meeting_reminder(
+    kind: crate::meetings_v2::ReminderKind,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let mock_id = format!("mock_{}", uuid::Uuid::new_v4());
+    let title = match kind {
+        crate::meetings_v2::ReminderKind::Upcoming => "Product Sync — Demo",
+        crate::meetings_v2::ReminderKind::Unrecorded => "Engineering Review — Demo",
+        crate::meetings_v2::ReminderKind::Detected => "Detected Meeting — Demo",
+    };
+    let provider = "zoom";
+
+    if let Some(queue) = app.try_state::<crate::meetings_v2::ReminderQueue>() {
+        crate::meetings_v2::reminders::inject_mock_reminder(
+            &queue, &mock_id, kind, title, provider,
+        );
+    }
+
+    let entry = crate::meetings_v2::ReminderEvent {
+        id: mock_id.clone(),
+        kind,
+        title: title.to_string(),
+        provider: provider.to_string(),
+        participants: Vec::new(),
+        fire_at: chrono::Utc::now(),
+        status: crate::meetings_v2::reminders::ReminderStatus::Fired,
+    };
+
+    crate::meetings_v2::reminder_engine::dispatch_native_reminder_notification(&app, &entry);
+
+    tracing::info!(
+        "[reminders] Triggered mock meeting reminder '{}' ({:?})",
+        title,
+        kind
+    );
+
+    let _ = state; // suppress unused warning — future: use vault for real mock meeting
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn get_active_meeting_v2(
     state: State<'_, AppState>,

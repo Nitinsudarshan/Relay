@@ -208,6 +208,10 @@ pub fn run() {
             // more docked/floating product-mode choice to hide it behind
             // (see docs/decisions.md Decision 36) — so it's always shown.
             overlay::ensure_pill_window(handle, true, pill_position);
+            // Start the meeting reminder background loop. This manages
+            // ReminderQueue and ActiveMeetingRecording as Tauri-managed state
+            // and dispatches native OS notifications for fired reminders.
+            meetings_v2::reminder_engine::start(handle.clone());
 
             Ok(())
         })
@@ -285,6 +289,10 @@ pub fn run() {
             commands::stop_meeting_v2,
             commands::pause_meeting_v2,
             commands::resume_meeting_v2,
+            commands::start_meeting_recording,
+            commands::snooze_meeting_reminder,
+            commands::dismiss_meeting_reminder,
+            commands::trigger_mock_meeting_reminder,
             commands::get_active_meeting_v2,
             commands::list_meetings_v2,
             commands::get_meeting_v2,

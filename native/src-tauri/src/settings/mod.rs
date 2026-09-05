@@ -555,6 +555,27 @@ pub struct MeetingSettings {
     /// deadline the meeting did not establish.
     #[serde(default, alias = "summaryInstructions")]
     pub summary_instructions: String,
+
+    // -----------------------------------------------------------------------
+    // Reminder toggles
+    // -----------------------------------------------------------------------
+    //
+    // These control which kinds of native Windows OS notifications the user
+    // receives. All three default to `true`. Disabling one suppresses that
+    // reminder kind without affecting meeting detection, calendar sync, or the
+    // recording pipeline.
+
+    /// Notify 5 minutes before a scheduled meeting starts.
+    #[serde(default = "default_true", alias = "remindBeforeMeeting")]
+    pub remind_before_meeting: bool,
+
+    /// Notify when a calendar meeting has started but is not being recorded.
+    #[serde(default = "default_true", alias = "remindIfUnrecorded")]
+    pub remind_if_unrecorded: bool,
+
+    /// Notify when a conferencing window is detected with no active recording.
+    #[serde(default = "default_true", alias = "remindOnDetection")]
+    pub remind_on_detection: bool,
 }
 
 fn default_true() -> bool {
@@ -583,6 +604,9 @@ impl Default for MeetingSettings {
             meetings_are_in_person: false,
             extensions: Vec::new(),
             summary_instructions: String::new(),
+            remind_before_meeting: true,
+            remind_if_unrecorded: true,
+            remind_on_detection: true,
         }
     }
 }

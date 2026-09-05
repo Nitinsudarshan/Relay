@@ -758,6 +758,12 @@ export interface MeetingSettings {
    * assign an owner or a deadline the meeting did not establish.
    */
   summary_instructions: string;
+  /** Notify 5 minutes before a scheduled meeting starts. */
+  remind_before_meeting?: boolean;
+  /** Notify when a calendar meeting has started but is not being recorded. */
+  remind_if_unrecorded?: boolean;
+  /** Notify when a conferencing window is detected with no active recording. */
+  remind_on_detection?: boolean;
 }
 
 export type AccountMode = 'local' | 'hybrid';

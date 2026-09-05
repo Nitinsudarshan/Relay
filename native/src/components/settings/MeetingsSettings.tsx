@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { CalendarDays, Plus, Trash2 } from 'lucide-react';
+import { Bell, CalendarDays, Plus, Trash2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import type {
   AppSettings,
@@ -31,6 +31,9 @@ export const DEFAULT_MEETING_SETTINGS: MeetingSettings = {
   meetings_are_in_person: false,
   extensions: [],
   summary_instructions: '',
+  remind_before_meeting: true,
+  remind_if_unrecorded: true,
+  remind_on_detection: true,
 };
 
 const SUMMARY_MODE_OPTIONS: {
@@ -258,6 +261,62 @@ export const MeetingsSettings: React.FC<MeetingsSettingsProps> = ({
         {calendarError && (
           <p className="text-[11px] text-destructive">{calendarError}</p>
         )}
+      </div>
+
+      {/* Meeting Reminders */}
+      <div className="flex flex-col gap-4 p-4 rounded-lg border border-border/60 bg-card/40">
+        <div>
+          <div className="flex items-center gap-2">
+            <Bell className="w-4 h-4 text-primary" />
+            <p className="text-xs font-medium text-foreground">Meeting Reminders</p>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            Native Windows notifications prompting you to record upcoming or active meetings.
+          </p>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium text-foreground">Remind before meeting starts</p>
+            <p className="text-[11px] text-muted-foreground">
+              Notify 5 minutes before scheduled calendar meetings so you never miss the start.
+            </p>
+          </div>
+          <Switch
+            checked={meetings.remind_before_meeting ?? true}
+            onCheckedChange={(checked) => update({ remind_before_meeting: checked })}
+          />
+        </div>
+
+        <div className="h-px bg-border/60" />
+
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium text-foreground">Remind if meeting is unrecorded</p>
+            <p className="text-[11px] text-muted-foreground">
+              Notify when a calendar meeting has started but recording has not been initiated.
+            </p>
+          </div>
+          <Switch
+            checked={meetings.remind_if_unrecorded ?? true}
+            onCheckedChange={(checked) => update({ remind_if_unrecorded: checked })}
+          />
+        </div>
+
+        <div className="h-px bg-border/60" />
+
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium text-foreground">Remind when conferencing detected</p>
+            <p className="text-[11px] text-muted-foreground">
+              Notify when Zoom, Teams, Google Meet, or Webex window is detected with no active recording.
+            </p>
+          </div>
+          <Switch
+            checked={meetings.remind_on_detection ?? true}
+            onCheckedChange={(checked) => update({ remind_on_detection: checked })}
+          />
+        </div>
       </div>
 
       <div className="flex flex-col gap-4 p-4 rounded-lg border border-border/60 bg-card/40">

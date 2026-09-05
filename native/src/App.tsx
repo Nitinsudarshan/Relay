@@ -20,7 +20,10 @@ import { listen } from '@tauri-apps/api/event';
 import {
   isPermissionGranted,
   requestPermission,
+  registerActionTypes,
+  onAction,
 } from '@tauri-apps/plugin-notification';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { NativeSidebar } from './components/common/NativeSidebar';
 import {
   Mic,
@@ -125,10 +128,16 @@ export const App: React.FC = () => {
   useEffect(() => {
     refreshAccountAndSettings();
 
-    // 1. Check Native OS Notification Permissions
-    // Note: On desktop (Windows), permission is granted unconditionally, and OS toasts
-    // are used as a display-only fallback signal. Interactive controls live in the
-    // app-owned meeting-reminder overlay window.
+    // 1. Native OS notification permission + meeting-reminder action types
+    //
+    // Meeting reminder notifications carry actionable buttons: ▶ Record,
+    // ◷ Snooze 5m, ◷ Snooze 15m, Dismiss. registerActionTypes registers the
+    // action shape once; the Rust engine's dispatch sets action_type_id on
+    // every notification it emits. onAction routes button presses (and body
+    // clicks) back to the Rust commands that own reminder state.
+    //
+    // Hard rule: this is the ONLY place notifications are set up in the
+    // frontend. No component should call requestPermission or onAction.
     const setupNotifications = async () => {
       try {
         let granted = await isPermissionGranted();
@@ -136,13 +145,76 @@ export const App: React.FC = () => {
           const permission = await requestPermission();
           granted = permission === 'granted';
         }
-        console.info('[notifications] Native OS notification permission status:', granted ? 'granted' : 'denied');
+        console.info('[notifications] Permission status:', granted ? 'granted' : 'denied');
+
+        // Register the meeting-reminder action type. This must happen after
+        // permission is confirmed but before the first notification arrives.
+        await registerActionTypes([
+          {
+            id: 'meeting-reminder',
+            actions: [
+              { id: 'record',     title: '▶ Record' },
+              { id: 'snooze_5',   title: '◷ Snooze 5m' },
+              { id: 'snooze_15',  title: '◷ Snooze 15m' },
+              { id: 'dismiss',    title: 'Dismiss' },
+            ],
+          },
+        ]);
+
+        // Wire action button presses to Rust commands. The Rust side owns all
+        // reminder state — the frontend never tracks reminder status itself.
+        const unlistenAction = await onAction(async (notification) => {
+          const raw = notification as unknown as Record<string, unknown>;
+          const rawNotification = (raw.notification as Record<string, unknown> | undefined) ?? {};
+          const extra = (notification.extra ?? raw.data ?? rawNotification.data ?? {}) as Record<string, unknown>;
+          const meetingId: string | undefined =
+            (extra.meeting_id as string | undefined) ??
+            (raw.meeting_id as string | undefined);
+          const kind: string | undefined =
+            (extra.kind as string | undefined) ??
+            (raw.kind as string | undefined);
+
+          const actionId =
+            notification.actionTypeId ??
+            (raw.actionId as string | undefined) ??
+            (notification.id !== undefined ? String(notification.id) : '');
+
+          console.info('[notifications] onAction', actionId, 'meeting:', meetingId, 'kind:', kind);
+
+          try {
+            if (actionId === 'record' && meetingId) {
+              await invoke('start_meeting_recording', { meetingId });
+              navigateTo('meetings');
+            } else if (actionId === 'snooze_5' && meetingId && kind) {
+              await invoke('snooze_meeting_reminder', { meetingId, kind, minutes: 5 });
+            } else if (actionId === 'snooze_15' && meetingId && kind) {
+              await invoke('snooze_meeting_reminder', { meetingId, kind, minutes: 15 });
+            } else if (actionId === 'dismiss' && meetingId && kind) {
+              await invoke('dismiss_meeting_reminder', { meetingId, kind });
+            } else {
+              // Body / notification click — bring the app to front and navigate.
+              try {
+                const win = getCurrentWindow();
+                await win.unminimize();
+                await win.show();
+                await win.setFocus();
+              } catch (winErr) {
+                console.warn('[notifications] Could not focus window:', winErr);
+              }
+              navigateTo('meetings');
+            }
+          } catch (err) {
+            console.error('[notifications] Failed to handle action', actionId, err);
+          }
+        });
+
+        // Persist the unlisten handle for cleanup.
+        return unlistenAction;
       } catch (err) {
-        console.error('[notifications] Failed to initialize notification permissions:', err);
+        console.error('[notifications] Failed to initialize notification setup:', err);
+        return undefined;
       }
     };
-
-    setupNotifications();
 
     // 2. Listen for backend Tauri account, profile, settings, & navigation events
     const handleNavigate = (payload: unknown) => {
@@ -218,11 +290,19 @@ export const App: React.FC = () => {
     window.addEventListener('relay-profile-changed', handleDomProfileChange);
     window.addEventListener('relay-navigate-tab', handleDomNavigate);
 
+    // Capture the onAction unlisten handle so it can be cleaned up on unmount.
+    const notificationCleanup = setupNotifications();
+
     return () => {
       unlistenNavigate.then((unlisten) => unlisten());
       unlistenAccount.then((unlisten) => unlisten());
       unlistenProfile.then((unlisten) => unlisten());
       unlistenSettings.then((unlisten) => unlisten());
+      notificationCleanup.then((listener) => {
+        if (listener && typeof listener.unregister === 'function') {
+          void listener.unregister();
+        }
+      });
       window.removeEventListener('relay-account-changed', handleDomAccountChange);
       window.removeEventListener('relay-profile-changed', handleDomProfileChange);
       window.removeEventListener('relay-navigate-tab', handleDomNavigate);
