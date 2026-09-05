@@ -145,6 +145,7 @@ pub fn utterance(
         start_time_s,
         end_time_s: start_time_s + seconds,
         features,
+        embedding: None,
     }
 }
 

@@ -24,6 +24,7 @@
 //! and it is a "do not bother splitting anything closer than this" bound rather
 //! than a claim about where two voices sit apart.
 
+use super::embedding::{cosine_similarity, SpeakerEmbedding};
 use super::features::VoiceFeatures;
 
 /// Weight on the MFCC standard-deviation half of the feature vector.
@@ -116,6 +117,24 @@ pub struct Utterance {
     pub start_time_s: f64,
     pub end_time_s: f64,
     pub features: VoiceFeatures,
+    pub embedding: Option<SpeakerEmbedding>,
+}
+
+impl Utterance {
+    pub fn new(id: String, start_time_s: f64, end_time_s: f64, features: VoiceFeatures) -> Self {
+        Self {
+            id,
+            start_time_s,
+            end_time_s,
+            features,
+            embedding: None,
+        }
+    }
+
+    pub fn with_embedding(mut self, embedding: SpeakerEmbedding) -> Self {
+        self.embedding = Some(embedding);
+        self
+    }
 }
 
 /// Which cluster a stretch was assigned to.
@@ -249,14 +268,28 @@ fn weighted(features: &VoiceFeatures) -> Vec<f32> {
 /// clusters whatever the hint says, because inventing seventeen silent speakers
 /// would be a claim the recording cannot back.
 pub fn cluster(utterances: &[Utterance], expected_speakers: Option<usize>) -> Clustering {
+    let use_embeddings = !utterances.is_empty()
+        && utterances.iter().all(|u| {
+            u.embedding
+                .as_ref()
+                .is_some_and(|e| e.provider != "acoustic-spectral-v2")
+        });
+
+    let is_usable_fn = |u: &Utterance| -> bool {
+        if use_embeddings {
+            u.embedding.as_ref().is_some_and(|e| e.quality >= 0.15)
+        } else {
+            u.features.is_usable()
+        }
+    };
+
     let usable: Vec<usize> = utterances
         .iter()
         .enumerate()
-        .filter(|(_, u)| u.features.is_usable())
+        .filter(|(_, u)| is_usable_fn(u))
         .map(|(i, _)| i)
         .collect();
 
-    let unplaced_count = utterances.len() - usable.len();
     let unassigned: Vec<Assignment> = utterances
         .iter()
         .map(|u| Assignment {
@@ -272,36 +305,61 @@ pub fn cluster(utterances: &[Utterance], expected_speakers: Option<usize>) -> Cl
             cluster_count: 0,
             mean_within_distance: 0.0,
             min_between_distance: 0.0,
-            unplaced_count,
+            unplaced_count: utterances.len(),
             singleton_cluster_count: 0,
             silhouette: 0.0,
         };
     }
 
-    let vectors: Vec<Vec<f32>> = usable
+    // Core selection: utterances with duration >= 1.2s provide the stable cluster centroids.
+    // Short interjections (< 1.2s) will be projected onto established centroids to prevent
+    // premature merge distortion or false singletons.
+    let core_usable: Vec<usize> = usable
         .iter()
-        .map(|&i| weighted(&utterances[i].features))
+        .copied()
+        .filter(|&i| (utterances[i].end_time_s - utterances[i].start_time_s) >= 1.2)
         .collect();
 
-    // Merge all the way down, recording what each merge cost. The sequence is
-    // what the stopping rule reads; stopping early would throw away exactly the
-    // evidence needed to choose where to stop.
-    let distances = distance_matrix(&vectors);
-    let (snapshots, _) = merge_all(&vectors);
+    let cluster_usable = if core_usable.len() >= 2 {
+        core_usable
+    } else {
+        usable.clone()
+    };
+
+    let vectors: Vec<Vec<f32>> = if use_embeddings {
+        cluster_usable
+            .iter()
+            .map(|&i| utterances[i].embedding.as_ref().unwrap().vector.clone())
+            .collect()
+    } else {
+        cluster_usable
+            .iter()
+            .map(|&i| weighted(&utterances[i].features))
+            .collect()
+    };
+
+    let dist_fn = |a: &[f32], b: &[f32]| -> f32 {
+        if use_embeddings {
+            (1.0 - cosine_similarity(a, b)).max(0.0)
+        } else {
+            distance(a, b)
+        }
+    };
+
+    let distances = distance_matrix_with(&vectors, dist_fn);
+    let (snapshots, _) = merge_all_with(&vectors, dist_fn);
     let chosen = choose_cluster_count(&snapshots, &distances, vectors.len(), expected_speakers);
 
-    // `snapshots[i]` is the partition with `i + 1` clusters.
     let mut members = snapshots
         .get(chosen.k.saturating_sub(1))
         .cloned()
         .unwrap_or_else(|| vec![(0..vectors.len()).collect()]);
 
-    // Order clusters by when each was first heard.
     members.sort_by(|left, right| {
         let first = |group: &Vec<usize>| {
             group
                 .iter()
-                .map(|&i| utterances[usable[i]].start_time_s)
+                .map(|&i| utterances[cluster_usable[i]].start_time_s)
                 .fold(f64::MAX, f64::min)
         };
         first(left)
@@ -319,10 +377,10 @@ pub fn cluster(utterances: &[Utterance], expected_speakers: Option<usize>) -> Cl
     let mut within_count = 0usize;
     for (cluster_index, group) in members.iter().enumerate() {
         for &local in group {
-            let d = distance(&vectors[local], &centroids[cluster_index]);
+            let d = dist_fn(&vectors[local], &centroids[cluster_index]);
             within_total += d;
             within_count += 1;
-            let original = usable[local];
+            let original = cluster_usable[local];
             assignments[original] = Assignment {
                 id: utterances[original].id.clone(),
                 cluster: Some(cluster_index),
@@ -331,12 +389,51 @@ pub fn cluster(utterances: &[Utterance], expected_speakers: Option<usize>) -> Cl
         }
     }
 
+    // Two-stage projection for short utterances:
+    for &idx in &usable {
+        if assignments[idx].cluster.is_none() && !centroids.is_empty() {
+            let u_vec = if use_embeddings {
+                utterances[idx].embedding.as_ref().map(|e| e.vector.clone())
+            } else {
+                Some(weighted(&utterances[idx].features))
+            };
+
+            if let Some(ref v) = u_vec {
+                let mut best_cluster = None;
+                let mut min_d = f32::MAX;
+                for (c_idx, c_vec) in centroids.iter().enumerate() {
+                    let d = dist_fn(v, c_vec);
+                    if d < min_d {
+                        min_d = d;
+                        best_cluster = Some(c_idx);
+                    }
+                }
+
+                let max_threshold = if use_embeddings { 0.35 } else { 0.65 };
+                if min_d <= max_threshold {
+                    if let Some(c) = best_cluster {
+                        assignments[idx] = Assignment {
+                            id: utterances[idx].id.clone(),
+                            cluster: Some(c),
+                            distance: min_d,
+                        };
+                        within_total += min_d;
+                        within_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
     let mut min_between = f32::MAX;
     for i in 0..centroids.len() {
         for j in i + 1..centroids.len() {
-            min_between = min_between.min(distance(&centroids[i], &centroids[j]));
+            min_between = min_between.min(dist_fn(&centroids[i], &centroids[j]));
         }
     }
+
+    let final_placed = assignments.iter().filter(|a| a.cluster.is_some()).count();
+    let final_unplaced = utterances.len().saturating_sub(final_placed);
 
     Clustering {
         singleton_cluster_count: members.iter().filter(|g| g.len() == 1).count(),
@@ -352,19 +449,22 @@ pub fn cluster(utterances: &[Utterance], expected_speakers: Option<usize>) -> Cl
         } else {
             min_between
         },
-        unplaced_count,
+        unplaced_count: final_unplaced,
         silhouette: chosen.silhouette,
     }
 }
 
-/// Merges every point down to one cluster under average linkage.
-///
-/// Returns the partition at each cluster count — `snapshots[i]` holds `i + 1`
-/// clusters — and the distance each merge was made at, ordered from the first
-/// merge (cheapest) to the last.
 type MergeTrace = (Vec<Vec<Vec<usize>>>, Vec<f32>);
 
+#[cfg(test)]
 fn merge_all(vectors: &[Vec<f32>]) -> MergeTrace {
+    merge_all_with(vectors, distance)
+}
+
+fn merge_all_with<F>(vectors: &[Vec<f32>], dist_fn: F) -> MergeTrace
+where
+    F: Fn(&[f32], &[f32]) -> f32 + Copy,
+{
     let mut members: Vec<Vec<usize>> = (0..vectors.len()).map(|i| vec![i]).collect();
     let mut snapshots: Vec<Vec<Vec<usize>>> = vec![Vec::new(); vectors.len()];
     let mut merge_distances: Vec<f32> = Vec::new();
@@ -372,7 +472,7 @@ fn merge_all(vectors: &[Vec<f32>]) -> MergeTrace {
     snapshots[members.len() - 1] = members.clone();
 
     while members.len() > 1 {
-        let Some((a, b, best)) = closest_pair(&members, vectors) else {
+        let Some((a, b, best)) = closest_pair_with(&members, vectors, dist_fn) else {
             break;
         };
         let merged = members.remove(b);
@@ -381,9 +481,70 @@ fn merge_all(vectors: &[Vec<f32>]) -> MergeTrace {
         snapshots[members.len() - 1] = members.clone();
     }
 
-    // Agglomerative merging always takes the closest pair first, so this is
-    // already cheapest-first — the order the elbow rule reads.
     (snapshots, merge_distances)
+}
+
+fn closest_pair_with<F>(
+    members: &[Vec<usize>],
+    vectors: &[Vec<f32>],
+    dist_fn: F,
+) -> Option<(usize, usize, f32)>
+where
+    F: Fn(&[f32], &[f32]) -> f32 + Copy,
+{
+    let mut best_a = 0usize;
+    let mut best_b = 0usize;
+    let mut best_dist = f32::MAX;
+
+    for i in 0..members.len() {
+        for j in i + 1..members.len() {
+            let d = average_linkage_distance_with(&members[i], &members[j], vectors, dist_fn);
+            if d < best_dist {
+                best_dist = d;
+                best_a = i;
+                best_b = j;
+            }
+        }
+    }
+
+    (best_dist != f32::MAX).then_some((best_a, best_b, best_dist))
+}
+
+fn average_linkage_distance_with<F>(
+    a: &[usize],
+    b: &[usize],
+    vectors: &[Vec<f32>],
+    dist_fn: F,
+) -> f32
+where
+    F: Fn(&[f32], &[f32]) -> f32 + Copy,
+{
+    if a.is_empty() || b.is_empty() {
+        return f32::MAX;
+    }
+    let mut total = 0.0f64;
+    for &i in a {
+        for &j in b {
+            total += dist_fn(&vectors[i], &vectors[j]) as f64;
+        }
+    }
+    (total / (a.len() * b.len()) as f64) as f32
+}
+
+fn distance_matrix_with<F>(vectors: &[Vec<f32>], dist_fn: F) -> Vec<Vec<f32>>
+where
+    F: Fn(&[f32], &[f32]) -> f32 + Copy,
+{
+    let n = vectors.len();
+    let mut matrix = vec![vec![0.0f32; n]; n];
+    for i in 0..n {
+        for j in i + 1..n {
+            let d = dist_fn(&vectors[i], &vectors[j]);
+            matrix[i][j] = d;
+            matrix[j][i] = d;
+        }
+    }
+    matrix
 }
 
 /// Mean silhouette of one partition, over a precomputed distance matrix.
@@ -448,10 +609,7 @@ fn mean_silhouette(members: &[Vec<usize>], distances: &[Vec<f32>]) -> f32 {
 }
 
 /// Every pairwise distance, computed once.
-///
-/// Scoring every candidate partition re-reads these many times over; computing
-/// them per comparison would make the search quadratic in cluster count for no
-/// reason.
+#[allow(dead_code)]
 fn distance_matrix(vectors: &[Vec<f32>]) -> Vec<Vec<f32>> {
     let n = vectors.len();
     let mut matrix = vec![vec![0.0f32; n]; n];
@@ -552,30 +710,7 @@ fn choose_cluster_count(
     SpeakerCount { k: 1, silhouette: 0.0 }
 }
 
-/// The closest pair of clusters under average linkage, and their distance.
-fn closest_pair(members: &[Vec<usize>], vectors: &[Vec<f32>]) -> Option<(usize, usize, f32)> {
-    let mut best: Option<(usize, usize, f32)> = None;
-    for i in 0..members.len() {
-        for j in i + 1..members.len() {
-            let mut total = 0.0f32;
-            let mut count = 0usize;
-            for &a in &members[i] {
-                for &b in &members[j] {
-                    total += distance(&vectors[a], &vectors[b]);
-                    count += 1;
-                }
-            }
-            if count == 0 {
-                continue;
-            }
-            let mean = total / count as f32;
-            if best.as_ref().is_none_or(|(_, _, d)| mean < *d) {
-                best = Some((i, j, mean));
-            }
-        }
-    }
-    best
-}
+
 
 fn centroid(group: &[usize], vectors: &[Vec<f32>]) -> Vec<f32> {
     let width = vectors.first().map(|v| v.len()).unwrap_or(0);
@@ -952,6 +1087,7 @@ silhouette {:.3})",
                 voiced_fraction: 0.0,
                 frame_count: 5,
             },
+            embedding: None,
         });
 
         let clustering = cluster(&meeting, None);

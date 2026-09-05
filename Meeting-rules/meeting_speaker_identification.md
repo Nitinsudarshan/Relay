@@ -17,78 +17,37 @@ Two things are deliberately kept separate throughout:
 Conflating them is the most common design error. Diarization can succeed completely while identification fails, and the UI must be able to show that state honestly.
 
 > [!NOTE]
-> **What is implemented today** (v0.33.0). Rungs **1**, **4**, **5** and **6**
-> are built. Rungs 2 and 3 are not.
->
-> **v0.31.0 shipped rung 4 broken**, and the correction is worth reading before
-> the description below: a three-person meeting reported one speaker, because
-> the split threshold was calibrated against synthetic voices an octave apart
-> and sat above every distance real speech produces. See
-> `docs/meetings/TRANSCRIPT_AND_SPEAKER_REBUILD.md` §2.0. Two things changed as
-> a result — the count is now chosen by scoring partitions rather than by any
-> threshold, and §3's identification is a *comparison* of three methods over one
-> recording rather than a single implementation judged by holding meetings.
+> **What is implemented today** (v0.37.0 — Meetings Intelligence v2.1).
+> Rungs **1**, **3**, **4**, **5**, **6**, and **Multi-Signal Evidence Fusion** are built.
 >
 > - **Rung 1 — channel** (`processing/speakers.rs`): microphone input is the
->   local user (`speaker_me`), system audio is everyone else. Always on, and it
->   is not overridable by a later rung *for the local user*, because the channel
->   is what the audio device reported and a cluster is an inference about it.
-> - **Rung 4 — diarization** (`meetings_v2::diarize`): the recorded chunk WAVs
->   are cut at Whisper's own utterance boundaries, characterised, and clustered
->   into distinct voices, which is what splits the single remote bucket into
->   `Speaker 1`, `Speaker 2`, … Features are MFCC statistics plus a pitch
->   estimate, **not** a neural embedding, so no biometric data is created:
->   features live for the duration of one run and are never stored or matched
->   across meetings. Three engines implement the decision — channel only,
->   whole-recording clustering, and a registry built live as chunks land — and
->   §3's identification command can run all of them over one recording for
->   comparison.
->
->   The limitation is measured rather than asserted: two deliberately similar
->   voices score the same as one voice wandering across a meeting, so they
->   cannot be told apart at all, and Relay merges them rather than risk
->   inventing a speaker. §2.2's expected-speaker count is the override, and it
->   recovers the correct split. `maybe_later.md` item 18 tracks the neural
->   embedding that would resolve it.
+>   local user (`speaker_me`), system audio is everyone else for online calls.
+>   In-person room microphone mode strictly disables the local-user channel assumption.
+> - **Rung 3 — calendar attendee context** (`calendar`): Google Calendar integration
+>   provides candidate attendees, attendance reconciliation (heard vs no voice evidence),
+>   and event matching. Calendar is strictly contextual evidence, NEVER identity truth.
+> - **Rung 4 — speaker embedding & diarization** (`meetings_v2::diarize`):
+>   Whisper utterance boundaries are characterized via a pluggable `SpeakerEmbeddingProvider`
+>   abstraction. Features include a pure Rust 64-dimensional acoustic spectral embedding
+>   (MFCC means/stds, pitch statistics, spectral shape moments, sub-band balances) with
+>   dynamic neural ONNX fallback orchestration (CAM++ / 3D-Speaker). Two-stage clustering
+>   groups core utterances (>=1.2s) into centroids, then projects short utterances (<1.2s like "Yes")
+>   via acoustic similarity to preserve short interruptions (A -> B -> A).
+> - **Rung 4.5 — calibrated self-voice anchor** (`diarize::self_voice`):
+>   Meeting-local acoustic reference model calibrated using candidate similarity, runner-up
+>   similarity, acoustic margin, duration, and SNR.
 > - **Rung 5 — contextual inference** (`processing/names.rs`): deterministic
->   patterns over self-introductions and direct address, deliberately *not* the
->   model pass §4 specifies. A model asked who Speaker 2 is will always produce
->   a plausible answer, and the failure mode here is inventing a name. A
->   self-introduction binds to the speaker who gave it; a direct address is
->   recorded as a mentioned participant and never bound to a voice.
-> - **Rung 6 — user correction** (`processing/directives.rs`): a `SpeakerName`
->   directive in the meeting's notes renames the speaker in the registry. It
->   does not yet feed rungs 2 or 3, because neither exists.
->
-> **Rung 2 (enrolled voiceprint)** is absent because it is the feature that
-> would create biometric data, and §6's consent, management and deletion
-> requirements have to land with it — `maybe_later.md` item 18.
-> **Rung 3 (calendar attendees)** is absent because Relay has no calendar
-> integration; the participant list and the expected-speaker hint are the
-> surfaces it would fill — `maybe_later.md` item 19.
->
-> §2.1's settings surface accordingly exposes "Speaker identification:
-> Automatic / Off", "Separate individual speakers" (rung 4, **on** by default —
-> see below) and an expected-speaker count. The voice-library toggles are still
-> deliberately absent.
->
-> One deliberate departure from §2.1: "Identify individual speakers" defaults
-> **on**, where this document says off for CPU cost. The measured cost is a few
-> hundred milliseconds over a whole meeting, run once after recording ends; the
-> alternative default is a twenty-person meeting reporting one remote speaker,
-> which is the failure this rung was built to fix. §2.2's per-meeting override
-> exists as the **Identify speakers** action in the conversation tab, with its
-> own expected-speaker field.
->
-> §2.2's **In person** marking is built as a setting: it disables the local-user
-> inference, because the channel split that identifies the person at this
-> machine means nothing when every voice arrives on one microphone, and a guess
-> there mislabels whoever it lands on.
->
-> §2.3's states are all reachable: a name a person typed is marked confirmed, a
-> cluster nobody has named shows as `Speaker N`, a roster the clustering is
-> unsure of is reported as provisional, and a stretch that could not be placed
-> is left blank.
+>   patterns over self-introductions and direct address. Contradiction penalties prevent
+>   contextual mentions from overriding strong acoustic evidence.
+> - **Rung 6 — user correction** (`processing/directives.rs`): user renames and merges
+>   have absolute authority, immediately propagating to turns, facts, and summaries while
+>   leaving the raw transcript SHA-256 hash strictly immutable.
+> - **Multi-Signal Evidence Fusion**: rather than a brittle linear hierarchy, speaker resolution
+>   evaluates candidate scores combining channel evidence, acoustic similarity, cluster consistency,
+>   calendar candidates, contextual speech, and temporal continuity, emitting calibrated confidence levels:
+>   `Confirmed`, `High`, `Likely`, `Unresolved`, and `Unknown`.
+> - **Privacy**: Voice representations and embeddings are strictly meeting-local and ephemeral.
+>   No persistent cross-meeting biometric voiceprints are created by default.
 
 
 ---

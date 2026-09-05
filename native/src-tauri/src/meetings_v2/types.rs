@@ -442,8 +442,41 @@ pub enum SpeakerAssignmentMethod {
     CalendarCandidate,
     /// Conservative self-introduction or direct speech address.
     ContextualInference,
+    /// Multi-signal evidence fusion scoring.
+    EvidenceFusion,
     /// Unresolved or unnamed speaker.
     Unknown,
+}
+
+/// Calibrated user-facing confidence semantics for speaker identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SpeakerConfidenceLevel {
+    /// Manually confirmed by the user or 100% verified hardware channel.
+    Confirmed,
+    /// High acoustic confidence with supporting context.
+    High,
+    /// Probable attribution based on consistent partial evidence.
+    Likely,
+    /// Distinct voice isolated but identity not established (e.g. Speaker 2).
+    Unresolved,
+    /// Too little speech or ambiguous evidence; unattributed.
+    Unknown,
+}
+
+/// Detailed multi-signal score components for a candidate speaker identity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpeakerCandidateScore {
+    pub speaker_id: String,
+    #[serde(default)]
+    pub acoustic_similarity: Option<f32>,
+    pub cluster_consistency: f32,
+    pub channel_evidence: f32,
+    pub contextual_evidence: f32,
+    pub calendar_evidence: f32,
+    pub temporal_consistency: f32,
+    pub contradiction_penalty: f32,
+    pub final_confidence: f32,
 }
 
 /// Structured evidence supporting a speaker assignment.
@@ -457,6 +490,14 @@ pub struct SpeakerEvidence {
     pub similarity: Option<f32>,
     #[serde(default)]
     pub notes: Option<String>,
+    #[serde(default)]
+    pub calendar_candidate: Option<String>,
+    #[serde(default)]
+    pub contextual_mention: Option<String>,
+    #[serde(default)]
+    pub temporal_consistency: Option<String>,
+    #[serde(default)]
+    pub candidate_scores: Vec<SpeakerCandidateScore>,
 }
 
 /// A formal speaker assignment for one transcript utterance.
@@ -466,6 +507,8 @@ pub struct SpeakerAssignment {
     pub utterance_id: String,
     pub speaker_id: String,
     pub confidence: f32,
+    #[serde(default)]
+    pub confidence_level: Option<SpeakerConfidenceLevel>,
     pub method: SpeakerAssignmentMethod,
     pub evidence: SpeakerEvidence,
 }

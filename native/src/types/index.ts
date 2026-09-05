@@ -1086,19 +1086,45 @@ export type SpeakerAssignmentMethod =
   | 'ENROLLED_VOICE'
   | 'CALENDAR_CANDIDATE'
   | 'CONTEXTUAL_INFERENCE'
-  | 'MANUAL';
+  | 'EVIDENCE_FUSION'
+  | 'MANUAL'
+  | 'UNKNOWN';
+
+export type SpeakerConfidenceLevel =
+  | 'CONFIRMED'
+  | 'HIGH'
+  | 'LIKELY'
+  | 'UNRESOLVED'
+  | 'UNKNOWN';
+
+export interface SpeakerCandidateScore {
+  speaker_id: string;
+  acoustic_similarity?: number | null;
+  cluster_consistency: number;
+  channel_evidence: number;
+  contextual_evidence: number;
+  calendar_evidence: number;
+  temporal_consistency: number;
+  contradiction_penalty: number;
+  final_confidence: number;
+}
 
 export interface SpeakerEvidence {
   channel?: string | null;
   cluster_id?: number | null;
   similarity?: number | null;
   notes?: string | null;
+  calendar_candidate?: string | null;
+  contextual_mention?: string | null;
+  temporal_consistency?: string | null;
+  candidate_scores?: SpeakerCandidateScore[];
 }
 
 export interface SpeakerAssignment {
   utterance_id: string;
   speaker_id: string;
   confidence: number;
+  confidence_level?: SpeakerConfidenceLevel;
   method: SpeakerAssignmentMethod;
   evidence: SpeakerEvidence;
 }

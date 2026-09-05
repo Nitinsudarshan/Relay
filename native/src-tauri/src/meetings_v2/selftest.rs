@@ -457,6 +457,7 @@ fn synthetic_meeting(voices: &[(f32, f32)]) -> Vec<cluster::Utterance> {
                 start_time_s: index as f64 * 10.0,
                 end_time_s: index as f64 * 10.0 + 4.0,
                 features: f,
+                embedding: None,
             })
         })
         .collect()

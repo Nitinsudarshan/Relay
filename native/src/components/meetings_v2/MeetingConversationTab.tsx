@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AudioLines, Check, GitMerge, Info, Pencil, Play, RefreshCw, Users, X } from 'lucide-react';
 import type { Conversation, Diarization, Speaker } from '../../types';
 import { formatTimestamp, speakerLabel } from './meetingProcessing';
+import { MeetingSpeakerEvidenceInspector } from './MeetingSpeakerEvidenceInspector';
 
 interface MeetingConversationTabProps {
   conversation?: Conversation | null;
@@ -47,8 +48,18 @@ const SpeakerRow: React.FC<{
   otherSpeakers: Speaker[];
   onRename: (displayName: string | null) => void;
   onMerge?: (targetSpeakerId: string) => void;
+  onInspect?: () => void;
+  isInspected?: boolean;
   isRenaming: boolean;
-}> = ({ speaker, otherSpeakers, onRename, onMerge, isRenaming }) => {
+}> = ({
+  speaker,
+  otherSpeakers,
+  onRename,
+  onMerge,
+  onInspect,
+  isInspected,
+  isRenaming,
+}) => {
   const [editing, setEditing] = useState(false);
   const [merging, setMerging] = useState(false);
   const [draft, setDraft] = useState(speaker.display_name ?? '');
@@ -158,6 +169,19 @@ const SpeakerRow: React.FC<{
         <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
       </button>
 
+      <button
+        onClick={onInspect}
+        className={`p-1 rounded-md transition-colors cursor-pointer ${
+          isInspected
+            ? 'bg-primary/10 text-primary font-medium'
+            : 'hover:bg-accent text-muted-foreground hover:text-foreground'
+        }`}
+        title={`Inspect speaker evidence for ${speaker.fallback_label}`}
+        aria-label={`Inspect evidence for ${speaker.fallback_label}`}
+      >
+        <Info className="w-3 h-3" />
+      </button>
+
       {otherSpeakers.length > 0 && onMerge && (
         <button
           onClick={() => setMerging(true)}
@@ -188,6 +212,7 @@ export const MeetingConversationTab: React.FC<MeetingConversationTabProps> = ({
 }) => {
   // Declared before any early return: hooks must run unconditionally.
   const [expectedDraft, setExpectedDraft] = useState<string>('');
+  const [inspectedSpeakerId, setInspectedSpeakerId] = useState<string | null>(null);
 
   if (isDisabled) {
     return (
@@ -244,6 +269,10 @@ export const MeetingConversationTab: React.FC<MeetingConversationTabProps> = ({
                   ? (targetId) => onMergeSpeaker(speaker.id, targetId)
                   : undefined
               }
+              onInspect={() =>
+                setInspectedSpeakerId((cur) => (cur === speaker.id ? null : speaker.id))
+              }
+              isInspected={inspectedSpeakerId === speaker.id}
             />
           ))}
 
@@ -262,19 +291,36 @@ export const MeetingConversationTab: React.FC<MeetingConversationTabProps> = ({
             <button
               onClick={() => onIdentifySpeakers(expected)}
               disabled={isIdentifying}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card hover:bg-accent border border-border text-xs text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              title="Separate the recorded audio into distinct voices. Reads the stored audio; the transcript is untouched."
+              className="flex items-center gap-1 px-2 py-1 rounded-md bg-accent hover:bg-accent/80 text-xs text-foreground font-medium transition-colors disabled:opacity-50 cursor-pointer"
+              title="Re-run acoustic separation to find distinct voices"
             >
-              {isIdentifying ? (
-                <RefreshCw className="w-3 h-3 animate-spin text-primary" />
-              ) : (
-                <AudioLines className="w-3 h-3 text-primary" />
-              )}
+              <RefreshCw
+                className={`w-3 h-3 ${isIdentifying ? 'animate-spin' : ''}`}
+              />
               <span>{isChannelOnly ? 'Identify speakers' : 'Re-identify'}</span>
             </button>
           </div>
         </div>
       )}
+
+      {inspectedSpeakerId && (() => {
+        const target = speakers.find((s) => s.id === inspectedSpeakerId);
+        if (!target) return null;
+        return (
+          <div className="max-w-md my-2 animate-in fade-in slide-in-from-top-1 duration-150">
+            <MeetingSpeakerEvidenceInspector
+              speaker={target}
+              onClose={() => setInspectedSpeakerId(null)}
+              onStartRename={() => onRenameSpeaker(target.id, target.display_name ?? null)}
+              onStartMerge={
+                onMergeSpeaker && speakers.length > 1
+                  ? () => onMergeSpeaker(target.id, speakers.find((s) => s.id !== target.id)!.id)
+                  : undefined
+              }
+            />
+          </div>
+        );
+      })()}
 
       {report && report.cluster_count > 0 && !report.well_separated && (
         <p className="flex items-start gap-2 text-[11px] px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-800 dark:text-amber-200">

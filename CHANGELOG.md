@@ -1,5 +1,27 @@
 # Relay — Changelog
 
+## [0.38.0] - 2026-09-05
+
+### Meetings Intelligence v2.1: Speaker Intelligence Accuracy, Reusable Speaker Embeddings, and Multi-Signal Evidence Fusion
+
+**Type**: minor — acoustic speaker accuracy hardening introducing reusable speaker embedding architecture (`SpeakerEmbeddingProvider`), pure Rust 64-dimensional spectral baseline, dynamic ONNX CAM++ fallback, two-stage diarization clustering with short-utterance centroid projection, multi-signal evidence fusion scoring with calibrated confidence levels (`Confirmed`, `High`, `Likely`, `Unresolved`, `Unknown`), hardened multi-metric self-voice anchoring, Evidence Inspector UI diagnostics, comprehensive benchmark harness (Scenarios A through J), adversarial identity tests, and strict transcript immutability preservation (`native/src-tauri/src/meetings_v2/*`, `native/src/types/index.ts`, `native/src/components/meetings_v2/*`, `Meeting-rules/meeting_speaker_identification.md`).
+
+#### Features
+
+- **Reusable Speaker Embedding Abstraction (`native/src-tauri/src/meetings_v2/diarize/embedding.rs`)**: Introduced `SpeakerEmbeddingProvider` trait decoupling acoustic embedding generation from downstream diarization, verification, and identification. Implemented a zero-dependency 64-dimensional pure Rust `AcousticSpectralEmbeddingProvider` (capturing 20 MFCC means, 20 MFCC variances, 8 spectral shape statistics, 4 F0 pitch distribution moments, and 12 sub-band energy ratios) and dynamic `OnnxSpeakerEmbeddingProvider` with graceful fallback to classical feature extraction.
+- **Two-Stage Diarization Clustering (`native/src-tauri/src/meetings_v2/diarize/cluster.rs`)**: Re-architected speaker clustering to separate core conversational anchor utterances (duration >= 1.2s) from short interjections. Core utterances establish stable cluster centroids; short interjections (e.g., 1-second "Yes.", "Right.") are projected onto nearest centroids via acoustic similarity without fragmenting clusters into spurious single-utterance speakers.
+- **Multi-Signal Evidence Fusion (`native/src-tauri/src/meetings_v2/processing/speakers.rs`, `native/src-tauri/src/meetings_v2/types.rs`)**: Replaced brittle linear evidence chains with calibrated multi-signal fusion (`SpeakerCandidateScore`) balancing acoustic similarity, cluster consistency, channel evidence, contextual self-introductions, calendar roster matching, and temporal continuity (`A -> B -> A` protection). Enforced strict contradiction penalties preventing weak calendar or contextual hints from overriding strong acoustic evidence.
+- **Calibrated Semantic Confidence States (`native/src-tauri/src/meetings_v2/types.rs`, `native/src/types/index.ts`)**: Replaced arbitrary uncalibrated percentages with explicit semantic states: `Confirmed`, `High`, `Likely`, `Unresolved`, and `Unknown`. Users are never misled by false certainty, prioritizing truthful uncertainty over speculative naming.
+- **Hardened Self-Voice Anchoring (`native/src-tauri/src/meetings_v2/diarize/self_voice.rs`)**: Replaced single static threshold checks with multi-metric calibrated decisions (`SelfVoiceDecision`) evaluating candidate similarity, runner-up margin (>= 0.15), reference duration (>= 3.0s), sample counts (>= 2), and signal-to-noise ratio before confirming local user identity.
+- **Speaker Evidence Inspector UI (`native/src/components/meetings_v2/MeetingSpeakerEvidenceInspector.tsx`, `native/src/components/meetings_v2/MeetingConversationTab.tsx`)**: Added an inspectable diagnostics drawer in the conversational transcript view displaying acoustic similarity, diarization cluster, calendar roster candidate status, contextual mention analysis, temporal consistency, and detailed candidate score breakdowns without exposing raw biometric vectors.
+- **Acoustic Benchmark Harness (`native/src-tauri/src/meetings_v2/diarize/benchmarks.rs`)**: Built an automated acoustic benchmark suite covering Scenarios A through J (two speakers, five speakers, 1s interruptions, cross-chunk transitions, similar voices, crosstalk, room mics, leakage, noise, and 8-12 speaker large meetings) reporting Diarization Error Rate (DER), speaker confusion rate, false identity rate, and short-interjection accuracy.
+- **Adversarial Identity & Neural Regression Tests (`native/src-tauri/src/meetings_v2/intelligence_adversarial_tests.rs`)**: Added 17 adversarial and regression tests guaranteeing that calendar attendees never force identity without acoustic support, contradictory evidence abstains cleanly, 30s storage chunk boundaries remain invisible, and raw Whisper transcript (`transcript.jsonl`) remains immutable across renames and merges.
+
+#### Security & Privacy
+
+- **Ephemeral Voice Representations**: Meeting-local embeddings are strictly ephemeral and discarded after processing. No cross-meeting persistent biometric voiceprints are retained.
+- **Transcript Immutability**: All speaker renames and merges propagate through assignments, turns, facts, and summary projections while the underlying raw Whisper transcript hash remains identical.
+
 ## [0.37.0] - 2026-09-04
 
 ### App Restructure: A Home Surface, and the Knowledge Graph Promoted Out of Scribbles

@@ -165,7 +165,7 @@ pub fn extract(samples: &[f32], sample_rate: u32) -> Option<VoiceFeatures> {
 }
 
 /// A Hann window, precomputed once per stretch.
-fn hann(len: usize) -> Vec<f32> {
+pub(crate) fn hann(len: usize) -> Vec<f32> {
     if len <= 1 {
         return vec![1.0; len];
     }
@@ -181,7 +181,7 @@ fn hann(len: usize) -> Vec<f32> {
 ///
 /// Uses an in-place iterative radix-2 FFT. `buffer.len()` must be a power of
 /// two; [`extract`] guarantees that by construction.
-fn power_spectrum(buffer: &[f32]) -> Vec<f32> {
+pub(crate) fn power_spectrum(buffer: &[f32]) -> Vec<f32> {
     let n = buffer.len();
     let mut re: Vec<f32> = buffer.to_vec();
     let mut im: Vec<f32> = vec![0.0; n];
@@ -242,14 +242,14 @@ fn fft_in_place(re: &mut [f32], im: &mut [f32]) {
 }
 
 /// Triangular mel filters over the FFT bins.
-struct MelFilterBank {
+pub(crate) struct MelFilterBank {
     /// One `(start_bin, weights)` pair per filter. Storing only the non-zero
     /// span keeps `apply` linear in bin count rather than filters × bins.
     filters: Vec<(usize, Vec<f32>)>,
 }
 
 impl MelFilterBank {
-    fn new(fft_size: usize, sample_rate: u32) -> Self {
+    pub(crate) fn new(fft_size: usize, sample_rate: u32) -> Self {
         let bins = fft_size / 2 + 1;
         let bin_hz = sample_rate as f64 / fft_size as f64;
 
@@ -290,7 +290,7 @@ impl MelFilterBank {
     }
 
     /// Log energy in each filter. The floor keeps `ln` finite on a silent band.
-    fn apply(&self, spectrum: &[f32]) -> Vec<f32> {
+    pub(crate) fn apply(&self, spectrum: &[f32]) -> Vec<f32> {
         self.filters
             .iter()
             .map(|(start, weights)| {
@@ -319,7 +319,7 @@ fn mel_to_hz(mel: f64) -> f64 {
 /// The zeroth coefficient is total log energy: it tracks microphone distance
 /// and speaking volume, not identity, and including it makes a speaker who
 /// leaned toward the mic look like a different person.
-fn dct_ii(input: &[f32], count: usize) -> Vec<f32> {
+pub(crate) fn dct_ii(input: &[f32], count: usize) -> Vec<f32> {
     let n = input.len();
     (1..=count)
         .map(|k| {
@@ -334,7 +334,7 @@ fn dct_ii(input: &[f32], count: usize) -> Vec<f32> {
 }
 
 /// Per-coefficient mean and population standard deviation across frames.
-fn mean_and_std(frames: &[Vec<f32>]) -> (Vec<f32>, Vec<f32>) {
+pub(crate) fn mean_and_std(frames: &[Vec<f32>]) -> (Vec<f32>, Vec<f32>) {
     let width = frames.first().map(|f| f.len()).unwrap_or(0);
     let mut mean = vec![0.0f32; width];
     for frame in frames {
@@ -364,7 +364,7 @@ fn mean_and_std(frames: &[Vec<f32>]) -> (Vec<f32>, Vec<f32>) {
 /// Returns `None` when the strongest peak in the search range is too weak to
 /// call the frame voiced, which is the honest answer for a fricative, a breath,
 /// or a keyboard.
-fn estimate_pitch(frame: &[f32], sample_rate: u32) -> Option<f32> {
+pub(crate) fn estimate_pitch(frame: &[f32], sample_rate: u32) -> Option<f32> {
     let min_lag = (sample_rate as f64 / PITCH_MAX_HZ) as usize;
     let max_lag = ((sample_rate as f64 / PITCH_MIN_HZ) as usize).min(frame.len().saturating_sub(1));
     if min_lag >= max_lag || min_lag == 0 {

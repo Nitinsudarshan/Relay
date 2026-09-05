@@ -223,6 +223,9 @@ fn empty_diarization(expected_speakers: Option<usize>) -> Diarization {
             silhouette: 0.0,
             expected_speakers,
             duration_ms: 0,
+            embedding_provider: None,
+            fallback_used: false,
+            embedding_duration_ms: 0,
         },
         assignments: Vec::new(),
     }
@@ -282,6 +285,9 @@ fn channel_only(store: &SessionStore, session_id: &str) -> Result<Diarization, S
             silhouette: 0.0,
             expected_speakers: None,
             duration_ms: started.elapsed().as_millis() as u64,
+            embedding_provider: None,
+            fallback_used: false,
+            embedding_duration_ms: 0,
         },
         assignments,
     })
@@ -390,6 +396,9 @@ separated. The transcript and summary are unaffected."
             silhouette: 0.0,
             expected_speakers: None,
             duration_ms: started.elapsed().as_millis() as u64,
+            embedding_provider: None,
+            fallback_used: false,
+            embedding_duration_ms: 0,
         },
         assignments,
     })

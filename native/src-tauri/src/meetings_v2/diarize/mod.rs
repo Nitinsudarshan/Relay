@@ -27,7 +27,9 @@
 //!   marginal rather than presented as fact, because two similar voices on one
 //!   channel are beyond what MFCC statistics can resolve.
 
+pub mod benchmarks;
 pub mod cluster;
+pub mod embedding;
 /// The three ways Relay can decide who spoke, and a way to compare them on one
 /// recording rather than by holding another meeting.
 pub mod engine;
@@ -40,6 +42,11 @@ pub mod self_voice;
 #[cfg(test)]
 pub mod fixtures;
 
+pub use benchmarks::{BenchmarkMetrics, BenchmarkReport, run_full_benchmark_suite};
+pub use embedding::{
+    AcousticSpectralEmbeddingProvider, DynamicSpeakerEmbeddingProvider, SpeakerEmbedding,
+    SpeakerEmbeddingProvider,
+};
 pub use self_voice::SelfVoiceAnchor;
 
 use super::session_store::SessionStore;
@@ -119,6 +126,37 @@ pub struct DiarizationReport {
     /// The hint the run was given, if any.
     pub expected_speakers: Option<usize>,
     pub duration_ms: u64,
+    /// Which embedding provider characterises speakers.
+    #[serde(default)]
+    pub embedding_provider: Option<String>,
+    /// Whether the engine fell back from a primary neural model to the acoustic floor.
+    #[serde(default)]
+    pub fallback_used: bool,
+    /// Time spent computing speaker embeddings, in milliseconds.
+    #[serde(default)]
+    pub embedding_duration_ms: u64,
+}
+
+impl Default for DiarizationReport {
+    fn default() -> Self {
+        Self {
+            cluster_count: 0,
+            placed_count: 0,
+            unplaced_count: 0,
+            skipped_count: 0,
+            local_cluster: None,
+            well_separated: false,
+            mean_within_distance: 0.0,
+            min_between_distance: 0.0,
+            singleton_speaker_count: 0,
+            silhouette: 0.0,
+            expected_speakers: None,
+            duration_ms: 0,
+            embedding_provider: None,
+            fallback_used: false,
+            embedding_duration_ms: 0,
+        }
+    }
 }
 
 /// The per-utterance result of a diarization run.
@@ -217,6 +255,10 @@ The transcript and summary are unaffected."
     let mut chunk_indices: Vec<usize> = by_chunk.keys().copied().collect();
     chunk_indices.sort_unstable();
 
+    let embedding_provider = DynamicSpeakerEmbeddingProvider::new();
+    let mut embedding_duration_ms = 0u64;
+    let mut fallback_used = false;
+
     for chunk_index in chunk_indices {
         let path = store.chunk_path(session_id, chunk_index);
         let samples = match read_chunk_samples(&path) {
@@ -235,12 +277,25 @@ The transcript and summary are unaffected."
             };
             match features::extract(slice, 16_000) {
                 Some(f) => {
+                    let emb_start = std::time::Instant::now();
+                    let embedding = match embedding_provider.embed_with_status(slice, 16_000) {
+                        Ok((emb, used_fb)) => {
+                            if used_fb {
+                                fallback_used = true;
+                            }
+                            Some(emb)
+                        }
+                        Err(_) => None,
+                    };
+                    embedding_duration_ms += emb_start.elapsed().as_millis() as u64;
+
                     mic_shares.insert(span.segment_id.clone(), span.mic_share);
                     utterances.push(cluster::Utterance {
                         id: span.segment_id.clone(),
                         start_time_s: span.start_time_s,
                         end_time_s: span.end_time_s,
                         features: f,
+                        embedding,
                     });
                 }
                 None => skipped += 1,
@@ -276,6 +331,9 @@ The transcript and summary are unaffected."
         silhouette: clustering.silhouette,
         expected_speakers,
         duration_ms: started.elapsed().as_millis() as u64,
+        embedding_provider: Some(embedding_provider.name().to_string()),
+        fallback_used,
+        embedding_duration_ms,
     };
 
     tracing::info!(
@@ -1008,6 +1066,9 @@ mod tests {
                 silhouette: 0.82,
                 expected_speakers: None,
                 duration_ms: 12,
+                embedding_provider: None,
+                fallback_used: false,
+                embedding_duration_ms: 0,
             },
             assignments: vec![
                 VoiceAssignment {

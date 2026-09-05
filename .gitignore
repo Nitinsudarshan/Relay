@@ -12,6 +12,8 @@ dist/
 **/dist/
 target/
 **/target/
+target-test/
+**/target-test/
 .relay/
 *.tsbuildinfo
 
