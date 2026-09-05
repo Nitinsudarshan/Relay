@@ -246,7 +246,7 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
 
   // Group events by day
   const groupedEvents = useMemo(() => {
-    const groups: Record<string, { label: string; date: Date; items: CalendarEvent[] }> = {};
+    const groups: Record<string, { id: string; label: string; date: Date; items: CalendarEvent[] }> = {};
     const todayStr = new Date().toDateString();
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -268,7 +268,7 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
         } else if (d.toDateString() === tomorrowStr) {
           label = `Tomorrow · ${label}`;
         }
-        groups[key] = { label, date: d, items: [] };
+        groups[key] = { id: key, label, date: d, items: [] };
       }
       groups[key].items.push(evt);
     }
@@ -789,7 +789,7 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
                 />
               ) : (
                 groupedEvents.map((group) => (
-                  <section key={group.label} className="space-y-2.5">
+                  <section key={group.id} className="space-y-2.5">
                     {/* Sticky Date Caption Header */}
                     <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-xs py-1 flex items-center gap-2">
                       <h4 className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground flex items-center gap-2">

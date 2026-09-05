@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import {
   Calendar,
   Check,
@@ -16,6 +17,16 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { CalendarEvent } from '../../types';
+
+export async function openExternalUrl(url: string) {
+  if (!url) return;
+  try {
+    await invoke('open_external_url', { url });
+  } catch (err) {
+    console.error('Failed to open external URL:', err);
+    window.open(url, '_blank');
+  }
+}
 
 export function getMeetingJoinUrl(evt: CalendarEvent): string | null {
   if (
@@ -109,8 +120,15 @@ function renderCalendarDescription(description?: string | null) {
           'hover:text-primary/80',
           'font-semibold',
           'break-all',
-          '[overflow-wrap:anywhere]'
+          '[overflow-wrap:anywhere]',
+          'cursor-pointer'
         );
+      });
+
+      // Ensure bold elements look clean and stand out
+      const bolds = doc.querySelectorAll('b, strong');
+      bolds.forEach((b) => {
+        b.classList.add('font-bold', 'text-foreground');
       });
 
       // Prevent <pre> or <code> blocks from causing horizontal overflow
@@ -127,7 +145,7 @@ function renderCalendarDescription(description?: string | null) {
 
       return (
         <div
-          className="prose dark:prose-invert max-w-none text-xs sm:text-sm text-foreground/90 leading-relaxed font-sans space-y-3 break-words [overflow-wrap:anywhere] [word-break:break-word]"
+          className="text-xs sm:text-sm text-foreground/90 leading-relaxed font-sans whitespace-pre-wrap break-words [overflow-wrap:anywhere] [word-break:break-word] select-text"
           dangerouslySetInnerHTML={{ __html: doc.body.innerHTML }}
         />
       );
@@ -217,6 +235,15 @@ export const UpcomingMeetingModal: React.FC<UpcomingMeetingModalProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleDescriptionClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const anchor = (e.target as HTMLElement).closest('a');
+    if (anchor && anchor.href) {
+      e.preventDefault();
+      e.stopPropagation();
+      void openExternalUrl(anchor.href);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
       {/* Viewport Backdrop */}
@@ -288,15 +315,18 @@ export const UpcomingMeetingModal: React.FC<UpcomingMeetingModalProps> = ({
                   </div>
                   {joinUrl ? (
                     <div className="flex items-center gap-2 mt-0.5">
-                      <a
-                        href={joinUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs font-bold text-primary hover:underline flex items-center gap-1 truncate"
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          void openExternalUrl(joinUrl);
+                        }}
+                        className="text-xs font-bold text-primary hover:underline flex items-center gap-1 truncate text-left cursor-pointer focus:outline-none"
+                        title="Open conferencing link in default browser"
                       >
                         <span>Join Video Call</span>
                         <ExternalLink className="w-3 h-3 shrink-0" />
-                      </a>
+                      </button>
                       <button
                         type="button"
                         onClick={handleCopyLink}
@@ -392,7 +422,10 @@ export const UpcomingMeetingModal: React.FC<UpcomingMeetingModalProps> = ({
                 </span>
               </div>
 
-              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-5 rounded-lg border border-border bg-card select-text break-words [overflow-wrap:anywhere]">
+              <div
+                onClick={handleDescriptionClick}
+                className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-5 rounded-lg border border-border bg-card select-text break-words [overflow-wrap:anywhere]"
+              >
                 {renderCalendarDescription(event.description)}
               </div>
             </div>

@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { invoke } from '@tauri-apps/api/core';
 import { describe, expect, it, vi } from 'vitest';
 import {
   UpcomingMeetingModal,
@@ -7,6 +8,8 @@ import {
   getMeetingJoinUrl,
 } from './UpcomingMeetingModal';
 import { CalendarEvent } from '../../types';
+
+const mockedInvoke = vi.mocked(invoke);
 
 describe('formatRelativeTimeToMeeting', () => {
   it('formats upcoming meetings under an hour', () => {
@@ -218,5 +221,39 @@ describe('UpcomingMeetingModal', () => {
     // Raw HTML tags should NOT be displayed verbatim
     expect(screen.queryByText(/<a href=/)).not.toBeInTheDocument();
     expect(screen.queryByText(/<b>/)).not.toBeInTheDocument();
+  });
+
+  it('opens external browser via open_external_url when clicking Join Video Call or link in description', async () => {
+    const user = userEvent.setup();
+    mockedInvoke.mockResolvedValue(null);
+
+    const htmlEvent: CalendarEvent = {
+      ...sampleEvent,
+      description: "Please <a href='https://example.com/class_session'>Click here to join</a>",
+    };
+
+    render(
+      <UpcomingMeetingModal
+        event={htmlEvent}
+        isOpen={true}
+        onClose={vi.fn()}
+        onStartRecording={vi.fn()}
+        onJoinAndRecord={vi.fn()}
+      />,
+    );
+
+    // Click "Join Video Call" in the top card
+    const joinBtn = screen.getByRole('button', { name: /join video call/i });
+    await user.click(joinBtn);
+    expect(mockedInvoke).toHaveBeenCalledWith('open_external_url', {
+      url: 'https://meet.google.com/abc-defg-hij',
+    });
+
+    // Click link inside the description
+    const descLink = screen.getByText('Click here to join');
+    await user.click(descLink);
+    expect(mockedInvoke).toHaveBeenCalledWith('open_external_url', {
+      url: 'https://example.com/class_session',
+    });
   });
 });
