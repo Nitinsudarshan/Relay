@@ -17,10 +17,7 @@ import { AccountExplanationModal } from './components/common/AccountExplanationM
 import { RelayAccount, RelayProfile, DeveloperSettings, AppSettings, MainTabType } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import {
-  isPermissionGranted,
-  requestPermission,
-} from '@tauri-apps/plugin-notification';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { NativeSidebar } from './components/common/NativeSidebar';
 import {
   Mic,
@@ -125,26 +122,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     refreshAccountAndSettings();
 
-    // 1. Check Native OS Notification Permissions
-    // Note: On desktop (Windows), permission is granted unconditionally, and OS toasts
-    // are used as a display-only fallback signal. Interactive controls live in the
-    // app-owned meeting-reminder overlay window.
-    const setupNotifications = async () => {
-      try {
-        let granted = await isPermissionGranted();
-        if (!granted) {
-          const permission = await requestPermission();
-          granted = permission === 'granted';
-        }
-        console.info('[notifications] Native OS notification permission status:', granted ? 'granted' : 'denied');
-      } catch (err) {
-        console.error('[notifications] Failed to initialize notification permissions:', err);
-      }
-    };
-
-    setupNotifications();
-
-    // 2. Listen for backend Tauri account, profile, settings, & navigation events
+    // Listen for backend Tauri account, profile, settings, & navigation events
     const handleNavigate = (payload: unknown) => {
       if (typeof payload === 'string') {
         if (payload in TAB_LABELS) {

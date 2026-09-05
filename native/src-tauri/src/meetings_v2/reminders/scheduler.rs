@@ -110,6 +110,9 @@ pub fn spawn(app: AppHandle) {
             };
 
             let is_recording = state.meetings_v2.is_recording();
+            // Recordings that already exist, so a meeting captured and stopped
+            // early is not then reported as unrecorded.
+            let sessions = state.meetings_v2.store().list_sessions().unwrap_or_default();
             let queue = app.state::<Arc<ReminderQueue>>();
             let (_, newly_fired) = recompute(
                 &queue,
@@ -118,6 +121,7 @@ pub fn spawn(app: AppHandle) {
                     windows: &windows,
                     settings: &settings,
                     is_recording,
+                    sessions: &sessions,
                     now: chrono::Utc::now(),
                 },
             );

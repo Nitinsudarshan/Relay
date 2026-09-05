@@ -24,6 +24,7 @@ pub mod worker;
 pub use engine::MeetingsV2Engine;
 pub use reminders::{MeetingReminderPayload, NotificationService, ReminderQueue};
 pub use processing::{MeetingProcessing, MeetingProcessor, ProcessingOptions};
+pub use reminders::{ReminderEvent, ReminderKind};
 pub use session_store::SessionStore;
 pub use diarize::{Diarization, DiarizationReport, VoiceAssignment};
 pub use selftest::{MeetingSelfTestReport, SelfTestCheck};
@@ -39,5 +40,3 @@ pub mod intelligence_tests;
 pub mod intelligence_adversarial_tests;
 #[cfg(test)]
 pub mod intelligence_golden_meeting_tests;
-
-

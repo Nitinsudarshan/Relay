@@ -26,6 +26,7 @@ pub mod notification;
 pub mod scheduler;
 
 use crate::calendar::CalendarEvent;
+use crate::meetings_v2::types::{MeetingSession, MeetingState};
 use crate::settings::MeetingSettings;
 use crate::sync::MutexExt;
 use chrono::{DateTime, Duration, Utc};
@@ -140,9 +141,64 @@ pub struct ReminderInputs<'a> {
     pub windows: &'a [WindowMatch],
     pub settings: &'a MeetingSettings,
     /// Whether Relay is recording anything at all. One session runs at a time,
-    /// so this is the whole answer to "is this meeting already handled".
+    /// so this answers "is something being recorded right now".
     pub is_recording: bool,
+    /// Recordings that already exist, so a meeting somebody recorded and
+    /// stopped early is not then reported as unrecorded.
+    ///
+    /// "Nothing is recording" is not the same question as "this meeting went
+    /// unrecorded", and answering the second with the first is what makes a
+    /// reminder arrive about a meeting the user already dealt with.
+    pub sessions: &'a [MeetingSession],
     pub now: DateTime<Utc>,
+}
+
+/// How far a recording's start may sit from a meeting's start and still be
+/// taken as a recording *of* that meeting.
+///
+/// Generous on purpose: somebody who starts recording eight minutes late has
+/// still recorded the meeting, and reminding them otherwise is the false
+/// positive that gets reminders switched off.
+const SESSION_COVERS_WITHIN_MINUTES: i64 = 30;
+
+/// Whether an existing recording covers this meeting.
+///
+/// A recording counts whether it is still running or already finished — the
+/// question is whether this meeting was captured, not whether it is being
+/// captured at this instant.
+fn a_recording_covers(
+    sessions: &[MeetingSession],
+    event_start: DateTime<Utc>,
+    event_end: Option<DateTime<Utc>>,
+) -> bool {
+    sessions.iter().any(|session| {
+        if !matches!(
+            session.state,
+            MeetingState::Recording
+                | MeetingState::Paused
+                | MeetingState::Stopping
+                | MeetingState::Finalizing
+                | MeetingState::Completed
+                | MeetingState::Recovered
+        ) {
+            return false;
+        }
+
+        let Some(started) = session
+            .started_at
+            .as_deref()
+            .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+            .map(|at| at.with_timezone(&Utc))
+        else {
+            return false;
+        };
+
+        let began_before_the_meeting_ended = event_end.is_none_or(|end| started < end);
+        let began_near_the_meeting = (started - event_start).num_minutes().abs()
+            <= SESSION_COVERS_WITHIN_MINUTES;
+
+        began_before_the_meeting_ended && began_near_the_meeting
+    })
 }
 
 fn participants_of(event: &CalendarEvent) -> Vec<String> {
@@ -205,6 +261,7 @@ pub fn recompute(queue: &ReminderQueue, inputs: &ReminderInputs<'_>) -> (Vec<Rem
         windows,
         settings,
         is_recording,
+        sessions,
         now,
     } = *inputs;
 
@@ -246,6 +303,7 @@ pub fn recompute(queue: &ReminderQueue, inputs: &ReminderInputs<'_>) -> (Vec<Rem
         if settings.remind_if_unrecorded
             && !is_recording
             && (UNRECORDED_FROM_SECONDS..=UNRECORDED_TO_SECONDS).contains(&seconds_since_start)
+            && !a_recording_covers(sessions, starts_at, ends_at)
             && event_is_on_screen(event, windows)
         {
             ensure_entry(
@@ -563,8 +621,16 @@ mod tests {
             windows,
             settings,
             is_recording,
+            sessions: &[],
             now: Utc::now(),
         }
+    }
+
+    fn session_started_at(state: MeetingState, started: DateTime<Utc>) -> MeetingSession {
+        let mut session = MeetingSession::new("meet_test".to_string(), None);
+        session.state = state;
+        session.started_at = Some(started.to_rfc3339());
+        session
     }
 
     #[test]
@@ -761,6 +827,64 @@ mod tests {
         dismiss(&queue, "cal:evt_1", ReminderKind::Upcoming);
         dismiss(&queue, "cal:evt_2", ReminderKind::Upcoming);
         assert!(current(&queue).is_none());
+    }
+
+    #[test]
+    fn a_meeting_that_was_already_recorded_is_not_called_unrecorded() {
+        // The user recorded this meeting and stopped early. Nothing is
+        // recording *now*, but the meeting did not go uncaptured — and saying
+        // it did is the false positive that gets reminders switched off.
+        let settings = settings_all_on();
+        let mut event = event_starting_in("evt_1", -330);
+        event.conference_url = Some("https://zoom.us/j/123".to_string());
+        let events = vec![event];
+        let windows = vec![zoom_window("Sprint planning")];
+        let finished = vec![session_started_at(
+            MeetingState::Completed,
+            Utc::now() - Duration::seconds(330),
+        )];
+
+        let queue = ReminderQueue::default();
+        let (all, _) = recompute(
+            &queue,
+            &ReminderInputs {
+                events: &events,
+                windows: &windows,
+                settings: &settings,
+                is_recording: false,
+                sessions: &finished,
+                now: Utc::now(),
+            },
+        );
+        assert!(all.iter().all(|e| e.kind != ReminderKind::Unrecorded));
+    }
+
+    #[test]
+    fn a_recording_of_some_other_meeting_does_not_cover_this_one() {
+        let settings = settings_all_on();
+        let mut event = event_starting_in("evt_1", -330);
+        event.conference_url = Some("https://zoom.us/j/123".to_string());
+        let events = vec![event];
+        let windows = vec![zoom_window("Sprint planning")];
+        // Recorded three hours ago — a different meeting entirely.
+        let unrelated = vec![session_started_at(
+            MeetingState::Completed,
+            Utc::now() - Duration::hours(3),
+        )];
+
+        let queue = ReminderQueue::default();
+        let (all, _) = recompute(
+            &queue,
+            &ReminderInputs {
+                events: &events,
+                windows: &windows,
+                settings: &settings,
+                is_recording: false,
+                sessions: &unrelated,
+                now: Utc::now(),
+            },
+        );
+        assert!(all.iter().any(|e| e.kind == ReminderKind::Unrecorded));
     }
 
     #[test]
