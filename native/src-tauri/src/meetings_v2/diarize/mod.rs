@@ -176,6 +176,8 @@ pub struct Diarization {
     pub assignments: Vec<VoiceAssignment>,
     #[serde(default)]
     pub self_voice_anchor: Option<SelfVoiceAnchor>,
+    #[serde(default)]
+    pub self_voice_similarities: HashMap<String, f32>,
 }
 
 impl Diarization {
@@ -194,6 +196,11 @@ impl Diarization {
             .iter()
             .filter_map(|a| a.cluster.map(|c| (a.segment_id.as_str(), c)))
             .collect()
+    }
+
+    /// Acoustic similarity to the meeting-local self-voice anchor for a segment id, if available.
+    pub fn self_voice_similarity_for(&self, segment_id: &str) -> Option<f32> {
+        self.self_voice_similarities.get(segment_id).copied()
     }
 }
 
@@ -376,6 +383,16 @@ The transcript and summary are unaffected."
         "diarize: clustering complete"
     );
 
+    let mut self_voice_similarities = HashMap::new();
+    if let Some(anchor) = self_voice_anchor.as_ref() {
+        for utt in &utterances {
+            if let Some((_, dist)) = anchor.compare(&utt.features) {
+                let sim = (1.0 - (dist / 1.5)).clamp(0.0, 1.0);
+                self_voice_similarities.insert(utt.id.clone(), sim);
+            }
+        }
+    }
+
     Ok(Diarization {
         report,
         assignments: clustering
@@ -388,6 +405,7 @@ The transcript and summary are unaffected."
             })
             .collect(),
         self_voice_anchor,
+        self_voice_similarities,
     })
 }
 
@@ -398,7 +416,7 @@ fn fused_local_cluster(
     self_voice_anchor: Option<&SelfVoiceAnchor>,
     utterances: &[cluster::Utterance],
 ) -> Option<usize> {
-    if clustering.cluster_count == 0 {
+    if clustering.cluster_count <= 1 {
         return None;
     }
 
@@ -465,8 +483,6 @@ fn fused_local_cluster(
                 // If mic share is high (e.g. >0.50) but anchor sim is very low (<0.40), penalize contradiction
                 let contradiction_penalty = if mic_share >= 0.50 && sim < 0.40 {
                     0.40
-                } else if sim >= 0.70 && mic_share < 0.15 {
-                    0.10
                 } else {
                     0.0
                 };
@@ -529,7 +545,12 @@ pub(crate) fn collect_spans(segments: &[TranscriptSegment]) -> Vec<UtteranceSpan
 
         if segment.utterances.is_empty() {
             let duration = segment.end_time_s - segment.start_time_s;
-            if duration < MIN_UTTERANCE_SECONDS || segment.text.trim().is_empty() {
+            let text = segment.text.trim();
+            if duration < MIN_UTTERANCE_SECONDS
+                || text.is_empty()
+                || (text.starts_with('[') && text.ends_with(']'))
+                || (text.starts_with('(') && text.ends_with(')'))
+            {
                 continue;
             }
             spans.push(UtteranceSpan {
@@ -546,7 +567,12 @@ pub(crate) fn collect_spans(segments: &[TranscriptSegment]) -> Vec<UtteranceSpan
 
         for utterance in &segment.utterances {
             let duration = utterance.end_time_s - utterance.start_time_s;
-            if duration < MIN_UTTERANCE_SECONDS || utterance.text.trim().is_empty() {
+            let text = utterance.text.trim();
+            if duration < MIN_UTTERANCE_SECONDS
+                || text.is_empty()
+                || (text.starts_with('[') && text.ends_with(']'))
+                || (text.starts_with('(') && text.ends_with(')'))
+            {
                 continue;
             }
             spans.push(UtteranceSpan {
@@ -1182,6 +1208,7 @@ mod tests {
                 },
             ],
             self_voice_anchor: None,
+            self_voice_similarities: HashMap::new(),
         };
 
         assert_eq!(diarization.cluster_for("seg_00000_001"), Some(1));

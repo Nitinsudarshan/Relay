@@ -229,6 +229,7 @@ fn empty_diarization(expected_speakers: Option<usize>) -> Diarization {
         },
         assignments: Vec::new(),
         self_voice_anchor: None,
+        self_voice_similarities: HashMap::new(),
     }
 }
 
@@ -292,6 +293,7 @@ fn channel_only(store: &SessionStore, session_id: &str) -> Result<Diarization, S
         },
         assignments,
         self_voice_anchor: None,
+        self_voice_similarities: HashMap::new(),
     })
 }
 
@@ -404,6 +406,7 @@ separated. The transcript and summary are unaffected."
         },
         assignments,
         self_voice_anchor: None,
+        self_voice_similarities: HashMap::new(),
     })
 }
 

@@ -173,12 +173,17 @@ pub fn attribute_speakers_with_evidence(
             None
         };
 
+        let per_seg_sim = input
+            .diarization
+            .and_then(|d| d.self_voice_similarity_for(segments[i].id.as_str()));
+
         let (resolved, method, confidence, confidence_level, evidence) = resolve_segment_with_evidence(
             segments[i].channel,
             cluster,
             &local_clusters,
             input.assume_in_person,
             input.self_voice,
+            per_seg_sim,
             &segments[i].text,
             input.calendar_attendees,
             prev_speaker,
@@ -234,6 +239,7 @@ fn resolve_segment_with_evidence(
     local_clusters: &[usize],
     assume_in_person: bool,
     self_voice: Option<&SelfVoiceAnchor>,
+    self_voice_sim: Option<f32>,
     text: &str,
     calendar_attendees: &[CalendarAttendee],
     prev_speaker: Option<&str>,
@@ -369,28 +375,32 @@ fn resolve_segment_with_evidence(
     // 2. Multi-Signal Evidence Fusion: Channel + Diarization Cluster + Self-Voice Anchor + Temporal
     let is_local_cluster = cluster.map(|c| local_clusters.contains(&c)).unwrap_or(false);
     let remote_spk_id = cluster
+        .filter(|&c| !local_clusters.contains(&c))
         .map(|c| remote_speaker_id(remote_index(c, local_clusters)))
         .unwrap_or_else(|| "speaker_1".to_string());
 
-    // Acoustic similarity from self-voice anchor if available
-    let (me_acoustic_sim, remote_acoustic_sim) = match (self_voice, cluster) {
-        (Some(anchor), Some(_)) if anchor.has_samples() => {
-            if is_local_cluster {
-                (Some(0.90f32), Some(0.15f32))
-            } else {
-                (Some(0.20f32), Some(0.85f32))
+    // Acoustic similarity from per-segment anchor match or cluster/fallback
+    let (me_acoustic_sim, remote_acoustic_sim) = match self_voice_sim {
+        Some(sim) => (Some(sim), Some((1.0 - sim).clamp(0.0, 1.0))),
+        None => match (self_voice, cluster) {
+            (Some(anchor), Some(_)) if anchor.has_samples() => {
+                if is_local_cluster {
+                    (Some(0.90f32), Some(0.15f32))
+                } else {
+                    (Some(0.20f32), Some(0.85f32))
+                }
             }
-        }
-        (Some(anchor), None) if anchor.has_samples() => {
-            if channel == SegmentChannel::Mic {
-                (Some(0.75f32), Some(0.25f32))
-            } else if channel == SegmentChannel::System {
-                (Some(0.20f32), Some(0.80f32))
-            } else {
-                (Some(0.50f32), Some(0.50f32))
+            (Some(anchor), None) if anchor.has_samples() => {
+                if channel == SegmentChannel::Mic {
+                    (Some(0.75f32), Some(0.25f32))
+                } else if channel == SegmentChannel::System {
+                    (Some(0.20f32), Some(0.80f32))
+                } else {
+                    (Some(0.50f32), Some(0.50f32))
+                }
             }
-        }
-        _ => (None, None),
+            _ => (None, None),
+        },
     };
 
     // Candidate Me scoring
@@ -402,6 +412,8 @@ fn resolve_segment_with_evidence(
     };
     let me_cluster_ev = if is_local_cluster {
         0.85f32
+    } else if me_acoustic_sim.is_some_and(|s| s >= 0.55) {
+        0.80f32
     } else if cluster.is_some() {
         0.15f32
     } else {
@@ -411,10 +423,10 @@ fn resolve_segment_with_evidence(
 
     // Contradiction penalties for Me:
     // If mic channel is claimed, but self-voice or cluster says remote (acoustic leakage / remote speech):
-    let me_contradiction = if channel == SegmentChannel::Mic && me_acoustic_sim.is_some_and(|s| s < 0.40) {
+    let me_contradiction = if (channel == SegmentChannel::Mic && me_acoustic_sim.is_some_and(|s| s < 0.40))
+        || (channel == SegmentChannel::System && !is_local_cluster)
+    {
         0.60f32
-    } else if channel == SegmentChannel::System && !is_local_cluster {
-        0.50f32
     } else {
         0.0f32
     };
@@ -434,14 +446,22 @@ fn resolve_segment_with_evidence(
         SegmentChannel::Unknown => 0.40f32,
     };
     let remote_cluster_ev = if !is_local_cluster && cluster.is_some() {
-        0.85f32
+        if channel == SegmentChannel::System {
+            0.85f32
+        } else if me_acoustic_sim.is_some_and(|s| s >= 0.55) {
+            0.15f32
+        } else {
+            0.85f32
+        }
     } else if is_local_cluster {
         0.15f32
     } else {
         0.40f32
     };
     let remote_temporal = if prev_speaker == Some(&remote_spk_id) { 0.10f32 } else { 0.0f32 };
-    let remote_contradiction = if is_local_cluster && channel == SegmentChannel::Mic {
+    let remote_contradiction = if (is_local_cluster || me_acoustic_sim.is_some_and(|s| s >= 0.55))
+        && matches!(channel, SegmentChannel::Mic | SegmentChannel::Mixed)
+    {
         0.60f32
     } else {
         0.0f32
@@ -734,6 +754,30 @@ fn build_roster(
         ));
     }
 
+    // Ensure any speaker present in segment counts is represented in the roster
+    for (id, &count) in counts {
+        if id != SPEAKER_ID_ME && !speakers.iter().any(|s| &s.id == id) {
+            let label = if id == SPEAKER_ID_REMOTE {
+                "Speaker 1".to_string()
+            } else {
+                format!("Speaker {}", speakers.len() + 1)
+            };
+            speakers.push(build_speaker(
+                id,
+                &label,
+                SegmentChannel::System,
+                false,
+                count,
+                if diarized {
+                    SpeakerOrigin::Diarization
+                } else {
+                    SpeakerOrigin::Channel
+                },
+                existing,
+            ));
+        }
+    }
+
     // A speaker the user has named but who did not speak in this run (e.g. the
     // mic was muted) is retained rather than dropped, so the name is not lost.
     for prior in existing {
@@ -1000,6 +1044,7 @@ mod tests {
                 })
                 .collect(),
             self_voice_anchor: None,
+            self_voice_similarities: HashMap::new(),
         }
     }
 

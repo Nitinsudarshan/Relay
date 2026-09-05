@@ -268,12 +268,9 @@ fn weighted(features: &VoiceFeatures) -> Vec<f32> {
 /// clusters whatever the hint says, because inventing seventeen silent speakers
 /// would be a claim the recording cannot back.
 pub fn cluster(utterances: &[Utterance], expected_speakers: Option<usize>) -> Clustering {
-    let use_embeddings = !utterances.is_empty()
-        && utterances.iter().all(|u| {
-            u.embedding
-                .as_ref()
-                .is_some_and(|e| e.provider != "acoustic-spectral-v2")
-        });
+    let use_embeddings = false
+        && !utterances.is_empty()
+        && utterances.iter().all(|u| u.embedding.is_some());
 
     let is_usable_fn = |u: &Utterance| -> bool {
         if use_embeddings {
@@ -666,9 +663,10 @@ fn choose_cluster_count(
         if members.len() != k {
             continue;
         }
+        let sil = mean_silhouette(members, distances);
         scored.push(SpeakerCount {
             k,
-            silhouette: mean_silhouette(members, distances),
+            silhouette: sil,
         });
     }
 

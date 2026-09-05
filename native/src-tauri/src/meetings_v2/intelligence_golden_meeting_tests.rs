@@ -21,6 +21,7 @@ use crate::settings::LanguageSettings;
 use crate::meetings_v2::types::{
     SpeakerAssignment, SpeakerAssignmentMethod, SpeakerConfidenceLevel, SpeakerEvidence,
 };
+use std::collections::HashMap;
 
 fn raw_seg(
     chunk_index: usize,
@@ -183,6 +184,7 @@ fn golden_meeting_1_speaker_coverage_is_not_catastrophically_skewed() {
         },
         assignments,
         self_voice_anchor: None,
+        self_voice_similarities: HashMap::new(),
     };
 
     let (roster, _) = attribute_speakers_with_evidence(
@@ -561,6 +563,7 @@ fn test_stage_1_mic_remote_self_voice_me_combined_evidence_selects_me() {
             distance: 0.1,
         }],
         self_voice_anchor: None,
+        self_voice_similarities: HashMap::new(),
     };
 
     let anchor = SelfVoiceAnchor {
@@ -625,6 +628,7 @@ fn test_stage_1_mic_me_self_voice_remote_contradiction_rejects_me() {
             distance: 0.1,
         }],
         self_voice_anchor: None,
+        self_voice_similarities: HashMap::new(),
     };
 
     let anchor = SelfVoiceAnchor {
@@ -678,4 +682,80 @@ fn test_stage_1_mic_tie_self_voice_tie_abstains_unresolved() {
     assert_eq!(roster.len(), 0, "No confident speaker should be invented when evidence is tied");
     assert_eq!(assignments.len(), 0, "Ambiguous tied evidence must remain unresolved");
     assert_eq!(norm.segments[0].speaker_id, None, "Tied segment must have speaker_id None");
+}
+
+#[test]
+fn test_stage_3_diagnose_real_meeting_coverage() {
+    let vault_path = std::path::PathBuf::from(".relay/vault/meetings_v2");
+    let meeting_id = "meet_dd912b1e-b243-4239-8a3a-6e6ed575d1c8";
+    let meet_dir = vault_path.join(meeting_id);
+    if !meet_dir.exists() {
+        println!("Real meeting vault not present, skipping runtime validation");
+        return;
+    }
+
+    let temp_vault = std::env::temp_dir().join(format!("relay_stage3_test_{}", uuid::Uuid::new_v4()));
+    let temp_meet = temp_vault.join("meetings_v2").join(meeting_id);
+    std::fs::create_dir_all(&temp_meet).unwrap();
+    let _ = std::fs::copy(meet_dir.join("session.json"), temp_meet.join("session.json"));
+    let _ = std::fs::copy(meet_dir.join("transcript.jsonl"), temp_meet.join("transcript.jsonl"));
+    let temp_audio = temp_meet.join("audio");
+    std::fs::create_dir_all(&temp_audio).unwrap();
+    if let Ok(entries) = std::fs::read_dir(meet_dir.join("audio")) {
+        for entry in entries.flatten() {
+            let _ = std::fs::copy(entry.path(), temp_audio.join(entry.file_name()));
+        }
+    }
+
+    let store = std::sync::Arc::new(crate::meetings_v2::session_store::SessionStore::new(temp_vault.clone()));
+    let processor = crate::meetings_v2::processing::MeetingProcessor::new(store);
+    let options = crate::meetings_v2::processing::ProcessingOptions {
+        diarize_speakers: true,
+        ..Default::default()
+    };
+    let prepared = processor.prepare(meeting_id, &options).expect("prepare succeeds");
+
+    println!("Diarization report: {:?}", prepared.diarization.as_ref().map(|d| &d.report));
+    println!("Self voice anchor: {:?}", prepared.diarization.as_ref().and_then(|d| d.self_voice_anchor.as_ref()).map(|a| (a.sample_count, a.total_seconds, a.reference_quality)));
+
+    let mut me_count = 0usize;
+    let mut remote_count = 0usize;
+    let mut unresolved_count = 0usize;
+
+    let normalized = prepared.normalized.as_ref().unwrap();
+    for seg in &normalized.segments {
+        match seg.speaker_id.as_deref() {
+            Some(SPEAKER_ID_ME) => me_count += 1,
+            Some(_) => remote_count += 1,
+            None => unresolved_count += 1,
+        }
+    }
+
+    let total = normalized.segments.len();
+    let me_pct = (me_count as f64 / total as f64) * 100.0;
+    let remote_pct = (remote_count as f64 / total as f64) * 100.0;
+    let unresolved_pct = (unresolved_count as f64 / total as f64) * 100.0;
+
+    let diar = prepared.diarization.as_ref().unwrap();
+    println!("Diarization report: {:?}", diar.report);
+    let _anchor_opt = diar.self_voice_anchor.as_ref();
+    for seg in &normalized.segments {
+        let cl = diar.assignments.iter().find(|a| a.segment_id == seg.id).and_then(|a| a.cluster);
+        let dist = diar.assignments.iter().find(|a| a.segment_id == seg.id).map(|a| a.distance).unwrap_or(0.0);
+        let dur = seg.end_time_s - seg.start_time_s;
+        println!("SEG {:?} dur={:.2}s chan={:?} cl={:?} dist={:.4} spk={:?}: {:?}", seg.id, dur, seg.channel, cl, dist, seg.speaker_id, seg.text);
+    }
+
+    println!("Total segments: {}", total);
+    println!("Me: {} ({:.1}%)", me_count, me_pct);
+    println!("Remote: {} ({:.1}%)", remote_count, remote_pct);
+    println!("Unresolved: {} ({:.1}%)", unresolved_count, unresolved_pct);
+    println!("Roster: {:?}", prepared.speakers);
+
+    assert!((15.0..=30.0).contains(&me_pct), "Me coverage must be in ~20-25% range (got {:.1}%)", me_pct);
+    assert!((70.0..=85.0).contains(&remote_pct), "Remote coverage must be in ~75-80% range (got {:.1}%)", remote_pct);
+    assert!(prepared.speakers.iter().any(|s| s.is_local_user), "Roster must include local user Me");
+    assert!(prepared.speakers.iter().any(|s| !s.is_local_user), "Roster must include remote speaker");
+
+    let _ = std::fs::remove_dir_all(temp_vault);
 }
