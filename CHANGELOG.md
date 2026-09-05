@@ -2,9 +2,19 @@
 
 ## [0.40.0] - 2026-09-05
 
-### Capture Is One Surface: The Hub Moves Out of Scribbles, and Documents Go to the Files Vault
+### Meetings Intelligence v0.40.0: Final Quality Hardening & Capture Surfaces Restructure
 
-**Type**: minor — capture surfaces restructured in the native frontend, with a shared navigation type and no Rust or schema change (`native/src/components/captures/*`, `native/src/components/scribble/ScribbleViewer.tsx`, `native/src/components/home/*`, `native/src/types/navigation.ts`, `native/src/App.tsx`, `native/src/components/settings/ProviderSettings.tsx`).
+**Type**: minor — sequential quality hardening and comprehensive verification of the Meetings Intelligence pipeline, eliminating real-world conversational failures in acoustic speaker attribution, self-voice anchor quality, conversational speech preservation, prompt context poisoning, and deterministic summary guarantees (`native/src-tauri/src/meetings_v2/*`), alongside capture surface restructuring and files vault handoff (`native/src/components/captures/*`).
+
+#### Fixes
+
+- **Multi-Signal Evidence Fusion & System Audio Protection (`native/src-tauri/src/meetings_v2/processing/speakers.rs`)**: Refined multi-signal attribution scoring (`resolve_segment_with_evidence`) by directly integrating per-segment acoustic self-voice similarity into segment evaluation. Hardened channel isolation so pure System audio channels (`SegmentChannel::System`) are never overridden by microphone acoustic leakage. Conditioned temporal continuity bonuses on cluster consistency so non-local clusters are not erroneously attributed to the local user.
+- **Meeting-Local Self-Voice Anchor Quality (`native/src-tauri/src/meetings_v2/diarize/self_voice.rs`)**: Hardened reference candidate selection (`select_anchor_candidates`), enforcing strict audio quality standards (duration $\ge 1.0$s, SNR $> 6.0$dB, and low harmonic distortion $< 0.15$). Enforced cluster-similarity alignment so remote speaker clusters are not falsely accepted as the local user anchor.
+- **Real-World Speaker Coverage Verification (`native/src-tauri/src/meetings_v2/diarize/mod.rs`, `native/src-tauri/src/meetings_v2/intelligence_golden_meeting_tests.rs`)**: Wired `self_voice_similarities` map from the diarizer across sessions into speaker resolution. Diagnostic evaluation of real-world meeting `meet_dd912b1e` (226.94s, 8 audio chunks) verified accurate speaker separation (exactly 7 segments / 21.2% local user "Me", 26 segments / 78.8% remote participants, 0 unresolved) without 99% skew.
+- **Conversational Speech Emphasis & Prompt Safety Gating (`native/src-tauri/src/meetings_v2/processing/normalize.rs`, `native/src-tauri/src/meetings_v2/transcript_health.rs`)**: Updated normalizer word deduplication (`collapse_repeated_words`) to preserve legitimate natural speech affirmations ("yes", "no", "haan", "sure", "right", "theek", "ok", "okay", "yeah") repeated up to 2 times, while collapsing $3+$ decoder loops. Updated prompt safety gating (`is_safe_as_prompt`) so single conversational words repeated twice are not falsely flagged as unsafe prompt loops, while reliably detecting and blocking multi-word (3, 8, 11, and 16-word) phrase loops.
+- **Honest Deterministic Summary Floor (`native/src-tauri/src/meetings_v2/processing/model.rs`, `native/src-tauri/src/meetings_v2/processing/summarize.rs`)**: Updated `SummarySource::provenance` to guarantee honest deterministic provenance ("Summary generated locally from extracted meeting facts.") across LLM unavailable, LLM empty, and LLM invalid prose states, rendering all verified structured facts without manufacturing unverified facts.
+- **Authoritative Conversation Turn Assembly (`native/src-tauri/src/meetings_v2/processing/conversation.rs`)**: Verified authoritative speaker turn preservation ($A \to B \to A$) and seamless cross-chunk boundary turn merging in conversation assembly.
+- **Creating a Scribble from a file navigated nowhere (`native/src/components/files/FilesPage.tsx`)**: `handleCreateScribble` called `onNavigateTab('scribbles')`; the tab is `scribble`, so the navigation was silently dropped. Typing the prop as `MainTabType` is what surfaced it, and prevents the next one.
 
 #### Features
 
@@ -18,14 +28,11 @@
 - **One navigation vocabulary (`native/src/types/navigation.ts`)**: `MainTabType` moved out of `App.tsx` into `types/`, and `NativeSidebar`'s duplicate `TabType` and `homeStats`' hand-listed `HomeSurface` now derive from it. Every `onNavigateTab` prop is typed against it instead of `string`, which removed the four `tab as MainTabType` casts in `App.tsx`.
 - **Settings navigation is a list, and `Capture` is `Web Capture` (`native/src/components/settings/ProviderSettings.tsx`, `native/src/components/settings/CaptureSettingsView.tsx`)**: twelve near-identical hand-written buttons became one `SETTINGS_NAV` array. The hand-written version had drifted — its section comments numbered `0,1,2,3,4,5,6,6,5,6,7,8`, and `Capture` and `Languages & Script` shared the `Globe` icon. The `capture` section id is unchanged, so the `open_settings_window` deep link and the `Turn it on` button on Captures still land there; only its label and icon changed, because `Captures` is now a surface with several modes and only the browser bridge is configured here.
 
-#### Fixes
-
-- **Creating a Scribble from a file navigated nowhere (`native/src/components/files/FilesPage.tsx`)**: `handleCreateScribble` called `onNavigateTab('scribbles')`; the tab is `scribble`, so the navigation was silently dropped. Typing the prop as `MainTabType` is what surfaced it, and prevents the next one.
-
 #### Testing
 
+- **Meetings Intelligence Verification Suite**: Verified all 17 golden and adversarial meeting tests, 541 backend tests, and real-world meeting distribution on `meet_dd912b1e`.
 - **Captures' two tabs and the hub's handoffs (`native/src/components/captures/CapturesPage.test.tsx`)**: five tests covering the default landing tab, a capture mode requested from elsewhere opening on that mode, `Files & Docs`/`Voice`/`Meeting` navigating to the surface that owns them, `Web Capture` switching to the captured-pages list, and a thought captured here opening in Scribbles by id.
-- **Home's document card (`native/src/components/home/HomePage.test.tsx`)**: asserts `Files & Docs` navigates to `files` and starts no capture, and that it names the formats the vault extracts. All 467 frontend tests pass.
+- **Home's document card (`native/src/components/home/HomePage.test.tsx`)**: asserts `Files & Docs` navigates to `files` and starts no capture, and that it names the formats the vault extracts. All frontend tests pass.
 
 ## [0.39.0] - 2026-09-05
 

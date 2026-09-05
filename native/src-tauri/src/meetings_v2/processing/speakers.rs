@@ -419,7 +419,11 @@ fn resolve_segment_with_evidence(
     } else {
         0.40f32
     };
-    let me_temporal = if prev_speaker == Some(SPEAKER_ID_ME) { 0.10f32 } else { 0.0f32 };
+    let me_temporal = if prev_speaker == Some(SPEAKER_ID_ME) && (is_local_cluster || cluster.is_none()) {
+        0.10f32
+    } else {
+        0.0f32
+    };
 
     // Contradiction penalties for Me:
     // If mic channel is claimed, but self-voice or cluster says remote (acoustic leakage / remote speech):
@@ -458,7 +462,11 @@ fn resolve_segment_with_evidence(
     } else {
         0.40f32
     };
-    let remote_temporal = if prev_speaker == Some(&remote_spk_id) { 0.10f32 } else { 0.0f32 };
+    let remote_temporal = if prev_speaker == Some(&remote_spk_id) && (!is_local_cluster || cluster.is_none()) {
+        0.10f32
+    } else {
+        0.0f32
+    };
     let remote_contradiction = if (is_local_cluster || me_acoustic_sim.is_some_and(|s| s >= 0.55))
         && matches!(channel, SegmentChannel::Mic | SegmentChannel::Mixed)
     {
