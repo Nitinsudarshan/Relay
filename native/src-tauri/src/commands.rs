@@ -1971,6 +1971,21 @@ pub async fn start_meeting_v2(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
+    start_meeting_session(title, &app, &state)
+}
+
+/// Starts a meeting recording, wherever the request came from.
+///
+/// Shared by the Meetings page and the reminder card so both take exactly the
+/// same path: one place resolves the model, seeds the vocabulary and raises the
+/// pill. Two call sites doing this separately is what previously let the
+/// reminder path and the list path disagree about recording state
+/// (`docs/decisions.md` Decision 45, Refactor #1).
+fn start_meeting_session(
+    title: Option<String>,
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
     let settings = state.settings.lock_or_recover().clone();
     let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
     let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
@@ -2008,8 +2023,18 @@ pub async fn start_meeting_v2(
     // re-announce the session: the overlay's webview may not have existed when
     // `start_session` emitted, and a pill that missed the start event would show
     // a stale or zero timer.
-    crate::overlay::ensure_meeting_overlay(&app, true);
+    crate::overlay::ensure_meeting_overlay(app, true);
     let _ = app.emit("meeting-session-state-changed", &session);
+
+    // A reminder card asking "shall I record this?" is answered by a recording
+    // starting, wherever it was started from. Clearing it here rather than in
+    // the reminder path alone is what stops the list and the card from holding
+    // different views of whether a meeting has been dealt with.
+    if let Some(notifications) =
+        app.try_state::<Arc<crate::meetings_v2::NotificationService>>()
+    {
+        notifications.dismiss(app);
+    }
 
     Ok(session)
 }
@@ -2120,177 +2145,6 @@ pub async fn resume_meeting_v2(
         .meetings_v2
         .resume_session(session_id, Some(app))
         .map_err(|e: String| CommandError::new("RESUME_MEETING_FAILED", &e))
-}
-
-// =========================================================================
-// MEETING REMINDER COMMANDS
-//
-// These are the Rust-side handlers for native OS notification actions and
-// direct reminder manipulation. The frontend never owns reminder state —
-// it only calls these commands in response to user action.
-// =========================================================================
-
-/// Start recording for a meeting from a notification or the meetings list.
-///
-/// This is the single authoritative recording entry point for reminder-driven
-/// recording. It reuses the shared `MeetingsV2Engine` (and therefore the shared
-/// `AudioRecorder`) — no second capture path is introduced.
-///
-/// On success:
-/// 1. A new recording session is started (or the active one is returned).
-/// 2. The `ActiveMeetingRecording` is updated to the session ID.
-/// 3. All reminders keyed to `meeting_id` are marked `Actioned`.
-/// 4. The app navigates to the Meetings tab.
-///
-/// `meeting_id` is the calendar event ID or window-detection ID that the
-/// notification was generated for. It is used only to mark reminders as
-/// actioned; the actual recording session is new and unrelated to it.
-#[tauri::command]
-pub async fn start_meeting_recording(
-    meeting_id: String,
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    use crate::meetings_v2::ActiveMeetingRecording;
-    use tauri::Manager;
-
-    // Start the recording session (or reuse the active one).
-    let settings = state.settings.lock_or_recover().clone();
-    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
-    let mut decoding_config =
-        crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
-    if decoding_config.initial_prompt.is_none() {
-        decoding_config.initial_prompt = settings.build_stt_prompt();
-    }
-    let models_dir = state.config_dir.join("models");
-    let whisper_model_path = settings.stt.whisper_model_path.clone();
-
-    let session = state
-        .meetings_v2
-        .start_session(
-            None, // title from engine, same as start_meeting_v2
-            &models_dir,
-            whisper_model_path,
-            language_config,
-            decoding_config,
-            Some(app.clone()),
-        )
-        .map_err(|e: String| CommandError::new("START_RECORDING_FAILED", &e))?;
-
-    // Track which session the reminder system is now recording for.
-    if let Some(active_rec) = app.try_state::<ActiveMeetingRecording>() {
-        *active_rec.0.lock().unwrap() = Some(session.id.clone());
-    }
-
-    // Mark every reminder for this meeting_id as Actioned.
-    if let Some(queue) = app.try_state::<crate::meetings_v2::ReminderQueue>() {
-        crate::meetings_v2::reminders::mark_meeting_actioned(&queue, &meeting_id);
-    }
-
-    // Surface the recording overlay and navigate to the Meetings tab.
-    crate::overlay::ensure_meeting_overlay(&app, true);
-    let _ = app.emit("meeting-session-state-changed", &session);
-    let _ = app.emit("navigate-tab", "meetings");
-
-    tracing::info!(
-        "[reminders] start_meeting_recording: session {} started for reminder id '{}'",
-        session.id,
-        meeting_id
-    );
-
-    Ok(())
-}
-
-/// Snooze a specific reminder. Transitions `Fired → Snoozed { until }`.
-///
-/// The reminder will re-fire when `minutes` have elapsed. This mutates Rust
-/// state only — no frontend timer is involved.
-#[tauri::command]
-pub async fn snooze_meeting_reminder(
-    meeting_id: String,
-    kind: crate::meetings_v2::ReminderKind,
-    minutes: i64,
-    app: tauri::AppHandle,
-) -> Result<(), CommandError> {
-    if let Some(queue) = app.try_state::<crate::meetings_v2::ReminderQueue>() {
-        crate::meetings_v2::reminders::snooze(&queue, &meeting_id, kind, minutes);
-        tracing::info!(
-            "[reminders] Snoozed reminder '{}' {:?} for {}m",
-            meeting_id,
-            kind,
-            minutes
-        );
-    }
-    Ok(())
-}
-
-/// Permanently dismiss a specific reminder.
-///
-/// A dismissed reminder does not re-appear on engine ticks, application
-/// restart, or calendar re-sync.
-#[tauri::command]
-pub async fn dismiss_meeting_reminder(
-    meeting_id: String,
-    kind: crate::meetings_v2::ReminderKind,
-    app: tauri::AppHandle,
-) -> Result<(), CommandError> {
-    if let Some(queue) = app.try_state::<crate::meetings_v2::ReminderQueue>() {
-        crate::meetings_v2::reminders::dismiss(&queue, &meeting_id, kind);
-        tracing::info!(
-            "[reminders] Dismissed reminder '{}' {:?}",
-            meeting_id,
-            kind
-        );
-    }
-    Ok(())
-}
-
-/// Developer / testing: inject a mock fired reminder and emit the real native
-/// OS notification via `dispatch_native_reminder_notification`.
-///
-/// This exercises the full production notification path — the same one a real
-/// reminder uses — rather than a synthetic frontend-only notification.
-/// `kind` must be one of: "upcoming", "unrecorded", "detected".
-#[tauri::command]
-pub async fn trigger_mock_meeting_reminder(
-    kind: crate::meetings_v2::ReminderKind,
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let mock_id = format!("mock_{}", uuid::Uuid::new_v4());
-    let title = match kind {
-        crate::meetings_v2::ReminderKind::Upcoming => "Product Sync — Demo",
-        crate::meetings_v2::ReminderKind::Unrecorded => "Engineering Review — Demo",
-        crate::meetings_v2::ReminderKind::Detected => "Detected Meeting — Demo",
-    };
-    let provider = "zoom";
-
-    if let Some(queue) = app.try_state::<crate::meetings_v2::ReminderQueue>() {
-        crate::meetings_v2::reminders::inject_mock_reminder(
-            &queue, &mock_id, kind, title, provider,
-        );
-    }
-
-    let entry = crate::meetings_v2::ReminderEvent {
-        id: mock_id.clone(),
-        kind,
-        title: title.to_string(),
-        provider: provider.to_string(),
-        participants: Vec::new(),
-        fire_at: chrono::Utc::now(),
-        status: crate::meetings_v2::reminders::ReminderStatus::Fired,
-    };
-
-    crate::meetings_v2::reminder_engine::dispatch_native_reminder_notification(&app, &entry);
-
-    tracing::info!(
-        "[reminders] Triggered mock meeting reminder '{}' ({:?})",
-        title,
-        kind
-    );
-
-    let _ = state; // suppress unused warning — future: use vault for real mock meeting
-    Ok(())
 }
 
 #[tauri::command]
@@ -4959,4 +4813,197 @@ mod tests {
         assert!(validate_external_url("data:text/html,hello").is_err());
         assert!(validate_external_url("https://example.com\n\revil").is_err());
     }
+}
+
+// =========================================================================
+// MEETING REMINDER COMMANDS
+// =========================================================================
+
+use crate::meetings_v2::reminders::{
+    self, MeetingReminderPayload, NotificationService, ReminderKind, ReminderQueue,
+};
+
+/// How long after pressing Join the reminder comes back offering Record.
+///
+/// Long enough to get through a waiting room, short enough that the recording
+/// misses only the hellos.
+const JOIN_REARM_MINUTES: i64 = 1;
+
+/// What the reminder card should render.
+///
+/// Pulled by the overlay on mount, because the window outlives any one reminder
+/// and a view that mounted after the event was emitted would otherwise show an
+/// empty card.
+#[tauri::command]
+pub async fn get_pending_meeting_reminder(
+    notifications: State<'_, Arc<NotificationService>>,
+) -> Result<Option<MeetingReminderPayload>, CommandError> {
+    Ok(notifications.pending())
+}
+
+/// The reminder card reporting itself mounted.
+#[tauri::command]
+pub async fn meeting_reminder_ready(
+    app: AppHandle,
+    notifications: State<'_, Arc<NotificationService>>,
+) -> Result<(), CommandError> {
+    notifications.on_view_ready(&app);
+    Ok(())
+}
+
+/// Pointer entering or leaving the card, which pauses and resumes its
+/// auto-dismiss countdown.
+#[tauri::command]
+pub async fn meeting_reminder_hover_changed(
+    hovered: bool,
+    notifications: State<'_, Arc<NotificationService>>,
+) -> Result<(), CommandError> {
+    notifications.on_hover_changed(hovered);
+    Ok(())
+}
+
+/// "Not now" — this reminder, for this meeting, is done.
+#[tauri::command]
+pub async fn dismiss_meeting_reminder(
+    app: AppHandle,
+    key: String,
+    kind: ReminderKind,
+    queue: State<'_, Arc<ReminderQueue>>,
+    notifications: State<'_, Arc<NotificationService>>,
+) -> Result<(), CommandError> {
+    reminders::dismiss(&queue, &key, kind);
+    notifications.dismiss(&app);
+    Ok(())
+}
+
+/// "Remind me again shortly."
+#[tauri::command]
+pub async fn snooze_meeting_reminder(
+    app: AppHandle,
+    key: String,
+    kind: ReminderKind,
+    minutes: i64,
+    queue: State<'_, Arc<ReminderQueue>>,
+    notifications: State<'_, Arc<NotificationService>>,
+) -> Result<(), CommandError> {
+    // The card offers 5, 10 and 15; the bound is here rather than there so a
+    // malformed call cannot park a reminder past the meeting it is about.
+    let minutes = minutes.clamp(1, 60);
+    reminders::snooze(&queue, &key, kind, minutes);
+    notifications.dismiss(&app);
+    Ok(())
+}
+
+/// Opens the meeting's conferencing link in the default browser.
+///
+/// Relay opens the call; it never joins one. The URL comes from a calendar
+/// invitation, so the scheme is checked before it reaches the OS — handing an
+/// arbitrary string to the shell is how a calendar entry becomes a launcher.
+#[tauri::command]
+pub async fn join_meeting_from_reminder(
+    app: AppHandle,
+    key: String,
+    kind: ReminderKind,
+    queue: State<'_, Arc<ReminderQueue>>,
+    notifications: State<'_, Arc<NotificationService>>,
+) -> Result<(), CommandError> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let entry = reminders::find(&queue, &key, kind)
+        .or_else(|| notifications.showing())
+        .ok_or_else(|| CommandError::new("REMINDER_NOT_FOUND", "That reminder is no longer active"))?;
+
+    let url = entry.join_url.ok_or_else(|| {
+        CommandError::new("NO_MEETING_LINK", "This meeting has no conferencing link")
+    })?;
+
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(CommandError::new(
+            "UNSUPPORTED_MEETING_LINK",
+            "This meeting's link is not a web address",
+        ));
+    }
+
+    notifications.dismiss(&app);
+    app.opener()
+        .open_url(&url, None::<&str>)
+        .map_err(|e| CommandError::new("JOIN_FAILED", &e.to_string()))?;
+
+    // Joining is not answering the reminder — the meeting still is not being
+    // recorded. The card comes back a minute later, once the user is in the
+    // call, with Record still one press away.
+    reminders::snooze(&queue, &key, kind, JOIN_REARM_MINUTES);
+
+    Ok(())
+}
+
+/// Starts recording the meeting a reminder is about.
+///
+/// The reminder's key names a calendar event or a window, never a session —
+/// which is exactly why this resolves it to a title and starts a *new* session
+/// rather than passing the key on. The removed implementation handed that key
+/// straight to the recorder, so the card's primary action failed for every
+/// reminder it ever showed (`docs/decisions.md` Decision 45, Broken #1).
+#[tauri::command]
+pub async fn start_meeting_from_reminder(
+    app: AppHandle,
+    key: String,
+    kind: ReminderKind,
+    state: State<'_, AppState>,
+    queue: State<'_, Arc<ReminderQueue>>,
+    notifications: State<'_, Arc<NotificationService>>,
+) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
+    let entry = reminders::find(&queue, &key, kind)
+        .or_else(|| notifications.showing())
+        .ok_or_else(|| CommandError::new("REMINDER_NOT_FOUND", "That reminder is no longer active"))?;
+
+    // The card is taken down before the recorder is asked for anything: the
+    // window is already hidden by this point, and leaving the service believing
+    // it is still showing would deduplicate the next reminder away.
+    notifications.dismiss(&app);
+
+    let session = start_meeting_session(Some(entry.title.clone()), &app, &state)?;
+
+    // Every reminder about this meeting is resolved, not only the one that was
+    // clicked: the user has answered the question all of them were asking. Done
+    // after the recorder starts, so a failure leaves the meeting un-answered
+    // rather than silently marked as handled.
+    reminders::mark_actioned(&queue, &key);
+
+    // Bringing the window to the meeting is done here, once, rather than in
+    // each caller.
+    if let Some(window) = app.get_webview_window(crate::hotkeys::MAIN_WINDOW_LABEL) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    let _ = app.emit("navigate-tab", serde_json::json!({ "tab": "meetings" }));
+
+    Ok(session)
+}
+
+/// Testing only: raises a reminder card without waiting for a real meeting.
+///
+/// Backs Settings › Developer. It goes through `NotificationService::show` like
+/// every other reminder, so what it exercises is the real path — a preview that
+/// took a shortcut would prove nothing about the one users see.
+#[tauri::command]
+pub async fn trigger_mock_meeting_reminder(
+    app: AppHandle,
+    kind: ReminderKind,
+    state: State<'_, AppState>,
+    queue: State<'_, Arc<ReminderQueue>>,
+    notifications: State<'_, Arc<NotificationService>>,
+) -> Result<(), CommandError> {
+    let entry = reminders::inject_mock(&queue, kind);
+    let settings = state.settings.lock_or_recover().meetings.clone();
+    notifications.show(&app, &entry, state.meetings_v2.is_recording(), &settings);
+    Ok(())
+}
+
+/// Testing only: what window detection can see right now.
+#[tauri::command]
+pub async fn debug_detect_conferencing_windows(
+) -> Result<Vec<reminders::detection::WindowMatch>, CommandError> {
+    Ok(reminders::detection::detect_active_conferencing_windows())
 }

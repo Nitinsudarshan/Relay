@@ -161,7 +161,15 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Opens a meeting's conferencing link in the user's browser when they
+        // press Join on a reminder. Relay opens the call; it never joins one.
+        .plugin(tauri_plugin_opener::init())
         .manage(state)
+        // Reminders are two pieces of state, deliberately: the queue is what
+        // should be said, the service is what is currently on screen. Keeping
+        // them apart is what stops a card's lifecycle from owning the queue.
+        .manage(Arc::new(meetings_v2::ReminderQueue::default()))
+        .manage(Arc::new(meetings_v2::NotificationService::new()))
         .setup(move |app| {
             let handle = app.handle();
             let quit_i = tauri::menu::MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -208,10 +216,11 @@ pub fn run() {
             // more docked/floating product-mode choice to hide it behind
             // (see docs/decisions.md Decision 36) — so it's always shown.
             overlay::ensure_pill_window(handle, true, pill_position);
-            // Start the meeting reminder background loop. This manages
-            // ReminderQueue and ActiveMeetingRecording as Tauri-managed state
-            // and dispatches native OS notifications for fired reminders.
-            meetings_v2::reminder_engine::start(handle.clone());
+            // Created hidden and reused for every reminder. Building the
+            // webview on demand is what produced the creation races and the
+            // flash of white this surface used to be known for.
+            overlay::ensure_reminder_window(handle);
+            meetings_v2::reminders::scheduler::spawn(handle.clone());
 
             Ok(())
         })
@@ -277,6 +286,15 @@ pub fn run() {
             commands::get_developer_settings,
             commands::set_developer_force_onboarding,
             commands::set_developer_notification_surface_mode,
+            commands::get_pending_meeting_reminder,
+            commands::meeting_reminder_ready,
+            commands::meeting_reminder_hover_changed,
+            commands::dismiss_meeting_reminder,
+            commands::snooze_meeting_reminder,
+            commands::join_meeting_from_reminder,
+            commands::start_meeting_from_reminder,
+            commands::trigger_mock_meeting_reminder,
+            commands::debug_detect_conferencing_windows,
             commands::get_account_state,
             commands::start_google_sign_in,
             commands::sign_out_account,
@@ -289,10 +307,6 @@ pub fn run() {
             commands::stop_meeting_v2,
             commands::pause_meeting_v2,
             commands::resume_meeting_v2,
-            commands::start_meeting_recording,
-            commands::snooze_meeting_reminder,
-            commands::dismiss_meeting_reminder,
-            commands::trigger_mock_meeting_reminder,
             commands::get_active_meeting_v2,
             commands::list_meetings_v2,
             commands::get_meeting_v2,

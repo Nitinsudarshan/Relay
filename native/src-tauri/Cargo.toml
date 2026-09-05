@@ -19,6 +19,10 @@ tauri-plugin-shell = "2.0"
 tauri-plugin-dialog = "2.0"
 tauri-plugin-notification = "2.0"
 tauri-plugin-global-shortcut = "2.0"
+# Opens a meeting's conferencing link in the user's default browser when
+# they press Join on a reminder. `tauri-plugin-shell`'s `open` is deprecated
+# in favour of this.
+tauri-plugin-opener = "2"
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

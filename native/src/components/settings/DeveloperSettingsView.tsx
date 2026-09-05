@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { DeveloperSettings, NotificationSurfaceMode } from '../../types';
+import {
+  ConferencingWindowMatch,
+  DeveloperSettings,
+  NotificationSurfaceMode,
+  ReminderKind,
+} from '../../types';
 import { Terminal, RefreshCw, Check, Bell, CalendarClock, Play, SearchCode, Monitor, BellRing, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -14,6 +19,8 @@ export const DeveloperSettingsView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedFeedback, setSavedFeedback] = useState(false);
+  const [detected, setDetected] = useState<ConferencingWindowMatch[] | null>(null);
+  const [reminderError, setReminderError] = useState<string | null>(null);
 
   useEffect(() => {
     loadDevSettings();
@@ -63,22 +70,30 @@ export const DeveloperSettingsView: React.FC = () => {
     }
   };
 
-  const handleTriggerMockReminder = async (kind: string) => {
+  const handleTriggerMockReminder = async (kind: ReminderKind) => {
+    setReminderError(null);
     try {
       await invoke('trigger_mock_meeting_reminder', { kind });
     } catch (err) {
-      console.error(`Failed to trigger mock reminder (${kind}):`, err);
+      console.error(`Failed to trigger a mock ${kind} reminder:`, err);
+      setReminderError(String(err));
     }
   };
 
+  /**
+   * What window detection can see right now.
+   *
+   * Rendered in place rather than through `alert`: the result is a list worth
+   * reading against what is actually open, and a modal dialog blocks the app
+   * while the very windows being detected are meant to stay on screen.
+   */
   const handleCheckDetection = async () => {
+    setReminderError(null);
     try {
-      const res = await invoke('debug_detect_conferencing_windows');
-      console.log('Window-detection signal (raw, unresolved):', res);
-      alert(JSON.stringify(res, null, 2));
+      setDetected(await invoke<ConferencingWindowMatch[]>('debug_detect_conferencing_windows'));
     } catch (err) {
-      console.error('Failed to check detection:', err);
-      alert('Error: ' + err);
+      console.error('Failed to run window detection:', err);
+      setReminderError(String(err));
     }
   };
 
@@ -253,7 +268,7 @@ export const DeveloperSettingsView: React.FC = () => {
             className="text-xs h-8 gap-1.5 border-blue-500/30 hover:bg-blue-500/10 hover:text-blue-500"
           >
             <CalendarClock className="w-3.5 h-3.5" />
-            T-2 Min (Upcoming)
+            Upcoming
           </Button>
           <Button
             variant="outline"
@@ -262,7 +277,7 @@ export const DeveloperSettingsView: React.FC = () => {
             className="text-xs h-8 gap-1.5 border-orange-500/30 hover:bg-orange-500/10 hover:text-orange-500"
           >
             <Play className="w-3.5 h-3.5" />
-            T+5 Min (Unrecorded)
+            Unrecorded
           </Button>
           <Button
             variant="outline"
@@ -271,9 +286,39 @@ export const DeveloperSettingsView: React.FC = () => {
             className="text-xs h-8 gap-1.5 border-emerald-500/30 hover:bg-emerald-500/10 hover:text-emerald-500"
           >
             <Bell className="w-3.5 h-3.5" />
-            Ad-hoc (Detected)
+            Detected
           </Button>
         </div>
+
+        {reminderError && (
+          <p className="text-[11px] text-destructive">{reminderError}</p>
+        )}
+
+        {detected && (
+          <div className="pt-1 space-y-1.5">
+            <p className="text-[11px] font-medium text-foreground">
+              {detected.length === 0
+                ? 'No conferencing windows on screen.'
+                : `${detected.length} conferencing ${detected.length === 1 ? 'window' : 'windows'} on screen:`}
+            </p>
+            {detected.map((match) => (
+              <div
+                key={`${match.provider}:${match.raw_title}`}
+                className="flex items-center justify-between gap-3 p-2 rounded-md border border-border/60 bg-background/50"
+              >
+                <div className="min-w-0">
+                  <p className="text-[11px] font-medium text-foreground truncate">{match.title}</p>
+                  <p className="text-[10px] font-mono text-muted-foreground truncate">
+                    {match.raw_title}
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-[10px] shrink-0 font-mono">
+                  {match.provider} · {match.confidence.toFixed(2)}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

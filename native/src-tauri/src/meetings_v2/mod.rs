@@ -2,20 +2,14 @@ pub mod capture;
 /// Rung 4 of the speaker-identification ladder: separating recorded audio into
 /// distinct voices. Reads the recorder's chunk WAVs, never writes them.
 pub mod diarize;
-/// Window-level meeting detection (Win32 EnumWindows on Windows, no-op elsewhere).
-/// Pure signal — creates no records, has no side effects.
-pub mod detection;
 pub mod engine;
 pub mod live_stt;
 /// Derived meeting intelligence: normalization, speakers, conversation,
 /// structured extraction, summaries. Reads the recorder's artifacts, never
 /// writes them.
 pub mod processing;
-/// Background loop that resolves calendar + window signals into reminder-queue
-/// state transitions and dispatches native OS notifications.
-pub mod reminder_engine;
-/// Meeting reminder state machine: Pending → Fired → {Snoozed|Dismissed|Actioned|Expired}.
-/// Keyed by (id, ReminderKind) so reminders never overwrite each other.
+/// Telling somebody a meeting is about to happen, and letting them act on it.
+/// Reads the calendar and the desktop; starts nothing itself.
 pub mod reminders;
 /// Runnable checks for the pipeline's failure modes, for the Diagnostics page.
 /// Proves on the user's machine what the unit tests prove on CI.
@@ -28,8 +22,9 @@ pub mod types;
 pub mod worker;
 
 pub use engine::MeetingsV2Engine;
+pub use reminders::{MeetingReminderPayload, NotificationService, ReminderQueue};
 pub use processing::{MeetingProcessing, MeetingProcessor, ProcessingOptions};
-pub use reminders::{ActiveMeetingRecording, ReminderEvent, ReminderKind, ReminderQueue};
+pub use reminders::{ReminderEvent, ReminderKind};
 pub use session_store::SessionStore;
 pub use diarize::{Diarization, DiarizationReport, VoiceAssignment};
 pub use selftest::{MeetingSelfTestReport, SelfTestCheck};

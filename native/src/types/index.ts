@@ -751,6 +751,24 @@ export interface MeetingSettings {
    * this machine means nothing when every voice arrives on the same input.
    */
   meetings_are_in_person?: boolean;
+  /**
+   * Whether a reminder card appears shortly before a scheduled meeting starts.
+   *
+   * The three switches are separate because they interrupt at different costs:
+   * "before" lands while the user is still working, "unrecorded" lands inside a
+   * meeting already under way.
+   */
+  remind_before_meeting?: boolean;
+  /**
+   * Whether a card appears when a scheduled meeting is under way and nothing is
+   * recording it.
+   */
+  remind_if_unrecorded?: boolean;
+  /**
+   * Whether a card appears for a conferencing call the calendar knows nothing
+   * about. Backed by window detection, so Windows only in practice.
+   */
+  remind_on_detection?: boolean;
   extensions: MeetingExtensionSetting[];
   /**
    * Standing instructions for how summaries should read. Presentation only —
@@ -758,12 +776,6 @@ export interface MeetingSettings {
    * assign an owner or a deadline the meeting did not establish.
    */
   summary_instructions: string;
-  /** Notify 5 minutes before a scheduled meeting starts. */
-  remind_before_meeting?: boolean;
-  /** Notify when a calendar meeting has started but is not being recorded. */
-  remind_if_unrecorded?: boolean;
-  /** Notify when a conferencing window is detected with no active recording. */
-  remind_on_detection?: boolean;
 }
 
 export type AccountMode = 'local' | 'hybrid';
@@ -801,6 +813,42 @@ export interface RelayProfile {
   installation_id: string;
   created_at: string;
   updated_at: string;
+}
+
+/** Why a meeting reminder exists. */
+export type ReminderKind = 'upcoming' | 'unrecorded' | 'detected';
+
+/**
+ * What the reminder card renders.
+ *
+ * Every string here has already been sanitized and clamped in Rust — meeting
+ * titles come from calendar invitations and window titles, neither of which the
+ * user wrote.
+ */
+export interface MeetingReminderPayload {
+  /**
+   * Stable identity of what is being reminded about: a calendar event or a
+   * detected window. Not a recording session id — nothing is recorded yet.
+   */
+  key: string;
+  kind: ReminderKind;
+  title: string;
+  provider: string;
+  provider_name: string;
+  /** When the meeting starts, in words — "Starts in 4 minutes". */
+  time_label: string;
+  participants: string[];
+  /** Whether there is a conferencing link behind the Join button. */
+  can_join: boolean;
+}
+
+/** One conferencing window detection saw. Diagnostics only. */
+export interface ConferencingWindowMatch {
+  provider: string;
+  title: string;
+  raw_title: string;
+  source: string;
+  confidence: number;
 }
 
 export type NotificationSurfaceMode = 'system' | 'tauri' | 'both';
