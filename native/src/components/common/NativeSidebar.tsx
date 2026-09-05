@@ -175,8 +175,8 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
               >
                 {isOpen ? (
                   <>
-                    <div className="flex aspect-square size-7 items-center justify-center rounded-lg bg-card border border-border text-foreground shadow-xs shrink-0 group-hover:scale-105 transition-transform">
-                      <RelayLogo className="w-4 h-4" />
+                    <div className="flex aspect-square size-8 items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <RelayLogo className="w-8 h-8" />
                     </div>
                     <div className="flex items-center flex-1 min-w-0 ml-2.5 transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden whitespace-nowrap">
                       <div className="grid flex-1 text-left leading-tight min-w-0">
