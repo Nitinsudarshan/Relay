@@ -19,10 +19,12 @@
 //!   written by whoever sent the invitation. They are stored and shown; where
 //!   they reach a model they go inside the untrusted-source boundary.
 
+pub mod accounts;
 pub mod google;
 pub mod match_event;
 pub mod model;
 
+pub use accounts::CalendarAccount;
 pub use match_event::{match_recording, EventMatch, MatchOutcome, NoMatchReason};
 pub use model::{AttendanceResponse, CalendarAttendee, CalendarEvent};
 

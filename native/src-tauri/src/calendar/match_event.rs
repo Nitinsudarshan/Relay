@@ -54,6 +54,7 @@ pub enum NoMatchReason {
 /// The outcome of matching one recording against a day's events.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(clippy::large_enum_variant)]
 pub enum MatchOutcome {
     Matched(EventMatch),
     /// Nothing was chosen, with the reason and the candidates that were close,
@@ -159,6 +160,9 @@ mod tests {
             }],
             conference_url: None,
             organizer: None,
+            calendar_id: None,
+            calendar_name: None,
+            calendar_color: None,
         }
     }
 

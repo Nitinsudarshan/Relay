@@ -667,6 +667,9 @@ mod tests {
             ],
             conference_url: None,
             organizer: Some("pranjali@example.org".into()),
+            calendar_id: None,
+            calendar_name: None,
+            calendar_color: None,
         }
     }
 

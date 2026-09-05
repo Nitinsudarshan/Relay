@@ -597,6 +597,9 @@ mod tests {
             }],
             conference_url: Some("https://meet.google.com/abc-defg-hij".to_string()),
             organizer: None,
+            calendar_id: None,
+            calendar_name: None,
+            calendar_color: None,
         }
     }
 

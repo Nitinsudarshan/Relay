@@ -469,6 +469,9 @@ fn test_calendar_attendance_reconciliation_distinguishes_heard_vs_no_voice() {
         ],
         conference_url: None,
         organizer: Some("nitin@example.com".to_string()),
+        calendar_id: None,
+        calendar_name: None,
+        calendar_color: None,
     };
 
     let session = MeetingSession::new("meet_cal_test".to_string(), None);
@@ -536,6 +539,9 @@ fn test_calendar_injection_resistance_boundary() {
         attendees: vec![],
         conference_url: None,
         organizer: None,
+        calendar_id: None,
+        calendar_name: None,
+        calendar_color: None,
     };
 
     let session = MeetingSession::new("meet_security_test".to_string(), None);

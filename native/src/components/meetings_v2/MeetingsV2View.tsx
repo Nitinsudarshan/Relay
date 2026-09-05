@@ -65,6 +65,7 @@ import {
   formatRelativeTimeToMeeting,
   getMeetingJoinUrl,
 } from './UpcomingMeetingModal';
+import { CalendarViewModal } from './CalendarViewModal';
 
 /** See the recording pill: events alone cannot keep a long-lived view honest. */
 const RECONCILE_INTERVAL_MS = 1000;
@@ -127,6 +128,7 @@ export const MeetingsV2View: React.FC = () => {
   const [calendarLink, setCalendarLink] = useState<MeetingCalendarLink | null>(null);
   const [upcomingEvents, setUpcomingEvents] = useState<CalendarEvent[]>([]);
   const [selectedUpcomingEvent, setSelectedUpcomingEvent] = useState<CalendarEvent | null>(null);
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState<boolean>(false);
   const [busyActionItemId, setBusyActionItemId] = useState<string | null>(null);
   const [isAddingAllTasks, setIsAddingAllTasks] = useState<boolean>(false);
   const [isPromoting, setIsPromoting] = useState<boolean>(false);
@@ -905,13 +907,24 @@ export const MeetingsV2View: React.FC = () => {
             <span className="font-bold text-foreground">
               Recorded Sessions ({sessions.length})
             </span>
-            <button
-              onClick={loadSessions}
-              className="p-1 hover:bg-accent rounded-md transition-colors text-muted-foreground hover:text-foreground"
-              title="Refresh list"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setIsCalendarModalOpen(true)}
+                className="p-1 hover:bg-accent rounded-md transition-colors text-muted-foreground hover:text-foreground"
+                title="Open calendar view"
+                aria-label="Open calendar view"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={loadSessions}
+                className="p-1 hover:bg-accent rounded-md transition-colors text-muted-foreground hover:text-foreground"
+                title="Refresh list"
+                aria-label="Refresh list"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
           </div>
 
           {/* Action / Recording Section */}
@@ -1046,13 +1059,26 @@ export const MeetingsV2View: React.FC = () => {
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
-                      <span>
-                        {evt.attendees && evt.attendees.length > 0
-                          ? `${evt.attendees.length} participant${evt.attendees.length === 1 ? '' : 's'}`
-                          : 'No other participants'}
+                      <span className="flex items-center gap-1 truncate">
+                        {evt.calendar_color && (
+                          <span
+                            className="w-1.5 h-1.5 rounded-full shrink-0"
+                            style={{ backgroundColor: evt.calendar_color }}
+                            title={evt.calendar_name || undefined}
+                          />
+                        )}
+                        <span className="truncate">
+                          {evt.calendar_name ? (
+                            <strong className="text-foreground/90 font-medium">{evt.calendar_name}</strong>
+                          ) : evt.attendees && evt.attendees.length > 0 ? (
+                            `${evt.attendees.length} participant${evt.attendees.length === 1 ? '' : 's'}`
+                          ) : (
+                            'No other participants'
+                          )}
+                        </span>
                       </span>
                       {relativeTime && (
-                        <span className="inline-flex items-center gap-1 text-primary font-medium bg-primary/10 px-1.5 py-0.5 rounded group-hover:bg-primary/20 transition-colors">
+                        <span className="inline-flex items-center gap-1 text-primary font-medium bg-primary/10 px-1.5 py-0.5 rounded group-hover:bg-primary/20 transition-colors shrink-0">
                           <Clock className="w-2.5 h-2.5" />
                           <span>{relativeTime}</span>
                         </span>
@@ -1447,6 +1473,21 @@ export const MeetingsV2View: React.FC = () => {
         onClose={() => setSelectedUpcomingEvent(null)}
         onStartRecording={handleStartRecordingUpcomingMeeting}
         onJoinAndRecord={handleJoinAndRecordUpcomingMeeting}
+        isStarting={isStarting}
+      />
+
+      <CalendarViewModal
+        isOpen={isCalendarModalOpen}
+        onClose={() => setIsCalendarModalOpen(false)}
+        onSelectEvent={(evt) => setSelectedUpcomingEvent(evt)}
+        onStartRecording={(evt) => {
+          setIsCalendarModalOpen(false);
+          handleStartRecordingUpcomingMeeting(evt);
+        }}
+        onJoinAndRecord={(evt) => {
+          setIsCalendarModalOpen(false);
+          handleJoinAndRecordUpcomingMeeting(evt);
+        }}
         isStarting={isStarting}
       />
     </div>

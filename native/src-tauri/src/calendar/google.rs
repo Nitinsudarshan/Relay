@@ -10,6 +10,7 @@
 //! frequently not the user. They are stored and displayed; where they reach a
 //! model they go inside the same untrusted-source boundary as a transcript.
 
+use super::accounts::{load_calendar_accounts, CalendarAccount};
 use super::model::{AttendanceResponse, CalendarAttendee, CalendarEvent};
 use crate::oauth::{
     refresh_google_access_token, KeyringTokenStore, OAuthTokens, TokenNamespace,
@@ -145,6 +146,9 @@ fn convert(event: ApiEvent) -> Option<CalendarEvent> {
         organizer: event
             .organizer
             .and_then(|o| o.display_name.or(o.email)),
+        calendar_id: None,
+        calendar_name: None,
+        calendar_color: None,
     })
 }
 
@@ -191,12 +195,129 @@ in Settings › Meetings."
     Ok(refreshed.access_token)
 }
 
-/// Events overlapping a window, oldest first.
+/// A usable access token for a specific calendar account, refreshing when close to expiry.
+pub async fn account_access_token(
+    config_dir: &Path,
+    account: &CalendarAccount,
+) -> Result<String, String> {
+    let tokens = account.load_tokens(config_dir).ok_or_else(|| {
+        format!(
+            "Calendar '{}' is not connected. Reconnect it in Settings › Meetings.",
+            account.name
+        )
+    })?;
+
+    if !needs_refresh(&tokens, chrono::Utc::now().timestamp()) {
+        return Ok(tokens.access_token);
+    }
+
+    let refresh_token = tokens.refresh_token.clone().ok_or_else(|| {
+        format!(
+            "Calendar '{}' access has expired and no refresh token was stored. Reconnect it in Settings › Meetings.",
+            account.name
+        )
+    })?;
+
+    let mut refreshed = refresh_google_access_token(None, None, &refresh_token)
+        .await
+        .map_err(|e| {
+            format!(
+                "Calendar '{}' access could not be renewed ({e}). Reconnect it in Settings › Meetings.",
+                account.name
+            )
+        })?;
+
+    if refreshed.refresh_token.is_none() {
+        refreshed.refresh_token = Some(refresh_token);
+    }
+    refreshed.account_email = refreshed.account_email.or(tokens.account_email);
+    refreshed.account_name = refreshed.account_name.or(tokens.account_name);
+
+    account.save_tokens(config_dir, &refreshed)?;
+    Ok(refreshed.access_token)
+}
+
+/// Events for a specific calendar account overlapping a window.
+pub async fn account_events_between(
+    config_dir: &Path,
+    account: &CalendarAccount,
+    from: chrono::DateTime<chrono::Utc>,
+    to: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<CalendarEvent>, String> {
+    let token = account_access_token(config_dir, account).await?;
+
+    let response = reqwest::Client::new()
+        .get(EVENTS_ENDPOINT)
+        .bearer_auth(token)
+        .query(&[
+            ("timeMin", from.to_rfc3339()),
+            ("timeMax", to.to_rfc3339()),
+            ("singleEvents", "true".to_string()),
+            ("orderBy", "startTime".to_string()),
+            ("maxResults", "100".to_string()),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("Could not reach Google Calendar for '{}': {e}", account.name))?;
+
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(format!(
+            "Google Calendar rejected access for '{}'. Reconnect it in Settings › Meetings.",
+            account.name
+        ));
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "Google Calendar for '{}' returned {}. Nothing was changed.",
+            account.name,
+            response.status()
+        ));
+    }
+
+    let parsed: EventsResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Google Calendar's response for '{}' could not be read: {e}", account.name))?;
+
+    let events: Vec<CalendarEvent> = parsed
+        .items
+        .into_iter()
+        .filter_map(convert)
+        .map(|mut evt| {
+            evt.calendar_id = Some(account.id.clone());
+            evt.calendar_name = Some(account.name.clone());
+            evt.calendar_color = Some(account.color.clone());
+            evt
+        })
+        .collect();
+
+    Ok(events)
+}
+
+/// Events overlapping a window across all enabled accounts, oldest first.
 pub async fn events_between(
     config_dir: &Path,
     from: chrono::DateTime<chrono::Utc>,
     to: chrono::DateTime<chrono::Utc>,
 ) -> Result<Vec<CalendarEvent>, String> {
+    let accounts = load_calendar_accounts(config_dir);
+    let enabled_accounts: Vec<_> = accounts.into_iter().filter(|a| a.enabled).collect();
+
+    if !enabled_accounts.is_empty() {
+        let mut all_events = Vec::new();
+        for account in &enabled_accounts {
+            match account_events_between(config_dir, account, from, to).await {
+                Ok(evts) => all_events.extend(evts),
+                Err(err) => {
+                    tracing::warn!("Failed fetching events for calendar '{}': {}", account.name, err);
+                }
+            }
+        }
+        all_events.sort_by(|a, b| a.starts_at.cmp(&b.starts_at));
+        return Ok(all_events);
+    }
+
+    // Fallback to legacy single calendar if no multi-accounts configured
     let token = access_token(config_dir).await?;
 
     let response = reqwest::Client::new()
@@ -207,7 +328,7 @@ pub async fn events_between(
             ("timeMax", to.to_rfc3339()),
             ("singleEvents", "true".to_string()),
             ("orderBy", "startTime".to_string()),
-            ("maxResults", "50".to_string()),
+            ("maxResults", "100".to_string()),
         ])
         .send()
         .await
@@ -231,7 +352,9 @@ pub async fn events_between(
         .await
         .map_err(|e| format!("Google Calendar's response could not be read: {e}"))?;
 
-    Ok(parsed.items.into_iter().filter_map(convert).collect())
+    let mut events: Vec<CalendarEvent> = parsed.items.into_iter().filter_map(convert).collect();
+    events.sort_by(|a, b| a.starts_at.cmp(&b.starts_at));
+    Ok(events)
 }
 
 #[cfg(test)]

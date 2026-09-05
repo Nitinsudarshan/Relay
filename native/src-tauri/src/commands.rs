@@ -2663,11 +2663,117 @@ pub async fn sync_google_calendar(
     })
 }
 
-/// Returns upcoming Google Calendar events for the next 24 hours.
+/// Lists all configured Google Calendar accounts (Work, Personal, School, etc.).
+#[tauri::command]
+pub async fn list_calendar_accounts(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::calendar::CalendarAccount>, CommandError> {
+    Ok(crate::calendar::accounts::load_calendar_accounts(&state.config_dir))
+}
+
+/// Adds a new Google Calendar account with a specified name and optional color.
+/// Starts loopback OAuth flow prompting the user to select an account.
+#[tauri::command]
+pub async fn add_google_calendar_account(
+    state: State<'_, AppState>,
+    name: String,
+    color: Option<String>,
+) -> Result<crate::calendar::CalendarAccount, CommandError> {
+    use crate::oauth::{start_desktop_oauth_flow, SCOPE_CALENDAR_READONLY};
+
+    let result = start_desktop_oauth_flow(None, None, SCOPE_CALENDAR_READONLY)
+        .await
+        .map_err(|e| CommandError::new("CALENDAR_CONNECT_FAILED", &e))?;
+
+    let now_iso = chrono::Utc::now().to_rfc3339();
+    let mut tokens = result.tokens;
+    tokens.last_synced_at = Some(now_iso);
+
+    let account = crate::calendar::accounts::add_calendar_account(
+        &state.config_dir,
+        name,
+        color,
+        &tokens,
+    )
+    .map_err(|e| CommandError::new("CALENDAR_SAVE_FAILED", &e))?;
+
+    Ok(account)
+}
+
+/// Updates an existing calendar account's name, color, or enabled toggle.
+#[tauri::command]
+pub async fn update_calendar_account(
+    state: State<'_, AppState>,
+    id: String,
+    name: Option<String>,
+    color: Option<String>,
+    enabled: Option<bool>,
+) -> Result<crate::calendar::CalendarAccount, CommandError> {
+    crate::calendar::accounts::update_calendar_account(
+        &state.config_dir,
+        &id,
+        name,
+        color,
+        enabled,
+    )
+    .map_err(|e| CommandError::new("CALENDAR_UPDATE_FAILED", &e))
+}
+
+/// Removes a calendar account and its stored tokens.
+#[tauri::command]
+pub async fn disconnect_calendar_account(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<crate::calendar::CalendarAccount>, CommandError> {
+    crate::calendar::accounts::delete_calendar_account(&state.config_dir, &id)
+        .map_err(|e| CommandError::new("CALENDAR_DELETE_FAILED", &e))
+}
+
+/// Synchronizes a specific calendar account or all enabled accounts.
+#[tauri::command]
+pub async fn sync_calendar_accounts(
+    state: State<'_, AppState>,
+    id: Option<String>,
+) -> Result<Vec<crate::calendar::CalendarAccount>, CommandError> {
+    let accounts = crate::calendar::accounts::load_calendar_accounts(&state.config_dir);
+    let mut updated = Vec::new();
+    let now = chrono::Utc::now();
+    let now_iso = now.to_rfc3339();
+
+    for mut account in accounts {
+        if let Some(ref target_id) = id {
+            if &account.id != target_id {
+                updated.push(account);
+                continue;
+            }
+        } else if !account.enabled {
+            updated.push(account);
+            continue;
+        }
+
+        match crate::calendar::google::account_access_token(&state.config_dir, &account).await {
+            Ok(_) => {
+                account.last_synced_at = Some(now_iso.clone());
+            }
+            Err(err) => {
+                tracing::warn!("Failed to sync calendar '{}': {}", account.name, err);
+            }
+        }
+        updated.push(account);
+    }
+
+    crate::calendar::accounts::save_calendar_accounts(&state.config_dir, &updated)
+        .map_err(|e| CommandError::new("CALENDAR_SAVE_FAILED", &e))?;
+
+    Ok(updated)
+}
+
+/// Returns upcoming Google Calendar events for the next N days (defaults to 7).
 /// Returns an empty list if calendar is not connected or fails, without failing the UI.
 #[tauri::command]
 pub async fn get_upcoming_calendar_events(
     state: State<'_, AppState>,
+    days: Option<i64>,
 ) -> Result<Vec<crate::calendar::CalendarEvent>, CommandError> {
     use crate::oauth::{KeyringTokenStore, TokenNamespace};
 
@@ -2676,7 +2782,8 @@ pub async fn get_upcoming_calendar_events(
     }
 
     let now = chrono::Utc::now();
-    let later = now + chrono::Duration::hours(24);
+    let days_ahead = days.unwrap_or(7).clamp(1, 30);
+    let later = now + chrono::Duration::days(days_ahead);
 
     match crate::calendar::google::events_between(&state.config_dir, now, later).await {
         Ok(events) => Ok(events),

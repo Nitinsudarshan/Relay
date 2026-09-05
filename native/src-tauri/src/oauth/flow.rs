@@ -62,7 +62,7 @@ pub async fn start_desktop_oauth_flow(
 
     // 2. Build RFC 7636 PKCE Google Authorization URL
     let auth_url = format!(
-        "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent&code_challenge={}&code_challenge_method=S256&state={}",
+        "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=select_account%20consent&code_challenge={}&code_challenge_method=S256&state={}",
         GOOGLE_AUTH_ENDPOINT,
         urlencoding::encode(&client_id),
         urlencoding::encode(&redirect_uri),

@@ -120,6 +120,12 @@ pub struct CalendarEvent {
     pub conference_url: Option<String>,
     #[serde(default)]
     pub organizer: Option<String>,
+    #[serde(default)]
+    pub calendar_id: Option<String>,
+    #[serde(default)]
+    pub calendar_name: Option<String>,
+    #[serde(default)]
+    pub calendar_color: Option<String>,
 }
 
 impl CalendarEvent {
@@ -208,6 +214,9 @@ mod tests {
             attendees: Vec::new(),
             conference_url: None,
             organizer: None,
+            calendar_id: None,
+            calendar_name: None,
+            calendar_color: None,
         }
     }
 

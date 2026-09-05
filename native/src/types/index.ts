@@ -1803,6 +1803,9 @@ export interface CalendarEvent {
   attendees: CalendarAttendee[];
   conference_url?: string | null;
   organizer?: string | null;
+  calendar_id?: string | null;
+  calendar_name?: string | null;
+  calendar_color?: string | null;
 }
 
 export interface EventMatch {
@@ -1828,6 +1831,17 @@ export interface MeetingCalendarLink {
   linked_at: string;
   /** True when a person chose this event rather than Relay matching it. */
   chosen_by_user: boolean;
+}
+
+/** One configured calendar account (e.g. Work, Personal, School). */
+export interface CalendarAccount {
+  id: string;
+  name: string;
+  color: string;
+  account_email?: string | null;
+  account_name?: string | null;
+  enabled: boolean;
+  last_synced_at?: string | null;
 }
 
 /** Whether Relay can read the calendar, and as whom. */
