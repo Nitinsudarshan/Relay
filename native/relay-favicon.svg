@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" fill="none">
+  <style>
+    :root { --stroke: #0d0d0d; --fill: white; }
+    @media (prefers-color-scheme: dark) {
+      :root { --stroke: #e0e0e0; --fill: transparent; }
+    }
+    .s { stroke: var(--stroke); fill: var(--fill); }
+    .c { stroke: var(--stroke); fill: transparent; }
+    .l { stroke: var(--stroke); }
+  </style>
+
+  <!-- Connector: bottom to top-left -->
+  <line class="l" x1="245" y1="315" x2="145" y2="185" stroke-width="14" stroke-linecap="round"/>
+  <!-- Connector: bottom to top-right -->
+  <line class="l" x1="255" y1="315" x2="340" y2="185" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- Top-left node (small) -->
+  <circle class="s" cx="128" cy="170" r="46" stroke-width="14"/>
+  <circle class="c" cx="128" cy="170" r="32" stroke-width="7"/>
+
+  <!-- Top-right node (large) -->
+  <circle class="s" cx="358" cy="170" r="76" stroke-width="14"/>
+  <circle class="c" cx="358" cy="170" r="60" stroke-width="7"/>
+
+  <!-- Bottom-center node (medium) -->
+  <circle class="s" cx="250" cy="336" r="58" stroke-width="14"/>
+  <circle class="c" cx="250" cy="336" r="42" stroke-width="7"/>
+</svg>

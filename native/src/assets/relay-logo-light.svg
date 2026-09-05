@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" fill="none">
+  <!-- Connector: center-bottom to top-left -->
+  <line x1="245" y1="315" x2="145" y2="185" stroke="#0d0d0d" stroke-width="14" stroke-linecap="round"/>
+  <line x1="245" y1="315" x2="145" y2="185" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+  <!-- Connector: center-bottom to top-right -->
+  <line x1="255" y1="315" x2="340" y2="185" stroke="#0d0d0d" stroke-width="14" stroke-linecap="round"/>
+  <line x1="255" y1="315" x2="340" y2="185" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Top-left node (small) -->
+  <circle cx="128" cy="170" r="46" stroke="#0d0d0d" stroke-width="14" fill="white"/>
+  <circle cx="128" cy="170" r="32" stroke="#0d0d0d" stroke-width="7" fill="white"/>
+
+  <!-- Top-right node (large) -->
+  <circle cx="358" cy="170" r="76" stroke="#0d0d0d" stroke-width="14" fill="white"/>
+  <circle cx="358" cy="170" r="60" stroke="#0d0d0d" stroke-width="7" fill="white"/>
+
+  <!-- Bottom-center node (medium) -->
+  <circle cx="250" cy="336" r="58" stroke="#0d0d0d" stroke-width="14" fill="white"/>
+  <circle cx="250" cy="336" r="42" stroke="#0d0d0d" stroke-width="7" fill="white"/>
+</svg>
