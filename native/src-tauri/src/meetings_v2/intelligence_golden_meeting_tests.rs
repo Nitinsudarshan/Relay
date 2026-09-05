@@ -118,6 +118,58 @@ fn golden_meeting_1_long_sentence_repetition_loop_is_collapsed_and_blocked_from_
 }
 
 #[test]
+fn golden_meeting_1_conversational_repetition_survives_while_loops_are_gated() {
+    // Conversational affirmations repeated up to twice are legitimate human speech
+    let affirms = [
+        "Yes, yes, I agree.",
+        "Haan, haan, Tuesday better rahega.",
+        "Theek, theek, we will do that.",
+    ];
+
+    for text in affirms {
+        assert!(
+            is_safe_as_prompt(text),
+            "Conversational repetition '{text}' must NOT be flagged as unsafe prompt loop!"
+        );
+        let raws = vec![raw_seg(0, 0, 0.0, 4.0, text, true, false)];
+        let normalized = normalize_transcript(&raws, &[]);
+        assert_eq!(
+            normalized.segments[0].text, text,
+            "Conversational repetition must be preserved by normalizer!"
+        );
+    }
+
+    // Loops (3-word, 8-word, 16-word) must be gated and collapsed
+    let loops = [
+        (
+            "we should ship we should ship",
+            "We should ship.",
+        ),
+        (
+            "we need to verify all changes before shipping we need to verify all changes before shipping",
+            "We need to verify all changes before shipping.",
+        ),
+    ];
+
+    for (loop_text, expected_collapsed) in loops {
+        assert!(
+            !is_safe_as_prompt(loop_text),
+            "Multi-word repetition '{loop_text}' must be flagged as unsafe prompt loop!"
+        );
+        let raws = vec![raw_seg(0, 0, 0.0, 6.0, loop_text, true, false)];
+        let normalized = normalize_transcript(&raws, &[]);
+        assert_eq!(normalized.segments[0].text, expected_collapsed);
+    }
+
+    // Legitimate separated repetition survives
+    let separated = "Ship it today and then ship it tomorrow.";
+    assert!(is_safe_as_prompt(separated));
+    let raws = vec![raw_seg(0, 0, 0.0, 4.0, separated, true, false)];
+    let normalized = normalize_transcript(&raws, &[]);
+    assert_eq!(normalized.segments[0].text, separated);
+}
+
+#[test]
 fn golden_meeting_1_speaker_coverage_is_not_catastrophically_skewed() {
     // Regression target: The user actually spoke 20–25% of the ~3m46s meeting.
     // The previous bug produced Mansi ~99% and Me ~1%.

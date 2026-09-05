@@ -525,7 +525,11 @@ pub fn is_safe_as_prompt(text: &str) -> bool {
     }
     if let Some(hit) = dominant_repeat(text) {
         let phrase_words = hit.phrase.split_whitespace().count();
-        if hit.repeats >= 2
+        // A single conversational word repeated at most twice (e.g., "Yes, yes", "Haan, haan")
+        // is legitimate speech emphasis, not a decoder hallucination loop.
+        let is_conversational_single_repeat = phrase_words == 1 && hit.repeats <= 2;
+        if !is_conversational_single_repeat
+            && hit.repeats >= 2
             && (hit.covered_words as f64 / words as f64 >= PROMPT_MAX_LOOP_COVERAGE
                 || phrase_words >= 3)
         {
@@ -721,6 +725,39 @@ migration finished, tested, and reviewed by someone other than me.";
         assert!(!is_safe_as_prompt("Thanks for watching"));
         assert!(is_safe_as_prompt("and then we agreed to ship on Friday"));
         assert!(is_safe_as_prompt(""));
+
+        // 3-word repetition
+        assert!(!is_safe_as_prompt("we should ship, we should ship"));
+
+        // 8-word repetition
+        assert!(!is_safe_as_prompt(
+            "we need to verify all changes before shipping, we need to verify all changes before shipping"
+        ));
+
+        // 11-word sentence repetition
+        assert!(!is_safe_as_prompt(
+            "If you are schedule for Monday then you can sit here. If you are schedule for Monday then you can sit here."
+        ));
+
+        // 16-word repetition
+        let sixteen_words = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen";
+        let sixteen_repeated = format!("{sixteen_words} {sixteen_words}");
+        assert!(!is_safe_as_prompt(&sixteen_repeated));
+
+        // 3+ repeats of single words are loops
+        assert!(!is_safe_as_prompt("yes yes yes yes"));
+        assert!(!is_safe_as_prompt("the the the the"));
+
+        // Legitimate conversational repeated words survive
+        assert!(is_safe_as_prompt("Yes, yes, I agree."));
+        assert!(is_safe_as_prompt("Haan, haan, Tuesday better rahega."));
+        assert!(is_safe_as_prompt("Theek, theek, we can do that."));
+
+        // Legitimate separated repetition survives
+        assert!(is_safe_as_prompt("ship it today and then ship it tomorrow"));
+
+        // Normal Hinglish speech survives
+        assert!(is_safe_as_prompt("Monday ya Tuesday ko schedule kar sakte hain."));
     }
 
     #[test]

@@ -228,19 +228,48 @@ fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Returns true if the token is a conversational affirmation or emphasis word
+/// where saying it twice ("yes, yes", "haan haan", "theek theek") is natural human speech.
+fn is_conversational_affirmation(key: &str) -> bool {
+    matches!(
+        key,
+        "yes" | "no" | "haan" | "sure" | "right" | "theek" | "ok" | "okay" | "yeah"
+    )
+}
+
 /// Collapses immediate word repetition: "the the the plan" → "the plan".
 ///
 /// Comparison ignores case and trailing punctuation so "Plan. plan" is caught,
 /// and the *first* occurrence is kept so its punctuation survives.
+///
+/// Conversational affirmations ("yes", "no", "haan", "sure", "right", "theek", "ok", "okay", "yeah")
+/// repeated up to 2 times for natural emphasis are preserved, while 3 or more occurrences
+/// are collapsed down to 2. Non-conversational words always collapse to 1 occurrence.
 fn collapse_repeated_words(text: &str) -> String {
     let words: Vec<&str> = text.split(' ').filter(|w| !w.is_empty()).collect();
     let mut out: Vec<&str> = Vec::with_capacity(words.len());
+    let mut current_repeat_count = 0usize;
 
     for word in words {
+        let key = comparison_key(word);
+        if key.is_empty() {
+            out.push(word);
+            current_repeat_count = 0;
+            continue;
+        }
+
         let matches_previous = out.last().is_some_and(|prev| {
-            comparison_key(prev) == comparison_key(word) && !comparison_key(word).is_empty()
+            comparison_key(prev) == key
         });
-        if !matches_previous {
+
+        if matches_previous {
+            current_repeat_count += 1;
+            let is_conversational = is_conversational_affirmation(&key);
+            if is_conversational && current_repeat_count <= 2 {
+                out.push(word);
+            }
+        } else {
+            current_repeat_count = 1;
             out.push(word);
         }
     }
@@ -516,6 +545,59 @@ mod tests {
                 "If you are schedule for Monday then you can sit here. If you are schedule for Monday then you can sit here."
             ),
             "If you are schedule for Monday then you can sit here."
+        );
+
+        // 3-word repetition loop
+        assert_eq!(
+            collapse_repeated_phrases("we should ship we should ship"),
+            "we should ship"
+        );
+
+        // 8-word repetition loop
+        assert_eq!(
+            collapse_repeated_phrases(
+                "we need to verify all changes before shipping we need to verify all changes before shipping"
+            ),
+            "we need to verify all changes before shipping"
+        );
+
+        // 16-word repetition loop
+        let sixteen_words = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen";
+        let sixteen_repeated = format!("{sixteen_words} {sixteen_words}");
+        assert_eq!(collapse_repeated_phrases(&sixteen_repeated), sixteen_words);
+    }
+
+    #[test]
+    fn conversational_repetition_is_preserved_up_to_two_times() {
+        assert_eq!(
+            collapse_repeated_words("Yes, yes, I agree"),
+            "Yes, yes, I agree"
+        );
+        assert_eq!(
+            collapse_repeated_words("Haan, haan, theek hai"),
+            "Haan, haan, theek hai"
+        );
+        assert_eq!(
+            collapse_repeated_words("No, no, that is wrong"),
+            "No, no, that is wrong"
+        );
+        assert_eq!(
+            collapse_repeated_words("Sure, sure, we can do that"),
+            "Sure, sure, we can do that"
+        );
+        assert_eq!(
+            collapse_repeated_words("Right, right, exactly"),
+            "Right, right, exactly"
+        );
+
+        // 3 or more occurrences collapse down to 2
+        assert_eq!(
+            collapse_repeated_words("Yes, yes, yes, yes, I agree"),
+            "Yes, yes, I agree"
+        );
+        assert_eq!(
+            collapse_repeated_words("Haan, haan, haan, samjha"),
+            "Haan, haan, samjha"
         );
     }
 
