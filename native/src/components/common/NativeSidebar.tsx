@@ -191,7 +191,7 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
                     </div>
                   </>
                 ) : (
-                  <RelayLogo className="w-4 h-4" />
+                  <RelayLogo className="w-8 h-8" />
                 )}
               </button>
             </DropdownMenuTrigger>
