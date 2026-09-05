@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Sparkles,
   Trash2,
   Users,
   Video,
@@ -19,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/common/EmptyState';
 import { CalendarAccount, CalendarEvent } from '../../types';
 import { formatRelativeTimeToMeeting, getMeetingJoinUrl } from './UpcomingMeetingModal';
 
@@ -149,16 +151,18 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
       setAccounts((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
       const evts = await invoke<CalendarEvent[]>('get_upcoming_calendar_events', { days: 14 });
       setEvents(evts);
-    } catch (err) {
-      console.error('Failed to toggle calendar account:', err);
+    } catch (err: unknown) {
+      console.error('Failed to toggle calendar:', err);
+      setActionError('Failed to update calendar status.');
     }
   };
 
-  const handleSaveEdit = async (id: string) => {
+  const handleSaveEdit = async (accountId: string) => {
+    if (!editName.trim()) return;
     try {
       const updated = await invoke<CalendarAccount>('update_calendar_account', {
-        id,
-        name: editName.trim() || null,
+        id: accountId,
+        name: editName.trim(),
         color: editColor,
         enabled: null,
       });
@@ -166,87 +170,85 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
       setEditingAccountId(null);
       const evts = await invoke<CalendarEvent[]>('get_upcoming_calendar_events', { days: 14 });
       setEvents(evts);
-    } catch (err) {
-      console.error('Failed to update calendar account:', err);
+    } catch (err: unknown) {
+      console.error('Failed to save calendar edit:', err);
+      setActionError('Failed to save changes.');
     }
   };
 
-  const handleDisconnect = async (id: string) => {
+  const handleDisconnect = async (accountId: string) => {
     try {
-      const remaining = await invoke<CalendarAccount[]>('disconnect_calendar_account', { id });
-      setAccounts(remaining);
+      await invoke('disconnect_calendar_account', { id: accountId });
+      setAccounts((prev) => prev.filter((a) => a.id !== accountId));
       const evts = await invoke<CalendarEvent[]>('get_upcoming_calendar_events', { days: 14 });
       setEvents(evts);
-    } catch (err) {
-      console.error('Failed to disconnect calendar account:', err);
+    } catch (err: unknown) {
+      console.error('Failed to disconnect calendar:', err);
+      setActionError('Failed to disconnect account.');
     }
   };
 
-  const handleOpenGoogleCalendar = async (account?: CalendarAccount) => {
+  const handleOpenGoogleCalendar = async (accountEmail?: string) => {
+    const url = accountEmail
+      ? `https://calendar.google.com/calendar/u/${encodeURIComponent(accountEmail)}/r`
+      : 'https://calendar.google.com/calendar/r';
     try {
-      const url = account?.account_email
-        ? `https://calendar.google.com/calendar/u/${encodeURIComponent(account.account_email)}/r`
-        : 'https://calendar.google.com/';
       await invoke('open_external_url', { url });
     } catch (err) {
-      console.error('Failed to open Google Calendar in browser:', err);
+      window.open(url, '_blank');
     }
   };
 
-  // Filter and group events
+  // Filter events based on activeFilter and searchQuery
   const filteredEvents = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
     const now = new Date();
     const todayStr = now.toDateString();
+
     const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toDateString();
 
-    return events.filter((evt) => {
-      // 1. Account enabled filter
-      if (evt.calendar_id) {
-        const acc = accounts.find((a) => a.id === evt.calendar_id);
-        if (acc && !acc.enabled) return false;
-      }
+    const sevenDaysLater = new Date(now);
+    sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
 
-      // 2. Search query filter
-      if (query) {
-        const titleMatch = evt.title.toLowerCase().includes(query);
-        const descMatch = evt.description?.toLowerCase().includes(query) ?? false;
-        const orgMatch = evt.organizer?.toLowerCase().includes(query) ?? false;
-        const attMatch = evt.attendees.some((a) => a.name.toLowerCase().includes(query));
-        const calMatch = evt.calendar_name?.toLowerCase().includes(query) ?? false;
-        if (!titleMatch && !descMatch && !orgMatch && !attMatch && !calMatch) {
+    return events.filter((evt) => {
+      const start = new Date(evt.starts_at);
+      if (isNaN(start.getTime())) return false;
+
+      // Filter by quick tab
+      if (activeFilter === 'today' && start.toDateString() !== todayStr) {
+        return false;
+      }
+      if (activeFilter === 'tomorrow' && start.toDateString() !== tomorrowStr) {
+        return false;
+      }
+      if (activeFilter === 'week') {
+        if (start.getTime() < now.getTime() - 2 * 60 * 60 * 1000 || start.getTime() > sevenDaysLater.getTime()) {
           return false;
         }
       }
 
-      // 3. Time filter
-      const start = new Date(evt.starts_at);
-      if (isNaN(start.getTime())) return false;
-      const startDayStr = start.toDateString();
-
-      if (activeFilter === 'today') {
-        return startDayStr === todayStr;
-      }
-      if (activeFilter === 'tomorrow') {
-        return startDayStr === tomorrowStr;
-      }
-      if (activeFilter === 'week') {
-        const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-        return start >= now && start <= sevenDaysLater;
+      // Filter by search query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchTitle = evt.title.toLowerCase().includes(q);
+        const matchCalendar = evt.calendar_name?.toLowerCase().includes(q);
+        const matchAttendee = evt.attendees.some((a) => a.name.toLowerCase().includes(q));
+        const matchLoc = evt.location?.toLowerCase().includes(q);
+        if (!matchTitle && !matchCalendar && !matchAttendee && !matchLoc) {
+          return false;
+        }
       }
 
       return true;
     });
-  }, [events, accounts, searchQuery, activeFilter]);
+  }, [events, activeFilter, searchQuery]);
 
-  // Group filtered events by date
+  // Group events by day
   const groupedEvents = useMemo(() => {
-    const groups: { [dateKey: string]: { label: string; date: Date; items: CalendarEvent[] } } = {};
-    const now = new Date();
-    const todayStr = now.toDateString();
-    const tomorrow = new Date(now);
+    const groups: Record<string, { label: string; date: Date; items: CalendarEvent[] }> = {};
+    const todayStr = new Date().toDateString();
+    const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toDateString();
 
@@ -274,6 +276,36 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
     return Object.values(groups).sort((a, b) => a.date.getTime() - b.date.getTime());
   }, [filteredEvents]);
 
+  // Derived metrics for top summary bar (aligned with Home page library vitals)
+  const metrics = useMemo(() => {
+    const todayStr = new Date().toDateString();
+    const todayCount = events.filter((e) => {
+      const d = new Date(e.starts_at);
+      return !isNaN(d.getTime()) && d.toDateString() === todayStr;
+    }).length;
+
+    const activeAccCount = accounts.filter((a) => a.enabled).length;
+
+    // Find next event relative string
+    const nowMs = Date.now();
+    const upcoming = events
+      .filter((e) => {
+        const d = new Date(e.starts_at);
+        return !isNaN(d.getTime()) && d.getTime() > nowMs;
+      })
+      .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())[0];
+
+    const nextRelStr = upcoming ? formatRelativeTimeToMeeting(upcoming.starts_at, upcoming.ends_at) : null;
+
+    return {
+      todayCount,
+      activeAccCount,
+      totalCount: events.length,
+      nextEvent: upcoming,
+      nextRelStr,
+    };
+  }, [accounts, events]);
+
   if (!isOpen) return null;
 
   return (
@@ -284,24 +316,24 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
         onClick={() => !isConnecting && !isStarting && onClose()}
       />
 
-      {/* Main Modal Card - Sized identically to Files Vault */}
-      <div className="relative bg-card text-card-foreground border border-border rounded-xl shadow-2xl w-[80vw] max-w-[80vw] max-h-[88vh] flex flex-col overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200">
-        {/* Header */}
-        <div className="p-5 px-6 border-b border-border/60 flex items-center justify-between gap-4 shrink-0 bg-muted/20">
+      {/* Main Modal Card - Sized to 90vw width and 90vh height, matching Home page aesthetic */}
+      <div className="relative bg-card text-card-foreground border border-border rounded-lg shadow-2xl w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] flex flex-col overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200">
+        {/* Header - Aligned with Home page typography and hierarchy */}
+        <div className="p-4 px-6 border-b border-border flex items-center justify-between gap-4 shrink-0 bg-card">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-lg bg-primary/10 text-primary shrink-0">
-              <CalendarDays className="w-6 h-6" />
+            <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0 border border-primary/20">
+              <CalendarDays className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-xl font-bold text-foreground">Calendar View</h2>
-                <Badge variant="outline" className="text-xs font-mono">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground block">
+                Meetings &amp; Schedule
+              </span>
+              <div className="flex items-center gap-2 mt-0.5">
+                <h2 className="text-base font-extrabold text-foreground">Calendar View</h2>
+                <Badge variant="outline" className="text-[10px] font-mono border-border px-1.5 py-0">
                   {filteredEvents.length} event{filteredEvents.length === 1 ? '' : 's'}
                 </Badge>
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Synced schedules across your connected accounts (Work, Personal, School).
-              </p>
             </div>
           </div>
 
@@ -311,8 +343,8 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
               size="sm"
               onClick={handleSyncAll}
               disabled={isSyncing}
-              className="text-xs h-8 gap-1.5 border-border"
-              title="Sync all calendars"
+              className="text-xs h-8 gap-1.5 border-border hover:bg-muted/40 font-medium"
+              title="Sync all connected calendars"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
               <span>Sync All</span>
@@ -322,7 +354,7 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
               variant="outline"
               size="sm"
               onClick={() => handleOpenGoogleCalendar()}
-              className="text-xs h-8 gap-1.5 border-border text-muted-foreground hover:text-foreground"
+              className="text-xs h-8 gap-1.5 border-border text-muted-foreground hover:text-foreground hover:bg-muted/40 font-medium"
               title="Open Google Calendar in default browser"
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -340,6 +372,57 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
           </div>
         </div>
 
+        {/* Top Overview Metrics Strip - Exactly aligned with Home page vital rows */}
+        <div className="border-b border-border bg-card/60 divide-y divide-border sm:divide-y-0 sm:flex sm:divide-x shrink-0">
+          <div className="flex items-center gap-3 p-3 px-6 sm:flex-1 min-w-0">
+            <Calendar className="w-4 h-4 text-primary shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-extrabold text-foreground leading-none">
+                {accounts.length} Connected
+              </p>
+              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                {metrics.activeAccCount} active calendar accounts
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 p-3 px-6 sm:flex-1 min-w-0">
+            <Clock className="w-4 h-4 text-emerald-500 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-extrabold text-foreground leading-none">
+                {metrics.todayCount} Today
+              </p>
+              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                events scheduled today
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 p-3 px-6 sm:flex-1 min-w-0">
+            <CalendarDays className="w-4 h-4 text-indigo-400 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-extrabold text-foreground leading-none">
+                {metrics.totalCount} Upcoming
+              </p>
+              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                in the next 14 days
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 p-3 px-6 sm:flex-1 min-w-0">
+            <Video className="w-4 h-4 text-sky-500 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-extrabold text-foreground leading-none truncate">
+                {metrics.nextRelStr ? metrics.nextRelStr : 'None'}
+              </p>
+              <p className="text-[10px] text-muted-foreground truncate mt-0.5" title={metrics.nextEvent?.title}>
+                {metrics.nextEvent ? `next: ${metrics.nextEvent.title}` : 'next scheduled call'}
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Action Error Banner */}
         {actionError && (
           <div className="p-2.5 px-6 bg-destructive/10 text-destructive text-xs border-b border-destructive/20 flex items-center justify-between">
@@ -352,34 +435,36 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
 
         {/* Body Split View */}
         <div className="flex-1 flex min-h-0 overflow-hidden">
-          {/* Left Column: Calendars Management */}
-          <aside className="w-72 lg:w-80 border-r border-border/60 bg-muted/15 flex flex-col shrink-0">
-            <div className="p-3.5 border-b border-border/50 flex items-center justify-between">
-              <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                <Calendar className="w-4 h-4 text-primary" />
-                <span>My Calendars ({accounts.length})</span>
-              </div>
+          {/* Left Column: Calendars Management (Styled like Home page shortcut cards) */}
+          <aside className="w-80 lg:w-88 border-r border-border bg-card/40 flex flex-col shrink-0">
+            <div className="p-3.5 px-5 border-b border-border flex items-center justify-between">
+              <h3 className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                My Calendars ({accounts.length})
+              </h3>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={() => {
                   setIsAddingCalendar(true);
                   setNewCalendarName('');
-                  const nextColor = CALENDAR_COLORS[accounts.length % CALENDAR_COLORS.length]?.hex || CALENDAR_COLORS[0].hex;
+                  const nextColor =
+                    CALENDAR_COLORS[accounts.length % CALENDAR_COLORS.length]?.hex || CALENDAR_COLORS[0].hex;
                   setNewCalendarColor(nextColor);
                 }}
-                className="h-7 px-2 text-xs gap-1 text-primary hover:text-primary hover:bg-primary/10"
+                className="h-6 px-2 text-[11px] gap-1 text-primary border-border hover:bg-primary/10"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <Plus className="w-3 h-3" />
                 <span>Add</span>
               </Button>
             </div>
 
             {/* Add Calendar Form Dialog inside sidebar */}
             {isAddingCalendar && (
-              <div className="p-3.5 m-2.5 rounded-lg bg-card border border-primary/40 shadow-xs space-y-3 animate-in fade-in zoom-in-98 duration-150">
-                <div className="flex items-center justify-between text-xs font-semibold text-foreground">
-                  <span>Connect Google Calendar</span>
+              <div className="p-3.5 m-3 rounded-lg bg-card border border-border shadow-xs space-y-3 animate-in fade-in zoom-in-98 duration-150">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                    Connect Account
+                  </span>
                   <button
                     onClick={() => setIsAddingCalendar(false)}
                     className="text-muted-foreground hover:text-foreground"
@@ -387,8 +472,9 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
                     Calendar Name
                   </label>
                   <input
@@ -396,16 +482,16 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
                     placeholder="e.g. Work, Personal, School"
                     value={newCalendarName}
                     onChange={(e) => setNewCalendarName(e.target.value)}
-                    className="w-full text-xs px-2.5 py-1.5 rounded-md bg-muted/50 border border-border focus:border-primary focus:outline-none"
+                    className="w-full text-xs px-2.5 py-1.5 rounded-md bg-background border border-border focus:border-primary focus:outline-none"
                     autoFocus
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
-                    Color
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                    Color Accent
                   </label>
-                  <div className="flex items-center gap-1.5 flex-wrap">
+                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                     {CALENDAR_COLORS.map((c) => (
                       <button
                         key={c.hex}
@@ -450,53 +536,65 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
               </div>
             )}
 
-            {/* Calendars List */}
-            <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
-              {accounts.length === 0 && !isAddingCalendar ? (
-                <div className="p-4 text-center text-xs text-muted-foreground space-y-2">
-                  <Calendar className="w-8 h-8 text-muted-foreground/40 mx-auto" />
-                  <p>No calendars connected yet.</p>
+            {/* List of Accounts */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {accounts.length === 0 ? (
+                <div className="p-6 text-center text-muted-foreground space-y-2">
+                  <Calendar className="w-6 h-6 mx-auto text-muted-foreground/50" />
+                  <p className="text-xs font-medium">No calendars connected yet</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Add your work, personal, or school Google Calendars to sync your schedule.
+                  </p>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setIsAddingCalendar(true)}
-                    className="text-xs h-8 gap-1.5 border-dashed"
+                    className="text-xs h-7 gap-1 mt-1 border-border"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Connect Calendar</span>
+                    <Plus className="w-3 h-3" />
+                    <span>Connect Google Calendar</span>
                   </Button>
                 </div>
               ) : (
                 accounts.map((account) => {
-                  const isEditing = editingAccountId === account.id;
-
-                  if (isEditing) {
+                  if (editingAccountId === account.id) {
                     return (
                       <div
                         key={account.id}
-                        className="p-3 rounded-lg bg-card border border-primary/40 space-y-2.5 shadow-xs"
+                        className="p-3 rounded-lg bg-card border border-border space-y-2.5 shadow-xs"
                       >
-                        <div className="text-[11px] font-semibold text-foreground">Edit Calendar</div>
-                        <input
-                          type="text"
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          className="w-full text-xs px-2.5 py-1.5 rounded-md bg-muted/50 border border-border focus:border-primary focus:outline-none"
-                        />
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {CALENDAR_COLORS.map((c) => (
-                            <button
-                              key={c.hex}
-                              type="button"
-                              onClick={() => setEditColor(c.hex)}
-                              className={`w-4 h-4 rounded-full transition-transform flex items-center justify-center ${
-                                editColor === c.hex ? 'ring-2 ring-foreground scale-110' : 'hover:scale-105'
-                              }`}
-                              style={{ backgroundColor: c.hex }}
-                            >
-                              {editColor === c.hex && <Check className="w-2.5 h-2.5 text-white" />}
-                            </button>
-                          ))}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                            Edit Name
+                          </label>
+                          <input
+                            type="text"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            className="w-full text-xs px-2.5 py-1.5 rounded-md bg-background border border-border focus:border-primary focus:outline-none"
+                            autoFocus
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                            Color
+                          </label>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {CALENDAR_COLORS.map((c) => (
+                              <button
+                                key={c.hex}
+                                type="button"
+                                onClick={() => setEditColor(c.hex)}
+                                className={`w-4 h-4 rounded-full transition-transform flex items-center justify-center ${
+                                  editColor === c.hex ? 'ring-2 ring-foreground scale-110' : 'hover:scale-105'
+                                }`}
+                                style={{ backgroundColor: c.hex }}
+                                title={c.name}
+                              >
+                                {editColor === c.hex && <Check className="w-2.5 h-2.5 text-white" />}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                         <div className="flex items-center justify-end gap-1.5 pt-1">
                           <Button
@@ -523,18 +621,18 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
                   return (
                     <div
                       key={account.id}
-                      className={`group p-2.5 rounded-lg border transition-all flex items-center justify-between gap-2.5 ${
+                      className={`group p-3 rounded-lg border border-border text-left flex items-center justify-between gap-2.5 transition-all ${
                         account.enabled
-                          ? 'bg-card border-border/80 hover:border-border'
-                          : 'bg-muted/30 border-dashed border-border/50 opacity-60'
+                          ? 'bg-card hover:bg-muted/40 hover:border-primary/50'
+                          : 'bg-muted/20 border-dashed opacity-60'
                       }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        {/* Color indicator and toggle checkbox */}
+                        {/* Custom color toggle checkbox */}
                         <button
                           type="button"
                           onClick={() => handleToggleAccount(account)}
-                          className="w-4 h-4 rounded-md flex items-center justify-center shrink-0 border border-border/60 transition-colors"
+                          className="w-4 h-4 rounded-md flex items-center justify-center shrink-0 border border-border transition-colors"
                           style={{
                             backgroundColor: account.enabled ? account.color : 'transparent',
                             borderColor: account.color,
@@ -546,7 +644,7 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
 
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-semibold text-foreground truncate">
+                            <span className="text-xs font-bold text-foreground truncate">
                               {account.name}
                             </span>
                             <span
@@ -554,34 +652,43 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
                               style={{ backgroundColor: account.color }}
                             />
                           </div>
-                          <div className="text-[10px] text-muted-foreground truncate font-mono">
+                          <div className="text-[10px] text-muted-foreground truncate font-mono mt-0.5">
                             {account.account_email || 'Connected'}
                           </div>
                         </div>
                       </div>
 
-                      {/* Hover Actions */}
-                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingAccountId(account.id);
-                            setEditName(account.name);
-                            setEditColor(account.color);
-                          }}
-                          className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted"
-                          title="Edit calendar name or color"
-                        >
-                          <Pencil className="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDisconnect(account.id)}
-                          className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                          title="Disconnect calendar"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                      {/* Hotkey-styled Status badge or hover actions */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <div className="group-hover:hidden">
+                          <span className="font-mono text-[9px] bg-background/80 px-1.5 py-0.5 rounded-md border border-border text-muted-foreground">
+                            {account.enabled ? 'Active' : 'Muted'}
+                          </span>
+                        </div>
+
+                        {/* Hover Actions */}
+                        <div className="hidden group-hover:flex items-center gap-0.5 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingAccountId(account.id);
+                              setEditName(account.name);
+                              setEditColor(account.color);
+                            }}
+                            className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted"
+                            title="Edit calendar name or color"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDisconnect(account.id)}
+                            className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            title="Disconnect calendar"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -591,8 +698,8 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
 
             {/* Sidebar Bottom Sync Indicator */}
             {accounts.length > 0 && (
-              <div className="p-3 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
-                <span>{accounts.filter((a) => a.enabled).length} active</span>
+              <div className="p-3 px-4 border-t border-border text-[10px] font-mono text-muted-foreground flex items-center justify-between bg-card/60">
+                <span>{accounts.filter((a) => a.enabled).length} of {accounts.length} active</span>
                 <button
                   onClick={handleSyncAll}
                   disabled={isSyncing}
@@ -606,11 +713,11 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
           </aside>
 
           {/* Right Column: Schedule / Agenda View */}
-          <main className="flex-1 flex flex-col min-w-0 bg-background/50 overflow-hidden">
+          <main className="flex-1 flex flex-col min-w-0 bg-background/40 overflow-hidden">
             {/* Filter Bar & Search */}
-            <div className="p-3.5 px-6 border-b border-border/60 flex items-center justify-between gap-4 flex-wrap bg-muted/10">
+            <div className="p-3 px-6 border-b border-border flex items-center justify-between gap-4 flex-wrap bg-card/50">
               {/* Filter Tabs */}
-              <div className="flex items-center gap-1 p-0.5 bg-muted/50 rounded-lg border border-border/50">
+              <div className="flex items-center gap-1 p-0.5 bg-muted/40 rounded-lg border border-border">
                 {(['all', 'today', 'tomorrow', 'week'] as const).map((filter) => (
                   <button
                     key={filter}
@@ -634,7 +741,7 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
                   placeholder="Search meetings, attendees..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full text-xs pl-8 pr-3 py-1.5 rounded-lg bg-card border border-border/80 focus:border-primary focus:outline-none placeholder:text-muted-foreground"
+                  className="w-full text-xs pl-8 pr-3 py-1.5 rounded-lg bg-card border border-border focus:border-primary focus:outline-none placeholder:text-muted-foreground"
                 />
                 {searchQuery && (
                   <button
@@ -650,46 +757,48 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
             {/* Events List Scrollable */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {isLoading && events.length === 0 ? (
-                <div className="p-12 text-center text-muted-foreground flex flex-col items-center justify-center gap-2">
+                <div className="p-16 text-center text-muted-foreground flex flex-col items-center justify-center gap-2">
                   <RefreshCw className="w-6 h-6 animate-spin text-primary" />
                   <p className="text-xs font-medium">Loading synced calendars...</p>
                 </div>
               ) : groupedEvents.length === 0 ? (
-                <div className="p-16 text-center border border-dashed border-border rounded-xl space-y-3 bg-muted/5">
-                  <Calendar className="w-10 h-10 text-muted-foreground/40 mx-auto" />
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-semibold text-foreground">
-                      No upcoming meetings found
-                    </h3>
-                    <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                      {searchQuery
-                        ? 'No meetings match your search query.'
-                        : accounts.length === 0
-                        ? 'Connect your Google Calendar accounts (Work, Personal, School) to see all your meetings in one place.'
-                        : 'There are no upcoming events scheduled in this period across your enabled calendars.'}
-                    </p>
-                  </div>
-                  {accounts.length === 0 && (
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={() => setIsAddingCalendar(true)}
-                      className="text-xs gap-1.5 mt-2 bg-primary text-primary-foreground font-semibold"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Connect First Calendar</span>
-                    </Button>
-                  )}
-                </div>
+                <EmptyState
+                  icon={Calendar}
+                  title={searchQuery ? 'No matching meetings' : 'No upcoming meetings scheduled'}
+                  description={
+                    searchQuery
+                      ? 'No events matched your search terms.'
+                      : accounts.length === 0
+                      ? 'Connect your Google Calendar accounts (Work, Personal, School) to sync and manage your meetings in one place.'
+                      : 'There are no upcoming events scheduled in this period across your enabled calendars.'
+                  }
+                  action={
+                    accounts.length === 0 ? (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => setIsAddingCalendar(true)}
+                        className="text-xs gap-1.5 bg-primary text-primary-foreground font-semibold"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Connect First Calendar</span>
+                      </Button>
+                    ) : undefined
+                  }
+                  className="my-8"
+                />
               ) : (
                 groupedEvents.map((group) => (
-                  <div key={group.label} className="space-y-3">
-                    <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-xs py-1 text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                      <span>{group.label}</span>
-                      <span className="text-[10px] text-muted-foreground/60 font-mono">
-                        ({group.items.length})
-                      </span>
-                      <div className="h-px bg-border/60 flex-1 ml-2" />
+                  <section key={group.label} className="space-y-2.5">
+                    {/* Sticky Date Caption Header */}
+                    <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-xs py-1 flex items-center gap-2">
+                      <h4 className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                        <span>{group.label}</span>
+                        <span className="text-[10px] font-mono text-muted-foreground/70">
+                          ({group.items.length})
+                        </span>
+                      </h4>
+                      <div className="h-px bg-border flex-1 ml-2" />
                     </div>
 
                     <div className="space-y-2.5">
@@ -716,20 +825,21 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
                         return (
                           <div
                             key={evt.id}
-                            className="group relative p-4 rounded-xl bg-card border border-border/70 hover:border-primary/50 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xs hover:shadow-xs"
+                            className="group rounded-lg border border-border bg-card p-3.5 hover:bg-muted/40 hover:border-primary/50 transition-all text-left flex flex-col md:flex-row md:items-center justify-between gap-3 relative"
                           >
-                            {/* Color bar indicator */}
+                            {/* Color Accent Indicator Strip */}
                             <div
-                              className="absolute left-0 top-3 bottom-3 w-1 rounded-r-full"
+                              className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full"
                               style={{ backgroundColor: calColor }}
                             />
 
-                            {/* Left Info */}
-                            <div className="space-y-1.5 min-w-0 flex-1 pl-2">
+                            {/* Left Content Area */}
+                            <div className="space-y-1 min-w-0 flex-1 pl-2">
+                              {/* Tags and Badges Line */}
                               <div className="flex items-center gap-2 flex-wrap">
                                 {evt.calendar_name && (
                                   <span
-                                    className="text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1.5"
+                                    className="font-mono text-[9px] px-1.5 py-0.5 rounded-md border flex items-center gap-1 font-semibold"
                                     style={{
                                       backgroundColor: `${calColor}15`,
                                       borderColor: `${calColor}40`,
@@ -744,67 +854,54 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
                                   </span>
                                 )}
 
+                                {timeStr && (
+                                  <span className="font-mono text-[10px] text-muted-foreground flex items-center gap-1">
+                                    <Clock className="w-3 h-3 text-muted-foreground/70" />
+                                    <span>{timeStr}</span>
+                                  </span>
+                                )}
+
                                 {relativeTime && (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[10px] font-mono border-primary/30 text-primary bg-primary/10"
-                                  >
-                                    <Clock className="w-2.5 h-2.5 mr-1" />
+                                  <span className="font-mono text-[9px] bg-primary/10 border border-primary/20 text-primary px-1.5 py-0.5 rounded-md font-semibold">
                                     {relativeTime}
-                                  </Badge>
+                                  </span>
                                 )}
 
-                                <span className="text-xs text-muted-foreground font-mono">
-                                  {timeStr}
-                                </span>
+                                {joinUrl && (
+                                  <span className="font-mono text-[9px] bg-muted/60 border border-border text-muted-foreground px-1.5 py-0.5 rounded-md flex items-center gap-1">
+                                    <Video className="w-2.5 h-2.5 text-blue-500" />
+                                    <span>Video Call</span>
+                                  </span>
+                                )}
+
+                                {evt.attendees.length > 0 && (
+                                  <span className="font-mono text-[9px] text-muted-foreground flex items-center gap-1">
+                                    <Users className="w-2.5 h-2.5 text-muted-foreground/70" />
+                                    <span>{evt.attendees.length}</span>
+                                  </span>
+                                )}
                               </div>
 
-                              <h4
-                                onClick={() => onSelectEvent(evt)}
-                                className="text-sm font-bold text-foreground hover:text-primary transition-colors cursor-pointer truncate"
-                                title={evt.title}
-                              >
+                              {/* Title */}
+                              <h5 className="text-xs font-bold text-foreground truncate">
                                 {evt.title}
-                              </h4>
+                              </h5>
 
-                              <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
-                                {joinUrl ? (
-                                  <span className="flex items-center gap-1 text-blue-500 font-medium">
-                                    <Video className="w-3.5 h-3.5" />
-                                    <span>Conferencing Available</span>
-                                  </span>
-                                ) : evt.location ? (
-                                  <span className="flex items-center gap-1 truncate max-w-xs">
-                                    <MapPin className="w-3.5 h-3.5 shrink-0" />
-                                    <span className="truncate">{evt.location}</span>
-                                  </span>
-                                ) : null}
-
-                                {evt.attendees && evt.attendees.length > 0 && (
-                                  <span className="flex items-center gap-1">
-                                    <Users className="w-3.5 h-3.5" />
-                                    <span>
-                                      {evt.attendees.length} participant
-                                      {evt.attendees.length === 1 ? '' : 's'}
-                                    </span>
-                                  </span>
-                                )}
-
-                                {evt.organizer && (
-                                  <span className="truncate max-w-xs text-[11px]">
-                                    by {evt.organizer}
-                                  </span>
-                                )}
-                              </div>
+                              {/* Description / Location Preview */}
+                              {(evt.location || evt.description) && (
+                                <p className="text-[10px] text-muted-foreground truncate">
+                                  {evt.location || evt.description?.replace(/\n/g, ' ').slice(0, 120)}
+                                </p>
+                              )}
                             </div>
 
-                            {/* Action Buttons on Card */}
-                            <div className="flex items-center gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-border/40">
+                            {/* Right Action Controls */}
+                            <div className="flex items-center gap-1.5 shrink-0 pl-2 md:pl-0">
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => onSelectEvent(evt)}
-                                className="text-xs h-8 px-2.5 text-muted-foreground hover:text-foreground"
+                                className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground"
                               >
                                 Details
                               </Button>
@@ -814,7 +911,7 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
                                 size="sm"
                                 onClick={() => onStartRecording(evt)}
                                 disabled={isStarting}
-                                className="text-xs h-8 px-3 gap-1.5 border-border hover:bg-muted font-medium"
+                                className="h-7 px-2.5 text-xs gap-1 border-border hover:bg-primary/10 hover:text-primary hover:border-primary/50 font-medium"
                               >
                                 <Play className="w-3 h-3 fill-current" />
                                 <span>Record</span>
@@ -826,10 +923,10 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
                                   size="sm"
                                   onClick={() => onJoinAndRecord(evt)}
                                   disabled={isStarting}
-                                  className="text-xs h-8 px-3 gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 font-semibold"
+                                  className="h-7 px-3 text-xs gap-1 font-semibold bg-primary text-primary-foreground shadow-xs"
                                 >
-                                  <Video className="w-3.5 h-3.5" />
-                                  <span>Join & Record</span>
+                                  <Video className="w-3 h-3" />
+                                  <span>Join &amp; Record</span>
                                 </Button>
                               )}
                             </div>
@@ -837,7 +934,7 @@ export const CalendarViewModal: React.FC<CalendarViewModalProps> = ({
                         );
                       })}
                     </div>
-                  </div>
+                  </section>
                 ))
               )}
             </div>

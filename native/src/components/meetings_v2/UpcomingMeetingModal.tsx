@@ -129,23 +129,25 @@ export const UpcomingMeetingModal: React.FC<UpcomingMeetingModalProps> = ({
         onClick={() => !isStarting && onClose()}
       />
 
-      {/* Centered Modal Card - matching files vault view size */}
-      <div className="relative bg-card text-card-foreground border border-border rounded-xl shadow-2xl w-[80vw] max-w-[80vw] max-h-[88vh] flex flex-col overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200">
+      {/* Centered Modal Card - 90% width and height aligned with Home page */}
+      <div className="relative bg-card text-card-foreground border border-border rounded-lg shadow-2xl w-[90vw] max-w-[90vw] h-[90vh] max-h-[90vh] flex flex-col overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="p-6 border-b border-border/60 flex items-start justify-between gap-4 shrink-0 bg-muted/20">
-          <div className="space-y-2 min-w-0 flex-1">
+        <div className="p-5 px-6 border-b border-border flex items-start justify-between gap-4 shrink-0 bg-card">
+          <div className="space-y-1.5 min-w-0 flex-1">
+            <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground block">
+              Meeting Details
+            </span>
             <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="p-2 rounded-lg bg-primary/10 text-primary shrink-0">
-                <Calendar className="w-5 h-5" />
-              </span>
-              <Badge variant="outline" className="text-xs font-mono font-semibold border-primary/30 text-primary bg-primary/10 px-2.5 py-1">
-                <Clock className="w-3.5 h-3.5 mr-1.5" />
-                {relativeTime}
-              </Badge>
+              <h2 className="text-xl font-extrabold text-foreground leading-snug break-words">
+                {event.title}
+              </h2>
+              {relativeTime && (
+                <span className="font-mono text-[9px] bg-primary/10 border border-primary/20 text-primary px-2 py-0.5 rounded-md font-semibold flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  <span>{relativeTime}</span>
+                </span>
+              )}
             </div>
-            <h2 className="text-xl sm:text-2xl font-bold text-foreground leading-snug break-words">
-              {event.title}
-            </h2>
           </div>
 
           <button

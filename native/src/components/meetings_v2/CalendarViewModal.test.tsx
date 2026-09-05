@@ -90,7 +90,7 @@ describe('CalendarViewModal', () => {
     expect((await screen.findAllByText('School')).length).toBeGreaterThanOrEqual(1);
 
     // Events are listed
-    expect(await screen.findByText('Sprint Planning')).toBeInTheDocument();
+    expect((await screen.findAllByText('Sprint Planning')).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Doctor Appointment')).toBeInTheDocument();
   });
 
