@@ -8,6 +8,9 @@ pub mod live_stt;
 /// structured extraction, summaries. Reads the recorder's artifacts, never
 /// writes them.
 pub mod processing;
+/// Telling somebody a meeting is about to happen, and letting them act on it.
+/// Reads the calendar and the desktop; starts nothing itself.
+pub mod reminders;
 /// Runnable checks for the pipeline's failure modes, for the Diagnostics page.
 /// Proves on the user's machine what the unit tests prove on CI.
 pub mod selftest;
@@ -19,6 +22,7 @@ pub mod types;
 pub mod worker;
 
 pub use engine::MeetingsV2Engine;
+pub use reminders::{MeetingReminderPayload, NotificationService, ReminderQueue};
 pub use processing::{MeetingProcessing, MeetingProcessor, ProcessingOptions};
 pub use session_store::SessionStore;
 pub use diarize::{Diarization, DiarizationReport, VoiceAssignment};

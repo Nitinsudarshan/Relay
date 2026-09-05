@@ -292,3 +292,106 @@ fn reposition_meeting_overlay(app: &AppHandle, window: &tauri::WebviewWindow) {
 }
 
 
+
+// =========================================================================
+// MEETING REMINDER CARD
+// =========================================================================
+
+pub const REMINDER_WINDOW_LABEL: &str = "meeting-reminder";
+
+/// The reminder card: title, time, participants, and the Join / Record /
+/// Snooze row.
+const REMINDER_SIZE: (f64, f64) = (420.0, 152.0);
+
+/// Gap between the card and the top-right corner of the work area — where
+/// desktop notifications live on both platforms Relay targets.
+const REMINDER_MARGIN: f64 = 16.0;
+
+/// Creates the reminder window, hidden, at startup.
+///
+/// Created once and reused for every reminder rather than built per reminder:
+/// creating a webview on demand is what produced the creation races, re-show
+/// loops and flash of white background this surface was previously known for.
+///
+/// Idempotent — safe to call on every startup.
+pub fn ensure_reminder_window(app: &AppHandle) {
+    if app.get_webview_window(REMINDER_WINDOW_LABEL).is_some() {
+        return;
+    }
+
+    let mut builder = WebviewWindowBuilder::new(
+        app,
+        REMINDER_WINDOW_LABEL,
+        WebviewUrl::App("index.html#/meeting-reminder".into()),
+    )
+    .title("Relay — Meeting Reminder")
+    .inner_size(REMINDER_SIZE.0, REMINDER_SIZE.1)
+    .resizable(false)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .transparent(true)
+    .shadow(false)
+    .visible(false)
+    // Never takes focus by appearing. A reminder arrives while the user is
+    // mid-sentence in the very meeting it is about; stealing the keyboard to
+    // announce that is worse than the meeting going unrecorded.
+    .focused(false)
+    // Keeps the card out of screen shares and recordings. It names a meeting
+    // and its participants, and it appears exactly when somebody is most
+    // likely to be presenting.
+    .content_protected(true);
+
+    if let Some((x, y)) = reminder_anchor(app) {
+        builder = builder.position(x, y);
+    }
+
+    if let Err(e) = builder.build() {
+        tracing::error!("Failed to create meeting reminder window: {}", e);
+    }
+}
+
+/// Shows the reminder card, re-anchored to the monitor the user is on.
+///
+/// Position is recomputed on every show rather than once at creation, so the
+/// card survives a monitor, resolution, DPI or taskbar change between one
+/// meeting and the next.
+pub fn show_reminder_window(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(REMINDER_WINDOW_LABEL) else {
+        ensure_reminder_window(app);
+        if let Some(window) = app.get_webview_window(REMINDER_WINDOW_LABEL) {
+            reposition_reminder_window(app, &window);
+            let _ = window.show();
+        }
+        return;
+    };
+    reposition_reminder_window(app, &window);
+    let _ = window.show();
+}
+
+pub fn hide_reminder_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(REMINDER_WINDOW_LABEL) {
+        let _ = window.hide();
+    }
+}
+
+fn reposition_reminder_window(app: &AppHandle, window: &tauri::WebviewWindow) {
+    if let Some((x, y)) = reminder_anchor(app) {
+        let _ = window.set_position(LogicalPosition::new(x, y));
+    }
+}
+
+/// Top-right of the active monitor's work area.
+fn reminder_anchor(app: &AppHandle) -> Option<(f64, f64)> {
+    let monitor = active_monitor(app)?;
+    let scale = monitor.scale_factor();
+    let work_area = monitor.work_area();
+    let wa_x = work_area.position.x as f64 / scale;
+    let wa_y = work_area.position.y as f64 / scale;
+    let wa_w = work_area.size.width as f64 / scale;
+
+    Some((
+        wa_x + wa_w - REMINDER_SIZE.0 - REMINDER_MARGIN,
+        wa_y + REMINDER_MARGIN,
+    ))
+}
