@@ -1,28 +1,46 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" fill="none">
   <style>
-    :root { --stroke: #0d0d0d; --fill: white; }
-    @media (prefers-color-scheme: dark) {
-      :root { --stroke: #e0e0e0; --fill: transparent; }
+    .ring { fill-rule: evenodd; }
+    @media (prefers-color-scheme: light) {
+      .ring, .letter { fill: #0d0d0d; }
     }
-    .s { stroke: var(--stroke); fill: var(--fill); }
-    .c { stroke: var(--stroke); fill: transparent; }
-    .l { stroke: var(--stroke); }
+    @media (prefers-color-scheme: dark) {
+      .ring, .letter { fill: #f0f0f0; }
+    }
+    .ring, .letter { fill: #0d0d0d; }
   </style>
 
-  <!-- Connector: bottom to top-left -->
-  <line class="l" x1="245" y1="315" x2="145" y2="185" stroke-width="14" stroke-linecap="round"/>
-  <!-- Connector: bottom to top-right -->
-  <line class="l" x1="255" y1="315" x2="340" y2="185" stroke-width="14" stroke-linecap="round"/>
+  <!-- Outer ring -->
+  <path class="ring" d="
+    M 250 18
+    C 122.1 18 18 122.1 18 250
+    C 18 377.9 122.1 482 250 482
+    C 377.9 482 482 377.9 482 250
+    C 482 122.1 377.9 18 250 18 Z
+    M 250 60
+    C 145.3 60 60 145.3 60 250
+    C 60 354.7 145.3 440 250 440
+    C 354.7 440 440 354.7 440 250
+    C 440 145.3 354.7 60 250 60 Z
+  "/>
 
-  <!-- Top-left node (small) -->
-  <circle class="s" cx="128" cy="170" r="46" stroke-width="14"/>
-  <circle class="c" cx="128" cy="170" r="32" stroke-width="7"/>
-
-  <!-- Top-right node (large) -->
-  <circle class="s" cx="358" cy="170" r="76" stroke-width="14"/>
-  <circle class="c" cx="358" cy="170" r="60" stroke-width="7"/>
-
-  <!-- Bottom-center node (medium) -->
-  <circle class="s" cx="250" cy="336" r="58" stroke-width="14"/>
-  <circle class="c" cx="250" cy="336" r="42" stroke-width="7"/>
+  <!-- Bold R -->
+  <path class="letter" fill-rule="evenodd" d="
+    M 152 134
+    L 220 134
+    C 308 134 362 168 362 218
+    C 362 258 330 284 280 292
+    L 362 374
+    L 286 374
+    L 210 294
+    L 220 294
+    L 220 374
+    L 152 374
+    Z
+    M 220 178
+    L 220 256
+    C 270 256 316 240 316 218
+    C 316 196 278 178 220 178
+    Z
+  "/>
 </svg>
