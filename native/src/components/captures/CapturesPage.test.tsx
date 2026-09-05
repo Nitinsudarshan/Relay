@@ -67,6 +67,12 @@ function mockBackend(captures: VaultFile[], status: CaptureBridgeStatus = bridge
     if (command === 'get_captures') return Promise.resolve(captures);
     if (command === 'get_capture_bridge_status') return Promise.resolve(status);
     if (command === 'delete_capture') return Promise.resolve(undefined);
+    if (command === 'get_settings') {
+      return Promise.resolve({ hotkeys: { dictation_hotkey: 'Ctrl+Shift+D' } });
+    }
+    if (command === 'create_scribble') {
+      return Promise.resolve({ id: 'scr_9', title: 'A captured thought' });
+    }
     return Promise.resolve(undefined);
   }) as typeof invoke);
 }
@@ -157,5 +163,66 @@ describe('CapturesPage', () => {
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith('delete_capture', { id: 'capture_1' });
     });
+  });
+  test('lands on the captured pages, and opens the capture modes on request', async () => {
+    const user = userEvent.setup();
+    mockBackend([capture()]);
+    render(<CapturesPage />);
+
+    // Arriving from the sidebar shows what was captured, not a compose box.
+    await screen.findByText('Designing Relay Capture');
+    expect(screen.queryByText('Type a thought directly')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Capture' }));
+    expect(await screen.findByText('Type a thought directly')).toBeInTheDocument();
+    expect(screen.queryByText('Designing Relay Capture')).not.toBeInTheDocument();
+  });
+
+  test('a capture mode asked for elsewhere opens on that mode', async () => {
+    mockBackend([capture()]);
+    render(<CapturesPage initialCaptureMethod="clipboard" />);
+
+    expect(await screen.findByText('Paste from Clipboard')).toBeInTheDocument();
+  });
+
+  test('the modes another surface owns navigate there rather than duplicating it', async () => {
+    const user = userEvent.setup();
+    const onNavigateTab = vi.fn();
+    mockBackend([]);
+    render(<CapturesPage initialCaptureMethod="text" onNavigateTab={onNavigateTab} />);
+
+    await user.click(await screen.findByText('Files & Docs'));
+    expect(onNavigateTab).toHaveBeenCalledWith('files');
+
+    await user.click(screen.getByText('Voice'));
+    expect(onNavigateTab).toHaveBeenCalledWith('capture');
+
+    await user.click(screen.getByText('Meeting'));
+    expect(onNavigateTab).toHaveBeenCalledWith('meetings');
+  });
+
+  test('the web capture card switches to the pages this surface already holds', async () => {
+    const user = userEvent.setup();
+    mockBackend([capture()]);
+    render(<CapturesPage initialCaptureMethod="text" />);
+
+    await user.click(await screen.findByText('Web Capture'));
+    expect(await screen.findByText('Designing Relay Capture')).toBeInTheDocument();
+  });
+
+  test('a thought captured here can be opened in Scribbles', async () => {
+    const user = userEvent.setup();
+    const onOpenScribble = vi.fn();
+    mockBackend([]);
+    render(<CapturesPage initialCaptureMethod="text" onOpenScribble={onOpenScribble} />);
+
+    await user.type(
+      await screen.findByPlaceholderText(/Capture an observation/),
+      'Retrieval is the bottleneck',
+    );
+    await user.click(screen.getByRole('button', { name: /Save to Knowledge Layer/ }));
+
+    await user.click(await screen.findByRole('button', { name: /Open in Scribbles/ }));
+    expect(onOpenScribble).toHaveBeenCalledWith('scr_9');
   });
 });

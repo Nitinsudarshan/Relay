@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import {
   AppSettings,
   LanguageSettings,
+  MainTabType,
   VaultLocationInfo,
   RelayAccount,
   AudioDeviceInfo,
@@ -26,6 +27,7 @@ import {
   Mic,
   Keyboard,
   Globe,
+  Languages,
   Sparkles,
   BookOpen,
   Users,
@@ -39,6 +41,7 @@ import {
   Activity,
   ChevronDown,
   ChevronUp,
+  type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -66,6 +69,38 @@ export type SettingsSection =
   | 'privacy'
   | 'trash'
   | 'developer';
+
+interface SettingsNavItem {
+  id: SettingsSection;
+  label: string;
+  icon: LucideIcon;
+  /** Non-default tint, for the two sections that are not everyday preferences. */
+  accent?: string;
+}
+
+/**
+ * The settings sections, in the order they are shown.
+ *
+ * One list rather than twelve near-identical buttons: the hand-written version
+ * had drifted — its numbering ran 0,1,2,3,4,5,6,6,5,6,7,8 and two unrelated
+ * sections shared the same icon, which is exactly the drift a list cannot have.
+ * `capture` is labelled "Web Capture" because `Captures` is now a whole surface
+ * with several modes, and only the browser bridge is configured here.
+ */
+const SETTINGS_NAV: SettingsNavItem[] = [
+  { id: 'account', label: 'Account & Identity', icon: User },
+  { id: 'general', label: 'General', icon: Sliders },
+  { id: 'dictation', label: 'Dictation & Audio', icon: Mic },
+  { id: 'dictionary', label: 'Dictionary & Snippets', icon: BookOpen },
+  { id: 'meetings', label: 'Meetings', icon: Users },
+  { id: 'capture', label: 'Web Capture', icon: Globe },
+  { id: 'talkback', label: 'Talkback', icon: MessageCircle },
+  { id: 'languages', label: 'Languages & Script', icon: Languages },
+  { id: 'advanced', label: 'AI Models & STT', icon: Cpu },
+  { id: 'privacy', label: 'Privacy & Vault', icon: ShieldCheck },
+  { id: 'trash', label: 'Trash & Deleted', icon: Trash2, accent: 'text-amber-500' },
+  { id: 'developer', label: 'Developer', icon: Terminal, accent: 'text-amber-500' },
+];
 
 const DEFAULT_LANGUAGE_SETTINGS: LanguageSettings = {
   primary_dictation_language: 'en',
@@ -152,7 +187,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 interface ProviderSettingsProps {
   initialSection?: SettingsSection;
-  onNavigateTab?: (tab: string) => void;
+  onNavigateTab?: (tab: MainTabType) => void;
 }
 
 export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
@@ -489,173 +524,26 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
           </span>
         </div>
 
-        {/* 0. Account & Identity */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('account')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'account'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <User className="w-4 h-4 text-primary" />
-          <span>Account & Identity</span>
-        </button>
-
-        {/* 1. General */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('general')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'general'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <Sliders className="w-4 h-4 text-primary" />
-          <span>General</span>
-        </button>
-
-        {/* 2. Dictation & Audio */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('dictation')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'dictation'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <Mic className="w-4 h-4 text-primary" />
-          <span>Dictation & Audio</span>
-        </button>
-
-        {/* 3. Dictionary & Snippets */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('dictionary')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'dictionary'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <BookOpen className="w-4 h-4 text-primary" />
-          <span>Dictionary & Snippets</span>
-        </button>
-
-        {/* 4. Meetings */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('meetings')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'meetings'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <Users className="w-4 h-4 text-primary" />
-          <span>Meetings</span>
-        </button>
-
-        {/* 5. Capture */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('capture')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'capture'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <Globe className="w-4 h-4 text-primary" />
-          <span>Capture</span>
-        </button>
-
-        {/* 6. Talkback */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('talkback')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'talkback'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <MessageCircle className="w-4 h-4 text-primary" />
-          <span>Talkback</span>
-        </button>
-
-        {/* 6. Languages & Script */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('languages')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'languages'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <Globe className="w-4 h-4 text-primary" />
-          <span>Languages & Script</span>
-        </button>
-
-        {/* 5. AI Models & STT Engine */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('advanced')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'advanced'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <Cpu className="w-4 h-4 text-primary" />
-          <span>AI Models & STT</span>
-        </button>
-
-        {/* 6. Privacy & Vault */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('privacy')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'privacy'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4 text-primary" />
-          <span>Privacy & Vault</span>
-        </button>
-
-        {/* 7. Trash & Deleted Items */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('trash')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'trash'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <Trash2 className="w-4 h-4 text-amber-500" />
-          <span>Trash & Deleted</span>
-        </button>
-
-        {/* 8. Developer */}
-        <button
-          type="button"
-          onClick={() => setActiveSection('developer')}
-          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-            activeSection === 'developer'
-              ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          <Terminal className="w-4 h-4 text-amber-500" />
-          <span>Developer</span>
-        </button>
+        {SETTINGS_NAV.map((item) => {
+          const Icon = item.icon;
+          const active = activeSection === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setActiveSection(item.id)}
+              aria-current={active ? 'page' : undefined}
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
+                active
+                  ? 'bg-accent text-accent-foreground font-semibold shadow-xs'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+            >
+              <Icon className={`w-4 h-4 ${item.accent ?? 'text-primary'}`} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
       </aside>
 
       {/* Main Settings Content Area */}

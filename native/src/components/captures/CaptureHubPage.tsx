@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { AppSettings, Scribble } from '../../types';
+import { AppSettings, MainTabType, Scribble } from '../../types';
 import {
   Mic,
   FileText,
@@ -15,27 +15,59 @@ import {
   Loader2,
   ArrowRight,
   Command,
+  type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
 /**
- * The capture methods this hub can open on. `voice` is deliberately absent:
- * dictation is a global hotkey and a separate surface, not a panel here.
+ * The capture methods this hub performs in place.
+ *
+ * Deliberately only two. Voice is a global hotkey on its own surface, a
+ * document belongs in the Files Vault (which extracts PDF and Word text rather
+ * than reading the bytes as if they were plain text), a page comes from the
+ * browser extension, and a meeting is a recording — each of those is owned by
+ * a surface that already implements it, so the card opens that surface instead
+ * of reimplementing it here.
  */
-export type CaptureMethod = 'text' | 'file' | 'clipboard';
+export type CaptureMethod = 'text' | 'clipboard';
 
 interface CaptureHubPageProps {
-  onCaptureSuccess: (scribble: Scribble) => void;
-  onNavigateToScribbles: () => void;
+  /**
+   * Reveals a just-captured thought in Scribbles.
+   *
+   * Nothing else is handed back: `create_scribble` emits `scribble-saved`, which
+   * Scribbles already listens for, so a second notification path would only be a
+   * second thing to keep true.
+   */
+  onOpenScribble: (scribbleId: string) => void;
+  /** Hands the user to the surface that owns a mode this hub does not perform. */
+  onNavigate: (tab: MainTabType) => void;
+  /** Switches to the captured-pages list, which is this surface's other tab. */
+  onOpenCapturedPages: () => void;
   /** Method to open on. Set by a Home shortcut card; defaults to typed text. */
   initialMethod?: CaptureMethod | null;
+  /** Whether the capture bridge is actually listening, or null when unknown. */
+  bridgeRunning?: boolean | null;
+}
+
+/** A mode this hub hands off rather than performs. */
+interface HandoffCard {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: LucideIcon;
+  accent: string;
+  action: string;
+  onSelect: () => void;
 }
 
 export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
-  onCaptureSuccess,
-  onNavigateToScribbles,
+  onOpenScribble,
+  onNavigate,
+  onOpenCapturedPages,
   initialMethod = null,
+  bridgeRunning = null,
 }) => {
   const [selectedMethod, setSelectedMethod] = useState<CaptureMethod>(initialMethod ?? 'text');
   const [textContent, setTextContent] = useState('');
@@ -44,8 +76,6 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
   const [topics, setTopics] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [lastCaptured, setLastCaptured] = useState<Scribble | null>(null);
-
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // The accelerator is read rather than assumed: it is user-configurable, and a
   // card that names the wrong key is worse than one that names none.
@@ -81,7 +111,6 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
       });
 
       setLastCaptured(scribble);
-      onCaptureSuccess(scribble);
       setTextContent('');
       setTextTitle('');
       setTopics([]);
@@ -103,7 +132,6 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
         sourceType: 'clipboard',
       });
       setLastCaptured(scribble);
-      onCaptureSuccess(scribble);
     } catch (err) {
       console.error('Failed to read from clipboard:', err);
     } finally {
@@ -111,59 +139,76 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const file = files[0];
-
-    setBusy(true);
-    try {
-      const text = await file.text();
-      const scribble = await invoke<Scribble>('create_file_scribble', {
-        filename: file.name,
-        content: text,
-        mimeType: file.type || 'text/plain',
-        sizeBytes: file.size,
-      });
-
-      setLastCaptured(scribble);
-      onCaptureSuccess(scribble);
-    } catch (err) {
-      console.error('Failed to upload file as scribble:', err);
-    } finally {
-      setBusy(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
+  /**
+   * The three modes another surface owns.
+   *
+   * The web-capture card names whether the bridge is actually listening rather
+   * than implying it is, per `rules/ui-components.md`'s no-fake-controls rule.
+   */
+  const handoffs: HandoffCard[] = [
+    {
+      id: 'file',
+      title: 'Files & Docs',
+      subtitle: 'PDF, Word, Markdown, Text',
+      icon: Upload,
+      accent: 'text-blue-500',
+      action: 'Open Files Vault →',
+      onSelect: () => onNavigate('files'),
+    },
+    {
+      id: 'web',
+      title: 'Web Capture',
+      subtitle:
+        bridgeRunning === null
+          ? 'Pages & AI chats'
+          : bridgeRunning
+            ? 'Pages & AI chats · bridge live'
+            : 'Pages & AI chats · bridge off',
+      icon: Globe,
+      accent: 'text-sky-500',
+      action: 'Captured Pages →',
+      onSelect: onOpenCapturedPages,
+    },
+    {
+      id: 'meeting',
+      title: 'Meeting',
+      subtitle: 'Mic + system audio',
+      icon: Users,
+      accent: 'text-indigo-400',
+      action: 'Open Meetings →',
+      onSelect: () => onNavigate('meetings'),
+    },
+  ];
 
   return (
     <div className="flex-1 flex flex-col gap-4 overflow-y-auto w-full pb-10">
       {/* Capture Method Selector Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
-        {/* 1. Voice (Active) */}
-        <div className="p-3.5 rounded-lg border border-primary/40 bg-primary/5 flex flex-col justify-between space-y-2 transition-all">
+        {/* 1. Voice — a global hotkey and its own surface, not a panel here. */}
+        <button
+          type="button"
+          onClick={() => onNavigate('capture')}
+          className="p-3.5 rounded-lg border border-border bg-card hover:bg-muted/40 hover:border-primary/50 text-left flex flex-col justify-between space-y-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
           <div className="flex items-center justify-between">
-            <Mic className="w-4 h-4 text-primary" />
-            <Badge variant="outline" className="text-[8px] font-mono text-primary border-primary/30">
-              Active
-            </Badge>
+            <Mic className="w-4 h-4 text-emerald-500" />
           </div>
           <div>
             <span className="text-xs font-bold text-foreground block">Voice</span>
             <span className="text-[10px] text-muted-foreground block">Global hotkey PTT</span>
           </div>
-          <div className="pt-1">
-            <kbd className="font-mono text-[9px] bg-background/80 px-1.5 py-0.5 rounded-lg border border-border flex items-center gap-1 w-fit">
-              <Command className="w-2.5 h-2.5" /> {dictationHotkey ?? 'Set in Settings'}
-            </kbd>
-          </div>
-        </div>
+          <kbd className="font-mono text-[9px] bg-background/80 px-1.5 py-0.5 rounded-lg border border-border flex items-center gap-1 w-fit max-w-full">
+            <Command className="w-2.5 h-2.5 shrink-0" />
+            <span className="truncate">{dictationHotkey ?? 'Set in Settings'}</span>
+          </kbd>
+        </button>
 
-        {/* 2. Text (Active) */}
+        {/* 2. Text (performed here) */}
         <button
           type="button"
           onClick={() => setSelectedMethod('text')}
-          className={`p-3.5 rounded-lg border text-left flex flex-col justify-between space-y-2 transition-all ${
+          aria-pressed={selectedMethod === 'text'}
+          className={`p-3.5 rounded-lg border text-left flex flex-col justify-between space-y-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
             selectedMethod === 'text'
               ? 'border-primary bg-accent/60 shadow-xs'
               : 'border-border bg-card hover:bg-muted/40'
@@ -171,9 +216,6 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
         >
           <div className="flex items-center justify-between">
             <FileText className="w-4 h-4 text-amber-500" />
-            <Badge variant="outline" className="text-[8px] font-mono text-emerald-500 border-emerald-500/30">
-              Active
-            </Badge>
           </div>
           <div>
             <span className="text-xs font-bold text-foreground block">Typed Text</span>
@@ -182,11 +224,12 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
           <span className="text-[10px] text-primary font-medium">Quick Compose →</span>
         </button>
 
-        {/* 3. Clipboard (Active - Requirement 9) */}
+        {/* 3. Clipboard (performed here) */}
         <button
           type="button"
           onClick={() => setSelectedMethod('clipboard')}
-          className={`p-3.5 rounded-lg border text-left flex flex-col justify-between space-y-2 transition-all ${
+          aria-pressed={selectedMethod === 'clipboard'}
+          className={`p-3.5 rounded-lg border text-left flex flex-col justify-between space-y-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
             selectedMethod === 'clipboard'
               ? 'border-primary bg-accent/60 shadow-xs'
               : 'border-border bg-card hover:bg-muted/40'
@@ -194,9 +237,6 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
         >
           <div className="flex items-center justify-between">
             <Clipboard className="w-4 h-4 text-emerald-500" />
-            <Badge variant="outline" className="text-[8px] font-mono text-emerald-500 border-emerald-500/30">
-              Active
-            </Badge>
           </div>
           <div>
             <span className="text-xs font-bold text-foreground block">Clipboard</span>
@@ -205,58 +245,27 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
           <span className="text-[10px] text-primary font-medium">Paste Buffer →</span>
         </button>
 
-        {/* 4. Files & Docs (Active) */}
-        <button
-          type="button"
-          onClick={() => setSelectedMethod('file')}
-          className={`p-3.5 rounded-lg border text-left flex flex-col justify-between space-y-2 transition-all ${
-            selectedMethod === 'file'
-              ? 'border-primary bg-accent/60 shadow-xs'
-              : 'border-border bg-card hover:bg-muted/40'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <Upload className="w-4 h-4 text-blue-500" />
-            <Badge variant="outline" className="text-[8px] font-mono text-emerald-500 border-emerald-500/30">
-              Active
-            </Badge>
-          </div>
-          <div>
-            <span className="text-xs font-bold text-foreground block">Files & Docs</span>
-            <span className="text-[10px] text-muted-foreground block">TXT, MD, CSV, JSON</span>
-          </div>
-          <span className="text-[10px] text-primary font-medium">Import File →</span>
-        </button>
-
-        {/* 5. Browser (Future) */}
-        <div className="p-3.5 rounded-lg border border-border/40 bg-card/40 opacity-70 flex flex-col justify-between space-y-2 select-none">
-          <div className="flex items-center justify-between">
-            <Globe className="w-4 h-4 text-muted-foreground" />
-            <Badge variant="secondary" className="text-[8px] font-mono text-muted-foreground">
-              Future
-            </Badge>
-          </div>
-          <div>
-            <span className="text-xs font-bold text-muted-foreground block">Browser Extension</span>
-            <span className="text-[10px] text-muted-foreground block">Selection & Page clip</span>
-          </div>
-          <span className="text-[9px] text-muted-foreground italic">In development</span>
-        </div>
-
-        {/* 6. Meetings (Future Modality) */}
-        <div className="p-3.5 rounded-lg border border-border/40 bg-card/40 opacity-70 flex flex-col justify-between space-y-2 select-none">
-          <div className="flex items-center justify-between">
-            <Users className="w-4 h-4 text-muted-foreground" />
-            <Badge variant="secondary" className="text-[8px] font-mono text-muted-foreground">
-              Future
-            </Badge>
-          </div>
-          <div>
-            <span className="text-xs font-bold text-muted-foreground block">Meeting Notes</span>
-            <span className="text-[10px] text-muted-foreground block">Capture modality</span>
-          </div>
-          <span className="text-[9px] text-muted-foreground italic">Capture source</span>
-        </div>
+        {/* 4-6. The modes another surface owns. */}
+        {handoffs.map((card) => {
+          const Icon = card.icon;
+          return (
+            <button
+              key={card.id}
+              type="button"
+              onClick={card.onSelect}
+              className="p-3.5 rounded-lg border border-border bg-card hover:bg-muted/40 hover:border-primary/50 text-left flex flex-col justify-between space-y-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <div className="flex items-center justify-between">
+                <Icon className={`w-4 h-4 ${card.accent}`} />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-foreground block">{card.title}</span>
+                <span className="text-[10px] text-muted-foreground block">{card.subtitle}</span>
+              </div>
+              <span className="text-[10px] text-primary font-medium">{card.action}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Main Active Surface Area */}
@@ -356,48 +365,6 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
             </Button>
           </div>
         )}
-
-        {selectedMethod === 'file' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                <Upload className="w-4 h-4 text-blue-500" />
-                <span>Import File as Scribble</span>
-              </h3>
-            </div>
-
-            {/* Supported Files Specification (Requirement 11) */}
-            <div className="p-3.5 bg-muted/30 border border-border/60 rounded-lg space-y-1">
-              <span className="text-[11px] font-semibold text-foreground block">
-                Supported File Formats:
-              </span>
-              <p className="text-[11px] text-muted-foreground font-mono">
-                TXT · MD · JSON · CSV · PDF · DOCX · PNG · JPG · JPEG
-              </p>
-            </div>
-
-            {/* Dropzone */}
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-border hover:border-primary/60 rounded-lg p-10 text-center cursor-pointer transition-all bg-muted/10 hover:bg-muted/30 space-y-3"
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                className="hidden"
-                accept=".txt,.md,.json,.csv,.pdf,.docx,.png,.jpg,.jpeg"
-              />
-              <Upload className="w-10 h-10 mx-auto text-muted-foreground opacity-50" />
-              <div>
-                <p className="text-xs font-bold text-foreground">Click to upload or drag and drop</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Content is converted to an addressable Scribble in your local vault.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Success Feedback Card */}
@@ -418,10 +385,10 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
           <Button
             size="sm"
             variant="outline"
-            onClick={onNavigateToScribbles}
+            onClick={() => onOpenScribble(lastCaptured.id)}
             className="h-8 text-xs gap-1.5 shrink-0 bg-background"
           >
-            <span>Open in Workspace</span>
+            <span>Open in Scribbles</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </Button>
         </div>

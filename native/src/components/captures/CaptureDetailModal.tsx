@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import type { Scribble, SourceContext, VaultFile } from '../../types';
+import type { MainTabType, Scribble, SourceContext, VaultFile } from '../../types';
 import { MarkdownView } from '../common/MarkdownView';
 import { CaptureContextTab } from './CaptureContextTab';
 import {
@@ -34,7 +34,7 @@ interface CaptureDetailModalProps {
   onClose: () => void;
   onAnalyse: (id: string) => Promise<void>;
   onCreateScribble: (id: string) => Promise<Scribble | undefined>;
-  onNavigateTab?: (tab: string) => void;
+  onNavigateTab?: (tab: MainTabType) => void;
 }
 
 type DetailTab = 'content' | 'context' | 'provenance' | 'source';

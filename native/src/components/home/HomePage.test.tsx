@@ -99,7 +99,7 @@ const renderHome = (overrides: Partial<React.ComponentProps<typeof HomePage>> = 
     settings,
     appVersion: '0.37.0',
     onNavigate: vi.fn(),
-    onStartScribbleCapture: vi.fn(),
+    onStartCapture: vi.fn(),
     onOpenSettings: vi.fn(),
     onOpenChangelog: vi.fn(),
     ...overrides,
@@ -170,13 +170,10 @@ describe('HomePage', () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByText('Typed Text'));
-    expect(props.onStartScribbleCapture).toHaveBeenCalledWith('text');
+    expect(props.onStartCapture).toHaveBeenCalledWith('text');
 
     await user.click(screen.getByText('Clipboard'));
-    expect(props.onStartScribbleCapture).toHaveBeenCalledWith('clipboard');
-
-    await user.click(screen.getByText('Files & Docs'));
-    expect(props.onStartScribbleCapture).toHaveBeenCalledWith('file');
+    expect(props.onStartCapture).toHaveBeenCalledWith('clipboard');
 
     // Voice, meetings and web capture are surfaces, not modes of this page.
     await user.click(screen.getByText('Voice'));
@@ -184,6 +181,21 @@ describe('HomePage', () => {
 
     await user.click(screen.getByText('Meeting'));
     expect(props.onNavigate).toHaveBeenCalledWith('meetings');
+
+    await user.click(screen.getByText('Web Capture'));
+    expect(props.onNavigate).toHaveBeenCalledWith('captures');
+  });
+
+  test('a document goes to the Files Vault, not to a second file importer', async () => {
+    const props = renderHome();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText('Files & Docs'));
+
+    expect(props.onNavigate).toHaveBeenCalledWith('files');
+    expect(props.onStartCapture).not.toHaveBeenCalled();
+    // And it names the formats the vault actually extracts.
+    expect(screen.getByText('PDF, Word, Markdown, Text')).toBeInTheDocument();
   });
 
   test('a counter is also the way into its surface', async () => {

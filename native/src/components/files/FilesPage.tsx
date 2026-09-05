@@ -16,12 +16,12 @@ import {
   Filter,
   CheckCircle2
 } from 'lucide-react';
-import { VaultFile, Scribble } from '../../types';
+import { MainTabType, VaultFile, Scribble } from '../../types';
 import { FileDetailModal } from './FileDetailModal';
 import { ConfirmationModal } from '../common/ConfirmationModal';
 
 interface FilesPageProps {
-  onNavigateTab?: (tab: string) => void;
+  onNavigateTab?: (tab: MainTabType) => void;
 }
 
 const SUPPORTED_EXTENSIONS = ['pdf', 'docx', 'doc', 'md', 'markdown', 'txt'];
@@ -229,7 +229,7 @@ export const FilesPage: React.FC<FilesPageProps> = ({ onNavigateTab }) => {
     try {
       const scribble = await invoke<Scribble>('create_scribble_from_vault_file', { id });
       setSuccessBanner(`Created new Scribble "${scribble.title}" linked to file.`);
-      if (onNavigateTab) onNavigateTab('scribbles');
+      if (onNavigateTab) onNavigateTab('scribble');
       return scribble;
     } catch (err: any) {
       setErrorBanner(`Create Scribble failed: ${err?.message || err}`);

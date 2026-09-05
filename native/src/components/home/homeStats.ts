@@ -9,21 +9,24 @@
  */
 import type {
   KnowledgeTelemetrySnapshot,
+  MainTabType,
   MeetingSession,
   Scribble,
   VaultFile,
   VaultNote,
 } from '@/types';
 
-/** The tab a Home card hands the user to. Mirrors `MainTabType` in `App.tsx`. */
-export type HomeSurface =
-  | 'capture'
-  | 'meetings'
-  | 'scribble'
-  | 'files'
-  | 'captures'
-  | 'graph'
-  | 'talkback';
+/**
+ * The tab a Home card hands the user to.
+ *
+ * Narrowed from `MainTabType` rather than re-listed, so a tab that is renamed
+ * or removed breaks this at compile time instead of silently becoming a card
+ * that navigates nowhere.
+ */
+export type HomeSurface = Extract<
+  MainTabType,
+  'capture' | 'meetings' | 'scribble' | 'files' | 'captures' | 'graph' | 'talkback'
+>;
 
 export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 

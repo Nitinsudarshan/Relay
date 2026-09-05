@@ -34,19 +34,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import type { RelayAccount, RelayProfile } from '@/types';
+import type { MainTabType, RelayAccount, RelayProfile } from '@/types';
 
-export type TabType =
-  | 'home'
-  | 'capture'
-  | 'meetings'
-  | 'scribble'
-  | 'graph'
-  | 'files'
-  | 'captures'
-  | 'talkback'
-  | 'diagnostics'
-  | 'settings';
+/** The sidebar navigates the same tabs `App` routes — one list, in `types/navigation.ts`. */
+export type TabType = MainTabType;
 
 interface NativeSidebarProps {
   isOpen: boolean;

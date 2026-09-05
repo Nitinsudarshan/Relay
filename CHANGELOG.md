@@ -1,5 +1,32 @@
 # Relay — Changelog
 
+## [0.40.0] - 2026-09-05
+
+### Capture Is One Surface: The Hub Moves Out of Scribbles, and Documents Go to the Files Vault
+
+**Type**: minor — capture surfaces restructured in the native frontend, with a shared navigation type and no Rust or schema change (`native/src/components/captures/*`, `native/src/components/scribble/ScribbleViewer.tsx`, `native/src/components/home/*`, `native/src/types/navigation.ts`, `native/src/App.tsx`, `native/src/components/settings/ProviderSettings.tsx`).
+
+#### Features
+
+- **The Capture hub lives under Captures (`native/src/components/captures/CaptureHubPage.tsx`, `native/src/components/captures/CapturesPage.tsx`)**: `CaptureHubPage.tsx` moved from `components/capture/` (which now holds only the dictation pill) to `components/captures/`, and `Captures` became a two-tab surface — `Capture | Captured Pages`. Arriving from the sidebar still lands on the captured pages; a capture mode requested from Home lands on `Capture`. The `capture-progress` banner and the error banner sit above both tabs, so a capture arriving from the browser is visible whichever tab is open.
+- **Scribbles is the workspace, and only the workspace (`native/src/components/scribble/ScribbleViewer.tsx`)**: the `Capture | Workspace` sub-tab bar is gone, leaving the list and editor. Its header keeps the scribble count and gains a `New thought` button that opens `Captures › Capture` — a navigation, not a second capture implementation. The two empty states name the surface that captures rather than a tab that no longer exists.
+
+#### Improvements
+
+- **A document goes to the Files Vault, not to a second file importer (`native/src/components/home/HomeCaptureShortcuts.tsx`, `native/src/components/captures/CaptureHubPage.tsx`)**: Home's `Files & Docs` card and the hub's now open `Files`. Both previously ran `create_file_scribble` over `File.text()` while advertising `PDF · DOCX · PNG · JPG · JPEG` — formats that read as binary through that path. The Files Vault is the one importer that actually extracts PDF and Word text and leaves the original untouched, so the cards name what it really supports (`PDF, Word, Markdown, Text`). `create_file_scribble` remains a registered Tauri command; nothing in the frontend calls it any more.
+- **The hub hands off rather than advertising (`native/src/components/captures/CaptureHubPage.tsx`)**: `CaptureMethod` narrowed to the two modes the hub performs in place (`text`, `clipboard`). `Voice` opens Voice Notes, `Files & Docs` the Files Vault, `Meeting` opens Meetings, and `Web Capture` switches to this surface's own captured-pages list, naming whether the bridge is actually listening. The two `Future` placeholder cards — a browser extension that has shipped, and meetings that have their own surface — are gone. The success card's `Open in Workspace` became `Open in Scribbles` and reveals the scribble it just created.
+- **One navigation vocabulary (`native/src/types/navigation.ts`)**: `MainTabType` moved out of `App.tsx` into `types/`, and `NativeSidebar`'s duplicate `TabType` and `homeStats`' hand-listed `HomeSurface` now derive from it. Every `onNavigateTab` prop is typed against it instead of `string`, which removed the four `tab as MainTabType` casts in `App.tsx`.
+- **Settings navigation is a list, and `Capture` is `Web Capture` (`native/src/components/settings/ProviderSettings.tsx`, `native/src/components/settings/CaptureSettingsView.tsx`)**: twelve near-identical hand-written buttons became one `SETTINGS_NAV` array. The hand-written version had drifted — its section comments numbered `0,1,2,3,4,5,6,6,5,6,7,8`, and `Capture` and `Languages & Script` shared the `Globe` icon. The `capture` section id is unchanged, so the `open_settings_window` deep link and the `Turn it on` button on Captures still land there; only its label and icon changed, because `Captures` is now a surface with several modes and only the browser bridge is configured here.
+
+#### Fixes
+
+- **Creating a Scribble from a file navigated nowhere (`native/src/components/files/FilesPage.tsx`)**: `handleCreateScribble` called `onNavigateTab('scribbles')`; the tab is `scribble`, so the navigation was silently dropped. Typing the prop as `MainTabType` is what surfaced it, and prevents the next one.
+
+#### Testing
+
+- **Captures' two tabs and the hub's handoffs (`native/src/components/captures/CapturesPage.test.tsx`)**: five tests covering the default landing tab, a capture mode requested from elsewhere opening on that mode, `Files & Docs`/`Voice`/`Meeting` navigating to the surface that owns them, `Web Capture` switching to the captured-pages list, and a thought captured here opening in Scribbles by id.
+- **Home's document card (`native/src/components/home/HomePage.test.tsx`)**: asserts `Files & Docs` navigates to `files` and starts no capture, and that it names the formats the vault extracts. All 467 frontend tests pass.
+
 ## [0.39.0] - 2026-09-05
 
 ### Meetings Intelligence v2.2: Multilingual Hinglish Preservation, Context Poisoning Defense, Post-Hoc Speaker Attribution, and Resilient Summary Floor

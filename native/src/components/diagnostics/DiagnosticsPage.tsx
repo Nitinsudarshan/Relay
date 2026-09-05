@@ -30,6 +30,7 @@ import { SpeakerEngineComparison } from './SpeakerEngineComparison';
 import { KnowledgeArchitectureDiagnostics } from './KnowledgeArchitectureDiagnostics';
 import {
   AppSettings,
+  MainTabType,
   OllamaModelDetails,
   OllamaPromptTestResult,
   SttModelsOverview,
@@ -40,7 +41,7 @@ import {
 import { SttDiagnosticsView } from '../settings/SttDiagnosticsView';
 
 interface DiagnosticsPageProps {
-  onNavigateTab?: (tab: string) => void;
+  onNavigateTab?: (tab: MainTabType) => void;
 }
 
 export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab }) => {

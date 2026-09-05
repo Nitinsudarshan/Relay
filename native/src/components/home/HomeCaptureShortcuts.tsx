@@ -14,7 +14,7 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 
-import type { CaptureMethod } from '@/components/capture/CaptureHubPage';
+import type { CaptureMethod } from '@/components/captures/CaptureHubPage';
 import type { HomeSurface } from './homeStats';
 
 interface ShortcutCard {
@@ -41,7 +41,8 @@ export interface HomeCaptureShortcutsProps {
   bridgeRunning: boolean | null;
   bridgePort: number | null;
   onNavigate: (surface: HomeSurface) => void;
-  onStartScribbleCapture: (method: CaptureMethod) => void;
+  /** Opens `Captures › Capture` on the named mode. */
+  onStartCapture: (method: CaptureMethod) => void;
 }
 
 const ShortcutButton: React.FC<{ card: ShortcutCard }> = ({ card }) => {
@@ -81,7 +82,7 @@ const ShortcutButton: React.FC<{ card: ShortcutCard }> = ({ card }) => {
 /**
  * The capture modes, on Home.
  *
- * Deliberately the same six modes as `Scribbles › Capture`, in the same order,
+ * Deliberately the same six modes as `Captures › Capture`, in the same order,
  * because they are the same six modes — these cards navigate to the surface that
  * performs the capture rather than reimplementing any of it. Nothing here claims
  * a capability it does not have: the voice card names the accelerator read from
@@ -92,7 +93,7 @@ export const HomeCaptureShortcuts: React.FC<HomeCaptureShortcutsProps> = ({
   bridgeRunning,
   bridgePort,
   onNavigate,
-  onStartScribbleCapture,
+  onStartCapture,
 }) => {
   const bridgeLabel =
     bridgeRunning === null
@@ -119,7 +120,7 @@ export const HomeCaptureShortcuts: React.FC<HomeCaptureShortcutsProps> = ({
       icon: FileText,
       accent: 'text-amber-500',
       action: 'Quick Compose →',
-      onSelect: () => onStartScribbleCapture('text'),
+      onSelect: () => onStartCapture('text'),
     },
     {
       id: 'clipboard',
@@ -128,16 +129,18 @@ export const HomeCaptureShortcuts: React.FC<HomeCaptureShortcutsProps> = ({
       icon: Clipboard,
       accent: 'text-emerald-500',
       action: 'Paste Buffer →',
-      onSelect: () => onStartScribbleCapture('clipboard'),
+      onSelect: () => onStartCapture('clipboard'),
     },
     {
+      // A document is imported into the Files Vault, which extracts PDF and Word
+      // text and leaves the original untouched — not turned into a raw scribble.
       id: 'file',
       title: 'Files & Docs',
-      subtitle: 'TXT, MD, CSV, JSON',
+      subtitle: 'PDF, Word, Markdown, Text',
       icon: Upload,
       accent: 'text-blue-500',
-      action: 'Import File →',
-      onSelect: () => onStartScribbleCapture('file'),
+      action: 'Open Files Vault →',
+      onSelect: () => onNavigate('files'),
     },
     {
       id: 'meeting',

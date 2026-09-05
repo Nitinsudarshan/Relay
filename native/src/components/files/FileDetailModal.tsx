@@ -16,7 +16,7 @@ import {
   Copy,
   Check
 } from 'lucide-react';
-import { VaultFile, Scribble } from '../../types';
+import { MainTabType, VaultFile, Scribble } from '../../types';
 import { MarkdownView } from '../common/MarkdownView';
 
 interface FileDetailModalProps {
@@ -28,7 +28,7 @@ interface FileDetailModalProps {
   onReprocess: (id: string) => Promise<void>;
   onUpdateTags: (id: string, tags: string[], topics: string[], entities: string[]) => Promise<void>;
   onOpenLocation: (id: string) => Promise<void>;
-  onNavigateTab?: (tab: string) => void;
+  onNavigateTab?: (tab: MainTabType) => void;
 }
 
 export const FileDetailModal: React.FC<FileDetailModalProps> = ({

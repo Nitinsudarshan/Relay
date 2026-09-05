@@ -15,7 +15,7 @@ import {
   type HomeSurface,
 } from './homeStats';
 
-import type { CaptureMethod } from '@/components/capture/CaptureHubPage';
+import type { CaptureMethod } from '@/components/captures/CaptureHubPage';
 import type { SettingsSection } from '@/components/settings/ProviderSettings';
 import type {
   AppSettings,
@@ -35,7 +35,8 @@ export interface HomePageProps {
   settings: AppSettings | null;
   appVersion: string;
   onNavigate: (surface: HomeSurface) => void;
-  onStartScribbleCapture: (method: CaptureMethod) => void;
+  /** Opens `Captures › Capture` on the named mode. */
+  onStartCapture: (method: CaptureMethod) => void;
   onOpenSettings: (section: SettingsSection) => void;
   onOpenChangelog: () => void;
 }
@@ -54,7 +55,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   settings,
   appVersion,
   onNavigate,
-  onStartScribbleCapture,
+  onStartCapture,
   onOpenSettings,
   onOpenChangelog,
 }) => {
@@ -126,7 +127,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         bridgeRunning={bridge ? bridge.running : null}
         bridgePort={bridge?.port ?? null}
         onNavigate={onNavigate}
-        onStartScribbleCapture={onStartScribbleCapture}
+        onStartCapture={onStartCapture}
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 min-w-0">
