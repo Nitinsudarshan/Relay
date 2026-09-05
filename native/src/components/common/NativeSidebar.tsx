@@ -327,7 +327,9 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
                         <img
                           src={account.profile_image}
                           alt="Profile"
+                          referrerPolicy="no-referrer"
                           className="w-full h-full object-cover rounded-full"
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                         />
                       ) : (
                         <div className="w-full h-full rounded-full bg-primary/20 text-primary font-bold flex items-center justify-center text-xs">
@@ -354,7 +356,9 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
                       <img
                         src={account.profile_image}
                         alt="Profile"
+                        referrerPolicy="no-referrer"
                         className="size-full object-cover rounded-full"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                       />
                     ) : (
                       <div className="size-full rounded-full bg-primary/20 text-primary font-bold flex items-center justify-center text-xs">

@@ -281,7 +281,9 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
               <img
                 src={account.profile_image}
                 alt="Profile"
+                referrerPolicy="no-referrer"
                 className="w-14 h-14 rounded-full border-2 border-primary/30 object-cover shadow-xs"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
               />
             ) : (
               <div className="w-14 h-14 rounded-full bg-primary/10 border border-primary/20 text-primary flex items-center justify-center text-lg font-bold shadow-xs">
