@@ -246,6 +246,89 @@ mod tests {
             render_conversation_markdown(&conversation, &speakers).contains("**Unknown speaker**")
         );
     }
+
+    #[test]
+    fn turn_preservation_a_b_a_and_cross_chunk_boundary_merging() {
+        // Invariant: Turn preservation (A -> B -> A) and cross-chunk boundary merging.
+        let segments = vec![
+            // Speaker A in chunk 0 (utterance 0)
+            NormalizedSegment {
+                id: "seg_00000_000".into(),
+                chunk_index: 0,
+                utterance_index: Some(0),
+                start_time_s: 0.0,
+                end_time_s: 15.0,
+                text: "Speaker A starts talking in chunk 0.".into(),
+                raw_text: "Speaker A starts talking in chunk 0.".into(),
+                channel: SegmentChannel::Mic,
+                speaker_id: Some("speaker_a".into()),
+                applied_rules: Vec::new(),
+            },
+            // Speaker A crossing into chunk 1 (utterance 0) -> should merge with previous
+            NormalizedSegment {
+                id: "seg_00001_000".into(),
+                chunk_index: 1,
+                utterance_index: Some(0),
+                start_time_s: 30.0,
+                end_time_s: 45.0,
+                text: "Speaker A continues in chunk 1 across boundary.".into(),
+                raw_text: "Speaker A continues in chunk 1 across boundary.".into(),
+                channel: SegmentChannel::Mic,
+                speaker_id: Some("speaker_a".into()),
+                applied_rules: Vec::new(),
+            },
+            // Speaker B interrupts in chunk 1 (utterance 1) -> separate turn
+            NormalizedSegment {
+                id: "seg_00001_001".into(),
+                chunk_index: 1,
+                utterance_index: Some(1),
+                start_time_s: 46.0,
+                end_time_s: 55.0,
+                text: "Speaker B responds.".into(),
+                raw_text: "Speaker B responds.".into(),
+                channel: SegmentChannel::System,
+                speaker_id: Some("speaker_b".into()),
+                applied_rules: Vec::new(),
+            },
+            // Speaker A speaks again in chunk 2 (utterance 0) -> separate turn (A -> B -> A)
+            NormalizedSegment {
+                id: "seg_00002_000".into(),
+                chunk_index: 2,
+                utterance_index: Some(0),
+                start_time_s: 60.0,
+                end_time_s: 70.0,
+                text: "Speaker A takes turn back.".into(),
+                raw_text: "Speaker A takes turn back.".into(),
+                channel: SegmentChannel::Mic,
+                speaker_id: Some("speaker_a".into()),
+                applied_rules: Vec::new(),
+            },
+        ];
+
+        let conversation = build_conversation(&segments);
+
+        // Exactly 3 turns: Turn 0 (A), Turn 1 (B), Turn 2 (A)
+        assert_eq!(conversation.turns.len(), 3);
+
+        // Turn 0 merged across chunk 0 and chunk 1 for Speaker A
+        assert_eq!(conversation.turns[0].speaker_id.as_deref(), Some("speaker_a"));
+        assert_eq!(conversation.turns[0].segment_ids, vec!["seg_00000_000", "seg_00001_000"]);
+        assert_eq!(conversation.turns[0].start_time_s, 0.0);
+        assert_eq!(conversation.turns[0].end_time_s, 45.0);
+        assert!(conversation.turns[0].text.contains("chunk 0") && conversation.turns[0].text.contains("chunk 1"));
+
+        // Turn 1 is Speaker B
+        assert_eq!(conversation.turns[1].speaker_id.as_deref(), Some("speaker_b"));
+        assert_eq!(conversation.turns[1].segment_ids, vec!["seg_00001_001"]);
+        assert_eq!(conversation.turns[1].start_time_s, 46.0);
+        assert_eq!(conversation.turns[1].end_time_s, 55.0);
+
+        // Turn 2 is Speaker A again (A -> B -> A preserved)
+        assert_eq!(conversation.turns[2].speaker_id.as_deref(), Some("speaker_a"));
+        assert_eq!(conversation.turns[2].segment_ids, vec!["seg_00002_000"]);
+        assert_eq!(conversation.turns[2].start_time_s, 60.0);
+        assert_eq!(conversation.turns[2].end_time_s, 70.0);
+    }
 }
 
 #[cfg(test)]
