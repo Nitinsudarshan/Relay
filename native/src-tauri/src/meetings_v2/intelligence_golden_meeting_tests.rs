@@ -521,3 +521,161 @@ fn adversarial_case_t_manual_speaker_correction_propagates_cleanly() {
     assert_eq!(segments[1].speaker_id.as_deref(), Some("speaker_1"));
     assert_eq!(assignments[1].speaker_id, "speaker_1");
 }
+
+// =========================================================================
+// 3. Stage 1: Self-Voice Evidence Fusion Regression Tests
+// =========================================================================
+
+#[test]
+fn test_stage_1_mic_remote_self_voice_me_combined_evidence_selects_me() {
+    // 1. Mic evidence -> Remote (channel: System), but Self-voice -> Me (cluster 0 is local user)
+    // Diarization has two clusters. Combined evidence must support Me.
+    use crate::meetings_v2::diarize::SelfVoiceAnchor;
+
+    let raws = vec![
+        raw_seg(0, 0, 0.0, 4.0, "Speaking through system audio loopback", false, true), // System channel
+    ];
+    let mut norm = normalize_transcript(&raws, &[]);
+
+    let diarization = Diarization {
+        report: DiarizationReport {
+            cluster_count: 2,
+            placed_count: 1,
+            unplaced_count: 0,
+            skipped_count: 0,
+            local_cluster: Some(0),
+            well_separated: true,
+            mean_within_distance: 0.1,
+            min_between_distance: 1.0,
+            singleton_speaker_count: 0,
+            silhouette: 0.85,
+            expected_speakers: Some(2),
+            duration_ms: 4000,
+            embedding_provider: None,
+            fallback_used: false,
+            embedding_duration_ms: 0,
+        },
+        assignments: vec![VoiceAssignment {
+            segment_id: norm.segments[0].id.clone(),
+            cluster: Some(0),
+            distance: 0.1,
+        }],
+        self_voice_anchor: None,
+    };
+
+    let anchor = SelfVoiceAnchor {
+        mean_vector: vec![0.5; 64],
+        mean_embedding: None,
+        sample_count: 3,
+        total_seconds: 5.0,
+        reference_quality: 0.90,
+    };
+
+    let (roster, assignments) = attribute_speakers_with_evidence(
+        &mut norm.segments,
+        AttributionInput {
+            existing: &[],
+            mode: SpeakerIdentificationMode::Automatic,
+            diarization: Some(&diarization),
+            self_voice: Some(&anchor),
+            calendar_attendees: &[],
+            assume_in_person: false,
+        },
+    );
+
+    assert_eq!(roster.len(), 1);
+    assert!(roster[0].is_local_user, "Local user must be selected when combined evidence supports Me");
+    assert_eq!(assignments.len(), 1);
+    assert_eq!(assignments[0].speaker_id, "speaker_me");
+    assert_eq!(assignments[0].method, SpeakerAssignmentMethod::SelfVoiceAnchor);
+}
+
+#[test]
+fn test_stage_1_mic_me_self_voice_remote_contradiction_rejects_me() {
+    // 2. Mic evidence -> Me (channel: Mic), but Self-voice -> Remote (cluster 1 is remote cluster)
+    // Relay must NOT blindly trust mic share; contradiction penalty must reject false Me.
+    use crate::meetings_v2::diarize::SelfVoiceAnchor;
+
+    let raws = vec![
+        raw_seg(0, 0, 0.0, 4.0, "Remote participant speaking near mic", true, false), // Mic channel
+    ];
+    let mut norm = normalize_transcript(&raws, &[]);
+
+    let diarization = Diarization {
+        report: DiarizationReport {
+            cluster_count: 2,
+            placed_count: 1,
+            unplaced_count: 0,
+            skipped_count: 0,
+            local_cluster: Some(0), // cluster 0 is local, but this utterance is cluster 1 (remote)
+            well_separated: true,
+            mean_within_distance: 0.1,
+            min_between_distance: 1.0,
+            singleton_speaker_count: 0,
+            silhouette: 0.85,
+            expected_speakers: Some(2),
+            duration_ms: 4000,
+            embedding_provider: None,
+            fallback_used: false,
+            embedding_duration_ms: 0,
+        },
+        assignments: vec![VoiceAssignment {
+            segment_id: norm.segments[0].id.clone(),
+            cluster: Some(1), // remote cluster
+            distance: 0.1,
+        }],
+        self_voice_anchor: None,
+    };
+
+    let anchor = SelfVoiceAnchor {
+        mean_vector: vec![0.5; 64],
+        mean_embedding: None,
+        sample_count: 3,
+        total_seconds: 5.0,
+        reference_quality: 0.90,
+    };
+
+    let (roster, assignments) = attribute_speakers_with_evidence(
+        &mut norm.segments,
+        AttributionInput {
+            existing: &[],
+            mode: SpeakerIdentificationMode::Automatic,
+            diarization: Some(&diarization),
+            self_voice: Some(&anchor),
+            calendar_attendees: &[],
+            assume_in_person: false,
+        },
+    );
+
+    assert_eq!(roster.len(), 1);
+    assert!(!roster[0].is_local_user, "Relay must NOT blindly trust mic share when acoustic self-voice contradicts it!");
+    assert_eq!(assignments.len(), 1);
+    assert_ne!(assignments[0].speaker_id, "speaker_me");
+    assert_eq!(assignments[0].speaker_id, "speaker_1");
+}
+
+#[test]
+fn test_stage_1_mic_tie_self_voice_tie_abstains_unresolved() {
+    // 3. Mic evidence ≈ tie (channel: Mixed), Self-voice ≈ tie (no cluster, no anchor)
+    // Relay must abstain from false certainty and mark as Unresolved.
+    let raws = vec![
+        raw_seg(0, 0, 0.0, 4.0, "Ambiguous crosstalk utterance", true, true), // Mixed channel (mic and sys audio)
+    ];
+    let mut norm = normalize_transcript(&raws, &[]);
+
+    let (roster, assignments) = attribute_speakers_with_evidence(
+        &mut norm.segments,
+        AttributionInput {
+            existing: &[],
+            mode: SpeakerIdentificationMode::Automatic,
+            diarization: None,
+            self_voice: None,
+            calendar_attendees: &[],
+            assume_in_person: false,
+        },
+    );
+
+    assert_eq!(roster.len(), 0, "No confident speaker should be invented when evidence is tied");
+    assert_eq!(assignments.len(), 0, "Ambiguous tied evidence must remain unresolved");
+    assert_eq!(norm.segments[0].speaker_id, None, "Tied segment must have speaker_id None");
+}

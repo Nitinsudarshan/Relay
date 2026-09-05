@@ -366,226 +366,193 @@ fn resolve_segment_with_evidence(
         );
     }
 
-    // 2. Strong Channel Evidence: Dedicated microphone channel is the local user ("Me")
-    if channel == SegmentChannel::Mic {
-        let mut candidate_scores = Vec::new();
-        candidate_scores.push(SpeakerCandidateScore {
-            speaker_id: SPEAKER_ID_ME.to_string(),
-            acoustic_similarity: Some(1.0),
-            cluster_consistency: if cluster.is_some() { 0.90 } else { 0.50 },
-            channel_evidence: 1.0,
-            contextual_evidence: 0.0,
-            calendar_evidence: 0.0,
-            temporal_consistency: if prev_speaker == Some(SPEAKER_ID_ME) { 0.10 } else { 0.0 },
-            contradiction_penalty: 0.0,
-            final_confidence: 1.0,
-        });
+    // 2. Multi-Signal Evidence Fusion: Channel + Diarization Cluster + Self-Voice Anchor + Temporal
+    let is_local_cluster = cluster.map(|c| local_clusters.contains(&c)).unwrap_or(false);
+    let remote_spk_id = cluster
+        .map(|c| remote_speaker_id(remote_index(c, local_clusters)))
+        .unwrap_or_else(|| "speaker_1".to_string());
 
-        // Contradiction penalty check: Even if text mentions a calendar name, local mic hardware wins
-        for cal_name in &calendar_names {
-            if lower_text.contains(&cal_name.to_lowercase()) {
-                candidate_scores.push(SpeakerCandidateScore {
-                    speaker_id: cal_name.clone(),
-                    acoustic_similarity: None,
-                    cluster_consistency: 0.0,
-                    channel_evidence: 0.0,
-                    contextual_evidence: 0.30,
-                    calendar_evidence: 0.20,
-                    temporal_consistency: 0.0,
-                    contradiction_penalty: 0.80,
-                    final_confidence: 0.0,
-                });
+    // Acoustic similarity from self-voice anchor if available
+    let (me_acoustic_sim, remote_acoustic_sim) = match (self_voice, cluster) {
+        (Some(anchor), Some(_)) if anchor.has_samples() => {
+            if is_local_cluster {
+                (Some(0.90f32), Some(0.15f32))
+            } else {
+                (Some(0.20f32), Some(0.85f32))
             }
         }
-
-        let evidence = SpeakerEvidence {
-            channel: Some("mic".to_string()),
-            cluster_id: cluster,
-            similarity: None,
-            notes: Some("Microphone channel direct evidence".to_string()),
-            calendar_candidate: calendar_str,
-            contextual_mention: None,
-            temporal_consistency: if prev_speaker == Some(SPEAKER_ID_ME) {
-                Some("Turn continuity".to_string())
-            } else if next_speaker == prev_speaker && prev_speaker.is_some() {
-                Some("Conversational interruption preserved".to_string())
+        (Some(anchor), None) if anchor.has_samples() => {
+            if channel == SegmentChannel::Mic {
+                (Some(0.75f32), Some(0.25f32))
+            } else if channel == SegmentChannel::System {
+                (Some(0.20f32), Some(0.80f32))
             } else {
-                Some("Turn transition".to_string())
-            },
-            candidate_scores,
-        };
-        return (
-            Some(SPEAKER_ID_ME.to_string()),
-            SpeakerAssignmentMethod::Channel,
-            1.0,
-            Some(SpeakerConfidenceLevel::Confirmed),
-            evidence,
-        );
-    }
-
-    // 3. Self-Voice Anchor: check if cluster matches known self-voice reference
-    if let (Some(anchor), Some(c)) = (self_voice, cluster) {
-        if anchor.has_samples() && local_clusters.contains(&c) {
-            let mut candidate_scores = Vec::new();
-            candidate_scores.push(SpeakerCandidateScore {
-                speaker_id: SPEAKER_ID_ME.to_string(),
-                acoustic_similarity: Some(0.92),
-                cluster_consistency: 0.90,
-                channel_evidence: 0.80,
-                contextual_evidence: 0.0,
-                calendar_evidence: 0.0,
-                temporal_consistency: if prev_speaker == Some(SPEAKER_ID_ME) { 0.10 } else { 0.0 },
-                contradiction_penalty: 0.0,
-                final_confidence: 0.90,
-            });
-
-            let evidence = SpeakerEvidence {
-                channel: Some(channel.as_str().to_string()),
-                cluster_id: Some(c),
-                similarity: Some(0.92),
-                notes: Some("Matched meeting-local self voice anchor".to_string()),
-                calendar_candidate: calendar_str,
-                contextual_mention: None,
-                temporal_consistency: if prev_speaker == Some(SPEAKER_ID_ME) {
-                    Some("Turn continuity".to_string())
-                } else if next_speaker == prev_speaker && prev_speaker.is_some() {
-                    Some("Conversational interruption preserved".to_string())
-                } else {
-                    Some("Turn transition".to_string())
-                },
-                candidate_scores,
-            };
-            return (
-                Some(SPEAKER_ID_ME.to_string()),
-                SpeakerAssignmentMethod::SelfVoiceAnchor,
-                0.90,
-                Some(SpeakerConfidenceLevel::High),
-                evidence,
-            );
+                (Some(0.50f32), Some(0.50f32))
+            }
         }
-    }
+        _ => (None, None),
+    };
 
-    // 4. Diarization Cluster evidence with Evidence Fusion
-    match cluster {
-        Some(c) if local_clusters.contains(&c) => {
-            let mut candidate_scores = Vec::new();
+    // Candidate Me scoring
+    let me_channel_ev = match channel {
+        SegmentChannel::Mic => 0.85f32,
+        SegmentChannel::Mixed => 0.40f32,
+        SegmentChannel::System => 0.10f32,
+        SegmentChannel::Unknown => 0.20f32,
+    };
+    let me_cluster_ev = if is_local_cluster {
+        0.85f32
+    } else if cluster.is_some() {
+        0.15f32
+    } else {
+        0.40f32
+    };
+    let me_temporal = if prev_speaker == Some(SPEAKER_ID_ME) { 0.10f32 } else { 0.0f32 };
+
+    // Contradiction penalties for Me:
+    // If mic channel is claimed, but self-voice or cluster says remote (acoustic leakage / remote speech):
+    let me_contradiction = if channel == SegmentChannel::Mic && me_acoustic_sim.is_some_and(|s| s < 0.40) {
+        0.60f32
+    } else if channel == SegmentChannel::System && !is_local_cluster {
+        0.50f32
+    } else {
+        0.0f32
+    };
+
+    let me_confidence = (0.35 * me_channel_ev
+        + 0.35 * me_cluster_ev
+        + 0.30 * me_acoustic_sim.unwrap_or(me_channel_ev)
+        + me_temporal
+        - me_contradiction)
+        .clamp(0.0, 1.0);
+
+    // Candidate Remote scoring
+    let remote_channel_ev = match channel {
+        SegmentChannel::System => 0.85f32,
+        SegmentChannel::Mixed => 0.40f32,
+        SegmentChannel::Mic => 0.10f32,
+        SegmentChannel::Unknown => 0.40f32,
+    };
+    let remote_cluster_ev = if !is_local_cluster && cluster.is_some() {
+        0.85f32
+    } else if is_local_cluster {
+        0.15f32
+    } else {
+        0.40f32
+    };
+    let remote_temporal = if prev_speaker == Some(&remote_spk_id) { 0.10f32 } else { 0.0f32 };
+    let remote_contradiction = if is_local_cluster && channel == SegmentChannel::Mic {
+        0.60f32
+    } else {
+        0.0f32
+    };
+
+    let remote_confidence = (0.35 * remote_channel_ev
+        + 0.35 * remote_cluster_ev
+        + 0.30 * remote_acoustic_sim.unwrap_or(remote_channel_ev)
+        + remote_temporal
+        - remote_contradiction)
+        .clamp(0.0, 1.0);
+
+    let mut candidate_scores = Vec::new();
+    candidate_scores.push(SpeakerCandidateScore {
+        speaker_id: SPEAKER_ID_ME.to_string(),
+        acoustic_similarity: me_acoustic_sim,
+        cluster_consistency: me_cluster_ev,
+        channel_evidence: me_channel_ev,
+        contextual_evidence: 0.0,
+        calendar_evidence: 0.0,
+        temporal_consistency: me_temporal,
+        contradiction_penalty: me_contradiction,
+        final_confidence: me_confidence,
+    });
+    candidate_scores.push(SpeakerCandidateScore {
+        speaker_id: remote_spk_id.clone(),
+        acoustic_similarity: remote_acoustic_sim,
+        cluster_consistency: remote_cluster_ev,
+        channel_evidence: remote_channel_ev,
+        contextual_evidence: 0.0,
+        calendar_evidence: 0.0,
+        temporal_consistency: remote_temporal,
+        contradiction_penalty: remote_contradiction,
+        final_confidence: remote_confidence,
+    });
+
+    // Calendar candidate notes if mentioned
+    for cal_name in &calendar_names {
+        if lower_text.contains(&cal_name.to_lowercase()) {
             candidate_scores.push(SpeakerCandidateScore {
-                speaker_id: SPEAKER_ID_ME.to_string(),
-                acoustic_similarity: Some(0.85),
-                cluster_consistency: 0.90,
-                channel_evidence: 0.75,
-                contextual_evidence: 0.0,
-                calendar_evidence: 0.0,
-                temporal_consistency: if prev_speaker == Some(SPEAKER_ID_ME) { 0.10 } else { 0.0 },
-                contradiction_penalty: 0.0,
-                final_confidence: 0.85,
-            });
-
-            (
-                Some(SPEAKER_ID_ME.to_string()),
-                SpeakerAssignmentMethod::Diarization,
-                0.85,
-                Some(SpeakerConfidenceLevel::High),
-                SpeakerEvidence {
-                    channel: Some(channel.as_str().to_string()),
-                    cluster_id: Some(c),
-                    similarity: None,
-                    notes: Some("Diarization cluster aligned with local user".to_string()),
-                    calendar_candidate: calendar_str,
-                    contextual_mention: None,
-                    temporal_consistency: if prev_speaker == Some(SPEAKER_ID_ME) {
-                        Some("Turn continuity".to_string())
-                    } else if next_speaker == prev_speaker && prev_speaker.is_some() {
-                        Some("Conversational interruption preserved".to_string())
-                    } else {
-                        Some("Turn transition".to_string())
-                    },
-                    candidate_scores,
-                },
-            )
-        }
-        Some(c) => {
-            let spk_id = remote_speaker_id(remote_index(c, local_clusters));
-            let mut candidate_scores = Vec::new();
-            let temporal_match = prev_speaker == Some(&spk_id);
-            let temporal_boost = if temporal_match { 0.05 } else { 0.0 };
-
-            candidate_scores.push(SpeakerCandidateScore {
-                speaker_id: spk_id.clone(),
+                speaker_id: cal_name.clone(),
                 acoustic_similarity: None,
-                cluster_consistency: 0.80,
-                channel_evidence: 0.50,
-                contextual_evidence: 0.0,
-                calendar_evidence: 0.0,
-                temporal_consistency: temporal_boost,
+                cluster_consistency: 0.30,
+                channel_evidence: 0.0,
+                contextual_evidence: 0.30,
+                calendar_evidence: 0.20,
+                temporal_consistency: 0.0,
                 contradiction_penalty: 0.0,
-                final_confidence: 0.80,
+                final_confidence: 0.25,
             });
-
-            // Calendar candidate presence notes (bounded context, not truth)
-            for cal_name in &calendar_names {
-                candidate_scores.push(SpeakerCandidateScore {
-                    speaker_id: cal_name.clone(),
-                    acoustic_similarity: None,
-                    cluster_consistency: 0.30,
-                    channel_evidence: 0.0,
-                    contextual_evidence: 0.0,
-                    calendar_evidence: 0.20,
-                    temporal_consistency: 0.0,
-                    contradiction_penalty: 0.0,
-                    final_confidence: 0.20,
-                });
-            }
-
-            (
-                Some(spk_id.clone()),
-                SpeakerAssignmentMethod::Diarization,
-                0.80,
-                Some(SpeakerConfidenceLevel::Likely),
-                SpeakerEvidence {
-                    channel: Some(channel.as_str().to_string()),
-                    cluster_id: Some(c),
-                    similarity: None,
-                    notes: Some("Diarization remote speaker cluster".to_string()),
-                    calendar_candidate: calendar_str,
-                    contextual_mention: None,
-                    temporal_consistency: if temporal_match {
-                        Some("Turn continuity".to_string())
-                    } else if next_speaker == prev_speaker && prev_speaker.is_some() {
-                        Some("Conversational interruption preserved".to_string())
-                    } else {
-                        Some("Turn transition".to_string())
-                    },
-                    candidate_scores,
-                },
-            )
         }
-        // 5. Channel fallback if no cluster
-        None => {
-            let implied = channel.implied_speaker_id().map(|id| id.to_string());
-            let conf = if implied.is_some() { 0.60 } else { 0.0 };
-            let level = if implied.is_some() {
-                Some(SpeakerConfidenceLevel::Unresolved)
-            } else {
-                Some(SpeakerConfidenceLevel::Unknown)
-            };
-            (
-                implied,
-                SpeakerAssignmentMethod::Channel,
-                conf,
-                level,
-                SpeakerEvidence {
-                    channel: Some(channel.as_str().to_string()),
-                    cluster_id: None,
-                    similarity: None,
-                    notes: Some("Channel implied fallback".to_string()),
-                    calendar_candidate: calendar_str,
-                    contextual_mention: None,
-                    temporal_consistency: None,
-                    candidate_scores: Vec::new(),
-                },
-            )
-        }
+    }
+
+    let evidence = SpeakerEvidence {
+        channel: Some(channel.as_str().to_string()),
+        cluster_id: cluster,
+        similarity: me_acoustic_sim,
+        notes: Some("Fused multi-signal evidence attribution".to_string()),
+        calendar_candidate: calendar_str,
+        contextual_mention: None,
+        temporal_consistency: if prev_speaker == Some(SPEAKER_ID_ME) || prev_speaker == Some(&remote_spk_id) {
+            Some("Turn continuity".to_string())
+        } else if next_speaker == prev_speaker && prev_speaker.is_some() {
+            Some("Conversational interruption preserved".to_string())
+        } else {
+            Some("Turn transition".to_string())
+        },
+        candidate_scores,
+    };
+
+    // Margin-based decision
+    let margin = 0.15f32;
+    if me_confidence >= 0.50 && me_confidence - remote_confidence >= margin {
+        let method = if me_acoustic_sim.is_some_and(|s| s >= 0.80) {
+            SpeakerAssignmentMethod::SelfVoiceAnchor
+        } else if cluster.is_some() {
+            SpeakerAssignmentMethod::Diarization
+        } else {
+            SpeakerAssignmentMethod::Channel
+        };
+        let level = if cluster.is_none() && me_acoustic_sim.is_none() {
+            SpeakerConfidenceLevel::Unresolved
+        } else if me_confidence >= 0.85 {
+            SpeakerConfidenceLevel::High
+        } else {
+            SpeakerConfidenceLevel::Likely
+        };
+        (Some(SPEAKER_ID_ME.to_string()), method, me_confidence, Some(level), evidence)
+    } else if remote_confidence >= 0.50 && remote_confidence - me_confidence >= margin {
+        let method = if cluster.is_some() {
+            SpeakerAssignmentMethod::Diarization
+        } else {
+            SpeakerAssignmentMethod::Channel
+        };
+        let level = if cluster.is_none() {
+            SpeakerConfidenceLevel::Unresolved
+        } else if remote_confidence >= 0.85 {
+            SpeakerConfidenceLevel::High
+        } else {
+            SpeakerConfidenceLevel::Likely
+        };
+        (Some(remote_spk_id), method, remote_confidence, Some(level), evidence)
+    } else {
+        // Ambiguous / tie: abstain from confident wrong attribution
+        (
+            None,
+            SpeakerAssignmentMethod::Channel,
+            me_confidence.max(remote_confidence),
+            Some(SpeakerConfidenceLevel::Unresolved),
+            evidence,
+        )
     }
 }
 

@@ -337,14 +337,12 @@ The transcript and summary are unaffected."
         // picking the loudest would be a guess dressed as a finding.
         None
     } else {
-        let from_mic = local_cluster_from_mic_share(&clustering, &mic_shares);
-        if from_mic.is_some() {
-            from_mic
-        } else if let Some(ref anchor) = self_voice_anchor {
-            local_cluster_from_anchor(anchor, &clustering, &utterances)
-        } else {
-            None
-        }
+        fused_local_cluster(
+            &clustering,
+            &mic_shares,
+            self_voice_anchor.as_ref(),
+            &utterances,
+        )
     };
 
     let report = DiarizationReport {
@@ -391,99 +389,110 @@ The transcript and summary are unaffected."
     })
 }
 
-/// Identifies the local user's cluster by matching against the meeting-local self-voice anchor.
-fn local_cluster_from_anchor(
-    anchor: &SelfVoiceAnchor,
-    clustering: &cluster::Clustering,
-    utterances: &[cluster::Utterance],
-) -> Option<usize> {
-    if !anchor.has_samples() || clustering.cluster_count == 0 {
-        return None;
-    }
-
-    let mut cluster_scores: HashMap<usize, (f32, usize)> = HashMap::new();
-    for assignment in &clustering.assignments {
-        let Some(cluster_idx) = assignment.cluster else {
-            continue;
-        };
-        let Some(utt) = utterances.iter().find(|u| u.id == assignment.id) else {
-            continue;
-        };
-
-        let sim = if let Some(ref emb) = utt.embedding {
-            anchor.compare_embedding(&emb.vector).unwrap_or(0.0)
-        } else if let Some((_, dist)) = anchor.compare(&utt.features) {
-            (1.0 - (dist / 1.5)).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-
-        let entry = cluster_scores.entry(cluster_idx).or_insert((0.0, 0));
-        entry.0 += sim;
-        entry.1 += 1;
-    }
-
-    let mut ranked: Vec<(usize, f32)> = cluster_scores
-        .into_iter()
-        .filter(|(_, (_, count))| *count > 0)
-        .map(|(cluster_idx, (sum, count))| (cluster_idx, sum / count as f32))
-        .collect();
-
-    if ranked.is_empty() {
-        return None;
-    }
-    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    let (best_index, best_sim) = ranked[0];
-    if best_sim < 0.65 {
-        return None;
-    }
-    match ranked.get(1) {
-        Some(&(_, runner_up)) if best_sim - runner_up < 0.08 => None,
-        _ => Some(best_index),
-    }
-}
-
-/// The cluster whose utterances the microphone heard most.
-///
-/// Returns `None` unless one cluster is both microphone-dominant in absolute
-/// terms and clearly ahead of the next — a coin flip about which voice belongs
-/// to the user is worse than leaving it unattributed, because a wrong "Me"
-/// attaches the user's name to somebody else's commitments.
-fn local_cluster_from_mic_share(
+/// Identifies the local user's cluster by fusing microphone energy share with the meeting-local self-voice anchor.
+fn fused_local_cluster(
     clustering: &cluster::Clustering,
     mic_shares: &HashMap<String, Option<f32>>,
+    self_voice_anchor: Option<&SelfVoiceAnchor>,
+    utterances: &[cluster::Utterance],
 ) -> Option<usize> {
-    let mut totals: HashMap<usize, (f32, usize)> = HashMap::new();
+    if clustering.cluster_count == 0 {
+        return None;
+    }
+
+    // 1. Calculate average mic share per cluster
+    let mut mic_totals: HashMap<usize, (f32, usize)> = HashMap::new();
     for assignment in &clustering.assignments {
         let Some(index) = assignment.cluster else {
             continue;
         };
-        let Some(Some(share)) = mic_shares.get(&assignment.id) else {
-            continue;
-        };
-        let entry = totals.entry(index).or_insert((0.0, 0));
-        entry.0 += share;
-        entry.1 += 1;
+        if let Some(Some(share)) = mic_shares.get(&assignment.id) {
+            let entry = mic_totals.entry(index).or_insert((0.0, 0));
+            entry.0 += share;
+            entry.1 += 1;
+        }
     }
-
-    let mut ranked: Vec<(usize, f32)> = totals
+    let cluster_mic_shares: HashMap<usize, f32> = mic_totals
         .into_iter()
-        .map(|(index, (sum, count))| (index, sum / count as f32))
+        .map(|(index, (sum, count))| (index, sum / count.max(1) as f32))
         .collect();
-    if ranked.is_empty() {
-        return None;
-    }
-    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    let (best_index, best_share) = ranked[0];
-    if best_share < LOCAL_MIC_SHARE_MINIMUM {
+    // 2. Calculate average self-voice anchor similarity per cluster (if anchor is available)
+    let cluster_anchor_sims: Option<HashMap<usize, f32>> = if let Some(anchor) = self_voice_anchor {
+        if anchor.has_samples() {
+            let mut anchor_totals: HashMap<usize, (f32, usize)> = HashMap::new();
+            for assignment in &clustering.assignments {
+                let Some(cluster_idx) = assignment.cluster else {
+                    continue;
+                };
+                let Some(utt) = utterances.iter().find(|u| u.id == assignment.id) else {
+                    continue;
+                };
+                let sim = if let Some(ref emb) = utt.embedding {
+                    anchor.compare_embedding(&emb.vector).unwrap_or(0.0)
+                } else if let Some((_, dist)) = anchor.compare(&utt.features) {
+                    (1.0 - (dist / 1.5)).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let entry = anchor_totals.entry(cluster_idx).or_insert((0.0, 0));
+                entry.0 += sim;
+                entry.1 += 1;
+            }
+            Some(
+                anchor_totals
+                    .into_iter()
+                    .map(|(idx, (sum, count))| (idx, sum / count.max(1) as f32))
+                    .collect(),
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // 3. Score each cluster
+    let mut scored_clusters: Vec<(usize, f32, f32, Option<f32>)> = Vec::new();
+    for cluster_idx in 0..clustering.cluster_count {
+        let mic_share = cluster_mic_shares.get(&cluster_idx).copied().unwrap_or(0.0);
+        let anchor_sim = cluster_anchor_sims.as_ref().and_then(|m| m.get(&cluster_idx).copied());
+
+        let fused_score = match anchor_sim {
+            Some(sim) => {
+                // If mic share is high (e.g. >0.50) but anchor sim is very low (<0.40), penalize contradiction
+                let contradiction_penalty = if mic_share >= 0.50 && sim < 0.40 {
+                    0.40
+                } else if sim >= 0.70 && mic_share < 0.15 {
+                    0.10
+                } else {
+                    0.0
+                };
+                (0.50 * mic_share + 0.50 * sim) - contradiction_penalty
+            }
+            None => mic_share,
+        };
+        scored_clusters.push((cluster_idx, fused_score, mic_share, anchor_sim));
+    }
+
+    scored_clusters.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if scored_clusters.is_empty() {
         return None;
     }
-    match ranked.get(1) {
-        Some(&(_, runner_up)) if best_share - runner_up < LOCAL_MIC_SHARE_MARGIN => None,
-        _ => Some(best_index),
+
+    let (best_idx, best_score, _best_mic, best_sim) = scored_clusters[0];
+    let min_score = if best_sim.is_some() { 0.35 } else { LOCAL_MIC_SHARE_MINIMUM };
+    if best_score < min_score {
+        return None;
     }
+
+    if let Some(runner_up) = scored_clusters.get(1) {
+        if best_score - runner_up.1 < LOCAL_MIC_SHARE_MARGIN {
+            return None;
+        }
+    }
+
+    Some(best_idx)
 }
 
 /// One stretch of audio to characterise, located within its chunk.
