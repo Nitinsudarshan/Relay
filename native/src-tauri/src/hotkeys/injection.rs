@@ -1,3 +1,4 @@
+use crate::settings::InjectionMethod;
 use enigo::{Enigo, Keyboard, Settings};
 use thiserror::Error;
 
@@ -160,12 +161,170 @@ pub fn restore_foreground_window(_target_hwnd: isize) -> bool {
     true
 }
 
+/// Releases any lingering modifier keys (Ctrl, Shift, Alt, Win) on Windows.
+///
+/// Prevents modifier collisions when hotkey triggers (e.g. push-to-talk `Ctrl+Space`)
+/// are released just before text injection begins, preventing synthetic shortcuts
+/// or dropped keystrokes in applications like Windows 11 Notepad.
+#[cfg(target_os = "windows")]
+pub fn release_modifier_keys() {
+    unsafe {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+            GetAsyncKeyState, SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+            VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_RCONTROL,
+            VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
+        };
+
+        let modifiers = [
+            VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
+            VK_SHIFT, VK_LSHIFT, VK_RSHIFT,
+            VK_MENU, VK_LMENU, VK_RMENU,
+            VK_LWIN, VK_RWIN,
+        ];
+
+        let mut inputs = Vec::new();
+        for &vk in &modifiers {
+            if (GetAsyncKeyState(vk as i32) as u16 & 0x8000) != 0 {
+                let mut input = std::mem::zeroed::<INPUT>();
+                input.r#type = INPUT_KEYBOARD;
+                input.Anonymous.ki = KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+                inputs.push(input);
+            }
+        }
+
+        if !inputs.is_empty() {
+            SendInput(
+                inputs.len() as u32,
+                inputs.as_mut_ptr(),
+                std::mem::size_of::<INPUT>() as i32,
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn release_modifier_keys() {}
+
+/// Simulates a `Ctrl+V` paste shortcut via native OS input queue.
+#[cfg(target_os = "windows")]
+pub fn paste_from_clipboard() -> Result<(), InjectionError> {
+    unsafe {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+            SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL,
+        };
+
+        release_modifier_keys();
+
+        // Win32 virtual key for 'V' is 0x56
+        const VK_V: u16 = 0x56;
+
+        let mut inputs = [std::mem::zeroed::<INPUT>(); 4];
+
+        // 1. Ctrl Down
+        inputs[0].r#type = INPUT_KEYBOARD;
+        inputs[0].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_CONTROL,
+            wScan: 0,
+            dwFlags: 0,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        // 2. V Down
+        inputs[1].r#type = INPUT_KEYBOARD;
+        inputs[1].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_V,
+            wScan: 0,
+            dwFlags: 0,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        // 3. V Up
+        inputs[2].r#type = INPUT_KEYBOARD;
+        inputs[2].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_V,
+            wScan: 0,
+            dwFlags: KEYEVENTF_KEYUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        // 4. Ctrl Up
+        inputs[3].r#type = INPUT_KEYBOARD;
+        inputs[3].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_CONTROL,
+            wScan: 0,
+            dwFlags: KEYEVENTF_KEYUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        let sent = SendInput(
+            4,
+            inputs.as_mut_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        );
+
+        if sent != 4 {
+            return Err(InjectionError::SimulationFailed(format!(
+                "SendInput sent {}/4 keys for Ctrl+V paste",
+                sent
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn paste_from_clipboard() -> Result<(), InjectionError> {
+    use enigo::{Direction, Key};
+    let mut enigo = Enigo::new(&Settings::default())
+        .map_err(|e| InjectionError::ConnectionFailed(e.to_string()))?;
+    #[cfg(target_os = "macos")]
+    let mod_key = Key::Meta;
+    #[cfg(not(target_os = "macos"))]
+    let mod_key = Key::Control;
+
+    enigo.key(mod_key, Direction::Press)
+        .map_err(|e| InjectionError::SimulationFailed(e.to_string()))?;
+    enigo.key(Key::Unicode('v'), Direction::Click)
+        .map_err(|e| InjectionError::SimulationFailed(e.to_string()))?;
+    enigo.key(mod_key, Direction::Release)
+        .map_err(|e| InjectionError::SimulationFailed(e.to_string()))?;
+    Ok(())
+}
+
+/// Injects text using simulated individual keystrokes.
+pub fn inject_keystrokes(text: &str) -> Result<(), InjectionError> {
+    if text.trim().is_empty() {
+        return Ok(());
+    }
+
+    release_modifier_keys();
+
+    let mut enigo = Enigo::new(&Settings::default())
+        .map_err(|e| InjectionError::ConnectionFailed(e.to_string()))?;
+    enigo
+        .text(text)
+        .map_err(|e| InjectionError::SimulationFailed(e.to_string()))?;
+    Ok(())
+}
+
 /// Injects text into the focused element, with protection against tab changes or window shifts.
 /// If the user switched tabs in Chrome/Edge/Firefox or switched apps during transcription,
 /// it prevents injection into the wrong location so text is never typed in the wrong place.
 pub fn inject_text_safely(
     text: &str,
     target: Option<&TargetFocusContext>,
+    method: InjectionMethod,
 ) -> Result<InjectionOutcome, InjectionError> {
     if text.trim().is_empty() {
         return Ok(InjectionOutcome::Success);
@@ -201,7 +360,7 @@ pub fn inject_text_safely(
         }
     }
 
-    inject_text(text)?;
+    inject_text(text, method)?;
     Ok(InjectionOutcome::Success)
 }
 
@@ -215,6 +374,7 @@ pub fn inject_text_with_return_wait<F, W>(
     target: Option<&TargetFocusContext>,
     timeout: std::time::Duration,
     check_interval: std::time::Duration,
+    method: InjectionMethod,
     on_wait_start: W,
     is_cancelled: F,
 ) -> Result<InjectionOutcome, InjectionError>
@@ -229,7 +389,7 @@ where
     let target = match target {
         Some(t) => t,
         None => {
-            inject_text(text)?;
+            inject_text(text, method)?;
             return Ok(InjectionOutcome::Success);
         }
     };
@@ -238,13 +398,13 @@ where
     if let Some(current) = capture_target_focus_context() {
         if current.hwnd == target.hwnd {
             if is_same_tab_or_document(&target.title, &current.title) {
-                inject_text(text)?;
+                inject_text(text, method)?;
                 return Ok(InjectionOutcome::Success);
             }
         } else if restore_foreground_window(target.hwnd) {
             if let Some(restored) = capture_target_focus_context() {
                 if is_same_tab_or_document(&target.title, &restored.title) {
-                    inject_text(text)?;
+                    inject_text(text, method)?;
                     return Ok(InjectionOutcome::Success);
                 }
             }
@@ -272,7 +432,7 @@ where
                 // Confirm tab hasn't shifted again before typing
                 if let Some(recheck) = capture_target_focus_context() {
                     if recheck.hwnd == target.hwnd && is_same_tab_or_document(&target.title, &recheck.title) {
-                        inject_text(text)?;
+                        inject_text(text, method)?;
                         return Ok(InjectionOutcome::Success);
                     }
                 }
@@ -285,20 +445,21 @@ where
     })
 }
 
-/// Types `text` into whichever field currently has OS focus, as if the user
-/// had typed it themselves — this is what makes dictation "universal"
-/// instead of confined to Relay's own window.
-pub fn inject_text(text: &str) -> Result<(), InjectionError> {
+/// Injects `text` into whichever field currently has OS focus using the selected `InjectionMethod`.
+pub fn inject_text(text: &str, method: InjectionMethod) -> Result<(), InjectionError> {
     if text.trim().is_empty() {
         return Ok(());
     }
 
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| InjectionError::ConnectionFailed(e.to_string()))?;
-    enigo
-        .text(text)
-        .map_err(|e| InjectionError::SimulationFailed(e.to_string()))?;
-    Ok(())
+    match method {
+        InjectionMethod::ClipboardPaste => {
+            copy_to_clipboard(text)?;
+            paste_from_clipboard()
+        }
+        InjectionMethod::Keystrokes => {
+            inject_keystrokes(text)
+        }
+    }
 }
 
 /// Copies `text` directly to the OS clipboard natively using `arboard`.
@@ -391,6 +552,7 @@ mod tests {
             Some(&dummy_target),
             std::time::Duration::from_millis(50),
             std::time::Duration::from_millis(10),
+            InjectionMethod::ClipboardPaste,
             |_| {},
             || false,
         );
@@ -402,6 +564,7 @@ mod tests {
             Some(&dummy_target),
             std::time::Duration::from_millis(50),
             std::time::Duration::from_millis(10),
+            InjectionMethod::Keystrokes,
             |_| {},
             || true, // immediately cancelled
         );

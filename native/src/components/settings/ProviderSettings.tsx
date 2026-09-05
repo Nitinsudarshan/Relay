@@ -844,6 +844,91 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                     />
                   </div>
 
+                  {/* Injection Method Selector */}
+                  {(settings.clipboard?.auto_paste ?? true) && (
+                    <>
+                      <div className="h-px bg-border/60" />
+                      <div className="space-y-2">
+                        <div>
+                          <p className="text-xs font-medium text-foreground">Injection Method</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            Choose how transcribed text is inserted into the active application
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const updated: AppSettings = {
+                                ...settings,
+                                clipboard: {
+                                  ...settings.clipboard,
+                                  auto_paste: settings.clipboard?.auto_paste ?? true,
+                                  copy_to_clipboard: settings.clipboard?.copy_to_clipboard ?? true,
+                                  injection_method: 'clipboard_paste',
+                                  injectionMethod: 'clipboard_paste',
+                                },
+                              };
+                              setSettings(updated);
+                              try {
+                                await invoke('save_settings', { settings: updated });
+                              } catch (err) {
+                                console.error('Failed to update injection method', err);
+                              }
+                            }}
+                            className={`p-3 rounded-lg border text-left transition-all ${
+                              (settings.clipboard?.injection_method ?? 'clipboard_paste') === 'clipboard_paste'
+                                ? 'border-primary bg-primary/10 text-foreground shadow-xs'
+                                : 'border-border bg-card/50 text-muted-foreground hover:border-border/80'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs font-bold text-foreground">Clipboard Paste (Instant)</span>
+                              <Badge variant="emerald" className="text-[9px] px-1.5 py-0">Default</Badge>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground leading-snug">
+                              Pastes text instantly via Ctrl+V. Fast and 100% reliable across all apps including Notepad, Word, and terminals.
+                            </p>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const updated: AppSettings = {
+                                ...settings,
+                                clipboard: {
+                                  ...settings.clipboard,
+                                  auto_paste: settings.clipboard?.auto_paste ?? true,
+                                  copy_to_clipboard: settings.clipboard?.copy_to_clipboard ?? true,
+                                  injection_method: 'keystrokes',
+                                  injectionMethod: 'keystrokes',
+                                },
+                              };
+                              setSettings(updated);
+                              try {
+                                await invoke('save_settings', { settings: updated });
+                              } catch (err) {
+                                console.error('Failed to update injection method', err);
+                              }
+                            }}
+                            className={`p-3 rounded-lg border text-left transition-all ${
+                              (settings.clipboard?.injection_method ?? 'clipboard_paste') === 'keystrokes'
+                                ? 'border-primary bg-primary/10 text-foreground shadow-xs'
+                                : 'border-border bg-card/50 text-muted-foreground hover:border-border/80'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs font-bold text-foreground">Simulated Keystrokes</span>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground leading-snug">
+                              Simulates physical key presses per character. Use if the target application strictly blocks clipboard paste.
+                            </p>
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
                   <div className="h-px bg-border/60" />
 
                   <div className="flex items-center justify-between">

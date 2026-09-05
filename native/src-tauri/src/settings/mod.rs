@@ -250,6 +250,23 @@ impl Default for SoundSettings {
     }
 }
 
+/// Method used to inject text into the active target application.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InjectionMethod {
+    /// Instant atomic clipboard paste via Ctrl+V.
+    /// Fast, reliable across modern XAML, web, electron, and rich-text applications without character drops.
+    #[default]
+    ClipboardPaste,
+    /// Simulates keyboard typing events per character.
+    /// Used when the target application disables clipboard access.
+    Keystrokes,
+}
+
+fn default_injection_method() -> InjectionMethod {
+    InjectionMethod::ClipboardPaste
+}
+
 /// Clipboard injection and text retention preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ClipboardSettings {
@@ -259,6 +276,9 @@ pub struct ClipboardSettings {
     /// Keep transcribed text in OS clipboard so you can paste it manually if needed.
     #[serde(default = "default_copy_to_clipboard", alias = "copyToClipboard")]
     pub copy_to_clipboard: bool,
+    /// Injection method: instant clipboard paste (default) or simulated keystrokes.
+    #[serde(default = "default_injection_method", alias = "injectionMethod")]
+    pub injection_method: InjectionMethod,
 }
 
 fn default_auto_paste() -> bool {
@@ -274,6 +294,7 @@ impl Default for ClipboardSettings {
         Self {
             auto_paste: default_auto_paste(),
             copy_to_clipboard: default_copy_to_clipboard(),
+            injection_method: default_injection_method(),
         }
     }
 }
@@ -785,12 +806,28 @@ mod tests {
         let defaults = AppSettings::default();
         assert!(defaults.clipboard.auto_paste);
         assert!(defaults.clipboard.copy_to_clipboard);
+        assert_eq!(defaults.clipboard.injection_method, InjectionMethod::ClipboardPaste);
         assert!(!defaults.startup.launch_at_login);
         assert!(!defaults.startup.start_minimized);
         assert!(defaults.audio_input.prefer_builtin_mic);
         assert_eq!(defaults.audio_input.keep_microphone_warm, "off");
         assert!(defaults.audio_input.auto_learn_words);
         assert!(!defaults.dictionary.is_empty());
+    }
+
+    #[test]
+    fn test_injection_method_deserialization() {
+        let json = r#"{"injection_method": "keystrokes"}"#;
+        let s: ClipboardSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.injection_method, InjectionMethod::Keystrokes);
+
+        let camel_json = r#"{"injectionMethod": "clipboard_paste"}"#;
+        let s2: ClipboardSettings = serde_json::from_str(camel_json).unwrap();
+        assert_eq!(s2.injection_method, InjectionMethod::ClipboardPaste);
+
+        let empty_json = r#"{}"#;
+        let s3: ClipboardSettings = serde_json::from_str(empty_json).unwrap();
+        assert_eq!(s3.injection_method, InjectionMethod::ClipboardPaste);
     }
 
     #[test]

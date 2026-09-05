@@ -606,21 +606,31 @@ fn stop_dictation_session(
             let final_text = if !expanded_text.trim().is_empty() { expanded_text } else { text_res };
             let t_snippet_complete = std::time::Instant::now();
 
-            let (auto_paste, copy_to_clipboard) = {
+            let (auto_paste, copy_to_clipboard, injection_method) = {
                 let s = state.settings.lock_or_recover();
-                (s.clipboard.auto_paste, s.clipboard.copy_to_clipboard)
+                (
+                    s.clipboard.auto_paste,
+                    s.clipboard.copy_to_clipboard,
+                    s.clipboard.injection_method,
+                )
             };
 
             // 1. Copy to OS clipboard FIRST and NATIVELY in Rust.
             // Using arboard directly at the OS level ensures the transcription is in the
             // clipboard unconditionally, bypassing webview focus restrictions.
-            if copy_to_clipboard {
+            // When injection_method is ClipboardPaste and auto_paste is enabled, clipboard must be populated.
+            let should_copy_to_clipboard = copy_to_clipboard
+                || (auto_paste && injection_method == crate::settings::InjectionMethod::ClipboardPaste);
+
+            if should_copy_to_clipboard {
                 if let Err(e) = injection::copy_to_clipboard(&final_text) {
                     tracing::warn!("Native dictation clipboard copy failed: {}", e);
                 } else {
                     tracing::debug!("Native dictation clipboard copy succeeded ({} chars)", final_text.len());
                 }
-                let _ = app.emit("dictation-clipboard-copy", &final_text);
+                if copy_to_clipboard {
+                    let _ = app.emit("dictation-clipboard-copy", &final_text);
+                }
             }
 
             // 2. Inject text into the active field, guarded against tab or window switching.
@@ -637,6 +647,7 @@ fn stop_dictation_session(
                     target_focus.as_ref(),
                     std::time::Duration::from_secs(15),
                     std::time::Duration::from_millis(100),
+                    injection_method,
                     |_target_title| {
                         tracing::info!(
                             "[Dictation] Active focus moved from '{}'. Waiting up to 15s for return...",

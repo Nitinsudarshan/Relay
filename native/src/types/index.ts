@@ -636,13 +636,18 @@ export interface SoundSettings {
   dictationSounds?: boolean;
 }
 
+export type InjectionMethod = 'clipboard_paste' | 'keystrokes';
+
 export interface ClipboardSettings {
   /** Automatically paste/type transcribed text into the active app when dictation finishes. */
   auto_paste: boolean;
   /** Keep transcribed text in OS clipboard so you can paste it manually if needed. */
   copy_to_clipboard: boolean;
+  /** Injection method: instant clipboard paste (Ctrl+V) or simulated keystrokes. */
+  injection_method?: InjectionMethod;
   autoPaste?: boolean;
   copyToClipboard?: boolean;
+  injectionMethod?: InjectionMethod;
 }
 
 export interface StartupSettings {
