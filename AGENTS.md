@@ -38,7 +38,7 @@ All paths are relative to `rules/`.
 - [api-conventions.md](rules/api-conventions.md): Tauri command response shape; web route handler shape.
 - [performance.md](rules/performance.md): Async/non-blocking rules, bundle size, memoization.
 - [rbac-settings.md](rules/rbac-settings.md): Why RBAC is intentionally not built yet.
-- [version-and-changelog.md](rules/version-and-changelog.md): Versioning and changelog maintenance requirement.
+- [version-and-changelog.md](rules/version-and-changelog.md): Release versioning, changelog ownership, and conventional change metadata.
 - [readme.md](rules/readme.md): Machine-readable rules for generating, auditing, or rewriting `README.md`.
 - [maybe-later.md](rules/maybe-later.md): Policy and format for logging deferred features to `maybe_later.md`.
 
@@ -101,7 +101,7 @@ If two rules conflict, resolve in this order (most specific wins):
 
 ## Working in an established codebase
 
-This repo is well past its from-scratch phase — it is at v0.16.0 with a
+This repo is well past its from-scratch phase — it is at v0.41.0 with a
 shipped capture pipeline, meetings v2, scribbles, and a vault. Two habits
 matter more here than they did at the start:
 
@@ -131,6 +131,19 @@ matter more here than they did at the start:
   only ever runs there. **Hybrid mode requires real login** against the cloud
   backend — not LAN-only or tunnel-based access to the Windows machine, a
   framing already considered and rejected (`docs/decisions.md`, Decision 12).
+- **No Agent-Owned Version Bumps**: Development agents MUST NOT independently
+  increment the release version in `VERSION` or manifests, nor modify the
+  canonical release changelog (`CHANGELOG.md`) during ordinary development work.
+  Release versions and changelog entries are owned exclusively by the release
+  pipeline (`.github/workflows/release.yml`).
 - **Mandatory Commit & Push Execution**: After every task, before committing:
-  1. Inspect changes and update `VERSION` and `CHANGELOG.md` per `rules/version-and-changelog.md`.
-  2. Audit `README.md` per `rules/readme.md` whenever scripts, commands, dependencies, or features are modified.
+  1. Inspect changes and run verification gates:
+     - `npm run verify:rules` (manifest consistency, repository & README rules)
+     - `cd native/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test`
+     - `cd native && npx tsc --noEmit && npm test`
+     - `cd web && npx tsc --noEmit`
+  2. Write conventional commit messages (`feat:`, `fix:`, `refactor:`, `BREAKING CHANGE:`, etc.)
+     communicating change impact per `rules/version-and-changelog.md`.
+  3. Audit `README.md` per `rules/readme.md` whenever scripts, commands,
+     dependencies, or features are modified.
+  4. Push feature branch and create/update the PR with an accurate summary of changes.

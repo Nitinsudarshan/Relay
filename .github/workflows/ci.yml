@@ -25,11 +25,11 @@ jobs:
         with:
           node-version: 22
 
-      # scripts/verify-commit-rules.js already existed and enforces
-      # rules/version-and-changelog.md and rules/readme.md — VERSION agrees
-      # with all four manifests, CHANGELOG.md has an entry for it, README
-      # structure holds. Nothing ran it until now.
-      - name: Verify version, changelog, and README
+      # scripts/verify-commit-rules.js enforces rules/version-and-changelog.md
+      # and rules/readme.md: VERSION agrees across all manifests, CHANGELOG.md
+      # exists, development tasks do not tamper with release metadata, and
+      # README structure holds.
+      - name: Verify repository rules and manifest consistency
         run: npm run verify:rules
 
       # scripts/build-voice-manifest.mjs decides what Relay is willing to

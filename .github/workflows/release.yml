@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Version bump type (auto detects based on Conventional Commits)'
+        required: true
+        type: choice
+        default: 'auto'
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: 'Dry run (simulate version bump and changelog generation without committing)'
+        required: false
+        type: boolean
+        default: false
+
+# Concurrency protection: exactly one release job can run at a time; never cancel in-progress releases
+concurrency:
+  group: relay-release-production
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Prepare and Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository (full git history)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Pre-release validation (development rules & script tests)
+        run: |
+          npm run verify:rules
+          npm run test:scripts
+
+      - name: Prepare release manifests and changelog
+        id: prep
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          node scripts/prepare-release.mjs --bump=${{ github.event.inputs.bump_type }} $DRY_RUN_FLAG
+          NEW_VER=$(tr -d '[:space:]' < VERSION)
+          echo "version=${NEW_VER}" >> $GITHUB_OUTPUT
+
+      - name: Verify release manifest synchronization and changelog entry
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: npm run verify:release
+
+      - name: Extract release notes for GitHub Release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        id: notes
+        run: |
+          node -e '
+            const fs = require("fs");
+            const ver = "${{ steps.prep.outputs.version }}";
+            const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
+            const pattern = new RegExp(`## \\\\[${ver}\\\\][^\n]*\n\n([\\s\\S]*?)(?=\n## \\\\[|$)`);
+            const match = changelog.match(pattern);
+            const notes = match ? match[1].trim() : "Relay release v" + ver;
+            fs.writeFileSync("RELEASE_NOTES.md", notes + "\n", "utf8");
+          '
+
+      - name: Commit and Tag Release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION CHANGELOG.md package.json native/package.json native/src-tauri/tauri.conf.json native/src-tauri/Cargo.toml
+          git commit -m "chore(release): v${{ steps.prep.outputs.version }}"
+          git tag -a "v${{ steps.prep.outputs.version }}" -m "Release v${{ steps.prep.outputs.version }}"
+          git push origin main
+          git push origin "v${{ steps.prep.outputs.version }}"
+
+      - name: Publish GitHub Release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.prep.outputs.version }}" \
+            --title "Relay v${{ steps.prep.outputs.version }}" \
+            --notes-file RELEASE_NOTES.md

@@ -12,8 +12,10 @@
     "build:native": "npm --prefix native run tauri build",
     "install:all": "npm --prefix native install && npm --prefix web install",
     "verify:rules": "node scripts/verify-commit-rules.js",
+    "verify:release": "node scripts/verify-commit-rules.js --mode=release",
+    "release:prepare": "node scripts/prepare-release.mjs",
     "test": "npm --prefix native test",
     "test:scripts": "node --test \"scripts/**/*.test.mjs\"",
-    "typecheck": "npm --prefix native run typecheck && npm --prefix web exec tsc -- --noEmit"
+    "typecheck": "npm --prefix native run typecheck && npm --prefix web run typecheck"
   }
 }

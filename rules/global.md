@@ -50,7 +50,7 @@ Relay is **three surfaces sharing one repo**, per `docs/decisions.md`
 | `task-scoping.md` | Sizing, specificity, split signals, gate taxonomy | Whole repo |
 | `response-style.md` | Verbosity contract per mode (dev / review / research) | Whole repo |
 | `rbac-settings.md` | Why this is intentionally not built yet | Reference only — not active |
-| `version-and-changelog.md` | Versioning and changelog maintenance requirement | Whole repo |
+| `version-and-changelog.md` | Release versioning, changelog ownership, and conventional change metadata | Whole repo |
 | `readme.md` | Machine-readable rules for generating or rewriting README.md | Whole repo |
 | `maybe-later.md` | Requirements for logging deferred features to `maybe_later.md` | Whole repo |
 

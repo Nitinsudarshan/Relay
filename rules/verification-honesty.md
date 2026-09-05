@@ -113,7 +113,7 @@ honest form of the same instinct. Use that instead.
   `cd web && npx tsc --noEmit && npm run build`.
 - For a bug fix: the original failure reproduced first, then the same check
   passing.
-- `VERSION` and `CHANGELOG.md` updated, with every changelog line checked
-  against the real diff (`version-and-changelog.md`).
+- Change claims described accurately via conventional commit messages and PR
+  summaries, with every claim checked against the real diff (`version-and-changelog.md`).
 - If a gate was not run, say which and why. A skipped gate reported as green
   is the failure this whole file is about.

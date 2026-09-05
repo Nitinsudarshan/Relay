@@ -23,8 +23,8 @@ Never read these whole. Grep, `sed -n` a range, or read the newest entry:
 | `rules/readme.md` | ~32 KB | the section for the task at hand |
 | `docs/` | ~520 KB / 23 files | `docs/README.md` is the index — read it first |
 
-`version-and-changelog.md` requires inspecting the *latest* changelog entry
-before every push. That means the top of the file, not the file.
+`CHANGELOG.md` is release history, not a per-task work log. If checking recent
+releases or format, read the top of the file (`head -60`) rather than the whole file.
 
 If `graphify-out/` exists, `graphify query "<question>"` returns a scoped
 subgraph — usually far smaller than `GRAPH_REPORT.md` or raw grep across three
@@ -71,7 +71,7 @@ whatever the counter says:
 - **Increasing vagueness** — "appropriate handling", "standard patterns",
   "the usual approach" replacing specific code or specific file paths.
 - **Skipped steps** — a checklist of 8 items reported against 5. On Relay,
-  the tell is skipping `version-and-changelog.md` or the `cargo clippy` gate.
+  the tell is skipping verification gates (`verify:rules`) or the `cargo clippy` gate.
 
 When you hit one: checkpoint, then start clean rather than pushing through.
 
