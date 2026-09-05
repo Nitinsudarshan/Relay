@@ -14,7 +14,7 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { ChangelogModal } from './components/common/ChangelogModal';
 import { WelcomeModal } from './components/common/WelcomeModal';
 import { AccountExplanationModal } from './components/common/AccountExplanationModal';
-import { RelayAccount, RelayProfile, DeveloperSettings, AppSettings } from './types';
+import { RelayAccount, RelayProfile, DeveloperSettings, AppSettings, MainTabType } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -37,19 +37,9 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from './components/common/PageHeader';
-import type { CaptureMethod } from './components/capture/CaptureHubPage';
+import type { CaptureMethod } from './components/captures/CaptureHubPage';
 
-export type MainTabType =
-  | 'home'
-  | 'capture'
-  | 'meetings'
-  | 'scribble'
-  | 'graph'
-  | 'files'
-  | 'captures'
-  | 'talkback'
-  | 'diagnostics'
-  | 'settings';
+export type { MainTabType };
 
 const TAB_LABELS: Record<MainTabType, string> = {
   home: 'Home',
@@ -68,10 +58,10 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<MainTabType>('home');
   const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
   /**
-   * A capture mode requested from Home. Scribbles opens straight onto it, and it
+   * A capture mode requested from Home. Captures opens straight onto it, and it
    * is cleared by any other navigation so the Capture tab is not sticky.
    */
-  const [scribbleCaptureMethod, setScribbleCaptureMethod] = useState<CaptureMethod | null>(null);
+  const [captureMethod, setCaptureMethod] = useState<CaptureMethod | null>(null);
   /** A scribble the Knowledge Graph asked the workspace to reveal. */
   const [focusScribbleId, setFocusScribbleId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -90,7 +80,7 @@ export const App: React.FC = () => {
    *
    * A one-shot request from another surface — a capture mode from a Home card, a
    * scribble the graph wants revealed — is cleared on the next navigation, so
-   * arriving at Scribbles from the sidebar never lands on someone else's intent.
+   * arriving at a surface from the sidebar never lands on someone else's intent.
    */
   const navigateTo = (
     tab: MainTabType,
@@ -101,7 +91,7 @@ export const App: React.FC = () => {
     } = {},
   ) => {
     setActiveTab(tab);
-    setScribbleCaptureMethod(intent.captureMethod ?? null);
+    setCaptureMethod(intent.captureMethod ?? null);
     setFocusScribbleId(intent.focusScribbleId ?? null);
     if (tab === 'settings') {
       setSettingsSection(intent.section);
@@ -159,7 +149,7 @@ export const App: React.FC = () => {
       if (typeof payload === 'string') {
         if (payload in TAB_LABELS) {
           setActiveTab(payload as MainTabType);
-          setScribbleCaptureMethod(null);
+          setCaptureMethod(null);
           setFocusScribbleId(null);
           if (payload === 'settings') {
             setSettingsSection(undefined);
@@ -169,7 +159,7 @@ export const App: React.FC = () => {
         const obj = payload as { tab?: MainTabType; section?: SettingsSection };
         if (obj.tab && obj.tab in TAB_LABELS) {
           setActiveTab(obj.tab);
-          setScribbleCaptureMethod(null);
+          setCaptureMethod(null);
           setFocusScribbleId(null);
         }
         if (obj.section) {
@@ -315,7 +305,7 @@ export const App: React.FC = () => {
             badge={{ label: 'Knowledge Layer', icon: Sparkles, variant: 'default' }}
             title="Connected thoughts,"
             highlightText="living knowledge."
-            description="Capture atomic thoughts, connect related ideas, and keep every source they came from."
+            description="Every atomic thought Relay holds, with the ideas it connects to and the source it came from. New thoughts are captured on the Captures surface."
             glowColor="primary"
           />
         );
@@ -332,10 +322,10 @@ export const App: React.FC = () => {
       case 'captures':
         return (
           <PageHeader
-            badge={{ label: 'Web Capture', icon: Globe, variant: 'default' }}
-            title="Pages and conversations,"
+            badge={{ label: 'Capture Surface', icon: Globe, variant: 'default' }}
+            title="Everything you capture,"
             highlightText="as text you own."
-            description="Captured pages are stored as external source material with their provenance — never as instructions to Relay's AI."
+            description="Type or paste a thought, or open a page the browser extension sent here. Captured pages are stored as external source material with their provenance — never as instructions to Relay's AI."
             glowColor="primary"
           />
         );
@@ -459,9 +449,7 @@ export const App: React.FC = () => {
               settings={settings}
               appVersion={appVersion}
               onNavigate={(tab) => navigateTo(tab)}
-              onStartScribbleCapture={(method) =>
-                navigateTo('scribble', { captureMethod: method })
-              }
+              onStartCapture={(method) => navigateTo('captures', { captureMethod: method })}
               onOpenSettings={(section) => navigateTo('settings', { section })}
               onOpenChangelog={() => setChangelogOpen(true)}
             />
@@ -473,8 +461,8 @@ export const App: React.FC = () => {
 
           {activeTab === 'scribble' && (
             <ScribbleViewer
-              initialCaptureMethod={scribbleCaptureMethod}
               focusScribbleId={focusScribbleId}
+              onStartCapture={() => navigateTo('captures', { captureMethod: 'text' })}
             />
           )}
 
@@ -484,25 +472,27 @@ export const App: React.FC = () => {
             />
           )}
 
-          {activeTab === 'files' && <FilesPage onNavigateTab={(tab) => navigateTo(tab as MainTabType)} />}
+          {activeTab === 'files' && <FilesPage onNavigateTab={(tab) => navigateTo(tab)} />}
 
           {activeTab === 'captures' && (
             <CapturesPage
-              onNavigateTab={(tab) => navigateTo(tab as MainTabType)}
+              initialCaptureMethod={captureMethod}
+              onNavigateTab={(tab) => navigateTo(tab)}
               onOpenCaptureSettings={() => navigateTo('settings', { section: 'capture' })}
+              onOpenScribble={(id) => navigateTo('scribble', { focusScribbleId: id })}
             />
           )}
 
           {activeTab === 'talkback' && <TalkbackPage />}
 
           {activeTab === 'diagnostics' && (
-            <DiagnosticsPage onNavigateTab={(tab) => navigateTo(tab as MainTabType)} />
+            <DiagnosticsPage onNavigateTab={(tab) => navigateTo(tab)} />
           )}
 
           {activeTab === 'settings' && (
             <ProviderSettings
               initialSection={settingsSection}
-              onNavigateTab={(tab) => navigateTo(tab as MainTabType)}
+              onNavigateTab={(tab) => navigateTo(tab)}
             />
           )}
         </main>

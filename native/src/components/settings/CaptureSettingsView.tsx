@@ -15,8 +15,12 @@ import type { CaptureBridgeStatus } from '../../types';
 import { Switch } from '@/components/ui/switch';
 
 /**
- * Capture settings: the one place the user turns browser capture on and pairs
- * a browser with it.
+ * Web capture settings: the one place the user turns browser capture on and
+ * pairs a browser with it.
+ *
+ * Only the browser bridge is configured here. `Captures` is a whole surface with
+ * several modes, and the rest of them need no configuration — which is why this
+ * section is labelled "Web Capture" rather than "Capture".
  *
  * The pairing token is shown here in full, because pairing is a copy-paste
  * step the user performs deliberately. Nothing on this screen explains DOM
@@ -82,7 +86,7 @@ export const CaptureSettingsView: React.FC = () => {
     <div className="space-y-6">
       <header>
         <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <Globe className="h-4 w-4 text-primary" /> Capture
+          <Globe className="h-4 w-4 text-primary" /> Web Capture
         </h2>
         <p className="mt-1 text-xs text-muted-foreground">
           Save the page or conversation you are looking at into your Vault, with its source, its
@@ -289,7 +293,7 @@ export const CaptureSettingsView: React.FC = () => {
             <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]">
               {status.capture_hotkey}
             </kbd>{' '}
-            opens your captures.
+            opens <strong>Captures › Captured Pages</strong>.
           </dd>
         </dl>
         <p className="mt-2 text-[11px] text-muted-foreground">
