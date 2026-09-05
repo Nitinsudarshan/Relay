@@ -733,11 +733,10 @@ impl SummarySource {
         match self {
             Self::Model => "Written by a language model from the extracted facts.",
             Self::DeterministicPresentation => {
-                "Written without a language model, from facts a model extracted."
+                "Summary generated locally from extracted meeting facts."
             }
             Self::DeterministicExtraction => {
-                "Written without a language model. The points are taken from the transcript \
-rather than summarized."
+                "Summary generated locally from extracted meeting facts."
             }
         }
     }

@@ -1339,6 +1339,59 @@ mod tests {
         assert!(user.contains("Ship the release on Friday."));
     }
 
+    #[tokio::test]
+    async fn test_stage_6_summary_floor_matrix() {
+        let default = builtin_extensions()[0].clone();
+        let facts = facts();
+        let roster = roster();
+        let notes = MeetingNotes::default();
+        let request = input(&facts, &roster, &default, &notes, SummaryMode::Standard);
+
+        // 1. LLM success:
+        let llm_ok = ScriptedLlm::new(vec![Ok("## Overview\n\nLLM generated successfully.".to_string())]);
+        let out_ok = generate_summary(&llm_ok, &request).await;
+        assert!(!out_ok.deterministic);
+        assert_eq!(out_ok.markdown, "## Overview\n\nLLM generated successfully.");
+        assert!(out_ok.llm_error.is_none());
+
+        // 2. LLM unavailable:
+        let llm_down = ScriptedLlm::always_unavailable();
+        let out_down = generate_summary(&llm_down, &request).await;
+        assert!(out_down.deterministic);
+        assert!(out_down.llm_error.is_some());
+        assert!(out_down.markdown.contains("Summary generated locally from extracted meeting facts."));
+        assert!(out_down.markdown.contains("## Decisions"));
+        assert!(out_down.markdown.contains("## Action Items"));
+
+        // 3. LLM empty:
+        let llm_empty = ScriptedLlm::new(vec![Ok(String::new()), Ok(String::new())]);
+        let out_empty = generate_summary(&llm_empty, &request).await;
+        assert!(out_empty.deterministic);
+        assert!(out_empty.llm_error.is_some());
+        assert!(out_empty.markdown.contains("Summary generated locally from extracted meeting facts."));
+
+        // 4. Empty facts states:
+        let empty_facts = MeetingFacts {
+            title: "Empty Meeting".to_string(),
+            meeting_type: MeetingType::General,
+            key_points: Vec::new(),
+            topics: Vec::new(),
+            decisions: Vec::new(),
+            action_items: Vec::new(),
+            open_questions: Vec::new(),
+            risks: Vec::new(),
+            entities: Vec::new(),
+            speaker_ids: Vec::new(),
+            deterministic: true,
+        };
+        let out_empty_facts = render_markdown(&empty_facts, &[], SummaryMode::Standard);
+        assert!(out_empty_facts.contains("Summary generated locally from extracted meeting facts."));
+        assert!(out_empty_facts.contains("No structured summary could be derived from this recording. The raw transcript is available."));
+        // Ensure no unverified facts are manufactured:
+        assert!(!out_empty_facts.contains("## Decisions"));
+        assert!(!out_empty_facts.contains("## Action Items"));
+    }
+
     #[test]
     fn a_fenced_markdown_response_is_unwrapped() {
         assert_eq!(

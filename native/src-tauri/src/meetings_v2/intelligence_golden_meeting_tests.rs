@@ -334,6 +334,10 @@ fn golden_meeting_1_deterministic_summary_floor_always_provides_structured_facts
     let summary_md = render_markdown(&facts, &speakers, SummaryMode::Standard);
     
     assert!(summary_md.starts_with("## Overview"), "Summary must start with ## Overview");
+    assert!(
+        summary_md.contains("Summary generated locally from extracted meeting facts."),
+        "Deterministic summary must declare honest provenance!"
+    );
     assert!(summary_md.contains("## Decisions"), "Decisions section must be rendered");
     assert!(summary_md.contains("Schedule client call for Tuesday — because better availability (Mansi)"));
     assert!(summary_md.contains("## Action Items"), "Action items section must be rendered");
