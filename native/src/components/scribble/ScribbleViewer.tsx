@@ -1,51 +1,55 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import {
-  Scribble,
-  KnowledgeGraphData,
-} from '../../types';
+import { Scribble } from '@/types';
 import {
   Search,
-  Plus,
   FileText,
   PlusCircle,
   LayoutGrid,
-  Network,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScribbleDetailEditor } from './ScribbleDetailEditor';
-import { KnowledgeGraphView } from './KnowledgeGraphView';
-import { CaptureHubPage } from '../capture/CaptureHubPage';
+import { CaptureHubPage, type CaptureMethod } from '../capture/CaptureHubPage';
 import { EmptyState } from '../common/EmptyState';
 
-type ScribbleSubTab = 'workspace' | 'capture' | 'graph';
+type ScribbleSubTab = 'workspace' | 'capture';
 
-export const ScribbleViewer: React.FC = () => {
-  const [activeSubTab, setActiveSubTab] = useState<ScribbleSubTab>('workspace');
+export interface ScribbleViewerProps {
+  /**
+   * Opens the Capture tab on the given method. Set by a Home shortcut card, so
+   * "Clipboard" on Home lands on the clipboard capture rather than on a tab the
+   * user then has to find.
+   */
+  initialCaptureMethod?: CaptureMethod | null;
+  /** Scribble to select on arrival — how the Knowledge Graph reveals a thought here. */
+  focusScribbleId?: string | null;
+}
+
+export const ScribbleViewer: React.FC<ScribbleViewerProps> = ({
+  initialCaptureMethod = null,
+  focusScribbleId = null,
+}) => {
+  const [activeSubTab, setActiveSubTab] = useState<ScribbleSubTab>(
+    initialCaptureMethod ? 'capture' : 'workspace',
+  );
   const [scribbles, setScribbles] = useState<Scribble[]>([]);
-  const [selectedScribbleId, setSelectedScribbleId] = useState<string | null>(null);
+  const [selectedScribbleId, setSelectedScribbleId] = useState<string | null>(focusScribbleId);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
-  const [graphData, setGraphData] = useState<KnowledgeGraphData>({ nodes: [], edges: [] });
 
-  // Fetch Scribbles & Graph
+  // Fetch Scribbles
   const refreshData = useCallback(async () => {
     try {
-      const [loadedScribbles, loadedGraph] = await Promise.all([
-        invoke<Scribble[]>('get_scribbles'),
-        invoke<KnowledgeGraphData>('get_knowledge_graph', { filter: null }),
-      ]);
+      const loadedScribbles = await invoke<Scribble[]>('get_scribbles');
       setScribbles(loadedScribbles);
-      setGraphData(loadedGraph);
 
       if (loadedScribbles.length > 0 && !selectedScribbleId) {
         setSelectedScribbleId(loadedScribbles[0].id);
       }
     } catch (err) {
-      console.error('Failed to load scribbles or graph:', err);
+      console.error('Failed to load scribbles:', err);
     } finally {
       setLoading(false);
     }
@@ -119,7 +123,7 @@ export const ScribbleViewer: React.FC = () => {
     <div className="flex-1 flex flex-col gap-3 min-h-0 min-w-0 overflow-hidden">
       {/* Top Scribbles Sub-Navigation Bar */}
       <div className="flex items-center justify-between pb-2.5 shrink-0 border-b border-border">
-        {/* Sub-Tabs: Capture | Workspace | Knowledge Graph */}
+        {/* Sub-Tabs: Capture | Workspace */}
         <div className="flex items-center bg-muted/60 p-1 rounded-lg border border-border text-xs">
           <button
             type="button"
@@ -146,22 +150,6 @@ export const ScribbleViewer: React.FC = () => {
             <LayoutGrid className="w-3.5 h-3.5" />
             <span>Workspace</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSubTab('graph');
-              refreshData();
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
-              activeSubTab === 'graph'
-                ? 'bg-card text-foreground font-bold shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Network className="w-3.5 h-3.5 text-blue-500" />
-            <span>Knowledge Graph</span>
-          </button>
         </div>
 
         {/* Scribble Count Badge (Shown strictly on Workspace page) */}
@@ -172,9 +160,10 @@ export const ScribbleViewer: React.FC = () => {
         )}
       </div>
 
-      {/* Surface Tab 1: Dedicated Capture Tab */}
+      {/* Surface 1: Dedicated Capture Tab */}
       {activeSubTab === 'capture' && (
         <CaptureHubPage
+          initialMethod={initialCaptureMethod}
           onCaptureSuccess={(scribble) => {
             handleScribbleCreated(scribble);
             setSelectedScribbleId(scribble.id);
@@ -184,25 +173,7 @@ export const ScribbleViewer: React.FC = () => {
         />
       )}
 
-      {/* Surface Tab 2: Living Knowledge Graph Tab */}
-      {activeSubTab === 'graph' && (
-        <div className="flex-1 flex min-h-0">
-          <KnowledgeGraphView
-            graphData={graphData}
-            allScribbles={scribbles}
-            onSelectScribble={(id) => setSelectedScribbleId(id)}
-            onOpenScribbleEditor={(id) => {
-              setSelectedScribbleId(id);
-              setActiveSubTab('workspace');
-            }}
-            onScribbleUpdated={handleScribbleUpdated}
-            onScribbleCreated={handleScribbleCreated}
-            onScribbleDeleted={handleScribbleDeleted}
-          />
-        </div>
-      )}
-
-      {/* Surface Tab 3: Main Workspace (List + Editor) */}
+      {/* Surface 2: Main Workspace (List + Editor) */}
       {activeSubTab === 'workspace' && (
         <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden">
           <div className="flex-1 flex gap-4 min-h-0 min-w-0 overflow-hidden">
@@ -224,8 +195,10 @@ export const ScribbleViewer: React.FC = () => {
                 {filteredScribbles.length === 0 ? (
                   <EmptyState
                     icon={FileText}
-                    title="No thoughts found"
-                    description="Use the Capture tab or promote a Voice Note."
+                    title={loading ? 'Loading thoughts…' : 'No thoughts found'}
+                    description={
+                      loading ? 'Reading the vault.' : 'Use the Capture tab or promote a Voice Note.'
+                    }
                     minHeight="min-h-[140px]"
                     className="my-2 border-none bg-transparent"
                   />

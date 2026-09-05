@@ -10,7 +10,7 @@ import {
   GraphDisplaySettings,
   GraphForcesSettings,
   LocalGraphSettings,
-} from '../../types';
+} from '@/types';
 import {
   SimNode,
   CameraState,
@@ -30,8 +30,8 @@ import { renderGraph } from './graph/graphRenderer';
 import { GraphSettingsPanel } from './graph/GraphSettingsPanel';
 import { GraphNodeInspector } from './graph/GraphNodeInspector';
 import { GraphToolbar } from './graph/GraphToolbar';
-import { ConnectAndMergeModal } from './ConnectAndMergeModal';
-import { ConfirmationModal } from '../common/ConfirmationModal';
+import { ConnectAndMergeModal } from '@/components/scribble/ConnectAndMergeModal';
+import { ConfirmationModal } from '@/components/common/ConfirmationModal';
 
 interface KnowledgeGraphViewProps {
   graphData: KnowledgeGraphData;

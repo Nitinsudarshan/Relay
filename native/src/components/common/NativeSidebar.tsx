@@ -14,6 +14,8 @@ import {
   Sparkle,
   Sliders,
   Globe,
+  Home,
+  Network,
 } from 'lucide-react';
 import { RelayLogo } from '@/components/common/RelayLogo';
 import { Badge } from '@/components/ui/badge';
@@ -35,9 +37,11 @@ import {
 import type { RelayAccount, RelayProfile } from '@/types';
 
 export type TabType =
+  | 'home'
   | 'capture'
   | 'meetings'
   | 'scribble'
+  | 'graph'
   | 'files'
   | 'captures'
   | 'talkback'
@@ -83,6 +87,13 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
 
   const navItems = [
     {
+      id: 'home' as TabType,
+      label: 'Home',
+      icon: Home,
+      color: 'text-primary',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+    {
       id: 'capture' as TabType,
       label: 'Voice Note',
       icon: Mic,
@@ -101,6 +112,13 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       label: 'Scribbles',
       icon: Sparkles,
       color: 'text-amber-500',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+    {
+      id: 'graph' as TabType,
+      label: 'Knowledge Graph',
+      icon: Network,
+      color: 'text-blue-500',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {

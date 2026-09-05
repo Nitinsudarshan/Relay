@@ -1,22 +1,22 @@
 import React, { useState, useEffect } from 'react';
+import { HomePage } from './components/home/HomePage';
 import { VoiceNotePage } from './components/voicenotes/VoiceNotePage';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
 import { MeetingsV2View } from './components/meetings_v2/MeetingsV2View';
 import { TalkbackPage } from './components/talkback/TalkbackPage';
 import { FilesPage } from './components/files/FilesPage';
 import { CapturesPage } from './components/captures/CapturesPage';
+import { KnowledgeGraphPage } from './components/knowledge/KnowledgeGraphPage';
 
 import { ProviderSettings, type SettingsSection } from './components/settings/ProviderSettings';
 import { DiagnosticsPage } from './components/diagnostics/DiagnosticsPage';
 import { ThemeToggle } from './components/ThemeToggle';
-import { RelayLogo } from './components/common/RelayLogo';
 import { ChangelogModal } from './components/common/ChangelogModal';
 import { WelcomeModal } from './components/common/WelcomeModal';
 import { AccountExplanationModal } from './components/common/AccountExplanationModal';
-import { ProcessedPipelineResult, RelayAccount, RelayProfile, DeveloperSettings, AppSettings } from './types';
+import { RelayAccount, RelayProfile, DeveloperSettings, AppSettings } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   isPermissionGranted,
   requestPermission,
@@ -24,7 +24,6 @@ import {
 import { NativeSidebar } from './components/common/NativeSidebar';
 import {
   Mic,
-  Calendar,
   MessageCircle,
   Sparkles,
   FileText,
@@ -32,15 +31,20 @@ import {
   Sidebar as SidebarIcon,
   ChevronRight,
   Activity,
+  Globe,
+  Home,
+  Network,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from './components/common/PageHeader';
+import type { CaptureMethod } from './components/capture/CaptureHubPage';
 
 export type MainTabType =
+  | 'home'
   | 'capture'
   | 'meetings'
   | 'scribble'
+  | 'graph'
   | 'files'
   | 'captures'
   | 'talkback'
@@ -48,9 +52,11 @@ export type MainTabType =
   | 'settings';
 
 const TAB_LABELS: Record<MainTabType, string> = {
+  home: 'Home',
   capture: 'Voice Note',
   meetings: 'Meetings',
   scribble: 'Scribbles',
+  graph: 'Knowledge Graph',
   files: 'Files',
   captures: 'Captures',
   talkback: 'Talkback',
@@ -59,9 +65,15 @@ const TAB_LABELS: Record<MainTabType, string> = {
 };
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<MainTabType>('capture');
+  const [activeTab, setActiveTab] = useState<MainTabType>('home');
   const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
-  const [lastResult, setLastResult] = useState<ProcessedPipelineResult | null>(null);
+  /**
+   * A capture mode requested from Home. Scribbles opens straight onto it, and it
+   * is cleared by any other navigation so the Capture tab is not sticky.
+   */
+  const [scribbleCaptureMethod, setScribbleCaptureMethod] = useState<CaptureMethod | null>(null);
+  /** A scribble the Knowledge Graph asked the workspace to reveal. */
+  const [focusScribbleId, setFocusScribbleId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('0.9.0');
@@ -72,6 +84,29 @@ export const App: React.FC = () => {
   const [explanationOpen, setExplanationOpen] = useState(false);
 
 
+
+  /**
+   * Every tab change goes through here.
+   *
+   * A one-shot request from another surface — a capture mode from a Home card, a
+   * scribble the graph wants revealed — is cleared on the next navigation, so
+   * arriving at Scribbles from the sidebar never lands on someone else's intent.
+   */
+  const navigateTo = (
+    tab: MainTabType,
+    intent: {
+      captureMethod?: CaptureMethod;
+      focusScribbleId?: string;
+      section?: SettingsSection;
+    } = {},
+  ) => {
+    setActiveTab(tab);
+    setScribbleCaptureMethod(intent.captureMethod ?? null);
+    setFocusScribbleId(intent.focusScribbleId ?? null);
+    if (tab === 'settings') {
+      setSettingsSection(intent.section);
+    }
+  };
 
   const refreshAccountAndSettings = async () => {
     try {
@@ -124,6 +159,8 @@ export const App: React.FC = () => {
       if (typeof payload === 'string') {
         if (payload in TAB_LABELS) {
           setActiveTab(payload as MainTabType);
+          setScribbleCaptureMethod(null);
+          setFocusScribbleId(null);
           if (payload === 'settings') {
             setSettingsSection(undefined);
           }
@@ -132,6 +169,8 @@ export const App: React.FC = () => {
         const obj = payload as { tab?: MainTabType; section?: SettingsSection };
         if (obj.tab && obj.tab in TAB_LABELS) {
           setActiveTab(obj.tab);
+          setScribbleCaptureMethod(null);
+          setFocusScribbleId(null);
         }
         if (obj.section) {
           setSettingsSection(obj.section);
@@ -236,6 +275,20 @@ export const App: React.FC = () => {
 
   const renderHeroHeader = () => {
     switch (activeTab) {
+      case 'home': {
+        const name = profile?.display_name && profile.display_name !== 'Local User'
+          ? profile.display_name.split(' ')[0]
+          : null;
+        return (
+          <PageHeader
+            badge={{ label: 'Home', icon: Home, variant: 'emerald' }}
+            title={name ? 'Welcome back,' : 'Everything Relay'}
+            highlightText={name ? `${name}.` : 'has captured.'}
+            description="Start a capture, or pick up what you already said. Every count below is read from your local vault."
+            glowColor="emerald"
+          />
+        );
+      }
       case 'capture':
         return (
           <PageHeader
@@ -262,7 +315,27 @@ export const App: React.FC = () => {
             badge={{ label: 'Knowledge Layer', icon: Sparkles, variant: 'default' }}
             title="Connected thoughts,"
             highlightText="living knowledge."
-            description="Capture atomic thoughts, connect related ideas, and explore your Obsidian-compatible knowledge graph."
+            description="Capture atomic thoughts, connect related ideas, and keep every source they came from."
+            glowColor="primary"
+          />
+        );
+      case 'graph':
+        return (
+          <PageHeader
+            badge={{ label: 'Knowledge Layer', icon: Network, variant: 'default' }}
+            title="How everything"
+            highlightText="connects."
+            description="Scribbles, topics, entities and sources as one Obsidian-compatible graph. Drag to rearrange, double-click a thought to open it in Scribbles."
+            glowColor="primary"
+          />
+        );
+      case 'captures':
+        return (
+          <PageHeader
+            badge={{ label: 'Web Capture', icon: Globe, variant: 'default' }}
+            title="Pages and conversations,"
+            highlightText="as text you own."
+            description="Captured pages are stored as external source material with their provenance — never as instructions to Relay's AI."
             glowColor="primary"
           />
         );
@@ -316,12 +389,7 @@ export const App: React.FC = () => {
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
         activeTab={activeTab}
-        setActiveTab={(tab) => {
-          setActiveTab(tab);
-          if (tab === 'settings') {
-            setSettingsSection(undefined);
-          }
-        }}
+        setActiveTab={(tab) => navigateTo(tab)}
         account={account}
         profile={profile}
         appVersion={appVersion}
@@ -385,34 +453,56 @@ export const App: React.FC = () => {
         <main className="flex-1 min-w-0 p-4 md:p-6 overflow-y-auto flex flex-col bg-background">
           {renderHeroHeader()}
 
+          {activeTab === 'home' && (
+            <HomePage
+              account={account}
+              settings={settings}
+              appVersion={appVersion}
+              onNavigate={(tab) => navigateTo(tab)}
+              onStartScribbleCapture={(method) =>
+                navigateTo('scribble', { captureMethod: method })
+              }
+              onOpenSettings={(section) => navigateTo('settings', { section })}
+              onOpenChangelog={() => setChangelogOpen(true)}
+            />
+          )}
+
           {activeTab === 'capture' && <VoiceNotePage />}
 
           {activeTab === 'meetings' && <MeetingsV2View />}
 
-          {activeTab === 'scribble' && <ScribbleViewer />}
+          {activeTab === 'scribble' && (
+            <ScribbleViewer
+              initialCaptureMethod={scribbleCaptureMethod}
+              focusScribbleId={focusScribbleId}
+            />
+          )}
 
-          {activeTab === 'files' && <FilesPage onNavigateTab={(tab) => setActiveTab(tab as MainTabType)} />}
+          {activeTab === 'graph' && (
+            <KnowledgeGraphPage
+              onOpenScribble={(id) => navigateTo('scribble', { focusScribbleId: id })}
+            />
+          )}
+
+          {activeTab === 'files' && <FilesPage onNavigateTab={(tab) => navigateTo(tab as MainTabType)} />}
 
           {activeTab === 'captures' && (
             <CapturesPage
-              onNavigateTab={(tab) => setActiveTab(tab as MainTabType)}
-              onOpenCaptureSettings={() => {
-                setSettingsSection('capture');
-                setActiveTab('settings');
-              }}
+              onNavigateTab={(tab) => navigateTo(tab as MainTabType)}
+              onOpenCaptureSettings={() => navigateTo('settings', { section: 'capture' })}
             />
           )}
 
           {activeTab === 'talkback' && <TalkbackPage />}
 
           {activeTab === 'diagnostics' && (
-            <DiagnosticsPage onNavigateTab={(tab) => setActiveTab(tab as MainTabType)} />
+            <DiagnosticsPage onNavigateTab={(tab) => navigateTo(tab as MainTabType)} />
           )}
 
           {activeTab === 'settings' && (
             <ProviderSettings
               initialSection={settingsSection}
-              onNavigateTab={(tab) => setActiveTab(tab as MainTabType)}
+              onNavigateTab={(tab) => navigateTo(tab as MainTabType)}
             />
           )}
         </main>
