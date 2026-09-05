@@ -85,12 +85,20 @@ export const MeetingSpeakerEvidenceInspector: React.FC<MeetingSpeakerEvidenceIns
         </button>
       </div>
 
-      {/* Identity State */}
-      <div className="flex items-center justify-between">
-        <span className="text-muted-foreground font-medium">Identity Status</span>
-        <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[11px] font-medium ${badge.bg} ${badge.text}`}>
-          {badge.icon}
-          <span>{badge.label}</span>
+      {/* Speech Coverage & Identity Confidence */}
+      <div className="space-y-2 bg-background/50 rounded-md p-2.5 border border-border/40">
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground font-medium">Speech Coverage</span>
+          <span className="font-mono text-[11px] font-semibold text-foreground">
+            {speaker.segment_count} segment{speaker.segment_count === 1 ? '' : 's'}
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground font-medium">Identity Confidence</span>
+          <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[11px] font-medium ${badge.bg} ${badge.text}`}>
+            {badge.icon}
+            <span>{badge.label}</span>
+          </div>
         </div>
       </div>
 

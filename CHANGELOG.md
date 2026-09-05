@@ -1,5 +1,27 @@
 # Relay — Changelog
 
+## [0.39.0] - 2026-09-05
+
+### Meetings Intelligence v2.2: Multilingual Hinglish Preservation, Context Poisoning Defense, Post-Hoc Speaker Attribution, and Resilient Summary Floor
+
+**Type**: minor — end-to-end quality and correctness overhaul of the Meetings Intelligence pipeline resolving real-world conversational failures across multilingual transcription, prompt context carry poisoning, acoustic speaker attribution, and summary floor degradation (`native/src-tauri/src/meetings_v2/*`, `native/src/components/meetings_v2/*`, `native/src/components/settings/ProviderSettings.tsx`).
+
+#### Fixes
+
+- **Multilingual Hinglish & Code-Switching Preservation (`native/src-tauri/src/meetings_v2/worker.rs`, `native/src-tauri/src/meetings_v2/live_stt.rs`)**: Removed the hardcoded fallback override that silently forced `whisper_language = Some("en")` whenever language was unspecified or set to "auto". The pipeline now directly passes `whisper_language: None` to Whisper's native multilingual decoding for autonomous code-switching detection, while enforcing `translate: false` to guarantee that raw transcript represents spoken speech verbatim without silent English normalization.
+- **Context Carry & Hallucination Loop Protection (`native/src-tauri/src/meetings_v2/transcript_health.rs`, `native/src-tauri/src/meetings_v2/processing/normalize.rs`)**: Hardened prompt safety gating (`is_safe_as_prompt`) to detect and reject repeating sentence loops (up to 16-word phrases repeating $\ge 2$ times), preventing chunk $N$ hallucinations from poisoning chunk $N+1$ indefinitely. Expanded normalizer loop collapsing (`MAX_PHRASE_REPEAT_LEN = 16`) to collapse 11-word repeated sentence loops without losing semantic context.
+- **Post-Hoc Speaker Attribution & Self-Voice Anchor Integration (`native/src-tauri/src/meetings_v2/diarize/mod.rs`, `native/src-tauri/src/meetings_v2/processing/mod.rs`, `native/src-tauri/src/meetings_v2/processing/speakers.rs`)**: Fixed disconnected self-voice anchor in post-hoc processing pipeline by capturing `self_voice_anchor` from clean microphone audio during diarization and wiring it directly into `attribute_speakers_with_evidence`. Relaxed `LOCAL_MIC_SHARE_MINIMUM` from 0.50 to 0.30 and margin from 0.20 to 0.10 to prevent laptop speaker acoustic bleed from misclassifying the local user as remote participants. Added protective handling for short interjections ("yes", "no", "okay", "haan", "hmm") on mixed/unknown channels to keep them unresolved (`None`) rather than misattributing them to remote speakers.
+- **Unbreakable Deterministic Summary Floor (`native/src-tauri/src/meetings_v2/processing/summarize.rs`, `native/src-tauri/src/meetings_v2/processing/mod.rs`, `native/src/components/meetings_v2/MeetingProcessingStatus.tsx`)**: Re-engineered deterministic markdown generation (`render_markdown`) to render all available structured facts (Decisions, Action Items with due dates/owners, Risks & Blockers, Open Questions) even when unstructured discussion points are empty. Guaranteed that an LLM failure or empty response marks `summary_stage.status = Success` with verified deterministic fallback prose, preventing the UI from displaying "Summary unavailable".
+
+#### Features
+
+- **Multilingual Settings Option (`native/src/components/settings/ProviderSettings.tsx`)**: Added `Auto-detect / Multilingual (Hinglish)` option to STT language settings with explicit informational notice explaining that multilingual speech is transcribed verbatim without translation.
+- **Honest Speaker Metrics & Diagnostics UI (`native/src/components/meetings_v2/MeetingConversationTab.tsx`, `native/src/components/meetings_v2/MeetingSpeakerEvidenceInspector.tsx`, `native/src/components/meetings_v2/MeetingProcessingStatus.tsx`)**: Separated **Speech Coverage** percentage from **Identity Confidence** levels, clearly communicating attribution coverage vs identity certainty without false 99% claims. Surfaced fallback provenance badge ("Summary generated locally from verified meeting facts") when local LLM is unavailable or unconfigured.
+
+#### Testing
+
+- **Golden Meeting #1 & Synthetic Adversarial Regression Suite (`native/src-tauri/src/meetings_v2/intelligence_golden_meeting_tests.rs`)**: Added comprehensive test harness covering Golden Meeting #1 (~3m46s Hinglish two-speaker meeting) and Adversarial Cases A–T, asserting: multilingual auto-detection (`whisper_language == None`, `translate == false`), Hinglish preservation without translation, 11-word repeated sentence loop collapsing & prompt blocking, balanced speaker coverage within [15%, 30%], deterministic summary generation under empty LLM responses, short interjection non-misattribution, 30s chunk boundary crossing continuity, and in-person room mic attribution safety. All 528 `meetings_v2` unit tests and 461 frontend vitest tests pass cleanly.
+
 ## [0.38.0] - 2026-09-05
 
 ### Meetings Intelligence v2.1: Speaker Intelligence Accuracy, Reusable Speaker Embeddings, and Multi-Signal Evidence Fusion

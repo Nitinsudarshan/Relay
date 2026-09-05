@@ -228,6 +228,7 @@ fn empty_diarization(expected_speakers: Option<usize>) -> Diarization {
             embedding_duration_ms: 0,
         },
         assignments: Vec::new(),
+        self_voice_anchor: None,
     }
 }
 
@@ -290,6 +291,7 @@ fn channel_only(store: &SessionStore, session_id: &str) -> Result<Diarization, S
             embedding_duration_ms: 0,
         },
         assignments,
+        self_voice_anchor: None,
     })
 }
 
@@ -401,6 +403,7 @@ separated. The transcript and summary are unaffected."
             embedding_duration_ms: 0,
         },
         assignments,
+        self_voice_anchor: None,
     })
 }
 

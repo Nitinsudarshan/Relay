@@ -589,11 +589,23 @@ pub fn render_markdown(facts: &MeetingFacts, speakers: &[Speaker], mode: Summary
         }
     ));
 
-    if facts.key_points.is_empty() && facts.topics.is_empty() {
+    if facts.key_points.is_empty()
+        && facts.topics.is_empty()
+        && facts.decisions.is_empty()
+        && facts.action_items.is_empty()
+        && facts.risks.is_empty()
+        && facts.open_questions.is_empty()
+    {
         out.push_str(
-            "_No summary could be derived from this recording. The raw transcript is available._\n",
+            "_No structured summary could be derived from this recording. The raw transcript is available._\n",
         );
         return out.trim_end().to_string();
+    }
+
+    if facts.key_points.is_empty() && facts.topics.is_empty() {
+        out.push_str(
+            "_No main discussion points could be extracted. The verified meeting facts and raw transcript are available below._\n\n",
+        );
     }
 
     if !facts.topics.is_empty() {

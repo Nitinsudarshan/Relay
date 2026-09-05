@@ -73,9 +73,10 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
   const label = isBusy ? 'Processing meeting…' : headline.label;
 
   const summaryStage = processing?.stages.summary;
-  const summaryFailed = summaryStage?.status === 'FAILED';
   const summary = processing?.summary;
-  const usedFallback = summary?.fallback_used === true;
+  const hasMarkdown = !!summary?.markdown && summary.markdown.trim().length > 0;
+  const summaryFailed = summaryStage?.status === 'FAILED' && !hasMarkdown;
+  const usedFallback = summary?.fallback_used === true || (hasMarkdown && summary?.deterministic === true);
   const modelRejected = summary?.provider_output_status === 'REJECTED';
 
   return (
@@ -102,7 +103,7 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
         {summary && (
           <span className="text-[10px] font-mono text-muted-foreground ml-auto">
             {summary.mode.toLowerCase()} ·{' '}
-            {usedFallback ? 'local intelligence' : summary.model} · v
+            {usedFallback ? 'local verified facts' : summary.model} · v
             {summary.processing_version}
           </span>
         )}
@@ -127,19 +128,20 @@ export const MeetingProcessingStatus: React.FC<MeetingProcessingStatusProps> = (
       )}
 
       {!summaryFailed && usedFallback && (
-        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span>Summary generated locally</span>
-          {modelRejected ? (
-            <span className="text-muted-foreground/80">· AI enhancement was unavailable</span>
-          ) : summaryStage?.error ? (
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
+          <span className="font-medium text-foreground/90">Summary generated locally from verified meeting facts</span>
+          {summaryStage?.error ? (
+            <span className="text-muted-foreground/80">· AI enhancement was unavailable ({summaryStage.error})</span>
+          ) : modelRejected ? (
             <span className="text-muted-foreground/80">· AI enhancement was unavailable</span>
           ) : null}
           {onRetry && (
             <button
               onClick={onRetry}
-              className="text-primary hover:underline font-medium cursor-pointer ml-1"
+              className="text-primary hover:underline font-medium cursor-pointer ml-1 inline-flex items-center gap-1"
             >
-              Try with AI
+              <RefreshCw className="w-2.5 h-2.5" />
+              <span>Try with AI</span>
             </button>
           )}
         </div>

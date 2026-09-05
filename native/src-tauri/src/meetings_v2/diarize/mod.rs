@@ -66,15 +66,13 @@ const MIN_UTTERANCE_SECONDS: f64 = 0.8;
 /// Share of an utterance's energy that must come from the microphone before a
 /// cluster can be the local user.
 ///
-/// Half, so the microphone is genuinely the dominant source for that voice
-/// rather than merely the loudest among quiet ones.
-const LOCAL_MIC_SHARE_MINIMUM: f32 = 0.5;
+/// Calibrated to 0.30 to account for laptop speaker leakage into the microphone,
+/// quiet microphone capture, or distant user positioning while still requiring
+/// a distinct margin over the remote speaker.
+const LOCAL_MIC_SHARE_MINIMUM: f32 = 0.30;
 
 /// How far ahead of the next cluster the local user's must sit.
-///
-/// Without a margin, two clusters differing in the third decimal would still
-/// produce a confident "Me", and the wrong one half the time.
-const LOCAL_MIC_SHARE_MARGIN: f32 = 0.15;
+const LOCAL_MIC_SHARE_MARGIN: f32 = 0.10;
 
 /// How a diarization run turned out, kept alongside the derived model so the UI
 /// can explain the roster it is showing.
@@ -176,6 +174,8 @@ pub struct VoiceAssignment {
 pub struct Diarization {
     pub report: DiarizationReport,
     pub assignments: Vec<VoiceAssignment>,
+    #[serde(default)]
+    pub self_voice_anchor: Option<SelfVoiceAnchor>,
 }
 
 impl Diarization {
@@ -259,6 +259,8 @@ The transcript and summary are unaffected."
     let mut embedding_duration_ms = 0u64;
     let mut fallback_used = false;
 
+    let mut anchor_samples: Vec<(Vec<f32>, f64)> = Vec::new();
+
     for chunk_index in chunk_indices {
         let path = store.chunk_path(session_id, chunk_index);
         let samples = match read_chunk_samples(&path) {
@@ -275,6 +277,16 @@ The transcript and summary are unaffected."
                 skipped += 1;
                 continue;
             };
+
+            // Collect anchor samples from confident microphone speech if not in-person
+            if !assume_in_person && span.duration_s >= self_voice::MIN_ANCHOR_SAMPLE_SECONDS {
+                if let Some(share) = span.mic_share {
+                    if share >= 0.60 {
+                        anchor_samples.push((slice.to_vec(), span.duration_s));
+                    }
+                }
+            }
+
             match features::extract(slice, 16_000) {
                 Some(f) => {
                     let emb_start = std::time::Instant::now();
@@ -303,6 +315,16 @@ The transcript and summary are unaffected."
         }
     }
 
+    let self_voice_anchor = if !assume_in_person && !anchor_samples.is_empty() {
+        let sample_refs: Vec<(&[f32], f64)> = anchor_samples
+            .iter()
+            .map(|(s, d)| (s.as_slice(), *d))
+            .collect();
+        SelfVoiceAnchor::build_from_samples(&sample_refs, assume_in_person)
+    } else {
+        None
+    };
+
     let clustering = cluster::cluster(&utterances, expected_speakers);
     let placed = clustering
         .assignments
@@ -315,7 +337,14 @@ The transcript and summary are unaffected."
         // picking the loudest would be a guess dressed as a finding.
         None
     } else {
-        local_cluster_from_mic_share(&clustering, &mic_shares)
+        let from_mic = local_cluster_from_mic_share(&clustering, &mic_shares);
+        if from_mic.is_some() {
+            from_mic
+        } else if let Some(ref anchor) = self_voice_anchor {
+            local_cluster_from_anchor(anchor, &clustering, &utterances)
+        } else {
+            None
+        }
     };
 
     let report = DiarizationReport {
@@ -358,7 +387,61 @@ The transcript and summary are unaffected."
                 distance: a.distance,
             })
             .collect(),
+        self_voice_anchor,
     })
+}
+
+/// Identifies the local user's cluster by matching against the meeting-local self-voice anchor.
+fn local_cluster_from_anchor(
+    anchor: &SelfVoiceAnchor,
+    clustering: &cluster::Clustering,
+    utterances: &[cluster::Utterance],
+) -> Option<usize> {
+    if !anchor.has_samples() || clustering.cluster_count == 0 {
+        return None;
+    }
+
+    let mut cluster_scores: HashMap<usize, (f32, usize)> = HashMap::new();
+    for assignment in &clustering.assignments {
+        let Some(cluster_idx) = assignment.cluster else {
+            continue;
+        };
+        let Some(utt) = utterances.iter().find(|u| u.id == assignment.id) else {
+            continue;
+        };
+
+        let sim = if let Some(ref emb) = utt.embedding {
+            anchor.compare_embedding(&emb.vector).unwrap_or(0.0)
+        } else if let Some((_, dist)) = anchor.compare(&utt.features) {
+            (1.0 - (dist / 1.5)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        let entry = cluster_scores.entry(cluster_idx).or_insert((0.0, 0));
+        entry.0 += sim;
+        entry.1 += 1;
+    }
+
+    let mut ranked: Vec<(usize, f32)> = cluster_scores
+        .into_iter()
+        .filter(|(_, (_, count))| *count > 0)
+        .map(|(cluster_idx, (sum, count))| (cluster_idx, sum / count as f32))
+        .collect();
+
+    if ranked.is_empty() {
+        return None;
+    }
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let (best_index, best_sim) = ranked[0];
+    if best_sim < 0.65 {
+        return None;
+    }
+    match ranked.get(1) {
+        Some(&(_, runner_up)) if best_sim - runner_up < 0.08 => None,
+        _ => Some(best_index),
+    }
 }
 
 /// The cluster whose utterances the microphone heard most.
@@ -1087,6 +1170,7 @@ mod tests {
                     distance: 0.0,
                 },
             ],
+            self_voice_anchor: None,
         };
 
         assert_eq!(diarization.cluster_for("seg_00000_001"), Some(1));

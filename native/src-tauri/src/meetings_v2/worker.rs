@@ -358,17 +358,13 @@ impl TranscriptionWorker {
         decoding_config: WhisperDecodingConfig,
         app: Option<AppHandle>,
     ) -> Self {
-        // Enforce explicit language (defaulting to "en") so Whisper never
-        // hallucinates random language codes (e.g. "kn", "la") or token
-        // repetition loops on background hiss.
-        let effective_lang_config = if language_config.whisper_language.is_none() {
-            SttLanguageConfig {
-                whisper_language: Some("en".to_string()),
-                translate: false,
-            }
-        } else {
-            language_config
-        };
+        // Respect the user's language configuration directly. When None, Whisper's
+        // native language auto-detection operates across chunks, preserving
+        // multilingual speech, Hindi, and code-switched Hinglish without forcing
+        // English or triggering translation.
+        let mut effective_lang_config = language_config;
+        // Invariant: Meeting transcription NEVER translates.
+        effective_lang_config.translate = false;
 
         let handle = std::thread::spawn(move || {
             let model_path_str = whisper_model_path.as_ref().and_then(|p| p.to_str());

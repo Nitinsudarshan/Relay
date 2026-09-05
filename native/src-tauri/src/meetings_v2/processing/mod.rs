@@ -221,13 +221,14 @@ impl MeetingProcessor {
         // every WAV on each prepare, unless the transcript has changed under it.
         let diarization = self.resolve_diarization(meeting_id, options, &normalized.segments);
 
+        let self_voice = diarization.as_ref().and_then(|d| d.self_voice_anchor.as_ref());
         let (mut roster, speaker_assignments) = speakers::attribute_speakers_with_evidence(
             &mut normalized.segments,
             speakers::AttributionInput {
                 existing: &existing_speakers,
                 mode: options.speaker_identification,
                 diarization: diarization.as_ref(),
-                self_voice: None,
+                self_voice,
                 calendar_attendees,
                 assume_in_person: options.assume_in_person,
             },
@@ -773,8 +774,12 @@ audio are unaffected."
 
         // The stage's verdict is on the prose actually shown. A rejected draft
         // that the fallback replaced is recorded, not counted as a failure.
+        // The deterministic summary floor ensures there is always a verified summary;
+        // an LLM returning empty or failing is an enhancement failure, never a stage failure.
         let summary_stage = StageState {
-            status: if validation.has_errors() {
+            status: if fallback_used {
+                StageStatus::Success
+            } else if validation.has_errors() {
                 StageStatus::Failed
             } else {
                 StageStatus::Success

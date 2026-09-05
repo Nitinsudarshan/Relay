@@ -75,6 +75,7 @@ const DEFAULT_LANGUAGE_SETTINGS: LanguageSettings = {
 };
 
 const WHISPER_SUPPORTED_LANGUAGES = [
+  { code: 'auto', name: 'Auto-detect / Multilingual (Hinglish)' },
   { code: 'en', name: 'English' },
   { code: 'hi', name: 'Hindi' },
   { code: 'kn', name: 'Kannada' },

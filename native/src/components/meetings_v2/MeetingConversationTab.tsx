@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { AudioLines, Check, GitMerge, Info, Pencil, Play, RefreshCw, Users, X } from 'lucide-react';
 import type { Conversation, Diarization, Speaker } from '../../types';
 import { formatTimestamp, speakerLabel } from './meetingProcessing';
@@ -46,7 +46,8 @@ const ORIGIN_MARKS: Record<Speaker['origin'], { mark: string; title: string }> =
 const SpeakerRow: React.FC<{
   speaker: Speaker;
   otherSpeakers: Speaker[];
-  onRename: (displayName: string | null) => void;
+  coveragePercent?: number;
+  onRename: (newName: string | null) => void;
   onMerge?: (targetSpeakerId: string) => void;
   onInspect?: () => void;
   isInspected?: boolean;
@@ -54,6 +55,7 @@ const SpeakerRow: React.FC<{
 }> = ({
   speaker,
   otherSpeakers,
+  coveragePercent,
   onRename,
   onMerge,
   onInspect,
@@ -146,11 +148,16 @@ const SpeakerRow: React.FC<{
           setEditing(true);
         }}
         className="group flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card hover:bg-accent border border-border text-xs text-foreground transition-colors cursor-pointer"
-        title={`Rename ${speaker.fallback_label} (id: ${speaker.id}) — ${origin.title}`}
+        title={`Rename ${speaker.fallback_label} (id: ${speaker.id}) — ${coveragePercent != null ? `${coveragePercent}% speech coverage · ` : ''}${origin.title}`}
       >
         <span>
           {speaker.display_name?.trim() || speaker.fallback_label}
         </span>
+        {coveragePercent != null && (
+          <span className="text-[10px] text-muted-foreground font-mono">
+            {coveragePercent}%
+          </span>
+        )}
         {origin.mark && (
           <span
             className={`text-[10px] font-mono ${
@@ -249,6 +256,11 @@ export const MeetingConversationTab: React.FC<MeetingConversationTabProps> = ({
   const expected =
     Number.isFinite(parsedExpected) && parsedExpected > 0 ? parsedExpected : null;
 
+  const totalSegments = useMemo(
+    () => speakers.reduce((sum, s) => sum + s.segment_count, 0),
+    [speakers]
+  );
+
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-4">
       {speakers.length > 0 && (
@@ -257,24 +269,31 @@ export const MeetingConversationTab: React.FC<MeetingConversationTabProps> = ({
             <Users className="w-3.5 h-3.5" />
             Speakers
           </span>
-          {speakers.map((speaker) => (
-            <SpeakerRow
-              key={speaker.id}
-              speaker={speaker}
-              otherSpeakers={speakers.filter((s) => s.id !== speaker.id)}
-              isRenaming={isRenaming}
-              onRename={(name) => onRenameSpeaker(speaker.id, name)}
-              onMerge={
-                onMergeSpeaker
-                  ? (targetId) => onMergeSpeaker(speaker.id, targetId)
-                  : undefined
-              }
-              onInspect={() =>
-                setInspectedSpeakerId((cur) => (cur === speaker.id ? null : speaker.id))
-              }
-              isInspected={inspectedSpeakerId === speaker.id}
-            />
-          ))}
+          {speakers.map((speaker) => {
+            const coveragePercent =
+              totalSegments > 0
+                ? Math.round((speaker.segment_count / totalSegments) * 100)
+                : undefined;
+            return (
+              <SpeakerRow
+                key={speaker.id}
+                speaker={speaker}
+                otherSpeakers={speakers.filter((s) => s.id !== speaker.id)}
+                coveragePercent={coveragePercent}
+                isRenaming={isRenaming}
+                onRename={(name) => onRenameSpeaker(speaker.id, name)}
+                onMerge={
+                  onMergeSpeaker
+                    ? (targetId) => onMergeSpeaker(speaker.id, targetId)
+                    : undefined
+                }
+                onInspect={() =>
+                  setInspectedSpeakerId((cur) => (cur === speaker.id ? null : speaker.id))
+                }
+                isInspected={inspectedSpeakerId === speaker.id}
+              />
+            );
+          })}
 
           <div className="flex items-center gap-1.5 ml-auto">
             <input

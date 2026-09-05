@@ -37,9 +37,9 @@ const ISOLATED_FILLERS: &[&str] = &[
 ];
 
 /// Longest repeated phrase length (in words) the loop detector looks for.
-/// Whisper's repetition loops are short; searching further mostly finds
-/// legitimate repetition for emphasis.
-const MAX_PHRASE_REPEAT_LEN: usize = 6;
+/// Whisper's repetition loops can span full sentences (up to 16 words);
+/// searching up to 16 catches full sentence loops while preserving single-occurrence speech.
+const MAX_PHRASE_REPEAT_LEN: usize = 16;
 
 /// Minimum token length before a glossary term is matched by edit distance
 /// rather than exactly. Short tokens are far too easy to "correct" into
@@ -509,6 +509,13 @@ mod tests {
         assert_eq!(
             collapse_repeated_phrases("we should ship it we should ship it we should ship it"),
             "we should ship it"
+        );
+        // Long sentence repetition loop (regression for meeting failure)
+        assert_eq!(
+            collapse_repeated_phrases(
+                "If you are schedule for Monday then you can sit here. If you are schedule for Monday then you can sit here."
+            ),
+            "If you are schedule for Monday then you can sit here."
         );
     }
 

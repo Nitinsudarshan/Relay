@@ -33,5 +33,7 @@ pub use types::{
 pub mod intelligence_tests;
 #[cfg(test)]
 pub mod intelligence_adversarial_tests;
+#[cfg(test)]
+pub mod intelligence_golden_meeting_tests;
 
 

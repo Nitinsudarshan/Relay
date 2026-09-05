@@ -58,16 +58,8 @@ impl LiveSttWorker {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = stop_flag.clone();
 
-        // Pin the language (defaulting to English) so short windows cannot send
-        // Whisper's language detector somewhere unrelated on background hiss.
-        let effective_lang_config = if language_config.whisper_language.is_none() {
-            SttLanguageConfig {
-                whisper_language: Some("en".to_string()),
-                translate: false,
-            }
-        } else {
-            language_config
-        };
+        let mut effective_lang_config = language_config;
+        effective_lang_config.translate = false;
 
         let handle = std::thread::spawn(move || {
             run_live_loop(

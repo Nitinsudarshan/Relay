@@ -58,7 +58,8 @@ const NOISE_FLOOR_PERCENTILE: f64 = 0.10;
 pub const MIN_VOICED_SECONDS: f64 = 0.5;
 
 /// Longest phrase, in words, the loop detector looks for.
-const MAX_LOOP_PHRASE_WORDS: usize = 8;
+/// Expanded to 16 words so full repeated hallucinated sentences are caught.
+const MAX_LOOP_PHRASE_WORDS: usize = 16;
 
 /// How many adjacent repeats of one phrase constitute a loop.
 const LOOP_MIN_REPEATS: usize = 3;
@@ -523,7 +524,11 @@ pub fn is_safe_as_prompt(text: &str) -> bool {
         return true;
     }
     if let Some(hit) = dominant_repeat(text) {
-        if hit.repeats >= 2 && hit.covered_words as f64 / words as f64 >= PROMPT_MAX_LOOP_COVERAGE {
+        let phrase_words = hit.phrase.split_whitespace().count();
+        if hit.repeats >= 2
+            && (hit.covered_words as f64 / words as f64 >= PROMPT_MAX_LOOP_COVERAGE
+                || phrase_words >= 3)
+        {
             return false;
         }
     }

@@ -210,6 +210,22 @@ pub fn attribute_speakers_with_evidence(
     (speakers, assignments)
 }
 
+const SHORT_INTERJECTIONS: &[&str] = &[
+    "yes", "no", "okay", "ok", "haan", "yeah", "yep", "right", "hmm", "sure", "nah", "nahi", "accha", "theek",
+];
+
+fn is_short_interjection(text: &str) -> bool {
+    let words: Vec<&str> = text
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()))
+        .filter(|w| !w.is_empty())
+        .collect();
+    if words.is_empty() || words.len() > 2 {
+        return false;
+    }
+    words.iter().all(|w| SHORT_INTERJECTIONS.contains(&w.to_lowercase().as_str()))
+}
+
 /// Resolves a segment into speaker id, assignment method, confidence, confidence level, and evidence.
 #[allow(clippy::too_many_arguments)]
 fn resolve_segment_with_evidence(
@@ -245,6 +261,36 @@ fn resolve_segment_with_evidence(
     } else {
         Some(calendar_names.join(", "))
     };
+
+    // Short interjections ("yes", "no", "okay", "haan"):
+    // Acoustic features for a short isolated token are insufficient for reliable clustering.
+    // If channel is mixed or unknown, do not guess a remote speaker cluster.
+    if is_short_interjection(text) && matches!(channel, SegmentChannel::Mixed | SegmentChannel::Unknown) {
+        let is_self_match = if let (Some(anchor), Some(c)) = (self_voice, cluster) {
+            anchor.has_samples() && local_clusters.contains(&c)
+        } else {
+            false
+        };
+
+        if !is_self_match {
+            return (
+                None,
+                SpeakerAssignmentMethod::Unknown,
+                0.0,
+                Some(SpeakerConfidenceLevel::Unknown),
+                SpeakerEvidence {
+                    channel: Some(channel.as_str().to_string()),
+                    cluster_id: cluster,
+                    similarity: None,
+                    notes: Some("Short interjection with insufficient channel/acoustic evidence left unresolved".to_string()),
+                    calendar_candidate: calendar_str,
+                    contextual_mention: None,
+                    temporal_consistency: None,
+                    candidate_scores: Vec::new(),
+                },
+            );
+        }
+    }
 
     // 1. In-person meeting: Room mic is NOT assumed to be local user
     if assume_in_person {
@@ -986,6 +1032,7 @@ mod tests {
                     distance: 0.2,
                 })
                 .collect(),
+            self_voice_anchor: None,
         }
     }
 
