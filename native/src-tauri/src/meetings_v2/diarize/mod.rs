@@ -259,7 +259,7 @@ The transcript and summary are unaffected."
     let mut embedding_duration_ms = 0u64;
     let mut fallback_used = false;
 
-    let mut anchor_samples: Vec<(Vec<f32>, f64)> = Vec::new();
+    let mut anchor_samples: Vec<(Vec<f32>, f64, f32)> = Vec::new();
 
     for chunk_index in chunk_indices {
         let path = store.chunk_path(session_id, chunk_index);
@@ -281,8 +281,8 @@ The transcript and summary are unaffected."
             // Collect anchor samples from confident microphone speech if not in-person
             if !assume_in_person && span.duration_s >= self_voice::MIN_ANCHOR_SAMPLE_SECONDS {
                 if let Some(share) = span.mic_share {
-                    if share >= 0.60 {
-                        anchor_samples.push((slice.to_vec(), span.duration_s));
+                    if share >= self_voice::MIN_ANCHOR_MIC_SHARE {
+                        anchor_samples.push((slice.to_vec(), span.duration_s, share));
                     }
                 }
             }
@@ -316,9 +316,11 @@ The transcript and summary are unaffected."
     }
 
     let self_voice_anchor = if !assume_in_person && !anchor_samples.is_empty() {
-        let sample_refs: Vec<(&[f32], f64)> = anchor_samples
+        let mut sorted_samples = anchor_samples;
+        sorted_samples.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        let sample_refs: Vec<(&[f32], f64)> = sorted_samples
             .iter()
-            .map(|(s, d)| (s.as_slice(), *d))
+            .map(|(s, d, _)| (s.as_slice(), *d))
             .collect();
         SelfVoiceAnchor::build_from_samples(&sample_refs, assume_in_person)
     } else {

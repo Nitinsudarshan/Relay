@@ -24,6 +24,12 @@ pub const MIN_ANCHOR_SAMPLES: usize = 2;
 /// Minimum total voiced seconds required across all anchor samples.
 pub const MIN_TOTAL_ANCHOR_SECONDS: f64 = 2.5;
 
+/// Minimum mic share threshold to consider a sample as candidate local speech.
+/// Under laptop speaker acoustic leakage and call background noise, local speech
+/// typically measures mic_share in 0.30..=0.90, whereas remote/system speech
+/// leaking into the laptop mic stays strictly below 0.20.
+pub const MIN_ANCHOR_MIC_SHARE: f32 = 0.30;
+
 /// Maximum distance in classical feature space to count as a possible match.
 pub const SELF_VOICE_MATCH_THRESHOLD: f32 = 0.65;
 
@@ -100,6 +106,7 @@ impl SelfVoiceAnchor {
         let mut qualifying_embeddings: Vec<Vec<f32>> = Vec::new();
         let mut total_duration = 0.0;
         let mut quality_accum = 0.0f32;
+        let mut base_embedding: Option<Vec<f32>> = None;
 
         for &(audio, duration_s) in samples {
             if duration_s < MIN_ANCHOR_SAMPLE_SECONDS {
@@ -108,12 +115,26 @@ impl SelfVoiceAnchor {
 
             if let Some(feat) = features::extract(audio, 16_000) {
                 if feat.is_usable() {
+                    let emb = provider.embed(audio, 16_000).ok().map(|e| e.vector);
+
+                    // Cross-sample consistency check: verify candidate sample matches the dominant
+                    // local acoustic register rather than incorporating outlier/leakage audio.
+                    if let (Some(ref base), Some(ref cand)) = (&base_embedding, &emb) {
+                        let sim = cosine_similarity(base, cand);
+                        if sim < 0.55 {
+                            // Inconsistent acoustic profile; reject sample from anchor
+                            continue;
+                        }
+                    } else if base_embedding.is_none() && emb.is_some() {
+                        base_embedding = emb.clone();
+                    }
+
                     qualifying_vectors.push(feat.vector());
                     total_duration += duration_s;
                     quality_accum += feat.voiced_fraction;
 
-                    if let Ok(emb) = provider.embed(audio, 16_000) {
-                        qualifying_embeddings.push(emb.vector);
+                    if let Some(e) = emb {
+                        qualifying_embeddings.push(e);
                     }
                 }
             }
@@ -304,5 +325,65 @@ mod tests {
             decision_diff.confidence,
             SelfVoiceConfidence::Low | SelfVoiceConfidence::Abstain
         ));
+    }
+
+    #[test]
+    fn test_stage_2_case_a_clean_local_microphone_speech_anchor_exists() {
+        let sample1 = generate_synthetic_voice(140.0, 1.5);
+        let sample2 = generate_synthetic_voice(140.0, 1.5);
+        let anchor = SelfVoiceAnchor::build_from_samples(&[(&sample1, 1.5), (&sample2, 1.5)], false);
+        assert!(anchor.is_some(), "Clean local microphone speech must produce a valid anchor");
+        let a = anchor.unwrap();
+        assert_eq!(a.sample_count, 2);
+        assert!(a.total_seconds >= 3.0);
+    }
+
+    #[test]
+    fn test_stage_2_case_b_only_remote_system_speech_no_anchor() {
+        // Obvious remote / system-only speech: zero microphone samples collected
+        let samples: Vec<(&[f32], f64)> = Vec::new();
+        let anchor = SelfVoiceAnchor::build_from_samples(&samples, false);
+        assert!(anchor.is_none(), "Zero mic speech samples must produce no anchor");
+    }
+
+    #[test]
+    fn test_stage_2_case_c_laptop_speaker_leakage_anchor_remains_local_dominant() {
+        let local1 = generate_synthetic_voice(140.0, 1.5);
+        let local2 = generate_synthetic_voice(140.0, 1.5);
+        // Acoustic leakage from remote speaker (different pitch/register 280 Hz)
+        let leakage = generate_synthetic_voice(280.0, 1.5);
+
+        // Candidate samples arrive with local-dominant first, followed by leakage
+        let anchor = SelfVoiceAnchor::build_from_samples(&[(&local1, 1.5), (&local2, 1.5), (&leakage, 1.5)], false);
+        assert!(anchor.is_some(), "Anchor must build successfully from local speech");
+        let a = anchor.unwrap();
+        // Leakage was rejected by acoustic consistency check
+        assert_eq!(a.sample_count, 2, "Remote leakage must not be incorporated into local anchor");
+
+        // Verify anchor matches local voice, not leakage
+        let cand_local = generate_synthetic_voice(140.0, 0.8);
+        let dec_local = a.evaluate_candidate(&cand_local, 0.8, Some(0.5));
+        assert!(dec_local.is_match);
+
+        let cand_remote = generate_synthetic_voice(280.0, 0.8);
+        let dec_remote = a.evaluate_candidate(&cand_remote, 0.2, Some(0.8));
+        assert!(!dec_remote.is_match);
+    }
+
+    #[test]
+    fn test_stage_2_case_d_very_short_local_utterances_only_insufficient_anchor() {
+        let short1 = generate_synthetic_voice(140.0, 0.5);
+        let short2 = generate_synthetic_voice(140.0, 0.6);
+        let short3 = generate_synthetic_voice(140.0, 0.4);
+        let anchor = SelfVoiceAnchor::build_from_samples(&[(&short1, 0.5), (&short2, 0.6), (&short3, 0.4)], false);
+        assert!(anchor.is_none(), "Very short utterances (<1.2s) must not form an anchor, resulting in abstention");
+    }
+
+    #[test]
+    fn test_stage_2_case_e_in_person_mode_no_local_user_inference() {
+        let sample1 = generate_synthetic_voice(140.0, 1.5);
+        let sample2 = generate_synthetic_voice(140.0, 1.5);
+        let anchor = SelfVoiceAnchor::build_from_samples(&[(&sample1, 1.5), (&sample2, 1.5)], true);
+        assert!(anchor.is_none(), "In-person mode must completely abstain from building a self-voice anchor");
     }
 }
