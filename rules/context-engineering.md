@@ -42,8 +42,9 @@ surfaces. See `.agents/rules/graphify.md`.
 ## Delegating
 
 - **Delegate heavy work to subagents.** The orchestrating session routes — it
-  should not itself be the thing doing a wide search across `native/`,
-  `web/`, and `native/src-tauri/`.
+  should not itself be the thing doing a wide search across `native/src/`,
+  `native/browser-extension/`, and `native/src-tauri/`.
+
 - **Never inline a large file into a subagent prompt.** Tell the agent the
   path and let it read from disk with its own context window.
 - Give a subagent the task and the constraints, not a transcript of how you

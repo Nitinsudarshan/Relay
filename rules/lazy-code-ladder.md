@@ -24,9 +24,9 @@ Before writing code, stop at the first rung that holds:
    - Rust: the domain modules under `native/src-tauri/src/`
      (`capture/`, `pipeline/`, `triggers/`, `providers/`, `vault/`, `mcp/`) —
      a feature's parsing/validation/persistence already lives together there.
-   - React: `native/src/lib/` and `native/src/components/`, `web/src/hooks/`
-     and `web/src/lib/`, before adding a hook or util.
-   - UI: the already-generated shadcn primitives in `<surface>/components/ui`.
+   - React: `native/src/lib/`, `native/src/hooks/`, and `native/src/components/`,
+     before adding a hook or util.
+   - UI: the already-generated shadcn primitives in `native/src/components/ui`.
    - If a knowledge graph exists at `graphify-out/`, query it
      (`graphify query "<question>"`) instead of grepping blind — see
      `.agents/rules/graphify.md`.
@@ -36,9 +36,10 @@ Before writing code, stop at the first rung that holds:
    lib, CSS over JS, a Tauri/WebView2 API over a shim, a LanceDB or SQL
    constraint over app-level validation.
 5. **Does an already-installed dependency solve it?** Check `Cargo.toml` and
-   both `package.json` files. Never add a new dependency for what a few lines
+   `native/package.json`. Never add a new dependency for what a few lines
    cover — a new crate is also a new CMake/toolchain risk for the whisper.cpp
    build (see the README's build notes).
+
 6. **Can it be one line?** One line.
 7. **Only then:** the minimum code that works.
 

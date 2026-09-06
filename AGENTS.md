@@ -1,8 +1,8 @@
 # Relay AI Agent Guidelines
 
-Relay is a **Rust + Tauri/React desktop app for Windows**, plus a **Next.js +
-shadcn/ui + Supabase web dashboard** for the (still deferred) hybrid mode. You
-**must follow** all rules in the `rules/` directory for any code change here.
+Relay is a **Rust + Tauri/React desktop app for Windows** with a browser
+extension capture system (`native/browser-extension`). You **must follow** all
+rules in the `rules/` directory for any code change here.
 
 Start with `docs/README.md` for the map of what documentation exists and what
 each file is for. `rules/` is the coding-convention layer underneath it.
@@ -11,9 +11,9 @@ each file is for. `rules/` is the coding-convention layer underneath it.
 
 | Path | What it is |
 |---|---|
-| `native/src-tauri/` | Rust backend: capture, STT, the meetings pipeline, vault, triggers, MCP wiring. ~35k lines, 400+ tests. |
-| `native/src/` | React frontend rendered inside the Tauri window. ~18k lines. |
-| `web/` | Next.js hybrid-mode dashboard. Deferred — see `docs/decisions.md` Decision 32. No build or runtime coupling to `native/` in either direction. |
+| `native/src-tauri/` | Rust backend: capture, STT, the meetings pipeline, vault, triggers, MCP wiring. |
+| `native/src/` | React frontend rendered inside the Tauri window. |
+| `native/browser-extension/` | Browser extension for structured web and AI conversation capture into the vault. |
 
 ## Rule Index
 
@@ -22,20 +22,18 @@ All paths are relative to `rules/`.
 - [global.md](rules/global.md): Master index, per-surface applicability, and precedence rules.
 - [project-structure.md](rules/project-structure.md): Repo layout — where new files go across all surfaces.
 - [rust-backend.md](rules/rust-backend.md): Error handling, module layout, async, Tauri command exposure (`native/src-tauri` only).
-- [code-standards-frontend.md](rules/code-standards-frontend.md): TypeScript/React conventions, shared by both frontends.
+- [code-standards-frontend.md](rules/code-standards-frontend.md): TypeScript/React conventions.
 - [component-architecture.md](rules/component-architecture.md): Component organization and splitting.
 - [design-system.md](rules/design-system.md): Design tokens (colors, spacing, radius, typography).
 - [ui-components.md](rules/ui-components.md): shadcn/ui usage, styling conventions, and the "no fake controls" rule.
 - [charts.md](rules/charts.md): Charts, graphs, and data visualizations.
-- [responsive-design.md](rules/responsive-design.md): Mobile-first rules — `web/` dashboard only.
 - [accessibility.md](rules/accessibility.md): Accessibility requirements for UI.
 - [documentation.md](rules/documentation.md): Code commenting format (TypeScript and Rust).
 - [data-access.md](rules/data-access.md): Local vault access vs. Supabase cloud access.
 - [security.md](rules/security.md): Secrets, environment variables, hybrid-mode auth.
-- [server-client-boundary.md](rules/server-client-boundary.md): Server vs Client Component usage — `web/` only.
 - [forms-and-validation.md](rules/forms-and-validation.md): Standard form pattern (shadcn Form + react-hook-form + zod).
 - [testing.md](rules/testing.md): What to test, frameworks, and file placement across all surfaces.
-- [api-conventions.md](rules/api-conventions.md): Tauri command response shape; web route handler shape.
+- [api-conventions.md](rules/api-conventions.md): Tauri command response shape.
 - [performance.md](rules/performance.md): Async/non-blocking rules, bundle size, memoization.
 - [rbac-settings.md](rules/rbac-settings.md): Why RBAC is intentionally not built yet.
 - [version-and-changelog.md](rules/version-and-changelog.md): Release versioning, changelog ownership, and conventional change metadata.
@@ -58,9 +56,6 @@ cd native/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 
 # Native frontend
 cd native && npm ci && npx tsc --noEmit && npm test
-
-# Web dashboard
-cd web && npm ci && npx tsc --noEmit
 ```
 
 Building the Rust crate needs a C/C++ toolchain and CMake for whisper.cpp. On
@@ -93,10 +88,10 @@ checked in — run `graphify update .` to create or refresh it.
 If two rules conflict, resolve in this order (most specific wins):
 1. A rule scoped to the exact surface/file/folder being edited.
 2. `security.md` / `data-access.md` (safety/correctness > style).
-3. `server-client-boundary.md` / `api-conventions.md` / `rust-backend.md` (architecture correctness).
+3. `api-conventions.md` / `rust-backend.md` (architecture correctness).
 4. `code-standards-frontend.md` / `component-architecture.md` / `project-structure.md`.
 5. `forms-and-validation.md` / `testing.md` / `performance.md`.
-6. `design-system.md` / `ui-components.md` / `charts.md` / `responsive-design.md` / `accessibility.md`.
+6. `design-system.md` / `ui-components.md` / `charts.md` / `accessibility.md`.
 7. `documentation.md` / `readme.md` / `version-and-changelog.md`.
 
 ## Working in an established codebase
@@ -123,8 +118,8 @@ matter more here than they did at the start:
   machine, including CI.
 - **Never** bypass RLS assumptions once hybrid mode's cloud storage is in
   place; queries missing matching policies should fail closed.
-- **Never** expose the Supabase service-role key to `native/src/`, `web/`
-  Client Components, or any browser-reachable bundle.
+- **Never** expose the Supabase service-role key to `native/src/` or any
+  browser-reachable bundle.
 - **Always** confirm with the user before running any command that mutates
   cloud-stored user data.
 - **Local-only mode needs no auth** — don't build login/session logic that
@@ -141,7 +136,6 @@ matter more here than they did at the start:
      - `npm run verify:rules` (manifest consistency, repository & README rules)
      - `cd native/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test`
      - `cd native && npx tsc --noEmit && npm test`
-     - `cd web && npx tsc --noEmit`
   2. Write conventional commit messages (`feat:`, `fix:`, `refactor:`, `BREAKING CHANGE:`, etc.)
      communicating change impact per `rules/version-and-changelog.md`.
   3. Audit `README.md` per `rules/readme.md` whenever scripts, commands,

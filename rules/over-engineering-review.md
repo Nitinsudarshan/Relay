@@ -33,7 +33,6 @@ Examples:
 ```
 native/src/lib/format.ts:L12-38: stdlib: 27-line duration formatter. Intl.DurationFormat, 1 line.
 native/src-tauri/src/vault/store.rs:L88: yagni: VaultStore trait, one impl. Inline until a second backend exists.
-web/src/lib/date.ts:L4: native: moment.js for one format call. Intl.DateTimeFormat, 0 deps.
 native/src/hooks/useChunk.ts:L52-71: delete: retry wrapper around a local synchronous call. Nothing replaces it.
 ```
 
@@ -45,9 +44,9 @@ Nothing to cut → `Lean already. Ship.` and stop.
 - Traits in `native/src-tauri/src/` with a single implementor. `providers/`
   legitimately has the Ollama/cloud swap (`testing.md` depends on a mock) —
   most others do not.
-- A second formatter/parser for transcripts, durations, or chunk headers when
-  one already exists in the other frontend. Shared shapes belong in
-  `packages/shared` once needed twice, not duplicated (`project-structure.md`).
+- A second formatter/parser for transcripts, durations, or chunk headers.
+  Reuse existing helpers in `native/src/lib/`.
+
 - Business logic that leaked into `commands.rs` — it should be thin
   (`rust-backend.md`), so logic there is a finding.
 - Hand-written UI primitives next to the generated shadcn ones.

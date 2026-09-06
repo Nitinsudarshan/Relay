@@ -41,8 +41,8 @@ spirit of keeping the living spec honest.
    `DiarizationReport::well_separated` reports when a roster should not be
    trusted. The remaining gaps are the voiceprint library (rung 2 of
    `Meeting-rules/meeting_speaker_identification.md`, and the feature that
-   would create biometric data — `maybe_later.md` item 18) and calendar
-   attendees (rung 3 — `maybe_later.md` item 19).
+   would create biometric data — `maybe_later.md` item 11) and calendar
+   attendees (rung 3 — `maybe_later.md` item 12).
 
 4. **Multi-user / team features** — explicitly flagged in `docs/decisions.md`
    as "noted for later, not decided," and the IDE Build Prompt calls scope

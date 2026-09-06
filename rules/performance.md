@@ -1,7 +1,7 @@
 ---
 trigger: always_on
-description: Async/non-blocking rules for the Rust backend, plus bundle-size and rendering basics for both frontends
-globs: "native/**, web/src/**/*.tsx"
+description: Async/non-blocking rules for the Rust backend, plus bundle-size and rendering basics for native frontend
+globs: "native/**"
 ---
 
 # Performance Rules
@@ -16,16 +16,14 @@ globs: "native/**, web/src/**/*.tsx"
   needs — a slow meeting→Kanban parse shouldn't block an unrelated vault
   read.
 
-## Frontend (native/src/ and web/src/)
+## Frontend (native/src/)
 
-- Always use `next/image` for images in `web/` (not a raw `<img>` tag) —
-  `native/`'s Vite-based frontend doesn't have this specific optimization,
-  but should still avoid shipping unoptimized large images.
-- Dynamically import heavy client-only libraries (`next/dynamic` in `web/`,
-  lazy `import()` in `native/`) where they're not needed on first paint —
-  especially chart components (see `charts.md`).
+- Avoid shipping unoptimized large images.
+- Dynamically import heavy client-only libraries (lazy `import()` in `native/`)
+  where they're not needed on first paint — especially chart components (see `charts.md`).
 - Don't put chart-heavy views (dogfooding metrics) on a page that doesn't
-  need them on initial load — lazy-load them behind a tab or route split.
+  need them on initial load — lazy-load them behind a tab or modal.
 - Memoize expensive derived data (`useMemo`) when transforming larger
-  datasets (a long meeting transcript, a large Kanban board) in a Client
-  Component — don't recompute on every render.
+  datasets (a long meeting transcript, a large Kanban board) — don't
+  recompute on every render.
+

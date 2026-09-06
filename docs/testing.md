@@ -175,21 +175,7 @@ with:
 cd native && RELAY_UPDATE_CAPTURE_FIXTURES=1 npm test
 ```
 
-## 3. Web dashboard (`web/`)
 
-No test suite yet. The dashboard is deferred (`docs/decisions.md`, Decision 32)
-and has no logic of its own to test — it renders a placeholder identity and
-static routes. CI typechecks and builds it:
-
-```bash
-cd web
-npm ci
-npx tsc --noEmit
-npm run build
-```
-
-When hybrid mode starts, `rules/testing.md` already sets the rules: Vitest +
-React Testing Library, a mocked Supabase client, never a real project database.
 
 ## Known gaps
 

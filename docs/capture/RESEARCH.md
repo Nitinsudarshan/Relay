@@ -429,7 +429,7 @@ Against it, all four of:
 
 So every attachment and image record carries `content_captured: false` and a
 `content_note` saying, in plain language, that the file itself was not
-retrieved and why. Deferred properly in `maybe_later.md` §16.
+retrieved and why. Deferred properly in `maybe_later.md` §9.
 
 ### 6.2 How they are represented
 
@@ -733,8 +733,8 @@ registry line.
 
 - **Screenshots and OCR.** Still not a rung. The goal is structured
   acquisition; a picture of text is a downgrade from `text_only`, not a
-  fallback below it. (`maybe_later.md` §14.)
-- **Fetching file bytes.** §6.1. (`maybe_later.md` §16.)
+  fallback below it. (`maybe_later.md` §7.)
+- **Fetching file bytes.** §6.1. (`maybe_later.md` §9.)
 - **Opening Claude artifact panels.** One at a time, changes the app's view
   state, and on some routes changes the URL. Recorded as inaccessible instead.
 - **Reading the sites' internal APIs** (`/backend-api/conversation`). It would

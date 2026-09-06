@@ -108,10 +108,11 @@ Development agents communicate what changed and its intended impact via **Conven
 Where applicable, note the affected Relay surface in the scope or description:
 - `native` (desktop React frontend)
 - `tauri` or `backend` (Rust backend)
-- `web` (Next.js dashboard)
+- `extension` (companion browser extension)
 - `meetings` (meetings pipeline)
 - `retrieval` (vault / vector search)
-- `capture` (audio / dictation / screen capture)
+- `capture` (audio / dictation / web capture)
+
 
 Examples:
 - `feat(meetings): add Google Calendar event auto-linking`

@@ -50,7 +50,7 @@ plus one key, and `Space` is not a modifier. `Ctrl+Space` is already
 push-to-talk dictation.
 
 Desktop-initiated browser capture is not abandoned, it is deferred with its
-constraints written down — see `maybe_later.md` §13.
+constraints written down — see `maybe_later.md` §6.
 
 ## 2. Architecture
 
@@ -323,7 +323,7 @@ rung 2 and the artifact carries a note naming the extractor that failed,
 which is also the early warning that it needs updating.
 
 Screenshot and OCR are deliberately **not** rungs. They are logged as
-deferred (`maybe_later.md` §14): the whole point of the feature is structured
+deferred (`maybe_later.md` §7): the whole point of the feature is structured
 acquisition, and a screenshot below `text_only` would add a large dependency
 to serve a case that is already honestly labelled.
 
@@ -506,7 +506,7 @@ makes normalization a total function over untrusted input; fetching
 authenticated asset URLs would make Relay a client of the site's API, a much
 larger claim for a least-privilege feature; and metadata now, bytes later
 behind an explicit setting, loses nothing, whereas retracting downloads is not
-available. Deferred in `maybe_later.md` §16.
+available. Deferred in `maybe_later.md` §9.
 
 Images keep provenance, alt text, caption, dimensions and their association
 with a message. Relay does not describe them, and never substitutes a

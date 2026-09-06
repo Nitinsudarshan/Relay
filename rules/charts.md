@@ -1,6 +1,7 @@
 ---
-globs: native/src/**/*.tsx, web/src/**/*.tsx
+globs: native/src/**/*.tsx
 ---
+
 
 # Charts, Graphs, and Data Visualizations
 

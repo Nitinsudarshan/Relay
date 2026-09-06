@@ -28,7 +28,6 @@ Relay processes speech locally using Whisper and structured pipelines to instant
 - **Talkback** — A conversational agent over everything Relay has captured. Ask out loud what you decided, what you said, or what happened in a meeting; answers about your own history come only from your Voice Notes, Scribbles, Files and Meetings, with the sources shown. Speak over it to interrupt, and turn a conversation into a Voice Note or a Scribble by saying so. Its voice runs locally: `Settings › Talkback › Make Relay speak` downloads, verifies and self-tests the speech engine in one click.
 - **Diagnostics & Observability Hub** — Dedicated technical testing and inspection workspace featuring real-time audio telemetry (RMS, peak amplitude, VAD segmentation, decoding diagnostics), STT accuracy benchmarking against reference corpora, live LLM prompt latency testing, verified disk-level model readiness, and runnable meeting-pipeline checks that exercise the speech gate, the hallucination screen and speaker separation against synthesized audio — including asking your own Whisper model to transcribe thirty seconds of room tone so you can see what it invents and that none of it reaches a transcript.
 - **Local Vault Storage** — Saves audio recordings, transcripts, and structured entities locally as Markdown files with YAML frontmatter.
-- **Hybrid Cloud Sync** — Optional Next.js + Supabase web dashboard for cross-device visibility and team synchronization when enabled.
 
 ## Requirements
 
@@ -42,31 +41,12 @@ Relay processes speech locally using Whisper and structured pipelines to instant
 npm run install:all
 ```
 
-<details>
-<summary><b>Individual surface installation</b></summary>
-
-```bash
-# Native desktop app
-cd native && npm install
-
-# Web dashboard
-cd web && npm install
-```
-
-</details>
-
 ## Quick start
 
 Run the native desktop application in development mode:
 
 ```bash
 npm run dev:native
-```
-
-To run the Next.js hybrid web dashboard:
-
-```bash
-npm run dev:web
 ```
 
 To build the Relay Capture browser extension (Chrome or Edge), then load
@@ -92,7 +72,7 @@ flowchart TD
     X --> F[(Local Markdown Vault)]
     E --> F
     F --> H[Talkback: retrieval → LLM → speech]
-    F -.->|Optional Hybrid Sync| G[Supabase Cloud Backend]
+    F -.->|Updates & Telemetry| G[Supabase Cloud Backend]
 ```
 
 ## Tests
@@ -101,11 +81,8 @@ flowchart TD
 # Rust backend — 1117 tests (+4 ignored benchmarks)
 cd native/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 
-# Native frontend — 417 tests
+# Native frontend — 498 tests
 cd native && npm test && npm run typecheck
-
-# Web dashboard — typecheck and build
-cd web && npx tsc --noEmit && npm run build
 ```
 
 CI runs all of these on every push and pull request

@@ -1,23 +1,17 @@
 # Relay — System Architecture
 
-## Three-Surface Overview
+## Architecture Overview
 
-Relay is architected into three distinct surfaces in a single repository. **Current phase note (see `docs/decisions.md` Decision 32): the Web Surface below is deferred.** `native/` has no import, build, or runtime dependency on `web/` in either direction — verified by repository audit — and the two apps build and run fully independently today.
+Relay is a native-first Windows desktop assistant built with a Rust backend and Tauri/React frontend, paired with a companion browser extension for structured web and conversation capture.
 
 ```
-                          ┌─────────────────────────────────────┐
-                          │   Web Surface (web/) — DEFERRED     │
-                          │   Next.js 15 + Shadcn + Supabase    │
-                          └──────────────────┬──────────────────┘
-                                             │ Hybrid Sync (planned — not implemented)
-                                             ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        Native Desktop (native/)                        │
 │                                                                        │
 │  ┌──────────────────────────────────────────────────────────────────┐  │
 │  │                     React UI (native/src/)                       │  │
-│  │   PTT Widget | Kanban Board | Voice Chat | Trigger/Provider      │  │
-│  │   Settings | Dictation Indicator (separate always-on-top window) │  │
+│  │   Home | PTT Dictation Pill | Meetings | Scribbles | Graph       │  │
+│  │   Files | Captures | Talkback | Diagnostics | Settings           │  │
 │  └─────────────────────────────────┬────────────────────────────────┘  │
 │                                    │ Tauri IPC (invoke commands)       │
 │  ┌─────────────────────────────────▼────────────────────────────────┐  │
@@ -40,8 +34,13 @@ Relay is architected into three distinct surfaces in a single repository. **Curr
 │  │  │ capture::web  ◀── loopback (127.0.0.1) ── browser extension  ││  │
 │  │  │ (detect source → sanitize → normalize → Vault artifact)      ││  │
 │  │  └──────────────────────────────────────────────────────────────┘│  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────┘
+│  └─────────────────────────────────┬────────────────────────────────┘  │
+└────────────────────────────────────┼───────────────────────────────────┘
+                                     │ Heartbeat, diagnostics & release checks
+                                     ▼
+                      ┌──────────────────────────────┐
+                      │   Supabase Cloud Services    │
+                      └──────────────────────────────┘
 ```
 
 ## Rust Backend Module Design (`native/src-tauri/src/`)
@@ -77,5 +76,5 @@ Relay is architected into three distinct surfaces in a single repository. **Curr
 - **Transient Meeting Reminders**: Native OS Toast Notifications (`tauri_plugin_notification`). Transient notifications are presented directly via native Windows OS toasts without any React WebView or Tauri meeting-reminder window.
 
 ## Data Access & Security Model
-- **Local-Only Mode**: No authentication required. Notes saved in `.relay/vault`. Vector indices stored in `.relay/lancedb`. Zero network activity required.
-- **Hybrid Cloud Mode**: Not yet implemented. This describes the intended design (Supabase client in `web/src/lib/supabase` for web dashboard authentication; desktop app syncing vault notes to Supabase PostgreSQL via RLS policies), but a repository audit (2026-08-20) found no Supabase code anywhere in `native/src-tauri`, and `web/`'s own Supabase client is a mocked stand-in returning hardcoded data. Hybrid mode is deferred along with the Web surface — see `docs/decisions.md` Decision 32.
+- **Local-Only Mode**: Default operating mode. No authentication required. Notes, scribbles, audio, and captures saved in `.relay/vault`. Vector indices stored in `.relay/lancedb`. Zero network transmission of user notes or audio.
+- **Supabase Cloud Services**: Native Rust integration (`identity/supabase.rs`, `updates/mod.rs`) for anonymous installation registration, heartbeat telemetry, diagnostics ingestion, and app release checking. Never transmits vault content, audio, or notes.

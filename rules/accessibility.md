@@ -1,12 +1,13 @@
 ---
 trigger: always_on
 description: Accessibility requirements for all UI
-globs: "native/src/**/*.tsx, web/src/**/*.tsx"
+globs: "native/src/**/*.tsx"
 ---
 
 # Accessibility Rules
 
-Applies to both `native/src/` and `web/src/`.
+Applies to `native/src/`.
+
 
 ## Rules
 

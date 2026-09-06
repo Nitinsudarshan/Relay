@@ -1,6 +1,8 @@
 # Relay — API Conventions & Specifications
 
-Per `rules/api-conventions.md`, all IPC commands and web API route handlers return consistent, typed error responses.
+Per `rules/api-conventions.md`, all Tauri IPC commands return consistent, typed error responses.
+
+
 
 ## 1. Tauri Commands API (`native/src-tauri/src/commands.rs`)
 
@@ -95,18 +97,5 @@ Progress is broadcast on the `capture-progress` event with a `stage` of
 
 ---
 
-## 2. Web Route Handlers (`web/src/app/api/...`)
+The Tauri IPC command layer is the primary internal API surface for Relay desktop.
 
-Standard JSON format:
-```typescript
-interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
-}
-```
-
-### Routes
-- `GET /api/kanban`: Returns synced Kanban tasks for authenticated user.
-- `PATCH /api/kanban/[id]`: Updates task status or attributes.
-- `GET /api/notes`: Returns user markdown note metadata.

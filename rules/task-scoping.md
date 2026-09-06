@@ -38,10 +38,11 @@ confidently, and is cheaper to abandon when a decision turns out wrong.
 **Always split when:**
 
 - More than ~3 tasks in one unit.
-- It crosses subsystems. On Relay that means **Rust backend + native frontend
-  + web dashboard are separate units** — the surfaces have different test
+- It crosses subsystems. On Relay that means **Rust backend + desktop frontend
+  are separate units** — the surfaces have different test
   gates, different conventions (`rust-backend.md` vs
   `code-standards-frontend.md`), and different reviewers' attention.
+
 - Any single task touches more than ~5 files.
 - Discovery and implementation are in the same unit — find out first, then
   decide.

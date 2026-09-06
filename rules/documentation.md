@@ -1,15 +1,16 @@
 ---
 trigger: always_on
 description: Comment and documentation format for generated code
-globs: "native/src/**/*.ts, native/src/**/*.tsx, native/src-tauri/**/*.rs, web/src/**/*.ts, web/src/**/*.tsx"
+globs: "native/src/**/*.ts, native/src/**/*.tsx, native/src-tauri/**/*.rs"
 ---
 
 # Code Documentation Rules
 
 All generated code must include concise comments explaining intent, not
-restating what the code obviously does. Applies across all three surfaces —
-TypeScript conventions below for `native/src/`/`web/src/`, Rust doc-comment
+restating what the code obviously does. Applies across native surfaces —
+TypeScript conventions below for `native/src/`, Rust doc-comment
 equivalent for `native/src-tauri/`.
+
 
 ## TypeScript/React format
 

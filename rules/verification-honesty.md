@@ -31,7 +31,7 @@ function that should persist something, a `#[tauri::command]` that returns a
 hardcoded shape, `let _ = result;` swallowing an error, `.unwrap()` standing in
 for the error path `rust-backend.md` requires.
 
-**React (`native/src/`, `web/src/`):** `return null` / `<></>` from a component
+**React (`native/src/`):** `return null` / `<></>` from a component
 that should render, `<div>Placeholder</div>`, `onClick={() => {}}`,
 `onSubmit={(e) => e.preventDefault()}` and nothing else, hardcoded counts or
 sample transcript text where live data belongs.
@@ -45,7 +45,7 @@ Grep before claiming done:
 
 ```bash
 grep -rnE 'todo!|unimplemented!|TODO|FIXME|PLACEHOLDER|coming soon' \
-  --exclude-dir={.git,node_modules,target,graphify-out} native/src native/src-tauri/src web/src
+  --exclude-dir={.git,node_modules,target,graphify-out} native/src native/src-tauri/src
 ```
 
 A `ponytail:` shortcut marker (`lazy-code-ladder.md`) is a *declared* ceiling,
@@ -62,8 +62,8 @@ State what failure looks like, alongside the command:
 ```
 cd native/src-tauri && cargo test pipeline::gate   # fails on: non-zero exit, or "0 passed"
 cd native && npm test -- useTriggerMatch           # fails on: any failed assertion, or 0 tests matched
-cd web && npx tsc --noEmit                         # fails on: any TS error line
 ```
+
 
 "non-zero exit" is a complete failing direction — there is no minimum length.
 What isn't acceptable: "it fails if it doesn't work", "an error occurs". Those
@@ -108,11 +108,12 @@ honest form of the same instinct. Use that instead.
 ## Before reporting done
 
 - The repo's own gates, actually run:
+  `npm run verify:rules`,
   `cd native/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test`,
-  `cd native && npm test && npm run typecheck`,
-  `cd web && npx tsc --noEmit && npm run build`.
+  `cd native && npm test && npm run typecheck`.
 - For a bug fix: the original failure reproduced first, then the same check
   passing.
+
 - Change claims described accurately via conventional commit messages and PR
   summaries, with every claim checked against the real diff (`version-and-changelog.md`).
 - If a gate was not run, say which and why. A skipped gate reported as green

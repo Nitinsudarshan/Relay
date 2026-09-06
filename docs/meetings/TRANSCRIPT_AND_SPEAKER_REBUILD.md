@@ -180,7 +180,7 @@ register, and counting how many distinct voices a stretch holds. What it does
 not buy: telling two similar voices apart on one channel, or matching a voice
 across meetings. Both are written into the module's docs, and
 `DiarizationReport::well_separated` is how the UI knows which situation it is
-in. `maybe_later.md` item 18 holds the upgrade path.
+in. `maybe_later.md` item 11 holds the upgrade path.
 
 The zeroth cepstral coefficient is dropped, which is not incidental: it is
 total log energy, so keeping it would make somebody leaning toward the
@@ -301,7 +301,7 @@ as "Speaker 2 said both of these": wrong, legible, and recoverable, because the
 expected-speaker count forces the split. Splitting one person in two invents
 somebody who was never in the room, attaches their name to commitments, and
 leaves the user nothing to correct. A neural speaker embedding is what actually
-resolves the ambiguity (`maybe_later.md` item 18); until then this fails toward
+resolves the ambiguity (`maybe_later.md` item 11); until then this fails toward
 the answer a person can fix.
 
 ### 2.2 Rung 1 still wins for the local user
@@ -483,12 +483,11 @@ test asserts that property across the whole set.
 
 - **Rung 2 — a voice library.** The feature that would create biometric data,
   and §6's consent, management and deletion requirements land with it.
-  `maybe_later.md` item 18.
+  `maybe_later.md` item 11.
 - **Rung 3 — calendar attendees.** No calendar integration exists.
   `MeetingMetadata` and the expected-speaker hint are the surfaces it would
-  fill. `maybe_later.md` item 19.
+  fill. `maybe_later.md` item 12.
 - **Per-source audio tracks.** Diarizing the system-audio stream alone would
   remove the local user's voice from the clustering problem entirely.
-  `maybe_later.md` item 3.
 - **The "In person" marking** from §2.2, which would disable rung 1 and make
   diarization the primary path for a room sharing one microphone.

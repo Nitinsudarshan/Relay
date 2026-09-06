@@ -26,18 +26,12 @@
 4. Trigger engine extracts arguments (`title: Design Team`, `time: tomorrow 3pm`) and executes MCP tool call.
 5. OS notification displays confirmation: `"Calendar event created for Design Team tomorrow at 3pm"`.
 
-## Flow 4: Hybrid Mode Web Dashboard Access
-1. User opens Relay web dashboard (`https://relay.app` or local web server).
-2. User logs in with Supabase auth credentials.
-3. Dashboard fetches synced Kanban cards and vault notes from Supabase database.
-4. User views and updates task card statuses on web Kanban board.
-
-## Flow 5: Global Show/Hide Hotkey
+## Flow 4: Global Show/Hide Hotkey
 1. User presses `Ctrl+Shift+Space` (configurable) while any other application is focused.
 2. The OS-level `tauri-plugin-global-shortcut` hotkey fires regardless of which window has focus.
 3. Relay's main window is shown and given focus if it was hidden, or hidden if it was already visible.
 
-## Flow 6: Universal Dictation (Type Anywhere)
+## Flow 5: Universal Dictation (Type Anywhere)
 1. User places their text cursor in any other application (email, Slack, an IDE, a browser form field).
 2. User presses and holds `Ctrl+Space` (configurable).
 3. A small always-on-top, non-focus-stealing "🎙 Listening…" indicator appears; Relay's own window never needs to be visible. Audio capture starts immediately.
@@ -45,7 +39,7 @@
 5. Captured audio is transcribed locally (Whisper only — no LLM pipeline, no vault write).
 6. The transcript is typed into whatever field currently has OS focus via simulated keystrokes (`enigo`), exactly as if the user had typed it themselves.
 
-## Flow 7: Voice Chat Over Vault Notes
+## Flow 6: Voice Chat Over Vault Notes
 1. User opens the "Voice Chat" tab and clicks the mic button.
 2. User asks a question out loud (e.g. "What did we decide about the Kanban schema?") and clicks stop.
 3. Audio is transcribed locally.
@@ -54,14 +48,14 @@
 6. The answer is shown in the chat thread along with the source note titles used.
 7. If a local Piper TTS binary and voice model are configured, the answer is also synthesized as audio and played back automatically; otherwise the response is text-only.
 
-## Flow 8: Native OS Meeting Notification Alerts
+## Flow 7: Native OS Meeting Notification Alerts
 1. Meeting engine detects an upcoming, unrecorded, or active meeting.
 2. Rust reminder engine transitions reminder state to `Fired`.
 3. System emits a native Windows OS Toast Notification (`app.notification()`).
 4. Windows displays the native toast notification without opening any Tauri WebView window.
 5. User clicks notification or action -> Relay main window opens and focuses relevant meeting context.
 
-## Flow 9: Capturing a Web Page or AI Conversation
+## Flow 8: Capturing a Web Page or AI Conversation
 1. One-time setup: the user builds the extension (`npm --prefix native run build:extension`), loads `native/browser-extension` unpacked, turns **Browser capture** on in Relay's Capture settings, and pastes the port and pairing token into the extension's Options.
 2. On any page, the user presses the extension's shortcut (`Ctrl+Shift+Y`) or clicks the Relay toolbar button. That gesture is what grants the extension access to this one tab — nothing before it did.
 3. The extension injects its extractor into the tab, which reads the rendered document: a site-specific extractor for ChatGPT, Claude or GitHub; otherwise the generic article extractor; otherwise the page's visible text. The toolbar badge shows `…`.
