@@ -226,6 +226,11 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
   // STT Model discovery state
   const [sttOverview, setSttOverview] = useState<SttModelsOverview | null>(null);
   const [loadingSttModels, setLoadingSttModels] = useState(false);
+  // Which managed model is downloading, and why the last attempt failed.
+  // `large-v3-turbo` is ~1.6 GB, so the button has to stay honest about being
+  // busy rather than looking inert for several minutes.
+  const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
+  const [modelDownloadError, setModelDownloadError] = useState<string | null>(null);
   const [customSttMode, setCustomSttMode] = useState(false);
 
   const checkLocalLlm = async (overrideHost?: string) => {
@@ -252,6 +257,34 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
     } finally {
       setLoadingOllamaModels(false);
     }
+  };
+
+  // Fetches a managed model on request.
+  //
+  // Downloading does not select the model. The accuracy ceiling costs real
+  // decode time on every utterance, so making it active is a separate press —
+  // the same separation the backend command documents.
+  const downloadSttModel = async (filename: string) => {
+    setDownloadingModel(filename);
+    setModelDownloadError(null);
+    try {
+      const status = await invoke<SttModelStatus>('download_stt_model', { filename });
+      if (status.state === 'failed') {
+        setModelDownloadError(status.message);
+      }
+      await fetchSttModels();
+    } catch (e) {
+      setModelDownloadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloadingModel(null);
+    }
+  };
+
+  const useSttModel = (path: string) => {
+    setSettings({
+      ...settings,
+      stt: { ...settings.stt, whisper_model_path: path },
+    });
   };
 
   const fetchSttModels = async () => {
@@ -1818,10 +1851,63 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                               <span>{m.filename}</span>
                               <span>{m.size_bytes ? `${(m.size_bytes / (1024 * 1024)).toFixed(0)} MB` : ''}</span>
                             </div>
+
+                            {/* The overview has always listed a missing managed
+                                model so the option is visible rather than
+                                hidden. This is the offer it was listed for. */}
+                            {m.is_managed && m.status !== 'ready' && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => downloadSttModel(m.filename)}
+                                disabled={downloadingModel !== null}
+                                className="w-full text-[11px] h-7 gap-1.5 mt-1"
+                              >
+                                {downloadingModel === m.filename ? (
+                                  <>
+                                    <RefreshCw className="w-3 h-3 animate-spin" />
+                                    Downloading…
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3 h-3" />
+                                    Download
+                                  </>
+                                )}
+                              </Button>
+                            )}
+
+                            {m.status === 'ready' && !isActive && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => useSttModel(m.path)}
+                                className="w-full text-[11px] h-7 gap-1.5 mt-1"
+                              >
+                                <Check className="w-3 h-3" />
+                                Use this model
+                              </Button>
+                            )}
                           </div>
                         );
                       })}
                     </div>
+
+                    {modelDownloadError && (
+                      <div className="p-2 rounded-lg border border-destructive/30 bg-destructive/10 text-destructive text-[11px] flex items-start gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                        <span>{modelDownloadError}</span>
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-muted-foreground leading-snug">
+                      Whisper Large v3 Turbo is the accuracy ceiling and a ~1.6 GB download. It is
+                      markedly better on Hindi and other non-English speech than Small, and slower
+                      on every utterance — worth it for meetings, usually not for push-to-talk.
+                      Downloading it does not switch to it.
+                    </p>
                   </div>
 
                   {/* Performance Profile Toggle */}
@@ -1887,6 +1973,62 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                           Maximum vocabulary fidelity (244M params). Recommended for complex technical monologues.
                         </p>
                       </button>
+                    </div>
+                  </div>
+
+                  {/* Decode Preset */}
+                  <div className="space-y-2 pt-2">
+                    <label className="block text-xs font-semibold text-foreground">
+                      Decode Preset
+                    </label>
+                    <p className="text-[11px] text-muted-foreground leading-snug">
+                      Trades decode time for how much borderline speech survives. Automatic lets
+                      each surface pick what suits it — dictation is latency-bound because someone
+                      is waiting for the text, a meeting is recall-bound because it is decoded once
+                      and read later. Choosing one here overrides both.
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {([
+                        {
+                          value: '',
+                          label: 'Automatic',
+                          hint: 'Fast for dictation, Quality for meetings',
+                        },
+                        { value: 'fast', label: 'Fast', hint: 'Greedy. Lowest latency' },
+                        { value: 'balanced', label: 'Balanced', hint: 'Beam search at 3' },
+                        { value: 'quality', label: 'Quality', hint: 'Beam search at 5. Keeps the most' },
+                      ] as const).map((option) => {
+                        const current = settings.stt.preset ?? settings.stt.sttPreset ?? '';
+                        const selected = current === option.value;
+                        return (
+                          <button
+                            key={option.value || 'auto'}
+                            type="button"
+                            onClick={() => {
+                              setSettings({
+                                ...settings,
+                                stt: {
+                                  ...settings.stt,
+                                  preset: option.value,
+                                  sttPreset: option.value,
+                                },
+                              });
+                            }}
+                            className={`p-2.5 rounded-lg border text-left transition-all ${
+                              selected
+                                ? 'border-primary bg-primary/10 text-foreground shadow-xs'
+                                : 'border-border bg-card/50 text-muted-foreground hover:border-border/80'
+                            }`}
+                          >
+                            <div className="text-[11px] font-bold text-foreground mb-0.5">
+                              {option.label}
+                            </div>
+                            <p className="text-[10px] text-muted-foreground leading-snug">
+                              {option.hint}
+                            </p>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 

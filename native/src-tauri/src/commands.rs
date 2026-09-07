@@ -1345,6 +1345,33 @@ pub async fn get_available_stt_models(
     Ok(crate::capture::stt::get_stt_models_overview(&models_dir, &stt_settings))
 }
 
+/// Downloads a managed Whisper model the user asked for.
+///
+/// Separate from [`ensure_stt_model_ready`], which fetches the default so a
+/// first capture works at all. This one is a deliberate choice: the accuracy
+/// ceiling is ~1.6 GB and costs real decode time, so it is never fetched
+/// implicitly and never becomes the active model as a side effect of being
+/// downloaded. Selecting it stays the user's separate act.
+///
+/// Reports a failed download as `Failed` rather than as a command error, the
+/// same way `ensure_stt_model_ready` does, so Settings can render the reason
+/// instead of a toast with a stack in it.
+#[tauri::command]
+pub async fn download_stt_model(
+    state: State<'_, AppState>,
+    filename: String,
+) -> Result<SttModelStatus, CommandError> {
+    let models_dir = state.config_dir.join("models");
+    match crate::capture::stt::ensure_managed_model(&models_dir, &filename).await {
+        Ok(path) => Ok(SttModelStatus::Ready {
+            path: path.to_string_lossy().to_string(),
+        }),
+        Err(e) => Ok(SttModelStatus::Failed {
+            message: e.to_string(),
+        }),
+    }
+}
+
 #[tauri::command]
 pub async fn test_stt_model(
     model_path: String,

@@ -378,10 +378,16 @@ export interface SttSettings {
    * Decode quality preset. Trades decode time for how much borderline speech
    * survives: 'fast' is greedy at whisper's stock no-speech threshold,
    * 'quality' is a wider beam at a lower one so little is dropped silently.
-   * Defaults to 'fast', which is what Relay did before the setting existed.
+   *
+   * `''` — the default — means the user has not chosen, and each surface uses
+   * what suits it: Fast for dictation, which is latency-bound, and Quality for
+   * meetings, which are recall-bound. Any other value is an explicit override
+   * and applies everywhere. The empty string is a real state rather than a
+   * missing one, which is why it is in the union: it is what distinguishes
+   * "let each surface decide" from "the user picked Fast".
    */
-  preset?: 'fast' | 'balanced' | 'quality';
-  sttPreset?: 'fast' | 'balanced' | 'quality';
+  preset?: '' | 'fast' | 'balanced' | 'quality';
+  sttPreset?: '' | 'fast' | 'balanced' | 'quality';
   enableInitialPrompt?: boolean;
   customInitialPrompt?: string | null;
 }

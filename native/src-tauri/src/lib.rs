@@ -237,6 +237,7 @@ pub fn run() {
             commands::test_llm_prompt,
             commands::ensure_stt_model_ready,
             commands::get_available_stt_models,
+            commands::download_stt_model,
             commands::test_stt_model,
             commands::copy_to_clipboard,
             commands::get_kanban_cards,

@@ -55,6 +55,42 @@ pub async fn ensure_accurate_model(models_dir: &Path) -> Result<PathBuf, SttErro
     ensure_model_file(models_dir, ACCURATE_MODEL_FILENAME, ACCURATE_MODEL_URL).await
 }
 
+/// Downloads one of Relay's three managed models, named by filename.
+///
+/// Keyed by filename against the managed set rather than taking a URL. A
+/// command that accepts a URL from the frontend is a command that will
+/// eventually be asked to fetch something that is not a model, and the
+/// download writes into Relay's own models directory — so the set of things
+/// it can be pointed at is decided here, in code, and not by its caller.
+///
+/// This is what makes [`ensure_accurate_model`] reachable. The function has
+/// existed since the accuracy tier was added and never had a caller: the
+/// models overview lists `large-v3-turbo` as "missing" precisely so the UI can
+/// offer the download, and nothing exposed one.
+/// Whether [`ensure_managed_model`] can fetch this filename.
+///
+/// Exists so the models overview and the download command cannot drift: a tier
+/// offered by one and unknown to the other is a download button that always
+/// fails.
+pub fn managed_model_is_known(filename: &str) -> bool {
+    matches!(
+        filename,
+        FAST_MODEL_FILENAME | DEFAULT_MODEL_FILENAME | ACCURATE_MODEL_FILENAME
+    )
+}
+
+pub async fn ensure_managed_model(models_dir: &Path, filename: &str) -> Result<PathBuf, SttError> {
+    match filename {
+        FAST_MODEL_FILENAME => ensure_fast_model(models_dir).await,
+        DEFAULT_MODEL_FILENAME => ensure_default_model(models_dir).await,
+        ACCURATE_MODEL_FILENAME => ensure_accurate_model(models_dir).await,
+        other => Err(SttError::ModelLoadFailed {
+            path: other.to_string(),
+            message: format!("'{other}' is not one of Relay's managed models"),
+        }),
+    }
+}
+
 /// Checks if a configured model path represents a legacy default model
 /// (e.g. `ggml-tiny.en.bin`) so Relay can seamlessly promote to `ggml-small.bin`.
 /// The Whisper model a meeting recording would use, or `None` when none is
@@ -1700,6 +1736,18 @@ mod tests {
         assert_eq!(overview.models[2].filename, ACCURATE_MODEL_FILENAME);
         assert!(!overview.models[2].exists, "not downloaded by default");
         assert_eq!(overview.models[2].status, "missing");
+
+        // Every tier the overview offers must be one the download command can
+        // actually fetch. The accuracy ceiling is listed as "missing" so the UI
+        // can offer it; if that name did not resolve, the offer would be a
+        // button that always fails.
+        for model in &overview.models {
+            assert!(
+                crate::capture::stt::managed_model_is_known(&model.filename),
+                "the overview offers {} but nothing can download it",
+                model.filename
+            );
+        }
 
         // Test file verification on nonexistent file
         let res = test_stt_model_file("nonexistent_model.bin");
