@@ -11,7 +11,7 @@
 //! prompt, a payload type and a builder — not another capture → normalize →
 //! prompt → LLM → parse → persist → provenance pipeline.
 
-use crate::providers::{LLMClient, ProviderError, ProviderType};
+use crate::providers::{Completer, ProviderError, ProviderType};
 
 use super::content::CanonicalContent;
 use super::contract::{
@@ -27,12 +27,17 @@ use crate::pipeline::source_boundary;
 /// authoritative provider abstraction, and a service that constructs its own
 /// `LLMClient` is the first step towards a second one.
 pub struct AnalysisService<'a> {
-    llm: Option<&'a LLMClient>,
+    llm: Option<&'a dyn Completer>,
 }
 
 impl<'a> AnalysisService<'a> {
     /// A service backed by a provider.
-    pub fn new(llm: &'a LLMClient) -> Self {
+    ///
+    /// Takes the [`Completer`] seam rather than the concrete client, so a
+    /// caller with a scripted stand-in can exercise this service's failure
+    /// paths. `&LLMClient` still coerces, so production call sites read
+    /// unchanged.
+    pub fn new(llm: &'a dyn Completer) -> Self {
         Self { llm: Some(llm) }
     }
 
@@ -356,6 +361,144 @@ fn preview(text: &str) -> String {
 mod computed_prompt_tests {
     use super::*;
     use crate::pipeline::analysis::{AnalysisType, PromptId, SourceType};
+
+    use crate::providers::{BoxFuture, CompletionOptions, LLMResponse, ProviderType};
+    use std::sync::Mutex;
+
+    /// A [`Completer`] that replays queued answers.
+    ///
+    /// The reason the trait exists. Before it, this service took a concrete
+    /// `LLMClient`, so its failure paths could only be reached with a network
+    /// or an Ollama instance — which meant they were not reached. It also
+    /// records the system prompt it was handed, which is how a computed
+    /// prompt's instructions can be asserted to have actually arrived.
+    struct ScriptedCompleter {
+        answers: Mutex<Vec<Result<String, String>>>,
+        seen_system_prompts: Mutex<Vec<String>>,
+    }
+
+    impl ScriptedCompleter {
+        fn replying(answers: Vec<Result<String, String>>) -> Self {
+            Self {
+                answers: Mutex::new(answers),
+                seen_system_prompts: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn last_system_prompt(&self) -> String {
+            self.seen_system_prompts
+                .lock()
+                .expect("not poisoned")
+                .last()
+                .cloned()
+                .unwrap_or_default()
+        }
+    }
+
+    impl Completer for ScriptedCompleter {
+        fn default_options(&self) -> CompletionOptions {
+            CompletionOptions::default()
+        }
+
+        fn provider_type(&self) -> &ProviderType {
+            &ProviderType::Ollama
+        }
+
+        fn complete_verified<'a>(
+            &'a self,
+            _prompt: &'a str,
+            system_prompt: Option<&'a str>,
+            _options: CompletionOptions,
+        ) -> BoxFuture<'a, Result<LLMResponse, ProviderError>> {
+            self.seen_system_prompts
+                .lock()
+                .expect("not poisoned")
+                .push(system_prompt.unwrap_or_default().to_string());
+            let next = self
+                .answers
+                .lock()
+                .expect("not poisoned")
+                .pop()
+                .unwrap_or_else(|| Err("the script ran out of answers".to_string()));
+            Box::pin(async move {
+                match next {
+                    Ok(text) => Ok(LLMResponse {
+                        text,
+                        model: "scripted".to_string(),
+                        prompt_tokens: None,
+                        completion_tokens: None,
+                    }),
+                    Err(message) => Err(ProviderError::NoCompletion(message)),
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_computed_prompt_reaches_the_model_with_the_supplied_instructions() {
+        // End to end through the seam: this is what a migrated meeting Stage A
+        // does, and what could not be tested before the trait existed.
+        let completer = ScriptedCompleter::replying(vec![Ok(
+            r#"{"key_points": [], "action_items": []}"#.to_string()
+        )]);
+        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let request =
+            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::MeetingFacts)
+                .at_stage(crate::pipeline::analysis::AnalysisStage::FACTS);
+
+        let executed = AnalysisService::new(&completer)
+            .execute_computed(
+                &request,
+                &source,
+                &meeting_content(),
+                "EXTRACT FACTS AS JSON. Invent nothing.",
+            )
+            .await
+            .expect("the scripted answer is valid JSON for a JSON contract");
+
+        assert!(executed.json.is_some(), "a JSON contract parses its answer");
+        assert_eq!(executed.provider, "ollama");
+        assert!(
+            completer
+                .last_system_prompt()
+                .contains("EXTRACT FACTS AS JSON"),
+            "the supplied instructions must be what the model was sent, got {:?}",
+            completer.last_system_prompt()
+        );
+    }
+
+    #[tokio::test]
+    async fn prose_returned_for_a_json_contract_is_a_failed_analysis() {
+        // §24. A failure path that needed a network to reach until now.
+        let completer =
+            ScriptedCompleter::replying(vec![Ok("Three interviews happened.".to_string())]);
+        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let request =
+            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::MeetingFacts);
+
+        let err = AnalysisService::new(&completer)
+            .execute_computed(&request, &source, &meeting_content(), "instructions")
+            .await
+            .expect_err("prose does not satisfy a JSON contract");
+        assert!(matches!(err, AnalysisFailure::Unparseable(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn a_provider_failure_is_reported_as_one_rather_than_as_an_answer() {
+        let completer = ScriptedCompleter::replying(vec![Err("the model timed out".to_string())]);
+        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let request =
+            AnalysisRequest::new(&source, AnalysisType::Summary, PromptId::MeetingSummary);
+
+        let err = AnalysisService::new(&completer)
+            .execute_computed(&request, &source, &meeting_content(), "write prose")
+            .await
+            .expect_err("a timeout is not a summary");
+        match err {
+            AnalysisFailure::NoCompletion(m) => assert!(m.contains("timed out"), "{m}"),
+            other => panic!("expected NoCompletion, got {other:?}"),
+        }
+    }
 
     fn meeting_content() -> CanonicalContent {
         CanonicalContent::from_markdown("Volunteer interviews", "Three interviews happened.")

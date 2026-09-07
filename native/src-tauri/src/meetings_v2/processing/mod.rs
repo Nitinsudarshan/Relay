@@ -52,19 +52,24 @@
 //   against it with their own output contracts and per-stage sampling.
 //   `AnalysisService::execute_computed` runs them.
 //
-// What remains is a third blocker neither this comment nor `analysis/mod.rs`
-// had identified: **the test seam**. `AnalysisService::new` takes a concrete
-// `&LLMClient`, while this pipeline's tests drive it through `ScriptedLlm`, a
-// `MeetingLlm` implementation that replays queued responses — used across
-// `processing::tests`, `summarize` and `extract`. Migrating means either
-// giving the service a mockable completion seam or rewriting those suites, and
-// neither belongs in the same change as the foundation it depends on.
+// A third blocker, which neither this comment nor `analysis/mod.rs` had
+// identified, is also gone: `AnalysisService` took a concrete `&LLMClient`,
+// so migrating would have meant rewriting the three suites that drive this
+// pipeline through `ScriptedLlm`. It now takes `providers::Completer`, and
+// `service.rs` has a scripted implementation of its own proving a computed,
+// staged prompt runs end to end without a network.
 //
-// So the order is: a completion trait on `AnalysisService`, then swap
-// `MeetingLlm` for it stage by stage, keeping the repair loop and the
-// deterministic floor in this module where they already are. What is already
-// shared: the provider layer, and the heuristic-filler marker, which now comes
-// from `providers::HEURISTIC_FALLBACK_MODEL` for both.
+// So nothing structural is in the way. What is left is the swap itself, and
+// it is a real piece of work rather than a rename: `MeetingLlm` carries
+// `prompt_budget_chars`, which extraction uses to decide how many passes a
+// long transcript needs, and that has no equivalent on the shared service
+// yet. Do it stage by stage, keep the repair loop and the deterministic floor
+// in this module where they already are, and keep `ScriptedLlm`'s coverage by
+// pointing it at the new seam rather than deleting it.
+//
+// What is already shared: the provider layer, the completion seam, and the
+// heuristic-filler marker, which comes from
+// `providers::HEURISTIC_FALLBACK_MODEL` for both.
 
 
 pub mod context;

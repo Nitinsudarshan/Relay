@@ -7,6 +7,46 @@ pub use ollama_manager::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// A boxed future, so [`Completer`] needs no `async_trait` dependency.
+///
+/// The same choice `meetings_v2::processing::llm` made and for the same
+/// reason; the alias lives here now so there is one of it.
+pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
+
+/// What an analysis needs from a completion provider, and nothing else.
+///
+/// A trait rather than the concrete [`LLMClient`] so a caller can substitute a
+/// scripted stand-in. That is the difference between a pipeline whose failure
+/// paths — a timeout, unparseable JSON, an empty answer — are tested, and one
+/// whose failure paths are hoped about.
+///
+/// It exists because of a specific migration. `meetings_v2::processing` drives
+/// its own suites through exactly such a stand-in (`MeetingLlm` and its
+/// `ScriptedLlm`), which is why it could not move onto
+/// `pipeline::analysis::AnalysisService` — the service took a concrete client,
+/// so migrating meant rewriting three test suites alongside the pipeline. This
+/// is the seam that removes that coupling.
+///
+/// Deliberately three methods. A wider trait would tempt the analysis layer
+/// into knowing about streaming, hosts and model names, none of which an
+/// analysis has any business deciding.
+pub trait Completer: Send + Sync {
+    /// The provider's own sampling defaults, which a prompt then narrows.
+    fn default_options(&self) -> CompletionOptions;
+
+    /// Which service will answer, for the provenance record.
+    fn provider_type(&self) -> &ProviderType;
+
+    /// One completion, with heuristic filler reported as the failure it is
+    /// rather than returned as an answer.
+    fn complete_verified<'a>(
+        &'a self,
+        prompt: &'a str,
+        system_prompt: Option<&'a str>,
+        options: CompletionOptions,
+    ) -> BoxFuture<'a, Result<LLMResponse, ProviderError>>;
+}
+
 #[derive(Error, Debug)]
 pub enum ProviderError {
     #[error("Network error connecting to LLM provider: {0}")]
@@ -149,6 +189,28 @@ pub struct CloudRoute {
 pub struct LLMClient {
     config: ProviderConfig,
     client: reqwest::Client,
+}
+
+/// `LLMClient` is the one real implementation; every other is a test
+/// stand-in. The methods delegate to the inherent ones, so there is a single
+/// definition of what a verified completion is.
+impl Completer for LLMClient {
+    fn default_options(&self) -> CompletionOptions {
+        LLMClient::default_options(self)
+    }
+
+    fn provider_type(&self) -> &ProviderType {
+        LLMClient::provider_type(self)
+    }
+
+    fn complete_verified<'a>(
+        &'a self,
+        prompt: &'a str,
+        system_prompt: Option<&'a str>,
+        options: CompletionOptions,
+    ) -> BoxFuture<'a, Result<LLMResponse, ProviderError>> {
+        Box::pin(LLMClient::complete_verified(self, prompt, system_prompt, options))
+    }
 }
 
 impl LLMClient {

@@ -7,7 +7,8 @@
 //!
 //! Boxed futures rather than `async_trait` keep this dependency-free; the
 //! pipeline makes a handful of model calls per meeting at most, so the
-//! allocation is irrelevant.
+//! allocation is irrelevant. The alias itself now lives in `providers`, which
+//! grew the same seam as [`providers::Completer`] — so there is one of it.
 //!
 //! Two things the trait carries beyond "send a prompt": the sampling each stage
 //! needs, and how much prompt the model can actually read. Both were previously
@@ -15,10 +16,7 @@
 //! extraction ran at a creative-writing temperature, and a transcript longer
 //! than the model's window was cut off with nothing in the response to say so.
 
-use std::future::Future;
-use std::pin::Pin;
-
-pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+pub use crate::providers::BoxFuture;
 
 /// A completion that actually came from a model.
 #[derive(Debug, Clone, PartialEq)]

@@ -36,11 +36,14 @@
 //! language. `PromptId::MeetingFacts` and `PromptId::MeetingSummary` are
 //! registered, with their own output contracts and per-stage sampling.
 //!
-//! The remaining obstacle is the test seam: [`service::AnalysisService::new`]
-//! takes a concrete `&LLMClient`, and the meeting suites drive their pipeline
-//! through a scripted `MeetingLlm`. A completion trait here comes first; the
-//! swap follows. Destabilising a working pipeline for architectural symmetry
-//! is still a bad trade, and §38 still says so.
+//! [`service::AnalysisService`] now holds `providers::Completer` rather than a
+//! concrete client, so a caller with a scripted stand-in can exercise its
+//! failure paths — which is what the meeting suites need in order to move.
+//! What is left is the swap itself: `MeetingLlm` also carries
+//! `prompt_budget_chars`, used to decide how many extraction passes a long
+//! transcript needs, and that has no equivalent here yet. Destabilising a
+//! working pipeline for architectural symmetry is still a bad trade, and §38
+//! still says so.
 //!
 //! The one thing that was genuinely duplicated — the heuristic-filler marker —
 //! now comes from `providers` for both.
