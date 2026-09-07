@@ -174,6 +174,27 @@ pub struct SourceDescriptor<'a> {
 }
 
 impl<'a> SourceDescriptor<'a> {
+    /// A minimal descriptor for tests across this module.
+    ///
+    /// Test-only on purpose: a production caller that cannot describe where
+    /// its source came from should not be analysing it, and a convenient
+    /// stand-in is exactly how `origin` and `coverage` come to be lies.
+    #[cfg(test)]
+    pub fn synthetic(id: &'a str, source_type: SourceType) -> Self {
+        Self {
+            id,
+            source_type,
+            subtype: SourceSubtype::None,
+            title: "Test source",
+            origin: "test",
+            canonical_location: None,
+            captured_at: "2026-09-07T00:00:00Z",
+            trust: SourceTrust::UserAuthored,
+            coverage: SourceCoverage::Complete,
+            notes: &[],
+        }
+    }
+
     /// Describes a vault artifact — a capture or an imported document.
     ///
     /// The classification comes from `capture_type`, which

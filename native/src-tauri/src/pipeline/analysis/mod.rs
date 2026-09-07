@@ -27,11 +27,24 @@
 //!
 //! # Not migrated yet
 //!
-//! The meetings pipeline (`meetings_v2::processing`) has its own staged
-//! extraction, validation and repair loop, and its own `MeetingLlm` abstraction
-//! with per-stage sampling that predates the prompt registry. It is a consumer
-//! of this foundation to migrate later, deliberately not now: destabilising a
-//! working pipeline for architectural symmetry is a bad trade, and §38 says so.
+//! The meetings pipeline (`meetings_v2::processing`) still runs its own
+//! `MeetingLlm`, but this module now models what it needs:
+//! [`contract::AnalysisStage`] describes a multi-pass analysis, and
+//! [`prompts::PromptBody::Computed`] admits a prompt whose instructions are
+//! built per call — which is what a meeting summary's are, since they
+//! interpolate the length budget, the depth mode, the extension and the user's
+//! language. `PromptId::MeetingFacts` and `PromptId::MeetingSummary` are
+//! registered, with their own output contracts and per-stage sampling.
+//!
+//! [`service::AnalysisService`] now holds `providers::Completer` rather than a
+//! concrete client, so a caller with a scripted stand-in can exercise its
+//! failure paths — which is what the meeting suites need in order to move.
+//! What is left is the swap itself: `MeetingLlm` also carries
+//! `prompt_budget_chars`, used to decide how many extraction passes a long
+//! transcript needs, and that has no equivalent here yet. Destabilising a
+//! working pipeline for architectural symmetry is still a bad trade, and §38
+//! still says so.
+//!
 //! The one thing that was genuinely duplicated — the heuristic-filler marker —
 //! now comes from `providers` for both.
 
@@ -44,11 +57,12 @@ pub mod source;
 
 pub use content::{ArtifactKind, CanonicalContent, ContentArtifact, ContentSegment};
 pub use contract::{
-    AnalysisFailure, AnalysisMetadata, AnalysisRequest, AnalysisResult, AnalysisStatus,
+    AnalysisFailure, AnalysisMetadata, AnalysisRequest, AnalysisResult, AnalysisStage,
+    AnalysisStatus,
     AnalysisType, MetadataBuilder,
 };
 pub use derived::{DerivedData, DerivedPayload, DerivedType};
-pub use prompts::{context_prompt_for, OutputContract, PromptDefinition, PromptId};
+pub use prompts::{context_prompt_for, OutputContract, PromptBody, PromptDefinition, PromptId};
 pub use service::{context_request, parse_json_response, AnalysisService};
 pub use source::{
     SourceCoverage, SourceDescriptor, SourceSubtype, SourceTrust, SourceType,

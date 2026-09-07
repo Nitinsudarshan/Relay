@@ -1395,6 +1395,69 @@ fn split_sentences(text: &str) -> Vec<&str> {
 }
 
 #[cfg(test)]
+mod registry_contract_tests {
+    use super::*;
+    use super::super::model::{NormalizedSegment, SegmentChannel};
+    use crate::meetings_v2::types::MeetingNotes;
+    use crate::pipeline::analysis::{OutputContract, PromptId};
+
+    /// The invariant the prompt registry cannot check for a computed prompt.
+    ///
+    /// `PromptId::MeetingFacts` declares `OutputContract::Json`, and the
+    /// registry's own test skips it because there is no static body to inspect.
+    /// The check belongs here, where the body is built — this module owns the
+    /// builder and the parser that has to agree with it, which is the reason
+    /// the body is computed in the first place.
+    #[test]
+    fn the_computed_extraction_prompt_asks_for_the_json_it_declares() {
+        let def = PromptId::MeetingFacts.definition();
+        assert_eq!(def.output_contract, OutputContract::Json);
+        assert!(
+            def.is_computed(),
+            "if this prompt ever gains a static body, the registry's own test covers it \
+and this one is redundant"
+        );
+
+        let segments = [NormalizedSegment {
+            id: "seg_00000".to_string(),
+            chunk_index: 0,
+            utterance_index: None,
+            start_time_s: 0.0,
+            end_time_s: 30.0,
+            text: "Mansi will send the final volunteer list to Pragati by Wednesday."
+                .to_string(),
+            raw_text: "mansi will send the final volunteer list to pragati by wednesday"
+                .to_string(),
+            channel: SegmentChannel::Mixed,
+            speaker_id: None,
+            applied_rules: Vec::new(),
+        }];
+        let notes = MeetingNotes::default();
+        let context = MeetingContext {
+            title: "Volunteer interviews",
+            date_iso: "2026-09-07",
+            duration_minutes: Some(5),
+            speakers: &[],
+            segments: &segments,
+            notes: &notes,
+            calendar: None,
+            glossary: &[],
+        };
+        let window = context
+            .windows(4_000)
+            .into_iter()
+            .next()
+            .expect("a transcript with one segment yields one window");
+        let prompt = build_extraction_prompt(&context, &window);
+
+        assert!(
+            prompt.contains("JSON"),
+            "Stage A declares JSON output but its prompt never asks for it"
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::meetings_v2::processing::llm::test_support::ScriptedLlm;

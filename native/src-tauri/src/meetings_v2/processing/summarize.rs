@@ -21,7 +21,102 @@ use super::model::{
 };
 use super::modes::mode_instructions;
 use super::speakers::resolve_label;
+use crate::capture::romanize::OutputScript;
 use crate::meetings_v2::types::MeetingNotes;
+
+/// The language and alphabet a summary is written in.
+///
+/// Relay has carried `notes_language` and `output_script` in settings since
+/// before this type existed, and threaded neither into any prompt — so a user
+/// who asked for Hindi notes in Latin script got English notes, and the
+/// settings screen described behaviour that did not exist.
+///
+/// Note what this is *not*: it does not translate the meeting. Stage A's facts
+/// stay in whatever language was spoken; this asks Stage B to write the prose
+/// about them in the language and alphabet the reader chose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LanguageDirective {
+    /// ISO code for the prose, from `notes_language`.
+    pub notes_language: String,
+    pub script: OutputScript,
+}
+
+impl Default for LanguageDirective {
+    fn default() -> Self {
+        Self {
+            notes_language: "en".to_string(),
+            script: OutputScript::Latin,
+        }
+    }
+}
+
+impl LanguageDirective {
+    /// True when this is English in Latin script — the case that needs no
+    /// instruction, because it is what a model does anyway.
+    fn is_implicit(&self) -> bool {
+        let lang = self.notes_language.trim().to_lowercase();
+        (lang.is_empty() || lang == "en" || lang == "auto")
+            && self.script == OutputScript::Latin
+    }
+
+    /// The prompt block, or nothing when the defaults already describe it.
+    ///
+    /// Kept empty in the common case rather than always emitted: every line in
+    /// a prompt competes for a small local model's attention, and an
+    /// instruction to "write in English using the Latin alphabet" spends that
+    /// attention saying nothing.
+    fn prompt_block(&self) -> String {
+        if self.is_implicit() {
+            return String::new();
+        }
+        let lang = self.notes_language.trim().to_lowercase();
+        let mut out = String::from("\nLANGUAGE AND SCRIPT\n");
+        if !(lang.is_empty() || lang == "auto") {
+            out.push_str(&format!(
+                "- Write the summary in {}. The facts may be in another language; \
+the summary is not a translation of them, it is a summary written in {}.\n",
+                language_name(&lang),
+                language_name(&lang)
+            ));
+        }
+        match self.script {
+            OutputScript::Latin => out.push_str(
+                "- Write it in the Latin alphabet, romanized. The reader speaks the \
+language but does not read its native script, so native-script output is \
+unreadable to them.\n",
+            ),
+            OutputScript::Native => out.push_str(
+                "- Write it in the language's own native script.\n",
+            ),
+        }
+        out.push_str(
+            "- Never translate a name, a number, or a quoted term in order to satisfy \
+this. Accuracy outranks language.\n",
+        );
+        out
+    }
+}
+
+/// A model follows a language name more reliably than an ISO code.
+fn language_name(code: &str) -> &str {
+    match code {
+        "en" => "English",
+        "hi" => "Hindi",
+        "kn" => "Kannada",
+        "ta" => "Tamil",
+        "te" => "Telugu",
+        "mr" => "Marathi",
+        "bn" => "Bengali",
+        "gu" => "Gujarati",
+        "ml" => "Malayalam",
+        "pa" => "Punjabi",
+        "ur" => "Urdu",
+        "es" => "Spanish",
+        "fr" => "French",
+        "de" => "German",
+        other => other,
+    }
+}
 
 /// What Stage B produced, and how.
 pub struct SummaryOutput {
@@ -54,6 +149,8 @@ pub struct SummaryInput<'a> {
     /// The user's own instructions for this summary, if they gave any. Always
     /// subordinate to accuracy.
     pub user_instructions: Option<&'a str>,
+    /// The language and alphabet the reader wants the prose in.
+    pub language: &'a LanguageDirective,
 }
 
 /// Runs Stage B.
@@ -272,6 +369,8 @@ do not carry.\n",
         ));
     }
 
+    out.push_str(&input.language.prompt_block());
+
     if let Some(instructions) = input.user_instructions.map(str::trim).filter(|i| !i.is_empty()) {
         out.push_str(&format!(
             "\nTHE USER'S OWN INSTRUCTIONS\n{}\nFollow these for structure, tone, emphasis and \
@@ -300,6 +399,15 @@ a claim the facts do not carry.\n",
             input.extension.name,
             input.extension.instructions.trim()
         )
+    };
+
+    let language_block = {
+        let block = input.language.prompt_block();
+        if block.is_empty() {
+            String::new()
+        } else {
+            format!("\n17.{}", block.trim_start_matches('\n'))
+        }
     };
 
     let user_block = match input.user_instructions.map(str::trim).filter(|i| !i.is_empty()) {
@@ -423,7 +531,7 @@ the reasoning, not just the position.
 Return the summary and nothing else. No preamble, no "here is the summary", no
 closing remark, no note about what you did, no JSON, no code fence. Begin with
 `## Overview`.
-{notes_block}{extension_block}{user_block}"#,
+{notes_block}{extension_block}{user_block}{language_block}"#,
         mode_shape = mode_instructions(input.budget.mode),
         notes_block = notes_block,
         extension_block = extension_block,
@@ -889,7 +997,106 @@ mod tests {
             extension,
             notes,
             user_instructions: None,
+            language: &ENGLISH_LATIN,
         }
+    }
+
+    /// The default reader: English in Latin script, which emits no directive.
+    static ENGLISH_LATIN: LanguageDirective = LanguageDirective {
+        notes_language: String::new(),
+        script: OutputScript::Latin,
+    };
+
+    #[test]
+    fn an_english_latin_reader_gets_no_language_instruction() {
+        // Every line in a prompt competes for a small local model's attention.
+        // "Write in English using the Latin alphabet" spends that attention
+        // saying nothing, so the default case emits nothing.
+        assert!(LanguageDirective::default().prompt_block().is_empty());
+        assert!(ENGLISH_LATIN.prompt_block().is_empty());
+        assert!(LanguageDirective {
+            notes_language: "auto".to_string(),
+            script: OutputScript::Latin,
+        }
+        .prompt_block()
+        .is_empty());
+    }
+
+    #[test]
+    fn hindi_in_latin_script_asks_for_both_and_neither_is_a_translation() {
+        // The setting combination that had no effect at all before this: the
+        // reader speaks Hindi and reads only Latin script.
+        let block = LanguageDirective {
+            notes_language: "hi".to_string(),
+            script: OutputScript::Latin,
+        }
+        .prompt_block();
+
+        assert!(block.contains("Hindi"), "{block}");
+        assert!(block.contains("Latin alphabet"), "{block}");
+        assert!(block.contains("romanized"), "{block}");
+        // The rule that keeps this from becoming a translation instruction.
+        assert!(block.contains("not a translation"), "{block}");
+        assert!(block.contains("Accuracy outranks language"), "{block}");
+    }
+
+    #[test]
+    fn a_native_script_reader_is_asked_for_the_native_script() {
+        let block = LanguageDirective {
+            notes_language: "hi".to_string(),
+            script: OutputScript::Native,
+        }
+        .prompt_block();
+        assert!(block.contains("native script"), "{block}");
+        assert!(!block.contains("romanized"), "{block}");
+    }
+
+    #[test]
+    fn the_directive_names_the_language_rather_than_its_code() {
+        // A model follows "Hindi" more reliably than "hi".
+        for (code, name) in [("hi", "Hindi"), ("kn", "Kannada"), ("ta", "Tamil")] {
+            let block = LanguageDirective {
+                notes_language: code.to_string(),
+                script: OutputScript::Latin,
+            }
+            .prompt_block();
+            assert!(block.contains(name), "{code} did not name {name}: {block}");
+        }
+        // An unknown code is passed through rather than dropped, so a language
+        // Relay has no name for still reaches the model.
+        let block = LanguageDirective {
+            notes_language: "sw".to_string(),
+            script: OutputScript::Latin,
+        }
+        .prompt_block();
+        assert!(block.contains("sw"), "{block}");
+    }
+
+    #[test]
+    fn a_non_default_reader_changes_both_prompts() {
+        // The full contract and the compact retry must carry the same
+        // instruction. Dropping it from the retry would silently produce a
+        // differently-shaped summary from the one that was asked for.
+        let facts = facts();
+        let roster = roster();
+        let extension = builtin_extensions()[0].clone();
+        let notes = MeetingNotes::default();
+        let hindi = LanguageDirective {
+            notes_language: "hi".to_string(),
+            script: OutputScript::Latin,
+        };
+        let input = SummaryInput {
+            facts: &facts,
+            speakers: &roster,
+            budget: summary_budget(1_400, SummaryMode::Standard),
+            extension: &extension,
+            notes: &notes,
+            user_instructions: None,
+            language: &hindi,
+        };
+
+        assert!(build_summary_prompt(&input).contains("Hindi"));
+        assert!(build_compact_summary_prompt(&input).contains("Hindi"));
     }
 
     #[test]

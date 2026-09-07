@@ -43,11 +43,33 @@
 // does not model yet, and destabilising it for architectural symmetry is a bad
 // trade.
 //
-// What it needs before it can migrate: multi-stage requests in
-// `AnalysisRequest`, and prompt-registry entries for the extraction and
-// summary builders (which are computed per call, not constant). What is
-// already shared: the provider layer, and the heuristic-filler marker, which
-// now comes from `providers::HEURISTIC_FALLBACK_MODEL` for both.
+// Both blockers this TODO originally named are now gone:
+//
+// * `AnalysisStage` describes a multi-pass analysis, and `AnalysisStage::FACTS`
+//   / `::PROSE` name this pipeline's two passes.
+// * `PromptBody::Computed` admits a prompt whose instructions are built per
+//   call, and `PromptId::MeetingFacts` / `::MeetingSummary` are registered
+//   against it with their own output contracts and per-stage sampling.
+//   `AnalysisService::execute_computed` runs them.
+//
+// A third blocker, which neither this comment nor `analysis/mod.rs` had
+// identified, is also gone: `AnalysisService` took a concrete `&LLMClient`,
+// so migrating would have meant rewriting the three suites that drive this
+// pipeline through `ScriptedLlm`. It now takes `providers::Completer`, and
+// `service.rs` has a scripted implementation of its own proving a computed,
+// staged prompt runs end to end without a network.
+//
+// So nothing structural is in the way. What is left is the swap itself, and
+// it is a real piece of work rather than a rename: `MeetingLlm` carries
+// `prompt_budget_chars`, which extraction uses to decide how many passes a
+// long transcript needs, and that has no equivalent on the shared service
+// yet. Do it stage by stage, keep the repair loop and the deterministic floor
+// in this module where they already are, and keep `ScriptedLlm`'s coverage by
+// pointing it at the new seam rather than deleting it.
+//
+// What is already shared: the provider layer, the completion seam, and the
+// heuristic-filler marker, which comes from
+// `providers::HEURISTIC_FALLBACK_MODEL` for both.
 
 
 pub mod context;
@@ -127,6 +149,9 @@ pub struct ProcessingOptions {
     /// Presentation only — see the summary contract, which subordinates them to
     /// the accuracy rules.
     pub user_instructions: Option<String>,
+    /// The language and alphabet the summary prose should be written in, from
+    /// `Settings › Languages & Script`.
+    pub language: summarize::LanguageDirective,
 }
 
 impl Default for ProcessingOptions {
@@ -143,6 +168,7 @@ impl Default for ProcessingOptions {
             extension_id: modes::DEFAULT_EXTENSION_ID.to_string(),
             user_extensions: Vec::new(),
             user_instructions: None,
+            language: summarize::LanguageDirective::default(),
         }
     }
 }
@@ -574,6 +600,7 @@ audio are unaffected."
             extension: &extension,
             notes: &notes,
             user_instructions: options.user_instructions.as_deref(),
+            language: &options.language,
         };
 
         let started = Instant::now();

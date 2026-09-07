@@ -102,6 +102,33 @@ pub struct SttSettings {
     /// Optional user-defined technical vocabulary prompt.
     #[serde(default, alias = "customInitialPrompt")]
     pub custom_initial_prompt: Option<String>,
+    /// Decode quality preset: "fast", "balanced" or "quality".
+    ///
+    /// Trades decode time for how much borderline speech survives. Empty means
+    /// the user has not chosen, and each surface uses the default that suits
+    /// it — dictation cannot afford what a meeting can. A value set here is an
+    /// override and applies everywhere.
+    #[serde(default, alias = "sttPreset")]
+    pub preset: String,
+}
+
+impl SttSettings {
+    /// The user's explicit preset choice, or `None` when they have not made
+    /// one.
+    ///
+    /// The distinction is the whole point. A single global preset would force
+    /// one answer onto surfaces with opposite constraints: push-to-talk is
+    /// latency-bound because someone is waiting for the text, and a meeting is
+    /// recall-bound because it is decoded once and read later. `None` lets each
+    /// surface pick, and a set value is an override that wins everywhere — so
+    /// there is one setting rather than one per surface.
+    pub fn configured_preset(&self) -> Option<crate::capture::stt::SttPreset> {
+        let raw = self.preset.trim();
+        if raw.is_empty() {
+            return None;
+        }
+        Some(crate::capture::stt::SttPreset::from_setting(raw))
+    }
 }
 
 /// Local text-to-speech configuration (Piper). Both fields must be set for

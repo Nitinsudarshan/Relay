@@ -426,7 +426,7 @@ async fn process_captured_audio(
     let models_dir = state.config_dir.join("models");
     let model_path = crate::capture::stt::resolve_dictation_model_path(&models_dir, &settings.stt).await;
 
-    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
+    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language, crate::capture::stt::SttWindow::ShortForm);
     let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::for_dictation(&settings.stt);
     if let Some(prompt) = settings.build_stt_prompt() {
         decoding_config.initial_prompt = Some(prompt);
@@ -468,6 +468,21 @@ async fn process_captured_audio(
     if let Some(err_msg) = err {
         return Err(CommandError::new("STT_FAILED", &err_msg));
     }
+
+    // The deterministic cleanup meetings have always had, now on this path
+    // too: bracketed ASR tags removed, decoder stutters collapsed, isolated
+    // fillers dropped, and the user's own dictionary applied by edit distance.
+    // No model runs, so nothing here can invent a word that was not spoken.
+    //
+    // The `Dictated` profile leaves sentence boundaries alone. This text is
+    // going into whatever field has focus, and a period Relay appended is a
+    // period the user has to delete.
+    let transcript = crate::capture::text_normalize::normalize_text(
+        &transcript,
+        &settings.dictionary,
+        crate::capture::text_normalize::TextProfile::Dictated,
+    )
+    .text;
 
     // had_audio only proves the mic measured sustained energy — Whisper can
     // still land on nothing (most commonly a short hallucination that its
@@ -1987,8 +2002,16 @@ fn start_meeting_session(
     state: &AppState,
 ) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
     let settings = state.settings.lock_or_recover().clone();
-    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
-    let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
+    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language, crate::capture::stt::SttWindow::LongForm);
+    // Meetings default to the accuracy-first preset. A recording is decoded
+    // once and read later, so it can afford a wider beam — and it needs the
+    // lower no-speech threshold that beam makes safe, because in accented or
+    // code-switched audio nearly every segment is low-confidence and a
+    // threshold tuned for clean English discards most of the transcript.
+    let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings_defaulting(
+        &settings.stt,
+        crate::capture::stt::SttPreset::Quality,
+    );
 
     // Hand the recognizer the vocabulary before it guesses, rather than
     // repairing its guess afterwards.
@@ -2177,16 +2200,41 @@ pub async fn get_meeting_v2(
         .map_err(|e: String| CommandError::new("GET_MEETING_FAILED", &e))
 }
 
+/// The alphabet this user reads, from `Settings › Languages & Script`.
+fn output_script(state: &State<'_, AppState>) -> crate::capture::romanize::OutputScript {
+    crate::capture::romanize::OutputScript::from_setting(
+        &state.settings.lock_or_recover().language.output_script,
+    )
+}
+
+/// Projects a meeting payload into the user's alphabet on its way to the UI.
+///
+/// The transform happens *here*, at the boundary, and never on the way in:
+/// `transcript.jsonl` stays byte-identical, so switching the setting back
+/// shows the original Devanagari with nothing to undo. That is also why it is
+/// applied to `raw_text` — the Raw Transcript tab is a view like any other,
+/// and a diagnostic the user cannot read diagnoses nothing.
+fn project_for_reader<T: serde::Serialize>(
+    value: T,
+    state: &State<'_, AppState>,
+) -> Result<serde_json::Value, CommandError> {
+    let mut json = serde_json::to_value(value)
+        .map_err(|e| CommandError::new("SERIALIZE_FAILED", &e.to_string()))?;
+    crate::capture::romanize::project_json(&mut json, output_script(state));
+    Ok(json)
+}
+
 #[tauri::command]
 pub async fn get_meeting_v2_transcript(
     session_id: String,
     state: State<'_, AppState>,
-) -> Result<Vec<crate::meetings_v2::TranscriptSegment>, CommandError> {
-    state
+) -> Result<serde_json::Value, CommandError> {
+    let segments = state
         .meetings_v2
         .store()
         .get_transcript_segments(&session_id)
-        .map_err(|e: String| CommandError::new("GET_TRANSCRIPT_FAILED", &e))
+        .map_err(|e: String| CommandError::new("GET_TRANSCRIPT_FAILED", &e))?;
+    project_for_reader(segments, &state)
 }
 
 #[tauri::command]
@@ -2242,6 +2290,13 @@ fn meeting_processing_options(
         // The dictation dictionary doubles as the normalization glossary: these
         // are exactly the terms the user has already told Relay it mishears.
         glossary: settings.dictionary.clone(),
+        // The two language settings that had never reached a prompt.
+        language: crate::meetings_v2::processing::summarize::LanguageDirective {
+            notes_language: settings.language.notes_language.clone(),
+            script: crate::capture::romanize::OutputScript::from_setting(
+                &settings.language.output_script,
+            ),
+        },
         generate_conversation: settings.meetings.generate_conversation_transcript,
         speaker_identification: match settings.meetings.speaker_identification {
             SpeakerIdentification::Automatic => SpeakerIdentificationMode::Automatic,
@@ -2276,11 +2331,11 @@ fn meeting_processing_options(
 pub async fn get_meeting_v2_processing(
     session_id: String,
     state: State<'_, AppState>,
-) -> Result<Option<crate::meetings_v2::MeetingProcessing>, CommandError> {
+) -> Result<serde_json::Value, CommandError> {
     if session_id.trim().is_empty() {
         return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
     }
-    Ok(state.meeting_processor.get(&session_id))
+    project_for_reader(state.meeting_processor.get(&session_id), &state)
 }
 
 /// Runs the deterministic stages — normalize, attribute speakers, build the
@@ -3577,7 +3632,7 @@ pub async fn start_talkback(
     }
 
     let settings = state.settings.lock_or_recover().clone();
-    let language = crate::capture::SttLanguageConfig::from_settings(&settings.language);
+    let language = crate::capture::SttLanguageConfig::from_settings(&settings.language, crate::capture::stt::SttWindow::ShortForm);
     let models_dir = state.config_dir.join("models");
     let model_path = if voice {
         crate::capture::stt::resolve_dictation_model_path(&models_dir, &settings.stt)
@@ -3587,9 +3642,22 @@ pub async fn start_talkback(
         None
     };
 
+    // Talkback decodes one complete utterance when the turn ends, not a
+    // stream of short windows, so it gets the full encoder context and as many
+    // segments as the audio holds. A turn runs up to thirty seconds and the
+    // short-window shape truncated it at about fifteen.
+    let mut decoding = crate::capture::stt::WhisperDecodingConfig::for_utterance();
+    if let Some(prompt) = settings.build_stt_prompt() {
+        decoding.initial_prompt = Some(prompt);
+    }
+    let tuned = crate::capture::stt::WhisperDecodingConfig::for_dictation(&settings.stt);
+    decoding.strategy = tuned.strategy.clone();
+    decoding.no_speech_thold = tuned.no_speech_thold;
+    decoding.n_threads = tuned.n_threads;
+
     state
         .talkback
-        .enable(&app, &settings.talkback, voice, model_path, language)
+        .enable(&app, &settings.talkback, voice, model_path, language, decoding)
         .map_err(|e| CommandError::new("TALKBACK_START_FAILED", &e))
 }
 

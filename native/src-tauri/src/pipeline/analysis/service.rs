@@ -11,7 +11,7 @@
 //! prompt, a payload type and a builder — not another capture → normalize →
 //! prompt → LLM → parse → persist → provenance pipeline.
 
-use crate::providers::{LLMClient, ProviderError, ProviderType};
+use crate::providers::{Completer, ProviderError, ProviderType};
 
 use super::content::CanonicalContent;
 use super::contract::{
@@ -27,12 +27,17 @@ use crate::pipeline::source_boundary;
 /// authoritative provider abstraction, and a service that constructs its own
 /// `LLMClient` is the first step towards a second one.
 pub struct AnalysisService<'a> {
-    llm: Option<&'a LLMClient>,
+    llm: Option<&'a dyn Completer>,
 }
 
 impl<'a> AnalysisService<'a> {
     /// A service backed by a provider.
-    pub fn new(llm: &'a LLMClient) -> Self {
+    ///
+    /// Takes the [`Completer`] seam rather than the concrete client, so a
+    /// caller with a scripted stand-in can exercise this service's failure
+    /// paths. `&LLMClient` still coerces, so production call sites read
+    /// unchanged.
+    pub fn new(llm: &'a dyn Completer) -> Self {
         Self { llm: Some(llm) }
     }
 
@@ -56,6 +61,35 @@ impl<'a> AnalysisService<'a> {
         source: &SourceDescriptor<'_>,
         content: &CanonicalContent,
     ) -> Result<ExecutedAnalysis, AnalysisFailure> {
+        self.execute_with(request, source, content, None).await
+    }
+
+    /// As [`execute`], for a prompt whose instructions are built per call.
+    ///
+    /// The escape hatch that lets a staged analysis onto this service without
+    /// the registry having to hold a body it cannot express as a constant. The
+    /// caller supplies the text and the registry still supplies everything
+    /// else — identity, version, output contract, sampling, applicability.
+    ///
+    /// [`execute`]: Self::execute
+    pub async fn execute_computed(
+        &self,
+        request: &AnalysisRequest<'_>,
+        source: &SourceDescriptor<'_>,
+        content: &CanonicalContent,
+        instructions: &str,
+    ) -> Result<ExecutedAnalysis, AnalysisFailure> {
+        self.execute_with(request, source, content, Some(instructions))
+            .await
+    }
+
+    async fn execute_with(
+        &self,
+        request: &AnalysisRequest<'_>,
+        source: &SourceDescriptor<'_>,
+        content: &CanonicalContent,
+        computed_instructions: Option<&str>,
+    ) -> Result<ExecutedAnalysis, AnalysisFailure> {
         let prompt = request.prompt_id.definition();
 
         // Applicability is checked before the call, not after: sending the
@@ -73,24 +107,44 @@ impl<'a> AnalysisService<'a> {
             return Err(AnalysisFailure::EmptySource);
         }
 
+        // A computed prompt's instructions come from the caller, because they
+        // cannot be a constant — see `PromptBody::Computed`. The registry still
+        // decided the output contract and the sampling that got us here.
+        let instructions = match (prompt.static_instructions(), computed_instructions) {
+            (Some(fixed), None) => fixed.to_string(),
+            (None, Some(supplied)) => supplied.to_string(),
+            (None, None) => {
+                return Err(AnalysisFailure::NoCompletion(format!(
+                    "{} is a computed prompt and no instructions were supplied",
+                    request.prompt_id.as_str()
+                )))
+            }
+            // Guards the confusing case rather than silently preferring one:
+            // a caller passing instructions for a prompt that has its own has
+            // misunderstood which prompt they are running.
+            (Some(_), Some(_)) => {
+                return Err(AnalysisFailure::NoCompletion(format!(
+                    "{} has its own instructions; supplied ones would be ignored",
+                    request.prompt_id.as_str()
+                )))
+            }
+        };
+
         let client = self.llm.ok_or_else(|| {
             AnalysisFailure::NoCompletion("no provider is configured".to_string())
         })?;
 
         // The boundary is applied from the source's trust level, not from the
         // caller's memory. A captured page is external whatever its domain.
+
         let body = content.as_prompt_body();
         let (user_prompt, mut system_prompt) = if source.trust.is_external() {
             (
                 source_boundary::wrap_external_source(&source.describe_origin(), &body).framed,
-                format!(
-                    "{}\n{}",
-                    prompt.system_instructions,
-                    source_boundary::EXTERNAL_SOURCE_RULE
-                ),
+                format!("{}\n{}", instructions, source_boundary::EXTERNAL_SOURCE_RULE),
             )
         } else {
-            (body, prompt.system_instructions.to_string())
+            (body, instructions)
         };
 
         // §29: what capture already knows about completeness reaches the model,
@@ -301,6 +355,223 @@ fn preview(text: &str) -> String {
     }
     let cut: String = trimmed.chars().take(200).collect();
     format!("{cut}…")
+}
+
+#[cfg(test)]
+mod computed_prompt_tests {
+    use super::*;
+    use crate::pipeline::analysis::{AnalysisType, PromptId, SourceType};
+
+    use crate::providers::{BoxFuture, CompletionOptions, LLMResponse, ProviderType};
+    use std::sync::Mutex;
+
+    /// A [`Completer`] that replays queued answers.
+    ///
+    /// The reason the trait exists. Before it, this service took a concrete
+    /// `LLMClient`, so its failure paths could only be reached with a network
+    /// or an Ollama instance — which meant they were not reached. It also
+    /// records the system prompt it was handed, which is how a computed
+    /// prompt's instructions can be asserted to have actually arrived.
+    struct ScriptedCompleter {
+        answers: Mutex<Vec<Result<String, String>>>,
+        seen_system_prompts: Mutex<Vec<String>>,
+    }
+
+    impl ScriptedCompleter {
+        fn replying(answers: Vec<Result<String, String>>) -> Self {
+            Self {
+                answers: Mutex::new(answers),
+                seen_system_prompts: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn last_system_prompt(&self) -> String {
+            self.seen_system_prompts
+                .lock()
+                .expect("not poisoned")
+                .last()
+                .cloned()
+                .unwrap_or_default()
+        }
+    }
+
+    impl Completer for ScriptedCompleter {
+        fn default_options(&self) -> CompletionOptions {
+            CompletionOptions::default()
+        }
+
+        fn provider_type(&self) -> &ProviderType {
+            &ProviderType::Ollama
+        }
+
+        fn complete_verified<'a>(
+            &'a self,
+            _prompt: &'a str,
+            system_prompt: Option<&'a str>,
+            _options: CompletionOptions,
+        ) -> BoxFuture<'a, Result<LLMResponse, ProviderError>> {
+            self.seen_system_prompts
+                .lock()
+                .expect("not poisoned")
+                .push(system_prompt.unwrap_or_default().to_string());
+            let next = self
+                .answers
+                .lock()
+                .expect("not poisoned")
+                .pop()
+                .unwrap_or_else(|| Err("the script ran out of answers".to_string()));
+            Box::pin(async move {
+                match next {
+                    Ok(text) => Ok(LLMResponse {
+                        text,
+                        model: "scripted".to_string(),
+                        prompt_tokens: None,
+                        completion_tokens: None,
+                    }),
+                    Err(message) => Err(ProviderError::NoCompletion(message)),
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_computed_prompt_reaches_the_model_with_the_supplied_instructions() {
+        // End to end through the seam: this is what a migrated meeting Stage A
+        // does, and what could not be tested before the trait existed.
+        let completer = ScriptedCompleter::replying(vec![Ok(
+            r#"{"key_points": [], "action_items": []}"#.to_string()
+        )]);
+        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let request =
+            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::MeetingFacts)
+                .at_stage(crate::pipeline::analysis::AnalysisStage::FACTS);
+
+        let executed = AnalysisService::new(&completer)
+            .execute_computed(
+                &request,
+                &source,
+                &meeting_content(),
+                "EXTRACT FACTS AS JSON. Invent nothing.",
+            )
+            .await
+            .expect("the scripted answer is valid JSON for a JSON contract");
+
+        assert!(executed.json.is_some(), "a JSON contract parses its answer");
+        assert_eq!(executed.provider, "ollama");
+        assert!(
+            completer
+                .last_system_prompt()
+                .contains("EXTRACT FACTS AS JSON"),
+            "the supplied instructions must be what the model was sent, got {:?}",
+            completer.last_system_prompt()
+        );
+    }
+
+    #[tokio::test]
+    async fn prose_returned_for_a_json_contract_is_a_failed_analysis() {
+        // §24. A failure path that needed a network to reach until now.
+        let completer =
+            ScriptedCompleter::replying(vec![Ok("Three interviews happened.".to_string())]);
+        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let request =
+            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::MeetingFacts);
+
+        let err = AnalysisService::new(&completer)
+            .execute_computed(&request, &source, &meeting_content(), "instructions")
+            .await
+            .expect_err("prose does not satisfy a JSON contract");
+        assert!(matches!(err, AnalysisFailure::Unparseable(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn a_provider_failure_is_reported_as_one_rather_than_as_an_answer() {
+        let completer = ScriptedCompleter::replying(vec![Err("the model timed out".to_string())]);
+        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let request =
+            AnalysisRequest::new(&source, AnalysisType::Summary, PromptId::MeetingSummary);
+
+        let err = AnalysisService::new(&completer)
+            .execute_computed(&request, &source, &meeting_content(), "write prose")
+            .await
+            .expect_err("a timeout is not a summary");
+        match err {
+            AnalysisFailure::NoCompletion(m) => assert!(m.contains("timed out"), "{m}"),
+            other => panic!("expected NoCompletion, got {other:?}"),
+        }
+    }
+
+    fn meeting_content() -> CanonicalContent {
+        CanonicalContent::from_markdown("Volunteer interviews", "Three interviews happened.")
+    }
+
+    #[tokio::test]
+    async fn a_computed_prompt_without_instructions_is_refused() {
+        // The failure mode this guard exists for: sending a model an empty
+        // system prompt and treating whatever comes back as an analysis.
+        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let request =
+            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::MeetingFacts);
+        let err = AnalysisService::offline()
+            .execute(&request, &source, &meeting_content())
+            .await
+            .expect_err("a computed prompt has no body of its own");
+
+        match err {
+            AnalysisFailure::NoCompletion(m) => {
+                assert!(m.contains("meeting.facts"), "{m}");
+                assert!(m.contains("computed"), "{m}");
+            }
+            other => panic!("expected NoCompletion, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn instructions_supplied_for_a_static_prompt_are_refused_not_ignored() {
+        // Silently preferring one body over the other would hide a caller
+        // running the wrong prompt. Refusing says so.
+        let source = SourceDescriptor::synthetic("doc1", SourceType::Document);
+        let request = AnalysisRequest::new(&source, AnalysisType::Summary, PromptId::Summary);
+        let err = AnalysisService::offline()
+            .execute_computed(&request, &source, &meeting_content(), "my own instructions")
+            .await
+            .expect_err("Summary carries its own instructions");
+
+        match err {
+            AnalysisFailure::NoCompletion(m) => assert!(m.contains("its own instructions"), "{m}"),
+            other => panic!("expected NoCompletion, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_meeting_prompt_is_refused_on_a_source_that_is_not_a_meeting() {
+        // Applicability is still checked for the new entries, and before the
+        // instructions are resolved — a wrong-source call must not depend on
+        // whether the caller remembered a body.
+        let source = SourceDescriptor::synthetic("doc1", SourceType::Document);
+        let request =
+            AnalysisRequest::new(&source, AnalysisType::Summary, PromptId::MeetingSummary);
+        let err = AnalysisService::offline()
+            .execute_computed(&request, &source, &meeting_content(), "instructions")
+            .await
+            .expect_err("a document is not a meeting");
+        assert!(matches!(err, AnalysisFailure::PromptNotApplicable(_)), "{err:?}");
+    }
+
+    #[test]
+    fn the_two_meeting_prompts_are_sampled_for_what_they_produce() {
+        // Extraction invents an owner the moment it has room to be creative;
+        // prose needs a little. This is the per-stage sampling the meeting
+        // pipeline had and the registry previously could not express.
+        let facts = PromptId::MeetingFacts.definition();
+        let prose = PromptId::MeetingSummary.definition();
+        assert!(facts.expects_json());
+        assert!(!prose.expects_json());
+        assert!(
+            facts.temperature < prose.temperature,
+            "extraction must be the colder of the two"
+        );
+        assert!(facts.is_computed() && prose.is_computed());
+    }
 }
 
 #[cfg(test)]

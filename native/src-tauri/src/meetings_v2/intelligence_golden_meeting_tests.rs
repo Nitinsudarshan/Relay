@@ -16,7 +16,7 @@ use crate::meetings_v2::processing::speakers::{
     AttributionInput, SpeakerIdentificationMode,
 };
 use crate::meetings_v2::processing::summarize::render_markdown;
-use crate::capture::stt::SttLanguageConfig;
+use crate::capture::stt::{SttLanguageConfig, SttWindow};
 use crate::settings::LanguageSettings;
 use crate::meetings_v2::types::{
     SpeakerAssignment, SpeakerAssignmentMethod, SpeakerConfidenceLevel, SpeakerEvidence,
@@ -59,7 +59,7 @@ fn golden_meeting_1_multilingual_language_config_does_not_force_english() {
         output_script: "native".to_string(),
         notes_language: "auto".to_string(),
     };
-    let auto_config = SttLanguageConfig::from_settings(&auto_settings);
+    let auto_config = SttLanguageConfig::from_settings(&auto_settings, SttWindow::LongForm);
     assert_eq!(auto_config.whisper_language, None, "Auto language must pass None to Whisper for multilingual detection");
     assert!(!auto_config.translate, "translate must NEVER be implicitly enabled");
 
@@ -69,7 +69,7 @@ fn golden_meeting_1_multilingual_language_config_does_not_force_english() {
         output_script: "native".to_string(),
         notes_language: "auto".to_string(),
     };
-    let explicit_hindi = SttLanguageConfig::from_settings(&explicit_hindi_settings);
+    let explicit_hindi = SttLanguageConfig::from_settings(&explicit_hindi_settings, SttWindow::LongForm);
     assert_eq!(explicit_hindi.whisper_language, Some("hi".to_string()));
     assert!(!explicit_hindi.translate);
 }

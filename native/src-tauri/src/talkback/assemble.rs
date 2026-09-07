@@ -37,6 +37,31 @@ pub fn char_budget_for(context_tokens: u32) -> usize {
     budget.clamp(1_500, 40_000)
 }
 
+/// Ceiling on retrieved context for one Talkback turn, independent of the
+/// provider's window.
+///
+/// [`char_budget_for`] scales with `context_tokens` deliberately, so a larger
+/// window buys more grounding — right for a surface whose output grows with its
+/// input. A Talkback turn is not that surface. Its answer is two or three
+/// sentences by [`VOICE_RULES`], so past a point more evidence cannot make the
+/// answer better, and on a local model it makes it *later*: prompt ingestion,
+/// not generation, dominates time-to-first-token, and at the default
+/// 8192-token window retrieval alone claims ~10,300 characters. That is tens of
+/// seconds of silence before the first word — the wait that makes Talkback feel
+/// broken rather than slow.
+///
+/// Written surfaces keep the full derivation. Only the conversation is capped.
+const TURN_CONTEXT_CHAR_CEILING: usize = 3_600;
+
+/// The character budget for retrieved context on one Talkback turn.
+///
+/// Takes the smaller of the provider-derived budget and the turn ceiling, so a
+/// user who has configured a *small* window still gets their own figure rather
+/// than this one.
+pub fn turn_char_budget_for(context_tokens: u32) -> usize {
+    char_budget_for(context_tokens).min(TURN_CONTEXT_CHAR_CEILING)
+}
+
 /// The shared voice rules. Every prompt below starts from these, so
 /// Talkback sounds like one thing whether it is recalling, answering, or
 /// confirming an action.
@@ -469,5 +494,58 @@ mod external_source_tests {
         for rules in [grounded_rules(), general_rules()] {
             assert!(rules.contains("EXTERNAL"), "{rules}");
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Turn context budget.
+    //
+    // The provider-derived budget is right for a written surface and wrong for
+    // a spoken turn: on a local model the prompt is ingested before the first
+    // word is generated, so grounding the answer cannot make it faster and
+    // past a point cannot make it better either.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn the_default_window_is_capped_for_a_turn() {
+        // 8192 tokens — the shipped default — derives ~10,300 characters of
+        // retrieval, which is the wait that makes Talkback feel broken.
+        let derived = char_budget_for(8_192);
+        assert!(derived > TURN_CONTEXT_CHAR_CEILING, "derived {derived}");
+        assert_eq!(turn_char_budget_for(8_192), TURN_CONTEXT_CHAR_CEILING);
+    }
+
+    #[test]
+    fn a_larger_window_does_not_lengthen_a_turn() {
+        // The point of the ceiling: raising the provider window buys grounding
+        // everywhere else and buys silence here, so here it buys nothing.
+        assert_eq!(
+            turn_char_budget_for(32_768),
+            turn_char_budget_for(8_192),
+            "a bigger window must not make a spoken answer slower"
+        );
+    }
+
+    #[test]
+    fn a_small_window_keeps_its_own_figure() {
+        // A user who configured a *small* window meant it. The ceiling is a
+        // maximum, never a floor that would overrun their model's context.
+        let small = char_budget_for(2_048);
+        assert!(small < TURN_CONTEXT_CHAR_CEILING, "small {small}");
+        assert_eq!(turn_char_budget_for(2_048), small);
+    }
+
+    #[test]
+    fn a_turn_is_never_starved_below_the_smallest_window() {
+        // Capped, not starved. `char_budget_for` floors at 1,500 characters for
+        // any window at all, so the ceiling has to sit above that floor —
+        // otherwise the cap would hand a spoken answer *less* evidence than the
+        // smallest provider configuration possible, which trades correctness
+        // for latency rather than buying latency for free.
+        let smallest_possible = char_budget_for(1);
+        let capped = turn_char_budget_for(u32::MAX);
+        assert!(
+            capped > smallest_possible,
+            "ceiling {capped} must exceed the {smallest_possible}-char floor"
+        );
     }
 }

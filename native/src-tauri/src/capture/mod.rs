@@ -1,4 +1,7 @@
 pub mod evaluation;
+pub mod romanize;
+pub mod speech_health;
+pub mod text_normalize;
 pub mod stt;
 pub mod web;
 
@@ -19,7 +22,7 @@ pub use evaluation::{
     BenchmarkReport, CorpusItem, EvalConfigVariant, EvaluationResult, SttDiagnosticSnapshot,
     SttFailureCategory, SttFailureDiagnostic,
 };
-pub use stt::{SttEngine, SttError, SttLanguageConfig};
+pub use stt::{SttEngine, SttError, SttLanguageConfig, SttWindow};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 

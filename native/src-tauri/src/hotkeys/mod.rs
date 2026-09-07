@@ -542,7 +542,7 @@ fn stop_dictation_session(
         let language_settings = state.settings.lock_or_recover().language.clone();
         let stt_settings = state.settings.lock_or_recover().stt.clone();
         let model_path = crate::capture::stt::resolve_dictation_model_path(&models_dir, &stt_settings).await;
-        let language_config = crate::capture::SttLanguageConfig::from_settings(&language_settings);
+        let language_config = crate::capture::SttLanguageConfig::from_settings(&language_settings, crate::capture::stt::SttWindow::ShortForm);
         let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::for_dictation(&stt_settings);
         if let Some(prompt) = state.settings.lock_or_recover().build_stt_prompt() {
             decoding_config.initial_prompt = Some(prompt);
@@ -602,8 +602,21 @@ fn stop_dictation_session(
         }
 
         if !text_res.trim().is_empty() {
-            let expanded_text = state.settings.lock_or_recover().expand_snippets(&text_res);
-            let final_text = if !expanded_text.trim().is_empty() { expanded_text } else { text_res };
+            // Deterministic cleanup before snippets, so a trigger is matched
+            // against tidied text and the snippet's own replacement is never
+            // re-normalized afterwards. No model runs here.
+            let (cleaned, expanded_text) = {
+                let s = state.settings.lock_or_recover();
+                let cleaned = crate::capture::text_normalize::normalize_text(
+                    &text_res,
+                    &s.dictionary,
+                    crate::capture::text_normalize::TextProfile::Dictated,
+                )
+                .text;
+                let expanded = s.expand_snippets(&cleaned);
+                (cleaned, expanded)
+            };
+            let final_text = if !expanded_text.trim().is_empty() { expanded_text } else { cleaned };
             let t_snippet_complete = std::time::Instant::now();
 
             let (auto_paste, copy_to_clipboard, injection_method) = {
@@ -636,6 +649,28 @@ fn stop_dictation_session(
             // 2. Inject text into the active field, guarded against tab or window switching.
             // If the user moved to another tab or window, wait up to 15s for them to return
             // so text is injected directly into the original field without spraying into the wrong place.
+            // Every abort branch below tells the user the transcription is on
+            // the clipboard, so it has to actually be there. It is not always:
+            // `should_copy_to_clipboard` is false when clipboard copying is off
+            // *and* the method is Keystrokes, which is a legitimate
+            // configuration — and in it, an aborted injection used to lose the
+            // text outright while promising it was recoverable.
+            //
+            // Guaranteeing it here rather than widening the condition above
+            // keeps the normal path unchanged: on a successful injection with
+            // copying off, nothing touches the clipboard.
+            let ensure_recoverable = |text: &str| {
+                if should_copy_to_clipboard {
+                    return;
+                }
+                if let Err(e) = injection::copy_to_clipboard(text) {
+                    tracing::warn!(
+                        "Dictation: injection was aborted and the fallback clipboard copy also failed: {}",
+                        e
+                    );
+                }
+            };
+
             let t_injection_start = std::time::Instant::now();
 
             if auto_paste {
@@ -671,6 +706,7 @@ fn stop_dictation_session(
                         emit_capture_status_event(&app, false, None, "SUCCESS", None);
                     }
                     Ok(injection::InjectionOutcome::TimedOutWaitingForReturn { target_title }) => {
+                        ensure_recoverable(&final_text);
                         tracing::info!(
                             "[Dictation] Timed out waiting for return to '{}'. Transcription kept in clipboard.",
                             target_title
@@ -692,6 +728,7 @@ fn stop_dictation_session(
                         tracing::info!("[Dictation] Focus return wait cancelled by newer session.");
                     }
                     Ok(injection::InjectionOutcome::TabChanged { target_title, current_title }) => {
+                        ensure_recoverable(&final_text);
                         tracing::info!(
                             "[Dictation] Active tab changed from '{}' to '{}'. Prevented typing into wrong tab.",
                             target_title, current_title
@@ -710,6 +747,7 @@ fn stop_dictation_session(
                         );
                     }
                     Ok(injection::InjectionOutcome::AppChanged { target_title, current_title }) => {
+                        ensure_recoverable(&final_text);
                         tracing::info!(
                             "[Dictation] Foreground app changed from '{}' to '{}'. Prevented typing into wrong app.",
                             target_title, current_title

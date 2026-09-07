@@ -178,6 +178,7 @@ fn utterance_samples(samples: &[f32], start_s: f64, end_s: f64) -> Option<&[f32]
 fn keep_spoken_utterances(
     decoded: &[SttUtterance],
     profile: &SpeechProfile,
+    language: Option<&str>,
 ) -> (Vec<SttUtterance>, usize) {
     let mut kept = Vec::with_capacity(decoded.len());
     let mut dropped = 0usize;
@@ -191,7 +192,12 @@ fn keep_spoken_utterances(
             total_seconds: span.max(0.001),
             mean_no_speech_prob: utterance.no_speech_prob,
         };
-        match transcript_health::assess(&utterance.text, evidence) {
+        match transcript_health::screen_decode(
+            "meeting-chunk",
+            language,
+            &utterance.text,
+            evidence,
+        ) {
             Some(reason) => {
                 dropped += 1;
                 tracing::debug!(
@@ -260,8 +266,9 @@ fn resolve_decode(
     chunk: &AudioChunk,
     profile: &SpeechProfile,
     voices: Option<&mut IncrementalDiarizer>,
+    language: Option<&str>,
 ) -> DecodeOutcome {
-    let (kept, dropped) = keep_spoken_utterances(decoded, profile);
+    let (kept, dropped) = keep_spoken_utterances(decoded, profile, language);
     if dropped > 0 {
         tracing::info!(
             "Worker: chunk #{} dropped {}/{} utterances as non-speech",
@@ -453,7 +460,13 @@ peak {:.3}); below the {:.1}s gate",
                         &chunk_config,
                     ) {
                         Ok((decoded, _diag)) => {
-                            resolve_decode(&decoded, &chunk, &profile, Some(&mut voices))
+                            resolve_decode(
+                                &decoded,
+                                &chunk,
+                                &profile,
+                                Some(&mut voices),
+                                effective_lang_config.whisper_language.as_deref(),
+                            )
                         }
                         Err(e) => {
                             tracing::warn!(
@@ -631,7 +644,7 @@ mod tests {
             })
             .collect();
 
-        let outcome = resolve_decode(&decoded, &chunk, &near_silent(), None);
+        let outcome = resolve_decode(&decoded, &chunk, &near_silent(), None, None);
 
         assert_eq!(outcome.status, TranscriptSegmentStatus::Rejected);
         assert!(outcome.text.is_empty(), "rejected text must not be stored as speech");
@@ -648,7 +661,7 @@ mod tests {
     fn a_rejected_chunk_never_prompts_the_next_one() {
         let chunk = chunk_with_track(track(&[(QUIET, QUIET); 30]), 330.0, 30.0);
         let decoded = vec![utterance(0.0, 30.0, "Thank you. Thank you. Thank you. Thank you.")];
-        let outcome = resolve_decode(&decoded, &chunk, &near_silent(), None);
+        let outcome = resolve_decode(&decoded, &chunk, &near_silent(), None, None);
         assert_eq!(
             outcome.carry, None,
             "carrying a loop forward is what turned one bad chunk into nine"
@@ -663,7 +676,7 @@ mod tests {
             utterance(6.0, 12.0, "That is ahead of the plan we set in July."),
         ];
 
-        let outcome = resolve_decode(&decoded, &chunk, &voiced(11.0), None);
+        let outcome = resolve_decode(&decoded, &chunk, &voiced(11.0), None, None);
 
         assert_eq!(outcome.status, TranscriptSegmentStatus::Success);
         assert!(outcome.text.contains("forty-one"));
@@ -690,7 +703,7 @@ mod tests {
             });
         }
 
-        let outcome = resolve_decode(&decoded, &chunk, &voiced(5.0), None);
+        let outcome = resolve_decode(&decoded, &chunk, &voiced(5.0), None, None);
 
         assert_eq!(outcome.status, TranscriptSegmentStatus::Success);
         assert!(outcome.text.contains("placement sheet"));
@@ -705,7 +718,7 @@ mod tests {
     #[test]
     fn a_decode_that_produced_nothing_at_all_is_empty_not_rejected() {
         let chunk = chunk_with_track(track(&[(QUIET, QUIET); 30]), 0.0, 30.0);
-        let outcome = resolve_decode(&[], &chunk, &near_silent(), None);
+        let outcome = resolve_decode(&[], &chunk, &near_silent(), None, None);
         assert_eq!(outcome.status, TranscriptSegmentStatus::Empty);
         assert!(outcome.rejection.is_none());
     }
@@ -738,7 +751,7 @@ mod tests {
     fn a_polite_closing_thank_you_over_real_speech_is_not_thrown_away() {
         let chunk = chunk_with_track(track(&[(LOUD, QUIET); 30]), 0.0, 30.0);
         let decoded = vec![utterance(0.0, 2.0, "Thank you.")];
-        let outcome = resolve_decode(&decoded, &chunk, &voiced(1.8), None);
+        let outcome = resolve_decode(&decoded, &chunk, &voiced(1.8), None, None);
         assert_eq!(outcome.status, TranscriptSegmentStatus::Success);
         assert_eq!(outcome.text, "Thank you.");
     }
