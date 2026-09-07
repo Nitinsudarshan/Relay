@@ -280,12 +280,28 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
     }
   };
 
-  const useSttModel = (path: string) => {
+  // Scoped to meetings deliberately. Dictation already has its own Fast /
+  // Accurate profile above, and the reason to reach for a model this large is
+  // a recording that is transcribed once and read for weeks — not push-to-talk,
+  // where the extra decode time is paid on every utterance.
+  const useSttModelForMeetings = (path: string) => {
     setSettings({
       ...settings,
-      stt: { ...settings.stt, whisper_model_path: path },
+      stt: { ...settings.stt, meeting_model_path: path, meetingModelPath: path },
     });
   };
+
+  const clearMeetingModel = () => {
+    setSettings({
+      ...settings,
+      stt: { ...settings.stt, meeting_model_path: null, meetingModelPath: null },
+    });
+  };
+
+  // What meetings will actually load. Null means they follow the global
+  // setting, which is the shipped behaviour and stays the default.
+  const meetingModel =
+    settings.stt.meeting_model_path ?? settings.stt.meetingModelPath ?? null;
 
   const fetchSttModels = async () => {
     setLoadingSttModels(true);
@@ -1878,18 +1894,29 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                               </Button>
                             )}
 
-                            {m.status === 'ready' && !isActive && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => useSttModel(m.path)}
-                                className="w-full text-[11px] h-7 gap-1.5 mt-1"
-                              >
-                                <Check className="w-3 h-3" />
-                                Use this model
-                              </Button>
-                            )}
+                            {m.status === 'ready' &&
+                              (meetingModel === m.path ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={clearMeetingModel}
+                                  className="w-full text-[11px] h-7 gap-1.5 mt-1 text-primary"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  Meetings use this
+                                </Button>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => useSttModelForMeetings(m.path)}
+                                  className="w-full text-[11px] h-7 gap-1.5 mt-1"
+                                >
+                                  Use for meetings
+                                </Button>
+                              ))}
                           </div>
                         );
                       })}
@@ -1907,6 +1934,11 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                       markedly better on Hindi and other non-English speech than Small, and slower
                       on every utterance — worth it for meetings, usually not for push-to-talk.
                       Downloading it does not switch to it.
+                    </p>
+                    <p className="text-[10px] text-muted-foreground leading-snug">
+                      {meetingModel
+                        ? 'Meetings use the model marked above. Dictation is unaffected and keeps the profile you chose below.'
+                        : 'Meetings currently follow the global model. Choose Use for meetings to give them a more accurate one without slowing dictation.'}
                     </p>
                   </div>
 

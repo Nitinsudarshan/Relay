@@ -1987,6 +1987,49 @@ mod tests {
     }
 
     #[test]
+    fn meetings_may_name_their_own_model_without_slowing_dictation() {
+        // The whole point of the setting: the accuracy ceiling is worth its
+        // decode cost on a recording read for weeks and a bad trade on
+        // push-to-talk, and one path could only give both surfaces the same
+        // answer.
+        let mut settings = crate::settings::SttSettings {
+            whisper_model_path: Some("/models/ggml-small.bin".to_string()),
+            ..Default::default()
+        };
+
+        // Unset: meetings follow the global setting, exactly as before.
+        assert_eq!(
+            settings.meeting_model_override(),
+            Some("/models/ggml-small.bin")
+        );
+
+        settings.meeting_model_path = Some("/models/ggml-large-v3-turbo.bin".to_string());
+        assert_eq!(
+            settings.meeting_model_override(),
+            Some("/models/ggml-large-v3-turbo.bin"),
+            "meetings take their own model"
+        );
+        assert_eq!(
+            settings.whisper_model_path.as_deref(),
+            Some("/models/ggml-small.bin"),
+            "and dictation is left alone"
+        );
+
+        // Blank is not a choice. A cleared text field must fall back rather
+        // than resolve to a path that is the empty string.
+        settings.meeting_model_path = Some("   ".to_string());
+        assert_eq!(
+            settings.meeting_model_override(),
+            Some("/models/ggml-small.bin")
+        );
+
+        // Neither set: nothing to override with, and the managed default is
+        // resolved downstream.
+        let empty = crate::settings::SttSettings::default();
+        assert_eq!(empty.meeting_model_override(), None);
+    }
+
+    #[test]
     fn each_surface_defaults_the_preset_and_the_user_overrides_both() {
         // Per-surface policy from one setting. Dictation is latency-bound and
         // a meeting is recall-bound, so they cannot share a default — but a

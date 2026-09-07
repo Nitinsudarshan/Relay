@@ -110,6 +110,19 @@ pub struct SttSettings {
     /// override and applies everywhere.
     #[serde(default, alias = "sttPreset")]
     pub preset: String,
+    /// A Whisper model meetings should use instead of the global one.
+    ///
+    /// Exists because the two surfaces want opposite things from a model and
+    /// `whisper_model_path` could only give them the same answer. The accuracy
+    /// ceiling is worth its decode cost on a recording that is transcribed once
+    /// and read for weeks; it is a bad trade on push-to-talk, where somebody is
+    /// waiting for the text. Selecting `large-v3-turbo` used to mean accepting
+    /// both.
+    ///
+    /// `None` means meetings follow the global setting, which is what they have
+    /// always done — so this changes nothing until it is set.
+    #[serde(default, alias = "meetingModelPath")]
+    pub meeting_model_path: Option<String>,
 }
 
 impl SttSettings {
@@ -128,6 +141,26 @@ impl SttSettings {
             return None;
         }
         Some(crate::capture::stt::SttPreset::from_setting(raw))
+    }
+
+    /// The model override a meeting should use.
+    ///
+    /// `meeting_model_path` when set, otherwise the global `whisper_model_path`.
+    /// The precedence lives here rather than at the call sites because there
+    /// are two of them — the recorder and the pipeline self-test — and a
+    /// self-test that resolved a different model than the recorder would report
+    /// green for a model the user never records with.
+    pub fn meeting_model_override(&self) -> Option<&str> {
+        self.meeting_model_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .or_else(|| {
+                self.whisper_model_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+            })
     }
 }
 

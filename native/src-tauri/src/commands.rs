@@ -2055,7 +2055,9 @@ fn start_meeting_session(
     }
 
     let models_dir = state.config_dir.join("models");
-    let whisper_model_path = settings.stt.whisper_model_path;
+    // Meetings may name their own model. Falls back to the global one, so this
+    // is unchanged for anyone who has not set it.
+    let whisper_model_path = settings.stt.meeting_model_override().map(str::to_string);
 
     let session = state
         .meetings_v2
@@ -2648,7 +2650,7 @@ pub async fn run_meeting_pipeline_selftest(
         let settings = state.settings.lock_or_recover();
         crate::capture::stt::resolve_meeting_model_path(
             &state.config_dir.join("models"),
-            settings.stt.whisper_model_path.as_deref(),
+            settings.stt.meeting_model_override(),
         )
     };
 

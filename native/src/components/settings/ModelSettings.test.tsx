@@ -237,6 +237,30 @@ describe('AI Models & STT Settings — Refactored Model Selection', () => {
     expect(within(card as HTMLElement).queryByRole('button', { name: /download/i })).toBeNull();
   });
 
+  it('scopes a model choice to meetings so dictation is not slowed with it', async () => {
+    const user = userEvent.setup();
+    render(<ProviderSettings initialSection="advanced" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Whisper Base')).toBeDefined();
+    });
+
+    expect(screen.getByText(/Meetings currently follow the global model/)).toBeDefined();
+
+    const card = screen.getByText('Whisper Base').closest('div.p-2\\.5');
+    const use = within(card as HTMLElement).getByRole('button', { name: /use for meetings/i });
+    await user.click(use);
+
+    // The choice is meetings-only: the card now reports it, and the global
+    // dictation profile below is untouched.
+    await waitFor(() => {
+      expect(screen.getByText(/Meetings use the model marked above/)).toBeDefined();
+    });
+    expect(
+      within(card as HTMLElement).getByRole('button', { name: /meetings use this/i }),
+    ).toBeDefined();
+  });
+
   it('exposes the decode preset and defaults to letting each surface choose', async () => {
     const user = userEvent.setup();
     render(<ProviderSettings initialSection="advanced" />);

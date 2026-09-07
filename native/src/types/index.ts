@@ -388,6 +388,16 @@ export interface SttSettings {
    */
   preset?: '' | 'fast' | 'balanced' | 'quality';
   sttPreset?: '' | 'fast' | 'balanced' | 'quality';
+  /**
+   * A Whisper model meetings should use instead of the global one.
+   *
+   * The two surfaces want opposite things from a model: the accuracy ceiling
+   * earns its decode cost on a recording transcribed once and read for weeks,
+   * and loses on push-to-talk where somebody is waiting. Null or empty means
+   * meetings follow `whisper_model_path`, which is what they always did.
+   */
+  meeting_model_path?: string | null;
+  meetingModelPath?: string | null;
   enableInitialPrompt?: boolean;
   customInitialPrompt?: string | null;
 }
