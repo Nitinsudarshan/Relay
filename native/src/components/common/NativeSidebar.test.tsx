@@ -22,12 +22,22 @@ describe('NativeSidebar', () => {
   it('renders primary destinations in expected order and does not include Home or capture actions', () => {
     render(<NativeSidebar {...defaultProps} />);
 
-    // Primary items
-    expect(screen.getByRole('button', { name: 'Talkback' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Voice Notes' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Meetings' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Scribbles' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Knowledge Graph' })).toBeInTheDocument();
+    // Primary items in requested order: Voice notes, Scribbles, Meetings, Talkback, Knowledge Graph
+    const buttons = screen.getAllByRole('button');
+    const buttonLabels = buttons.map((b) => b.getAttribute('aria-label')).filter(Boolean);
+    const expectedOrder = [
+      'Voice Notes',
+      'Scribbles',
+      'Meetings',
+      'Talkback',
+      'Knowledge Graph',
+    ];
+    let lastIdx = -1;
+    for (const label of expectedOrder) {
+      const idx = buttonLabels.indexOf(label);
+      expect(idx).toBeGreaterThan(lastIdx);
+      lastIdx = idx;
+    }
 
     // System items
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();

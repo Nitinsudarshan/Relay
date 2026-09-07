@@ -84,17 +84,17 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
 
   const primaryNavItems: NavItemConfig[] = [
     {
-      id: 'talkback',
-      label: 'Talkback',
-      icon: MessageCircle,
-      color: 'text-emerald-400',
-      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-    },
-    {
       id: 'capture',
       label: 'Voice Notes',
       icon: Mic,
       color: 'text-emerald-500',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+    {
+      id: 'scribble',
+      label: 'Scribbles',
+      icon: Sparkles,
+      color: 'text-amber-500',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {
@@ -105,10 +105,10 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {
-      id: 'scribble',
-      label: 'Scribbles',
-      icon: Sparkles,
-      color: 'text-amber-500',
+      id: 'talkback',
+      label: 'Talkback',
+      icon: MessageCircle,
+      color: 'text-emerald-400',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {

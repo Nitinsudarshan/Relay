@@ -118,7 +118,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
   const stats = useMemo(() => buildHomeStats(snapshot, nowMs), [snapshot, nowMs]);
   const vitals = useMemo(() => buildHomeVitals(snapshot), [snapshot]);
-  const activity = useMemo(() => buildRecentActivity(snapshot, 7), [snapshot]);
+  const activity = useMemo(() => buildRecentActivity(snapshot, 5), [snapshot]);
 
   return (
     <div className="flex-1 flex flex-col gap-5 min-w-0 overflow-y-auto pb-10">
@@ -130,7 +130,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         onStartCapture={onStartCapture}
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 min-w-0">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 min-w-0 items-start">
         <div className="xl:col-span-2 min-w-0">
           <HomeLibraryStats
             stats={stats}

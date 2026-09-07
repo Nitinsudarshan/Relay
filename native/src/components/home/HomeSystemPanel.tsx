@@ -6,7 +6,6 @@ import {
   Cpu,
   Database,
   FolderOpen,
-  ScrollText,
   Volume2,
   Waves,
   type LucideIcon,
@@ -131,19 +130,10 @@ export const HomeSystemPanel: React.FC<HomeSystemPanelProps> = ({
 
   return (
     <section className="space-y-2.5">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2">
         <h2 className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
           Relay on this machine
         </h2>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onOpenChangelog}
-          className="h-6 text-[10px] gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-        >
-          <ScrollText className="w-3 h-3" />
-          <span className="font-mono">v{appVersion} release notes</span>
-        </Button>
       </div>
 
       <div className="rounded-lg border border-border bg-card divide-y divide-border">
