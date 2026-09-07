@@ -131,14 +131,29 @@ Examples of loops that must produce nothing:
 
 A repeated phrase is never a key point, a decision, or a task.
 
-### 4.3 Machine-translated passages
+### 4.3 Non-English and code-switched passages
 
-Transcripts of Hindi, Hinglish, or other non-English speech arrive as literal, often broken English. In these passages:
+**Relay does not translate.** `meetings_v2::worker` sets `translate = false` as a
+stated invariant, so a Hindi passage arrives as Hindi and a Hinglish one arrives
+code-switched. This section previously described transcripts that "arrive as
+literal, often broken English", which assumed a translation step that has never
+existed; the rules below are the ones that apply to what actually arrives.
 
-- **Polarity is unreliable.** Negations and questions frequently invert. Never build a claim on a single sentence's yes/no.
-- **Pronouns are unreliable.** "He", "she", "they" often detach from their referent. Do not attribute anything to a named person from a translated passage unless the name is stated in that same passage.
-- **Corroborate across the stretch.** Take a point only if the surrounding three or four turns support it.
-- Where the meaning is genuinely unrecoverable, say nothing about it. Do not guess, and do not write "the transcript was unclear here" in the output.
+- **Recognition confidence is lower, so corroborate.** Accented and
+  code-switched speech decodes with more low-confidence spans than clean
+  English. Take a point only if the surrounding three or four turns support it.
+- **A code-switched sentence is one sentence.** An English clause inside a Hindi
+  sentence is not a separate statement and must not be quoted as though the
+  speaker said it in isolation.
+- **Do not translate to summarize.** If the summary is being written in another
+  language, the language directive says so
+  (`processing::summarize::LanguageDirective`) — and even then, names, numbers
+  and quoted terms are never translated to satisfy it.
+- **Script is not your concern.** The reader's alphabet is a projection applied
+  after you, by `capture::romanize`. Write in the script the facts are in; do
+  not transliterate.
+- Where the meaning is genuinely unrecoverable, say nothing about it. Do not
+  guess, and do not write "the transcript was unclear here" in the output.
 
 ### 4.4 Mistranscribed names — normalize via glossary
 

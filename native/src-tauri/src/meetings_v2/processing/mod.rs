@@ -43,11 +43,28 @@
 // does not model yet, and destabilising it for architectural symmetry is a bad
 // trade.
 //
-// What it needs before it can migrate: multi-stage requests in
-// `AnalysisRequest`, and prompt-registry entries for the extraction and
-// summary builders (which are computed per call, not constant). What is
-// already shared: the provider layer, and the heuristic-filler marker, which
-// now comes from `providers::HEURISTIC_FALLBACK_MODEL` for both.
+// Both blockers this TODO originally named are now gone:
+//
+// * `AnalysisStage` describes a multi-pass analysis, and `AnalysisStage::FACTS`
+//   / `::PROSE` name this pipeline's two passes.
+// * `PromptBody::Computed` admits a prompt whose instructions are built per
+//   call, and `PromptId::MeetingFacts` / `::MeetingSummary` are registered
+//   against it with their own output contracts and per-stage sampling.
+//   `AnalysisService::execute_computed` runs them.
+//
+// What remains is a third blocker neither this comment nor `analysis/mod.rs`
+// had identified: **the test seam**. `AnalysisService::new` takes a concrete
+// `&LLMClient`, while this pipeline's tests drive it through `ScriptedLlm`, a
+// `MeetingLlm` implementation that replays queued responses — used across
+// `processing::tests`, `summarize` and `extract`. Migrating means either
+// giving the service a mockable completion seam or rewriting those suites, and
+// neither belongs in the same change as the foundation it depends on.
+//
+// So the order is: a completion trait on `AnalysisService`, then swap
+// `MeetingLlm` for it stage by stage, keeping the repair loop and the
+// deterministic floor in this module where they already are. What is already
+// shared: the provider layer, and the heuristic-filler marker, which now comes
+// from `providers::HEURISTIC_FALLBACK_MODEL` for both.
 
 
 pub mod context;

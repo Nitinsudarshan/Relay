@@ -135,6 +135,48 @@ impl std::fmt::Display for AnalysisFailure {
     }
 }
 
+/// One pass of a multi-pass analysis.
+///
+/// A meeting is understood in two passes and has to stay that way: pass one
+/// reduces the transcript to facts, pass two writes prose from the facts with
+/// the transcript closed. That separation is what stops a summary becoming a
+/// reshuffled transcript — a model cannot copy out sentences it was never
+/// shown — so it is a property worth naming rather than an implementation
+/// detail of one pipeline.
+///
+/// Naming it here makes the two calls one traceable operation. Without it, a
+/// staged analysis is two unrelated requests and the provenance record cannot
+/// say that the second was written from the first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisStage {
+    /// Which pass this is, counting from one.
+    pub index: u8,
+    /// How many passes the analysis has in total.
+    pub of: u8,
+    /// A stable name for the pass, written into provenance alongside the
+    /// prompt id.
+    pub name: &'static str,
+}
+
+impl AnalysisStage {
+    pub const fn new(index: u8, of: u8, name: &'static str) -> Self {
+        Self { index, of, name }
+    }
+
+    /// Pass one of two: the transcript becomes facts.
+    pub const FACTS: Self = Self::new(1, 2, "facts");
+    /// Pass two of two: the facts become prose.
+    pub const PROSE: Self = Self::new(2, 2, "prose");
+
+    pub fn is_first(&self) -> bool {
+        self.index <= 1
+    }
+
+    pub fn is_last(&self) -> bool {
+        self.index >= self.of
+    }
+}
+
 /// One analysis to run.
 ///
 /// Borrowed from the source and content the caller already holds. The prompt is
@@ -150,6 +192,9 @@ pub struct AnalysisRequest<'a> {
     /// Overrides the prompt's own sampling when a caller needs different
     /// behaviour for one call. Normally `None` — the prompt knows what it needs.
     pub options: Option<crate::providers::CompletionOptions>,
+    /// Which pass of a multi-pass analysis this is. `None` for the
+    /// single-pass analyses, which is most of them.
+    pub stage: Option<AnalysisStage>,
 }
 
 impl<'a> AnalysisRequest<'a> {
@@ -165,7 +210,14 @@ impl<'a> AnalysisRequest<'a> {
             analysis_type,
             prompt_id,
             options: None,
+            stage: None,
         }
+    }
+
+    /// Marks this request as one pass of a multi-pass analysis.
+    pub fn at_stage(mut self, stage: AnalysisStage) -> Self {
+        self.stage = Some(stage);
+        self
     }
 
     pub fn with_options(mut self, options: crate::providers::CompletionOptions) -> Self {
@@ -326,6 +378,40 @@ impl MetadataBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_single_pass_analysis_carries_no_stage() {
+        // Most analyses are one pass, and must not be made to look staged.
+        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let request = AnalysisRequest::new(&source, AnalysisType::Summary, PromptId::Summary);
+        assert!(request.stage.is_none());
+    }
+
+    #[test]
+    fn the_two_meeting_passes_are_one_traceable_operation() {
+        // The property this type exists for: pass two is recorded as pass two
+        // *of* two, so provenance can say the prose was written from the
+        // facts rather than from the transcript.
+        assert!(AnalysisStage::FACTS.is_first());
+        assert!(!AnalysisStage::FACTS.is_last());
+        assert!(!AnalysisStage::PROSE.is_first());
+        assert!(AnalysisStage::PROSE.is_last());
+        assert_eq!(AnalysisStage::FACTS.of, AnalysisStage::PROSE.of);
+        assert_ne!(AnalysisStage::FACTS.name, AnalysisStage::PROSE.name);
+    }
+
+    #[test]
+    fn a_stage_is_attached_without_disturbing_the_rest_of_the_request() {
+        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let plain =
+            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::MeetingFacts);
+        let staged = plain.clone().at_stage(AnalysisStage::FACTS);
+
+        assert_eq!(staged.stage, Some(AnalysisStage::FACTS));
+        assert_eq!(staged.prompt_id, plain.prompt_id);
+        assert_eq!(staged.source_id, plain.source_id);
+        assert_eq!(staged.analysis_type, plain.analysis_type);
+    }
 
     #[test]
     fn insufficient_evidence_is_usable_and_failure_is_not() {

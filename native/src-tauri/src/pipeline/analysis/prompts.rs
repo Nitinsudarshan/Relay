@@ -44,6 +44,10 @@ pub enum PromptId {
     ConversationContext,
     /// Structured repository context: objective, stack, features, users, issues.
     RepositoryContext,
+    /// Stage A of a meeting: the transcript reduced to structured facts.
+    MeetingFacts,
+    /// Stage B of a meeting: prose written from those facts, transcript closed.
+    MeetingSummary,
 }
 
 impl PromptId {
@@ -54,6 +58,8 @@ impl PromptId {
         PromptId::Enrichment,
         PromptId::ConversationContext,
         PromptId::RepositoryContext,
+        PromptId::MeetingFacts,
+        PromptId::MeetingSummary,
     ];
 
     /// The wire name written into derived data. Stable — changing one is a
@@ -64,6 +70,8 @@ impl PromptId {
             Self::Enrichment => "enrichment",
             Self::ConversationContext => "conversation.context",
             Self::RepositoryContext => "repository.context",
+            Self::MeetingFacts => "meeting.facts",
+            Self::MeetingSummary => "meeting.summary",
         }
     }
 
@@ -83,6 +91,30 @@ pub enum OutputContract {
     Json,
 }
 
+/// Where a prompt's instruction text comes from.
+///
+/// The registry's doc below already says the bodies live in the modules that
+/// own the semantics, because those modules also own the parsers that must
+/// agree with them. This is that principle carried one step further: some
+/// bodies cannot be constants at all.
+///
+/// A meeting summary's instructions interpolate the length budget, the depth
+/// mode, the chosen extension, the user's standing instructions and their
+/// language — none of which are known until the call. `meetings_v2::processing`
+/// deliberately did not migrate onto this registry for exactly that reason
+/// (`analysis/mod.rs`, "Not migrated yet"). `Computed` is what removes the
+/// blocker: the registry keeps identity, version, output contract and sampling,
+/// and only the text is the caller's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptBody {
+    /// Fixed instructions, owned by the module the registry names.
+    Static(&'static str),
+    /// Instructions built per call by the module that owns them. The caller
+    /// supplies the text; everything else about the prompt still comes from
+    /// here.
+    Computed,
+}
+
 /// A prompt, everything about it that callers need, and nothing about how it
 /// is sent.
 pub struct PromptDefinition {
@@ -91,7 +123,7 @@ pub struct PromptDefinition {
     pub version: u32,
     /// What this prompt is for, in one line. Not sent to the model.
     pub purpose: &'static str,
-    pub system_instructions: &'static str,
+    pub body: PromptBody,
     pub output_contract: OutputContract,
     /// The source types this prompt is written for. Empty means "any source",
     /// used by the two canonical prompts that genuinely are source-agnostic.
@@ -121,6 +153,23 @@ impl PromptDefinition {
     pub fn expects_json(&self) -> bool {
         self.output_contract == OutputContract::Json
     }
+
+    /// The fixed instructions, when this prompt has any.
+    ///
+    /// `None` means the caller must supply them — see [`PromptBody::Computed`].
+    /// Returning an `Option` rather than an empty string is deliberate: a
+    /// computed prompt sent with no instructions is a bug, and an empty string
+    /// would let it reach a model as one.
+    pub fn static_instructions(&self) -> Option<&'static str> {
+        match self.body {
+            PromptBody::Static(text) => Some(text),
+            PromptBody::Computed => None,
+        }
+    }
+
+    pub fn is_computed(&self) -> bool {
+        matches!(self.body, PromptBody::Computed)
+    }
 }
 
 /// The registry.
@@ -136,7 +185,7 @@ pub fn definition(id: PromptId) -> PromptDefinition {
             id,
             version: 1,
             purpose: "Short, structured prose summary of any source.",
-            system_instructions: crate::pipeline::CANONICAL_SUMMARY_SYSTEM_PROMPT,
+            body: PromptBody::Static(crate::pipeline::CANONICAL_SUMMARY_SYSTEM_PROMPT),
             output_contract: OutputContract::Prose,
             applies_to: &[],
             temperature: 0.3,
@@ -146,7 +195,7 @@ pub fn definition(id: PromptId) -> PromptDefinition {
             id,
             version: 1,
             purpose: "Title, summary, topics, entities and exploration questions.",
-            system_instructions: crate::pipeline::CANONICAL_ANALYSIS_SYSTEM_PROMPT,
+            body: PromptBody::Static(crate::pipeline::CANONICAL_ANALYSIS_SYSTEM_PROMPT),
             output_contract: OutputContract::Json,
             applies_to: &[],
             temperature: 0.2,
@@ -156,7 +205,7 @@ pub fn definition(id: PromptId) -> PromptDefinition {
             id,
             version: 1,
             purpose: "Structured work context for a captured AI conversation.",
-            system_instructions: crate::capture::web::context::CONTEXT_EXTRACTION_SYSTEM_PROMPT,
+            body: PromptBody::Static(crate::capture::web::context::CONTEXT_EXTRACTION_SYSTEM_PROMPT),
             output_contract: OutputContract::Json,
             applies_to: &[SourceType::Conversation],
             // Extraction into strict JSON. The failure mode at a higher
@@ -168,12 +217,44 @@ pub fn definition(id: PromptId) -> PromptDefinition {
             id,
             version: 1,
             purpose: "Objective, stack, features, user base and issues for a repository.",
-            system_instructions: crate::capture::web::context::REPOSITORY_CONTEXT_SYSTEM_PROMPT,
+            body: PromptBody::Static(crate::capture::web::context::REPOSITORY_CONTEXT_SYSTEM_PROMPT),
             output_contract: OutputContract::Json,
             applies_to: &[SourceType::Repository],
             temperature: 0.1,
             max_output_tokens: 2_400,
         },
+        PromptId::MeetingFacts => PromptDefinition {
+            id,
+            version: 1,
+            purpose: "Stage A of a meeting: the transcript reduced to structured facts.",
+            // Built per call: the instructions carry the transcript window, the
+            // speaker roster and the extraction schema, which depend on the
+            // meeting. `meetings_v2::processing::extract` owns both the builder
+            // and the validator that has to agree with it.
+            body: PromptBody::Computed,
+            output_contract: OutputContract::Json,
+            applies_to: &[SourceType::Meeting],
+            // Extraction invents an owner or a deadline the moment it is given
+            // room to be creative.
+            temperature: 0.1,
+            max_output_tokens: 2_400,
+        },
+        PromptId::MeetingSummary => PromptDefinition {
+            id,
+            version: 1,
+            purpose: "Stage B of a meeting: prose written from the facts, transcript closed.",
+            // Built per call: length budget, depth mode, chosen extension, the
+            // user's standing instructions, and their notes language and
+            // script. None of it is known until the call.
+            body: PromptBody::Computed,
+            output_contract: OutputContract::Prose,
+            applies_to: &[SourceType::Meeting],
+            // Prose needs a little room; the accuracy rules are enforced by
+            // validation rather than by sampling.
+            temperature: 0.4,
+            max_output_tokens: 1_600,
+        },
+
     }
 }
 
@@ -200,11 +281,22 @@ mod tests {
             let def = id.definition();
             assert_eq!(def.id, *id);
             assert!(!id.as_str().is_empty());
-            assert!(
-                !def.system_instructions.trim().is_empty(),
-                "{} has no instructions",
-                id.as_str()
-            );
+            // A static prompt must carry instructions; a computed one must
+            // carry none, so that a caller supplying them cannot be silently
+            // ignored and a caller forgetting them cannot silently send an
+            // empty system prompt.
+            match def.body {
+                PromptBody::Static(text) => assert!(
+                    !text.trim().is_empty(),
+                    "{} is static and has no instructions",
+                    id.as_str()
+                ),
+                PromptBody::Computed => assert!(
+                    def.static_instructions().is_none(),
+                    "{} is computed and must not also carry a body",
+                    id.as_str()
+                ),
+            }
             assert!(def.version >= 1, "{} must be versioned", id.as_str());
         }
     }
@@ -217,6 +309,8 @@ mod tests {
         assert_eq!(PromptId::Enrichment.as_str(), "enrichment");
         assert_eq!(PromptId::ConversationContext.as_str(), "conversation.context");
         assert_eq!(PromptId::RepositoryContext.as_str(), "repository.context");
+        assert_eq!(PromptId::MeetingFacts.as_str(), "meeting.facts");
+        assert_eq!(PromptId::MeetingSummary.as_str(), "meeting.summary");
     }
 
     /// §47: a source-specific prompt must not be usable on another source type.
@@ -277,9 +371,16 @@ mod tests {
     fn json_prompts_ask_the_model_for_json() {
         for id in PromptId::ALL {
             let def = id.definition();
+            // A computed prompt has no body here to check. The invariant still
+            // holds — it is enforced where the body is built, by the module
+            // that owns both the builder and the parser. See
+            // `meetings_v2::processing::extract`.
+            let Some(instructions) = def.static_instructions() else {
+                continue;
+            };
             if def.expects_json() {
                 assert!(
-                    def.system_instructions.contains("JSON"),
+                    instructions.contains("JSON"),
                     "{} declares JSON output but never asks for it",
                     id.as_str()
                 );
