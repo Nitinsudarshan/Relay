@@ -8,6 +8,7 @@
 //! stays testable somewhere else.
 
 use super::assemble::{self, NO_EVIDENCE_RESPONSE};
+use super::hedge;
 use super::audio::{MicFrame, TalkbackMic, TARGET_SAMPLE_RATE};
 use super::chunk::PhraseBuffer;
 use super::intent::{self, Intent};
@@ -22,7 +23,7 @@ use crate::capture::speech_health::{profile_speech, screen_decode, DecodeEvidenc
 use crate::capture::stt::{SttLanguageConfig, StreamingTranscriber, WhisperDecodingConfig};
 use crate::meetings_v2::processing::MeetingProcessor;
 use crate::meetings_v2::session_store::SessionStore;
-use crate::providers::{CompletionOptions, LLMClient};
+use crate::providers::{CompletionOptions, LLMClient, LLMResponse, ProviderError};
 use crate::settings::AppSettings;
 use crate::sync::MutexExt;
 use crate::tts::{resolve_provider, TtsProvider};
@@ -728,6 +729,58 @@ pub async fn run_turn(ctx: TurnContext<'_>, text: &str) -> Result<String, String
 /// a vector and synthesized afterwards. Time-to-first-audio is therefore
 /// retrieval + first-token + first-sentence + one synthesis, rather than
 /// the whole generation plus a synthesis.
+/// Runs the generation, sending a duplicate request if the first one stalls.
+///
+/// The shape matters: the hedge is *not* started up front. It is started only
+/// once the first request has gone [`hedge::HEDGE_AFTER`] without finishing, so
+/// the common turn issues exactly one request. From then on both run and the
+/// first to produce a token owns the output — enforced by the caller's
+/// `hedge::Winner`, not by this function, because the claim has to happen on
+/// the token rather than on the future completing.
+///
+/// Local providers are never hedged; see `talkback::hedge` for why a duplicate
+/// cannot help there.
+async fn race_with_hedge<F>(
+    llm: &LLMClient,
+    question: &str,
+    system_prompt: &str,
+    options: CompletionOptions,
+    on_delta: &F,
+) -> Result<LLMResponse, ProviderError>
+where
+    F: Fn(u8, &str) -> bool,
+{
+    let first = llm.complete_streaming(question, Some(system_prompt), options, |d| {
+        on_delta(hedge::FIRST, d)
+    });
+
+    if !hedge::hedging_helps(llm.provider_type()) {
+        return first.await;
+    }
+
+    tokio::pin!(first);
+    tokio::select! {
+        done = &mut first => return done,
+        _ = tokio::time::sleep(hedge::HEDGE_AFTER) => {}
+    }
+
+    tracing::debug!(
+        "talkback: no answer in {:?}; sending a hedged request",
+        hedge::HEDGE_AFTER
+    );
+    let hedged = llm.complete_streaming(question, Some(system_prompt), options, |d| {
+        on_delta(hedge::HEDGE, d)
+    });
+    tokio::pin!(hedged);
+
+    // Whichever finishes first. The loser's stream is dropped, and its callback
+    // has already been refusing deltas since the winner claimed the turn.
+    tokio::select! {
+        done = &mut first => done,
+        done = &mut hedged => done,
+    }
+}
+
 /// Completion options for one spoken turn.
 ///
 /// Sampling comes from the prompt registry rather than from this module.
@@ -769,9 +822,18 @@ async fn generate_streaming(
 
     let options = turn_options(llm);
 
-    let response = llm
-        .complete_streaming(question, Some(system_prompt), options, |delta| {
+    // Exactly one attempt may reach the sentence buffer. Without this, a hedge
+    // that arrives late interleaves a second voice into the sentence the first
+    // one is still writing.
+    let winner = hedge::Winner::new();
+
+    let on_delta = |attempt: u8, delta: &str| -> bool {
             if ctx.engine.is_stale(generation) {
+                return false;
+            }
+            if !winner.claim(attempt) {
+                // The other request got there first. Returning false abandons
+                // this stream, which is how the loser stops costing anything.
                 return false;
             }
             let mut first = first_token.lock_or_recover();
@@ -797,8 +859,13 @@ async fn generate_streaming(
                 }
             }
             true
-        })
-        .await;
+    };
+
+    let response = race_with_hedge(llm, question, system_prompt, options, &on_delta).await;
+
+    if winner.settled() == Some(hedge::HEDGE) {
+        tracing::info!("talkback: the hedged request answered first");
+    }
 
     let response = match response {
         Ok(response) => response,
@@ -1086,6 +1153,33 @@ fn transcriber_threads() -> i32 {
 mod tests {
     use super::*;
     use crate::talkback::retrieval::SourceType;
+
+    #[tokio::test]
+    async fn a_local_provider_is_not_hedged() {
+        // Proves the wiring, not just the policy: against a local provider
+        // `race_with_hedge` must return the single attempt directly rather than
+        // entering the select that waits out the hedge window. An unreachable
+        // host refuses immediately, so anything near `HEDGE_AFTER` means the
+        // hedge branch was taken.
+        let llm = LLMClient::new(crate::providers::ProviderConfig {
+            active_provider: crate::providers::ProviderType::Ollama,
+            ollama_host: "http://127.0.0.1:1".to_string(),
+            ..Default::default()
+        });
+        let winner = hedge::Winner::new();
+        let on_delta = |attempt: u8, _delta: &str| winner.claim(attempt);
+
+        let started = std::time::Instant::now();
+        let result = race_with_hedge(&llm, "question", "rules", turn_options(&llm), &on_delta).await;
+
+        assert!(result.is_err(), "an unreachable host cannot answer");
+        assert!(
+            started.elapsed() < hedge::HEDGE_AFTER,
+            "a local turn must not wait out the hedge window; took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(winner.settled(), None, "no tokens, so nobody claimed the turn");
+    }
 
     #[test]
     fn a_spoken_turn_takes_its_sampling_from_the_registry() {
