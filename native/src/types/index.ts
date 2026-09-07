@@ -374,6 +374,14 @@ export interface SttSettings {
   enable_initial_prompt?: boolean;
   /** Optional user-defined technical vocabulary prompt. */
   custom_initial_prompt?: string | null;
+  /**
+   * Decode quality preset. Trades decode time for how much borderline speech
+   * survives: 'fast' is greedy at whisper's stock no-speech threshold,
+   * 'quality' is a wider beam at a lower one so little is dropped silently.
+   * Defaults to 'fast', which is what Relay did before the setting existed.
+   */
+  preset?: 'fast' | 'balanced' | 'quality';
+  sttPreset?: 'fast' | 'balanced' | 'quality';
   enableInitialPrompt?: boolean;
   customInitialPrompt?: string | null;
 }

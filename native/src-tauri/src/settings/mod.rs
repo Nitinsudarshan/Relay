@@ -102,6 +102,17 @@ pub struct SttSettings {
     /// Optional user-defined technical vocabulary prompt.
     #[serde(default, alias = "customInitialPrompt")]
     pub custom_initial_prompt: Option<String>,
+    /// Decode quality preset: "fast", "balanced" or "quality".
+    ///
+    /// Trades decode time for how much borderline speech survives. Defaults to
+    /// "fast", which is what Relay did before the setting existed, so an
+    /// upgrade changes nothing until a surface or the user opts in.
+    #[serde(default = "default_stt_preset", alias = "sttPreset")]
+    pub preset: String,
+}
+
+fn default_stt_preset() -> String {
+    crate::capture::stt::SttPreset::Fast.as_str().to_string()
 }
 
 /// Local text-to-speech configuration (Piper). Both fields must be set for

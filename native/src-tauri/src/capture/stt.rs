@@ -549,6 +549,104 @@ pub enum SttSamplingStrategy {
     BeamSearch { beam_size: i32, patience: f32 },
 }
 
+impl SttSamplingStrategy {
+    /// The whisper-rs equivalent.
+    ///
+    /// One conversion, shared by the batch engine and the streaming
+    /// transcriber. Two copies is how a preset comes to apply on one path and
+    /// not the other.
+    #[cfg(feature = "whisper-local")]
+    pub fn to_whisper(&self) -> SamplingStrategy {
+        match self {
+            Self::Greedy { best_of } => SamplingStrategy::Greedy { best_of: *best_of },
+            Self::BeamSearch {
+                beam_size,
+                patience,
+            } => SamplingStrategy::BeamSearch {
+                beam_size: *beam_size,
+                patience: *patience,
+            },
+        }
+    }
+}
+
+/// How much decode cost a surface is willing to pay for recall.
+///
+/// The two knobs move together on purpose. A higher `no_speech_thold` discards
+/// segments Whisper is unsure about; a wider beam gives it more hypotheses to
+/// choose between, which is what makes it safe to *keep* those segments
+/// instead. So accuracy-first means a wider beam **and** a lower threshold,
+/// which reads backwards until you see them as one decision.
+///
+/// This matters most for the speech Relay was losing. In accented or
+/// code-switched audio nearly every segment is low-confidence, so a threshold
+/// tuned for clean English discards most of the transcript — which is what a
+/// five-minute meeting arriving as fifty-six words looks like.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SttPreset {
+    /// Greedy, Whisper's stock threshold. Lowest latency; borderline clauses
+    /// are dropped. The right trade for push-to-talk, where the user is
+    /// waiting.
+    Fast,
+    /// Beam search at 3, threshold loosened so the beam has candidates to
+    /// work with. The middle ground.
+    Balanced,
+    /// Beam search at 5, threshold low enough that almost nothing is dropped
+    /// silently, relying on the wider beam to pick among low-confidence
+    /// segments. For audio that is recorded once and read later.
+    Quality,
+}
+
+impl Default for SttPreset {
+    /// [`SttPreset::Fast`] — Relay's shipped behaviour before presets existed,
+    /// so introducing them changes nothing until a surface opts in.
+    fn default() -> Self {
+        Self::Fast
+    }
+}
+
+impl SttPreset {
+    /// Parses a persisted setting, defaulting rather than failing.
+    pub fn from_setting(s: &str) -> Self {
+        match s.trim().to_lowercase().as_str() {
+            "balanced" => Self::Balanced,
+            "quality" => Self::Quality,
+            _ => Self::Fast,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fast => "fast",
+            Self::Balanced => "balanced",
+            Self::Quality => "quality",
+        }
+    }
+
+    pub fn sampling(self) -> SttSamplingStrategy {
+        match self {
+            Self::Fast => SttSamplingStrategy::Greedy { best_of: 1 },
+            Self::Balanced => SttSamplingStrategy::BeamSearch {
+                beam_size: 3,
+                patience: -1.0,
+            },
+            Self::Quality => SttSamplingStrategy::BeamSearch {
+                beam_size: 5,
+                patience: -1.0,
+            },
+        }
+    }
+
+    pub fn no_speech_thold(self) -> f32 {
+        match self {
+            Self::Fast => 0.6,
+            Self::Balanced => 0.4,
+            Self::Quality => 0.3,
+        }
+    }
+}
+
 /// Centralized Whisper decoding configuration for experiments and production.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WhisperDecodingConfig {
@@ -566,6 +664,28 @@ pub struct WhisperDecodingConfig {
     /// Meetings pin the durable clock below the core count so the live
     /// clock is never starved of CPU by a 30-second chunk decode.
     pub n_threads: Option<i32>,
+    /// Encoder frames to allocate. `None` is whisper's full context (1500,
+    /// covering thirty seconds).
+    ///
+    /// Clamping it buys latency on a short window and costs accuracy on a long
+    /// one, so it belongs to the caller rather than to the transcriber. It was
+    /// a constant inside [`StreamingTranscriber`], which is how Talkback came
+    /// to decode a fifteen-second question with half an encoder context.
+    #[serde(default)]
+    pub audio_ctx: Option<i32>,
+    /// Force exactly one segment per decode.
+    ///
+    /// Correct for a sub-two-second window, where it stops whisper discarding
+    /// the whole thing on a lone timestamp token. Wrong for a full utterance,
+    /// which it truncates to its first segment.
+    #[serde(default)]
+    pub single_segment: bool,
+    /// Discard decoder state between decodes.
+    ///
+    /// Set for independent live windows. A chunked recording wants the
+    /// opposite, so its cross-boundary context survives.
+    #[serde(default)]
+    pub no_context: bool,
 }
 
 impl Default for WhisperDecodingConfig {
@@ -593,6 +713,9 @@ impl WhisperDecodingConfig {
             print_special: false,
             print_timestamps: false,
             n_threads: None,
+            audio_ctx: None,
+            single_segment: false,
+            no_context: false,
         }
     }
 
@@ -627,10 +750,44 @@ impl WhisperDecodingConfig {
         cfg
     }
 
+    /// The decode parameters a low-latency streaming window needs.
+    ///
+    /// These are the values [`StreamingTranscriber`] used to hardcode inside
+    /// its own `transcribe()`, which is why Talkback and the live meeting clock
+    /// ran without the hallucination thresholds, without the user's
+    /// vocabulary, and on half an encoder context — none of it visible from
+    /// the call site, and none of it configurable. Naming the configuration is
+    /// what makes those choices reviewable.
+    ///
+    /// `single_segment` is what stops whisper discarding a whole window when
+    /// the decode ends on a lone timestamp token, which is the common outcome
+    /// for a sub-two-second window. It is wrong for a full utterance, and
+    /// callers that decode one should say so.
+    pub fn for_live_window() -> Self {
+        let mut cfg = Self::baseline();
+        cfg.audio_ctx = Some(LIVE_AUDIO_CTX);
+        cfg.single_segment = true;
+        cfg.no_context = true;
+        cfg.temperature_inc = 0.0;
+        cfg
+    }
+
+    /// Applies a quality preset, leaving every other field alone.
+    ///
+    /// Sampling strategy and the no-speech threshold move together, which is
+    /// why one setting sets both: a wider beam is what makes it safe to keep
+    /// low-confidence segments, and keeping them is what makes the wider beam
+    /// worth its cost. Tuning either alone gets the trade backwards.
+    pub fn with_preset(mut self, preset: SttPreset) -> Self {
+        self.strategy = preset.sampling();
+        self.no_speech_thold = preset.no_speech_thold();
+        self
+    }
+
     /// Resolves the effective production decoding configuration from persisted user settings.
     /// If domain vocabulary prompt is disabled (default), returns the clean baseline configuration (initial_prompt = None).
     pub fn from_settings(stt_settings: &crate::settings::SttSettings) -> Self {
-        let mut cfg = Self::baseline();
+        let mut cfg = Self::baseline().with_preset(SttPreset::from_setting(&stt_settings.preset));
         if stt_settings.enable_initial_prompt {
             if let Some(ref prompt) = stt_settings.custom_initial_prompt {
                 let trimmed = prompt.trim();
@@ -834,18 +991,7 @@ impl SttEngine {
                 .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
             let t_create_state_end = std::time::Instant::now();
 
-            let strategy = match &decoding_config.strategy {
-                SttSamplingStrategy::Greedy { best_of } => {
-                    SamplingStrategy::Greedy { best_of: *best_of }
-                }
-                SttSamplingStrategy::BeamSearch {
-                    beam_size,
-                    patience,
-                } => SamplingStrategy::BeamSearch {
-                    beam_size: *beam_size,
-                    patience: *patience,
-                },
-            };
+            let strategy = decoding_config.strategy.to_whisper();
 
             let mut params = FullParams::new(strategy);
             params.set_language(language_config.whisper_language.as_deref());
@@ -996,15 +1142,26 @@ pub struct StreamingTranscriber {
     language: Option<String>,
     translate: bool,
     n_threads: i32,
-    audio_ctx: i32,
+    /// Every other decode parameter, so this transcriber decides none of them
+    /// itself. It used to decide all of them, in a function no call site could
+    /// see into.
+    decoding: WhisperDecodingConfig,
 }
 
 impl StreamingTranscriber {
     /// Loads `model_path` into a private context and pre-allocates its state.
+    ///
+    /// `decoding` is a required argument. Before it was one, this transcriber
+    /// hardcoded its own parameters — which meant Talkback and the live meeting
+    /// clock silently ran without the hallucination thresholds and without the
+    /// user's vocabulary, while the batch path had both. Callers that want the
+    /// old low-latency behaviour ask for it by name:
+    /// [`WhisperDecodingConfig::for_live_window`].
     #[cfg(feature = "whisper-local")]
     pub fn new(
         model_path: &str,
         language_config: &SttLanguageConfig,
+        decoding: &WhisperDecodingConfig,
         n_threads: i32,
     ) -> Result<Self, SttError> {
         if model_path.trim().is_empty() {
@@ -1025,7 +1182,7 @@ impl StreamingTranscriber {
             language: language_config.whisper_language.clone(),
             translate: language_config.translate,
             n_threads: n_threads.max(1),
-            audio_ctx: LIVE_AUDIO_CTX,
+            decoding: decoding.clone(),
         })
     }
 
@@ -1033,34 +1190,50 @@ impl StreamingTranscriber {
     pub fn new(
         _model_path: &str,
         _language_config: &SttLanguageConfig,
+        _decoding: &WhisperDecodingConfig,
         _n_threads: i32,
     ) -> Result<Self, SttError> {
         Err(SttError::ModelNotConfigured)
     }
 
-    /// Transcribes one window. The window is independent: no state, prompt, or
-    /// text carries over from the previous call.
+    /// The decode parameters in force, for diagnostics and for the observability
+    /// record. A caller that cannot read them back cannot report what it ran.
+    pub fn decoding_config(&self) -> &WhisperDecodingConfig {
+        &self.decoding
+    }
+
+    /// Transcribes one window with the configured parameters.
     #[cfg(feature = "whisper-local")]
     pub fn transcribe(&mut self, samples_16k_mono: &[f32]) -> Result<String, SttError> {
         if samples_16k_mono.is_empty() {
             return Ok(String::new());
         }
 
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        let mut params = FullParams::new(self.decoding.strategy.to_whisper());
         params.set_language(self.language.as_deref());
         params.set_translate(self.translate);
         params.set_n_threads(self.n_threads);
-        params.set_audio_ctx(self.audio_ctx);
-        params.set_single_segment(true);
-        params.set_no_context(true);
-        params.set_temperature(0.0);
-        params.set_temperature_inc(0.0);
-        params.set_suppress_blank(true);
+        if let Some(audio_ctx) = self.decoding.audio_ctx {
+            params.set_audio_ctx(audio_ctx);
+        }
+        params.set_single_segment(self.decoding.single_segment);
+        params.set_no_context(self.decoding.no_context);
+        params.set_temperature(self.decoding.temperature);
+        params.set_temperature_inc(self.decoding.temperature_inc);
+        params.set_suppress_blank(self.decoding.suppress_blank);
+        // The three thresholds the hardcoded path never set, so whisper's own
+        // defaults applied and nothing downstream screened the result.
+        params.set_no_speech_thold(self.decoding.no_speech_thold);
+        params.set_entropy_thold(self.decoding.entropy_thold);
+        params.set_logprob_thold(self.decoding.logprob_thold);
+        if let Some(ref prompt) = self.decoding.initial_prompt {
+            params.set_initial_prompt(prompt);
+        }
         params.set_token_timestamps(false);
-        params.set_print_special(false);
+        params.set_print_special(self.decoding.print_special);
         params.set_print_progress(false);
         params.set_print_realtime(false);
-        params.set_print_timestamps(false);
+        params.set_print_timestamps(self.decoding.print_timestamps);
 
         self.state
             .full(params, samples_16k_mono)
@@ -1540,6 +1713,105 @@ mod tests {
             let resolved = SttLanguageConfig::from_settings(&settings, window);
             assert_ne!(resolved.whisper_language, Some(AUTO_LANGUAGE.to_string()));
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Decode presets, and the configuration the streaming transcriber used to
+    // hold privately.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn the_default_preset_is_what_relay_already_did() {
+        // Presets must be inert until a surface opts in. Fast is greedy at
+        // whisper's stock threshold, which is exactly the behaviour that
+        // shipped before this enum existed.
+        let cfg = WhisperDecodingConfig::baseline();
+        assert_eq!(cfg.strategy, SttSamplingStrategy::Greedy { best_of: 1 });
+        assert_eq!(cfg.no_speech_thold, 0.6);
+        assert_eq!(SttPreset::default(), SttPreset::Fast);
+        // A `SttSettings` built by `Default` carries an empty preset string,
+        // and `from_setting` is total, so the two agree.
+        let defaulted = crate::settings::SttSettings::default();
+        assert_eq!(SttPreset::from_setting(&defaulted.preset), SttPreset::Fast);
+    }
+
+    #[test]
+    fn accuracy_first_widens_the_beam_and_lowers_the_threshold_together() {
+        // The counter-intuitive half: keeping more low-confidence speech is
+        // only safe because the beam is wider. A preset that raised the
+        // threshold *and* the beam would be tuning against itself.
+        let fast = SttPreset::Fast;
+        let quality = SttPreset::Quality;
+        assert!(quality.no_speech_thold() < fast.no_speech_thold());
+        assert!(matches!(
+            quality.sampling(),
+            SttSamplingStrategy::BeamSearch { beam_size: 5, .. }
+        ));
+        assert!(matches!(
+            fast.sampling(),
+            SttSamplingStrategy::Greedy { .. }
+        ));
+
+        // And the ordering holds across all three, in both knobs at once.
+        let balanced = SttPreset::Balanced;
+        assert!(balanced.no_speech_thold() < fast.no_speech_thold());
+        assert!(quality.no_speech_thold() < balanced.no_speech_thold());
+    }
+
+    #[test]
+    fn an_unknown_preset_falls_back_rather_than_failing() {
+        // A corrupted or hand-edited settings file must not break capture.
+        for garbage in ["", "  ", "turbo", "QUALITY_"] {
+            assert_eq!(SttPreset::from_setting(garbage), SttPreset::Fast);
+        }
+        // Casing and padding are tolerated for the real values.
+        assert_eq!(SttPreset::from_setting(" Quality "), SttPreset::Quality);
+        assert_eq!(SttPreset::from_setting("BALANCED"), SttPreset::Balanced);
+    }
+
+    #[test]
+    fn a_preset_changes_only_its_own_two_fields() {
+        // `with_preset` is applied over a configuration that already carries a
+        // vocabulary prompt and a thread count. Losing either would silently
+        // undo the glossary fix.
+        let mut base = WhisperDecodingConfig::baseline();
+        base.initial_prompt = Some("NavGurukul, Pragati".to_string());
+        base.n_threads = Some(6);
+        let tuned = base.clone().with_preset(SttPreset::Quality);
+
+        assert_eq!(tuned.initial_prompt, base.initial_prompt);
+        assert_eq!(tuned.n_threads, base.n_threads);
+        assert_eq!(tuned.entropy_thold, base.entropy_thold);
+        assert_eq!(tuned.logprob_thold, base.logprob_thold);
+        assert_ne!(tuned.strategy, base.strategy);
+    }
+
+    #[test]
+    fn the_live_window_configuration_carries_the_thresholds() {
+        // The regression this exists to prevent: `for_live_window` replaced
+        // hardcoded parameters that set *none* of the three thresholds, so
+        // whisper's defaults applied and nothing screened the result.
+        let live = WhisperDecodingConfig::for_live_window();
+        let baseline = WhisperDecodingConfig::baseline();
+
+        assert_eq!(live.no_speech_thold, baseline.no_speech_thold);
+        assert_eq!(live.entropy_thold, baseline.entropy_thold);
+        assert_eq!(live.logprob_thold, baseline.logprob_thold);
+
+        // And it still describes a short independent window.
+        assert_eq!(live.audio_ctx, Some(LIVE_AUDIO_CTX));
+        assert!(live.single_segment);
+        assert!(live.no_context);
+    }
+
+    #[test]
+    fn the_batch_configuration_does_not_clamp_or_truncate() {
+        // A thirty-second chunk needs whisper's full encoder context and more
+        // than one segment. These are the two values the live window sets and
+        // the batch path must not inherit.
+        let cfg = WhisperDecodingConfig::baseline();
+        assert_eq!(cfg.audio_ctx, None, "batch decodes use the full context");
+        assert!(!cfg.single_segment, "a chunk holds many segments");
     }
 
     #[test]

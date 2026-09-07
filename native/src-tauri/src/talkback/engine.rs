@@ -8,7 +8,7 @@
 //! stays testable somewhere else.
 
 use super::assemble::{self, NO_EVIDENCE_RESPONSE};
-use super::audio::{MicFrame, TalkbackMic};
+use super::audio::{MicFrame, TalkbackMic, TARGET_SAMPLE_RATE};
 use super::chunk::PhraseBuffer;
 use super::intent::{self, Intent};
 use super::retrieval::{self, ContextItem, RetrievalQuery, RetrievalResult, SourceType};
@@ -18,7 +18,8 @@ use super::speech::{SpeechChunk, SpeechPipeline, SpeechSink};
 use super::state::{TalkbackEvent, TalkbackState};
 use super::tools;
 use super::turn::{TurnDetector, TurnDetectorConfig, TurnEvent};
-use crate::capture::stt::{SttLanguageConfig, StreamingTranscriber};
+use crate::capture::speech_health::{profile_speech, screen_decode, DecodeEvidence};
+use crate::capture::stt::{SttLanguageConfig, StreamingTranscriber, WhisperDecodingConfig};
 use crate::meetings_v2::processing::MeetingProcessor;
 use crate::meetings_v2::session_store::SessionStore;
 use crate::providers::{CompletionOptions, LLMClient};
@@ -347,6 +348,7 @@ impl TalkbackEngine {
         voice: bool,
         whisper_model: Option<std::path::PathBuf>,
         language: SttLanguageConfig,
+        decoding: WhisperDecodingConfig,
     ) -> Result<TalkbackState, String> {
         if settings.activation_mode == ActivationMode::WakeWord {
             return Err(
@@ -369,6 +371,7 @@ impl TalkbackEngine {
                 settings.clone(),
                 whisper_model,
                 language,
+                decoding,
             );
             *self.worker.lock_or_recover() = Some(worker);
         }
@@ -873,6 +876,7 @@ fn spawn_voice_worker(
     settings: TalkbackSettings,
     whisper_model: Option<std::path::PathBuf>,
     language: SttLanguageConfig,
+    decoding: WhisperDecodingConfig,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut detector = TurnDetector::new(settings.turn_detector_config());
@@ -880,7 +884,12 @@ fn spawn_voice_worker(
             .as_ref()
             .and_then(|p| p.to_str())
             .and_then(|path| {
-                match StreamingTranscriber::new(path, &language, transcriber_threads()) {
+                match StreamingTranscriber::new(
+                    path,
+                    &language,
+                    &decoding,
+                    transcriber_threads(),
+                ) {
                     Ok(t) => Some(t),
                     Err(e) => {
                         tracing::warn!("talkback: voice input disabled ({})", e);
@@ -956,8 +965,38 @@ fn spawn_voice_worker(
                         continue;
                     };
                     let started = std::time::Instant::now();
+                    // What the audio actually contained, measured before the
+                    // decode is trusted. The same profile the meeting pipeline
+                    // takes; Talkback ran without it, which is why subtitle
+                    // filler reached the conversation as if it were a question.
+                    let profile = profile_speech(&samples, TARGET_SAMPLE_RATE);
                     match transcriber.transcribe(&samples) {
                         Ok(text) if !text.trim().is_empty() => {
+                            // `StreamingTranscriber` returns text, not
+                            // per-span probabilities, so the model's own doubt
+                            // is unavailable here and is reported as zero
+                            // rather than guessed. The loop detector, the
+                            // filler-over-silence rule and the rate rule all
+                            // work from the audio profile and still apply.
+                            let evidence = DecodeEvidence {
+                                voiced_seconds: profile.voiced_seconds,
+                                total_seconds: profile.total_seconds,
+                                mean_no_speech_prob: 0.0,
+                            };
+                            if let Some(reason) =
+                                screen_decode("talkback", language.whisper_language.as_deref(), &text, evidence)
+                            {
+                                tracing::debug!(
+                                    voiced_seconds = profile.voiced_seconds,
+                                    voiced_ratio = profile.voiced_ratio(),
+                                    "talkback: discarded a decode that was not speech ({})",
+                                    reason.describe()
+                                );
+                                engine_event(&app, |engine, app| {
+                                    engine.transition(app, TalkbackEvent::ResponseComplete);
+                                });
+                                continue;
+                            }
                             let _ = app.emit(
                                 TALKBACK_UTTERANCE_EVENT,
                                 serde_json::json!({

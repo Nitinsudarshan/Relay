@@ -1,7 +1,7 @@
 use super::capture::{LiveAudioFrame, TARGET_SAMPLE_RATE};
 use super::transcript_health::{self, DecodeEvidence};
 use super::types::LiveTranscriptUpdate;
-use crate::capture::stt::{SttLanguageConfig, StreamingTranscriber};
+use crate::capture::stt::{SttLanguageConfig, StreamingTranscriber, WhisperDecodingConfig};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc as std_mpsc;
@@ -53,6 +53,7 @@ impl LiveSttWorker {
         live_rx: std_mpsc::Receiver<LiveAudioFrame>,
         whisper_model_path: Option<PathBuf>,
         language_config: SttLanguageConfig,
+        decoding_config: WhisperDecodingConfig,
         app: Option<AppHandle>,
     ) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -61,12 +62,22 @@ impl LiveSttWorker {
         let mut effective_lang_config = language_config;
         effective_lang_config.translate = false;
 
+        // The live clock decodes short, independent windows, so it keeps the
+        // low-latency shape — but as a named configuration carrying the
+        // thresholds and the caller's vocabulary, rather than as parameters
+        // hidden inside the transcriber.
+        let mut live_decoding = WhisperDecodingConfig::for_live_window();
+        live_decoding.initial_prompt = decoding_config.initial_prompt.clone();
+        live_decoding.strategy = decoding_config.strategy.clone();
+        live_decoding.no_speech_thold = decoding_config.no_speech_thold;
+
         let handle = std::thread::spawn(move || {
             run_live_loop(
                 session_id,
                 live_rx,
                 whisper_model_path,
                 effective_lang_config,
+                live_decoding,
                 app,
                 stop_flag_clone,
             );
@@ -135,13 +146,21 @@ fn run_live_loop(
     live_rx: std_mpsc::Receiver<LiveAudioFrame>,
     whisper_model_path: Option<PathBuf>,
     language_config: SttLanguageConfig,
+    decoding_config: WhisperDecodingConfig,
     app: Option<AppHandle>,
     stop_flag: Arc<AtomicBool>,
 ) {
     let mut transcriber = match whisper_model_path
         .as_ref()
         .and_then(|p| p.to_str())
-        .map(|path| StreamingTranscriber::new(path, &language_config, live_thread_count()))
+        .map(|path| {
+            StreamingTranscriber::new(
+                path,
+                &language_config,
+                &decoding_config,
+                live_thread_count(),
+            )
+        })
     {
         Some(Ok(t)) => t,
         Some(Err(e)) => {
@@ -231,7 +250,9 @@ fn run_live_loop(
         // The live stream is what the user watches while talking, so a
         // hallucination here is the most visible failure Relay has. It is also
         // the cheapest to catch: the same assessment the durable clock runs.
-        let text = match transcript_health::assess(
+        let text = match transcript_health::screen_decode(
+            "meeting-live",
+            language_config.whisper_language.as_deref(),
             &text,
             DecodeEvidence {
                 voiced_seconds: profile.voiced_seconds,

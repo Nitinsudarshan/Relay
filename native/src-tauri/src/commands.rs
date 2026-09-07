@@ -3587,9 +3587,22 @@ pub async fn start_talkback(
         None
     };
 
+    // Talkback gets the same decode configuration dictation does — the
+    // vocabulary prompt and the hallucination thresholds included. It kept the
+    // short-window shape (`for_live_window`) until the utterance-truncation
+    // work lands, but it no longer decides its own parameters.
+    let mut decoding = crate::capture::stt::WhisperDecodingConfig::for_live_window();
+    if let Some(prompt) = settings.build_stt_prompt() {
+        decoding.initial_prompt = Some(prompt);
+    }
+    let tuned = crate::capture::stt::WhisperDecodingConfig::for_dictation(&settings.stt);
+    decoding.strategy = tuned.strategy.clone();
+    decoding.no_speech_thold = tuned.no_speech_thold;
+    decoding.n_threads = tuned.n_threads;
+
     state
         .talkback
-        .enable(&app, &settings.talkback, voice, model_path, language)
+        .enable(&app, &settings.talkback, voice, model_path, language, decoding)
         .map_err(|e| CommandError::new("TALKBACK_START_FAILED", &e))
 }
 

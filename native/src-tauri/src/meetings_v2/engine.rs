@@ -151,15 +151,19 @@ impl MeetingsV2Engine {
             self.stt.clone(),
             resolved_model_path.clone(),
             language_config.clone(),
-            durable_decoding_config,
+            durable_decoding_config.clone(),
             app.clone(),
         );
 
+        // The live clock is handed the same configuration as the durable one.
+        // It reshapes it for a short window rather than inventing its own, so
+        // the vocabulary and the preset reach both.
         let live_stt = LiveSttWorker::spawn(
             session_id.clone(),
             live_rx,
             resolved_model_path,
             language_config,
+            durable_decoding_config,
             app.clone(),
         );
 

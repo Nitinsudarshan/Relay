@@ -398,6 +398,55 @@ pub fn assess(text: &str, evidence: DecodeEvidence) -> Option<HallucinationReaso
 }
 
 /// Builds the record kept in place of rejected text.
+/// Screens one decode and writes down the evidence, for every surface.
+///
+/// [`assess`] is the decision; this is the decision plus a record of how it was
+/// reached. Relay had five decode paths and no way to answer the three
+/// questions that actually diagnose a bad transcript: what language did this
+/// decode resolve to, how much of the window was voice, and did anything screen
+/// the result. Without them, a five-minute meeting arriving as fifty-six words
+/// looks like a summarization problem — which is where the search for it
+/// started.
+///
+/// `surface` names the caller ("meeting-chunk", "talkback", "live"), so one log
+/// stream can be read per surface. Recorded at debug level: it is one line per
+/// decode, useful when something is wrong and noise when nothing is.
+pub fn screen_decode(
+    surface: &'static str,
+    language: Option<&str>,
+    text: &str,
+    evidence: DecodeEvidence,
+) -> Option<HallucinationReason> {
+    let verdict = assess(text, evidence);
+    let words = word_count(text);
+    tracing::debug!(
+        surface,
+        // "auto" rather than absent, because the distinction between "resolved
+        // to auto-detect" and "we did not record it" is the whole point.
+        language = language.unwrap_or("auto"),
+        words,
+        voiced_seconds = evidence.voiced_seconds,
+        voiced_ratio = evidence.voiced_ratio(),
+        words_per_voiced_second = words_per_voiced_second(words, evidence.voiced_seconds),
+        outcome = verdict.as_ref().map_or("kept", |r| r.key()),
+        "stt decode screened"
+    );
+    verdict
+}
+
+/// Speaking rate, or zero when there was no voiced audio to divide by.
+///
+/// Reported rather than only compared against a threshold: the number itself is
+/// the diagnostic. Conversational speech sits at 2-4, and a transcript whose
+/// rate reads 0.2 has lost most of what was said — which is the signal that
+/// went unrecorded.
+fn words_per_voiced_second(words: usize, voiced_seconds: f64) -> f64 {
+    if voiced_seconds <= 0.0 {
+        return 0.0;
+    }
+    words as f64 / voiced_seconds
+}
+
 pub fn rejection(reason: HallucinationReason, discarded: &str) -> TranscriptRejection {
     let trimmed = discarded.trim();
     let (kept, truncated) = if trimmed.chars().count() > DISCARDED_TEXT_LIMIT {
@@ -831,6 +880,38 @@ migration finished, tested, and reviewed by someone other than me.";
     /// Hinglish when it is not locked to one language.
     const HINGLISH_SPEECH: &str =
         "Mansi ne teen interview liye lekin link ka issue tha to koi join nahi kar paya";
+
+    #[test]
+    fn screening_records_without_changing_the_verdict() {
+        // `screen_decode` is `assess` plus a log line. If it ever disagreed
+        // with `assess`, the observability layer would be deciding what counts
+        // as speech — which is the one thing it must not do.
+        let cases: [(&str, DecodeEvidence); 4] = [
+            ("The quarterly numbers look strong.", evidence(9.0, 30.0, 0.1)),
+            ("The quarterly numbers look strong.", evidence(9.0, 30.0, 0.94)),
+            ("Thank you.", evidence(0.2, 30.0, 0.1)),
+            (HINDI_SPEECH, evidence(6.0, 30.0, 0.08)),
+        ];
+        for (text, ev) in cases {
+            assert_eq!(
+                screen_decode("test", Some("en"), text, ev),
+                assess(text, ev),
+                "screen_decode disagreed with assess for {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_speaking_rate_is_reported_even_with_no_voiced_audio() {
+        // Divided by zero this would be NaN, which poisons the log line it
+        // exists to fill.
+        assert_eq!(words_per_voiced_second(10, 0.0), 0.0);
+        assert_eq!(words_per_voiced_second(0, 5.0), 0.0);
+        // And the figure that would have diagnosed the reported failure: a
+        // five-minute meeting that produced fifty-six words.
+        let rate = words_per_voiced_second(56, 270.0);
+        assert!(rate < 0.5, "got {rate}");
+    }
 
     #[test]
     fn hindi_meeting_speech_is_never_rejected() {

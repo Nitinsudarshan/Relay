@@ -1,4 +1,5 @@
 pub mod evaluation;
+pub mod speech_health;
 pub mod stt;
 pub mod web;
 
