@@ -600,10 +600,14 @@ fn retained_items_keep_meeting_order_not_ranking_order() {
 // English, and it means a commitment made in Hindi or Hinglish matches nothing
 // and is dropped by Gate 3 — from a *perfect* transcript.
 //
-// These tests record that. The English control passes today; the two
-// non-English cases are `#[ignore]`d because they describe the behaviour the
-// lexicon work (M3) will deliver, not the behaviour that exists. Running
-// `cargo test -- --ignored` is the check that the gap is still open.
+// That gap is now closed. Two things had to change together: the lexicons
+// gained their Hindi and Hinglish entries in both scripts, and `words()`
+// stopped splitting on the virama — without the second, no vocabulary could
+// have matched, because the words being matched against were fragments of
+// consonant clusters.
+//
+// Hindi puts the commitment in the verb rather than in an auxiliary before it:
+// "bhej dungi" is "I will send", and -unga/-ungi is the whole signal.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -626,7 +630,6 @@ fn the_english_control_for_the_hinglish_gap_qualifies() {
 }
 
 #[test]
-#[ignore = "M3: qualify.rs lexicons are English-only, so a romanized Hinglish commitment fails Gate 3"]
 fn a_romanized_hinglish_commitment_qualifies() {
     // "I will send the final volunteer list to Pragati by Wednesday."
     let segments = vec![segment(
@@ -648,7 +651,6 @@ fn a_romanized_hinglish_commitment_qualifies() {
 }
 
 #[test]
-#[ignore = "M3: qualify.rs lexicons are English-only, so a Devanagari commitment fails Gate 3"]
 fn a_devanagari_commitment_qualifies() {
     let segments = vec![segment(
         0,
@@ -665,5 +667,79 @@ fn a_devanagari_commitment_qualifies() {
         retained.len(),
         1,
         "a Devanagari commitment is still a commitment"
+    );
+}
+
+#[test]
+fn devanagari_words_tokenize_as_words() {
+    // `words()` splits on anything that is not alphanumeric. Devanagari vowel
+    // signs, anusvara and virama are combining marks, and whether they count
+    // as alphanumeric decides whether this whole module sees Hindi words or
+    // single consonants. Rust's `Alphabetic` property includes
+    // `Other_Alphabetic`, which covers the vowel signs — so this holds — but
+    // it is not obvious and every lexicon below depends on it.
+    assert_eq!(words("मैं फॉर्म भर दूंगी"), vec!["मैं", "फॉर्म", "भर", "दूंगी"]);
+    assert_eq!(words("क्या"), vec!["क्या"]);
+}
+
+#[test]
+fn hindi_thinking_aloud_is_still_not_a_commitment() {
+    // The gate must not have become a rubber stamp for anything in Hindi.
+    // "we should send the list" proposes work nobody took — Gate 3 rejects it
+    // in Hindi for the same reason it does in English.
+    let segments = vec![segment(
+        0,
+        "Humein volunteer list bhejni chahiye kisi ko.",
+        Some(SPEAKER_ID_ME),
+    )];
+    let candidates = vec![candidate(
+        "Send the volunteer list",
+        OwnerType::Unassigned,
+        &["seg_00000"],
+    )];
+    let (retained, _) = qualify_action_items(candidates, &segments);
+    assert!(
+        retained.is_empty(),
+        "a proposal nobody accepted is not a task, in any language"
+    );
+}
+
+#[test]
+fn a_hindi_proposal_answered_with_hindi_acceptance_qualifies() {
+    // The §4.3 pattern, in Hindi: a request plus an acceptance somewhere in
+    // the same evidence. Neither half alone.
+    let segments = vec![
+        segment(
+            0,
+            "Kya aap volunteer list Pragati ko bhej sakte hain?",
+            Some(SPEAKER_ID_REMOTE),
+        ),
+        segment(1, "Haan ji, theek hai.", Some(SPEAKER_ID_ME)),
+    ];
+    let candidates = vec![candidate(
+        "Send the volunteer list to Pragati",
+        OwnerType::Unassigned,
+        &["seg_00000", "seg_00001"],
+    )];
+    let (retained, _) = qualify_action_items(candidates, &segments);
+    assert_eq!(retained.len(), 1, "a request plus an acceptance is a task");
+}
+
+#[test]
+fn an_english_meeting_is_unaffected_by_the_hindi_vocabulary() {
+    // The regression that would matter most: a lexicon entry that happens to
+    // collide with an English word and starts qualifying English filler. "de",
+    // "do", "le" and "lo" are Hindi stems and also English fragments, so this
+    // checks the gate has not loosened for English.
+    let segments = vec![segment(
+        0,
+        "So we could do that, or we could just leave it and see.",
+        Some(SPEAKER_ID_ME),
+    )];
+    let candidates = vec![candidate("Do that", OwnerType::Me, &["seg_00000"])];
+    let (retained, _) = qualify_action_items(candidates, &segments);
+    assert!(
+        retained.is_empty(),
+        "thinking aloud in English must still be rejected"
     );
 }

@@ -48,6 +48,25 @@ pub struct SegmentOutcome {
     pub applied_rules: Vec<String>,
 }
 
+/// Whether `c` belongs inside a word rather than between two words.
+///
+/// Unicode's `Alphabetic` property — which is what `char::is_alphanumeric`
+/// consults — covers Devanagari vowel signs, so `दूंगी` tokenizes as one word.
+/// It does *not* cover the virama, which suppresses a consonant's inherent
+/// vowel and is therefore word-**internal**: it is how `क्या` and `फॉर्म` are
+/// spelled. Splitting on it turns every consonant cluster into two words, and
+/// consonant clusters are most Hindi words.
+///
+/// That mattered concretely: the action-item gate matches whole words against
+/// its lexicons, so a Hindi commitment could not have matched even with the
+/// vocabulary added, because the words it was matching against were fragments.
+///
+/// The zero-width joiners are here for the same reason — they control ligature
+/// shaping within a word and carry no boundary.
+pub fn is_word_internal(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '\u{094D}' | '\u{093C}' | '\u{200C}' | '\u{200D}')
+}
+
 /// Which rules a surface wants.
 ///
 /// The chain is shared; this is the one place it legitimately differs, and it
@@ -614,6 +633,22 @@ mod tests {
             transcript.text.trim_end_matches('.').to_lowercase(),
             dictated.text.to_lowercase()
         );
+    }
+
+    #[test]
+    fn a_virama_does_not_end_a_word() {
+        // The property every whole-word lexicon match depends on.
+        let split_on = |text: &str| -> Vec<String> {
+            text.split(|c: char| !is_word_internal(c))
+                .filter(|w| !w.is_empty())
+                .map(str::to_string)
+                .collect()
+        };
+        assert_eq!(split_on("क्या"), vec!["क्या"]);
+        assert_eq!(split_on("फॉर्म"), vec!["फॉर्म"]);
+        assert_eq!(split_on("मैं फॉर्म भर दूंगी"), vec!["मैं", "फॉर्म", "भर", "दूंगी"]);
+        // And it still separates actual words.
+        assert_eq!(split_on("bhej dungi"), vec!["bhej", "dungi"]);
     }
 
     #[test]

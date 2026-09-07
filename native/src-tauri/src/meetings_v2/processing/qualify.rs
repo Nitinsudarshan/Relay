@@ -435,6 +435,28 @@ const DELIVERABLE_VERBS: &[&str] = &[
     "reschedule", "coordinate", "align", "onboard", "train", "hire", "assign", "delegate",
     "raise", "file", "track", "upload", "download", "export", "import", "provide",
     "deliver", "submit", "complete", "circulateback", "reshare", "resend", "recirculate",
+    // Hindi and Hinglish stems, in both scripts.
+    //
+    // Relay does not translate, so a Hindi commitment reaches this gate in
+    // Hindi — and every lexicon here was English, which is why a Hinglish
+    // meeting produced zero action items from a perfect transcript.
+    //
+    // Both spellings are needed: the pipeline reads the stored script, and
+    // romanization is a projection applied after it. Whisper emits either
+    // depending on how the speaker code-switched.
+    "bhej", "bhejna", "bheju", "bhejo",
+    "kar", "karna", "karo",
+    "dekh", "dekhna", "dekho",
+    "likh", "likhna", "likho",
+    "bata", "batana", "batao",
+    "bana", "banana", "banao",
+    "de", "dena", "do",
+    "le", "lena", "lo",
+    "puchh", "puchhna", "pucho",
+    "bhejie", "kijiye", "dijiye",
+    "भेज", "भेजना", "कर", "करना", "देख", "देखना", "लिख", "लिखना",
+    "बता", "बताना", "बना", "बनाना", "दे", "देना", "ले", "लेना",
+    "पूछ", "पूछना", "भेजिए", "कीजिए", "दीजिए",
 ];
 
 /// Modal openings that mark a spoken commitment. Used by the cue-based
@@ -450,6 +472,51 @@ const FIRST_PERSON_CUES: &[&str] = &[
     "i have to",
     "i shall",
     "let me",
+    // Hindi puts the commitment in the verb, not in an auxiliary before it:
+    // "bhej dungi" is "I will send", and the -unga/-ungi ending is the whole
+    // signal. In Hinglish that ending is written as its own word, so a
+    // whole-word match reaches it.
+    //
+    // Gendered pairs throughout, because both are first person and dropping
+    // either would qualify half the speakers.
+    "dunga",
+    "dungi",
+    "karunga",
+    "karungi",
+    "bhejunga",
+    "bhejungi",
+    "dekhunga",
+    "dekhungi",
+    "lunga",
+    "lungi",
+    "banaunga",
+    "banaungi",
+    "likhunga",
+    "likhungi",
+    "batunga",
+    "batungi",
+    "rakhunga",
+    "rakhungi",
+    "main karunga",
+    "main karungi",
+    "mai karunga",
+    "mai karungi",
+    "दूंगा",
+    "दूंगी",
+    "करूंगा",
+    "करूंगी",
+    "भेजूंगा",
+    "भेजूंगी",
+    "देखूंगा",
+    "देखूंगी",
+    "लूंगा",
+    "लूंगी",
+    "बनाऊंगा",
+    "बनाऊंगी",
+    "लिखूंगा",
+    "लिखूंगी",
+    "रखूंगा",
+    "रखूंगी",
 ];
 
 const COLLECTIVE_CUES: &[&str] = &[
@@ -461,6 +528,20 @@ const COLLECTIVE_CUES: &[&str] = &[
     "we have to",
     "let's",
     "let us",
+    // "hum karenge" — the -enge ending is first person plural, the same
+    // signal as -unga/-ungi one person over.
+    "karenge",
+    "denge",
+    "lenge",
+    "bhejenge",
+    "dekhenge",
+    "banayenge",
+    "करेंगे",
+    "देंगे",
+    "लेंगे",
+    "भेजेंगे",
+    "देखेंगे",
+    "बनाएंगे",
 ];
 
 /// Acceptance tokens for §4.2 and §4.3 — assignment plus acceptance, and
@@ -468,6 +549,12 @@ const COLLECTIVE_CUES: &[&str] = &[
 const ACCEPTANCE_TOKENS: &[&str] = &[
     "sure", "yes", "yeah", "okay", "ok", "great", "perfect", "aligned", "agreed", "done",
     "absolutely", "certainly", "definitely", "works",
+    // Hindi acceptance. "haan" and "theek hai" are the everyday yes; "ji" is
+    // the polite one and carries agreement on its own.
+    "haan", "haan ji", "ji", "ji haan", "theek", "theek hai", "thik", "thik hai",
+    "bilkul", "zaroor", "zarur", "sahi", "ho jayega", "ho jaayega", "kar denge",
+    "हाँ", "हां", "जी", "जी हाँ", "ठीक", "ठीक है", "बिलकुल", "ज़रूर", "जरूर",
+    "सही", "हो जाएगा", "कर देंगे",
 ];
 
 /// Openings that propose work without anybody taking it.
@@ -486,6 +573,17 @@ const PROPOSAL_CUES: &[&str] = &[
     "we can do",
     "we can have",
     "can we have",
+    // "chahiye" is Hindi's "should" — the proposal marker itself. On its own
+    // it is thinking aloud, exactly as "we should" is, and Gate 3 still needs
+    // an acceptance somewhere in the same evidence.
+    "chahiye",
+    "karna chahiye",
+    "bhejna chahiye",
+    "dekhna chahiye",
+    "चाहिए",
+    "करना चाहिए",
+    "भेजना चाहिए",
+    "देखना चाहिए",
 ];
 
 const ASSIGNMENT_CUES: &[&str] = &[
@@ -499,6 +597,33 @@ const ASSIGNMENT_CUES: &[&str] = &[
     "can this be",
     "that can be done",
     "this can be done",
+    // Hindi requests. "sakte hain" / "sakti hain" is "can you", and the
+    // "kar do" imperative is the direct ask. Gendered and formal/informal
+    // pairs throughout, because a request is a request either way.
+    "kya aap",
+    "sakte hain",
+    "sakti hain",
+    "sakte ho",
+    "sakti ho",
+    "kar do",
+    "kar dena",
+    "kar dijiye",
+    "bhej do",
+    "bhej dena",
+    "bhej dijiye",
+    "dekh lena",
+    "क्या आप",
+    "सकते हैं",
+    "सकती हैं",
+    "सकते हो",
+    "सकती हो",
+    "कर दो",
+    "कर देना",
+    "कर दीजिए",
+    "भेज दो",
+    "भेज देना",
+    "भेज दीजिए",
+    "देख लेना",
 ];
 
 /// Tokens that carry no topic. Removed before a candidate is compared with
@@ -1247,7 +1372,11 @@ pub fn split_sentences(text: &str) -> Vec<&str> {
 /// Lowercased word tokens. Apostrophes are kept so "i'll" stays one token and
 /// can be matched as a whole word rather than as a substring of "will".
 fn words(text: &str) -> Vec<String> {
-    text.split(|c: char| !(c.is_alphanumeric() || c == '\'' || c == '\u{2019}'))
+    text.split(|c: char| {
+        !(crate::capture::text_normalize::is_word_internal(c)
+            || c == '\''
+            || c == '\u{2019}')
+    })
         .filter(|w| !w.is_empty())
         .map(|w| w.replace('\u{2019}', "'").to_lowercase())
         .collect()

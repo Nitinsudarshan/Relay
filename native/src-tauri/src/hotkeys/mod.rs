@@ -649,6 +649,28 @@ fn stop_dictation_session(
             // 2. Inject text into the active field, guarded against tab or window switching.
             // If the user moved to another tab or window, wait up to 15s for them to return
             // so text is injected directly into the original field without spraying into the wrong place.
+            // Every abort branch below tells the user the transcription is on
+            // the clipboard, so it has to actually be there. It is not always:
+            // `should_copy_to_clipboard` is false when clipboard copying is off
+            // *and* the method is Keystrokes, which is a legitimate
+            // configuration — and in it, an aborted injection used to lose the
+            // text outright while promising it was recoverable.
+            //
+            // Guaranteeing it here rather than widening the condition above
+            // keeps the normal path unchanged: on a successful injection with
+            // copying off, nothing touches the clipboard.
+            let ensure_recoverable = |text: &str| {
+                if should_copy_to_clipboard {
+                    return;
+                }
+                if let Err(e) = injection::copy_to_clipboard(text) {
+                    tracing::warn!(
+                        "Dictation: injection was aborted and the fallback clipboard copy also failed: {}",
+                        e
+                    );
+                }
+            };
+
             let t_injection_start = std::time::Instant::now();
 
             if auto_paste {
@@ -684,6 +706,7 @@ fn stop_dictation_session(
                         emit_capture_status_event(&app, false, None, "SUCCESS", None);
                     }
                     Ok(injection::InjectionOutcome::TimedOutWaitingForReturn { target_title }) => {
+                        ensure_recoverable(&final_text);
                         tracing::info!(
                             "[Dictation] Timed out waiting for return to '{}'. Transcription kept in clipboard.",
                             target_title
@@ -705,6 +728,7 @@ fn stop_dictation_session(
                         tracing::info!("[Dictation] Focus return wait cancelled by newer session.");
                     }
                     Ok(injection::InjectionOutcome::TabChanged { target_title, current_title }) => {
+                        ensure_recoverable(&final_text);
                         tracing::info!(
                             "[Dictation] Active tab changed from '{}' to '{}'. Prevented typing into wrong tab.",
                             target_title, current_title
@@ -723,6 +747,7 @@ fn stop_dictation_session(
                         );
                     }
                     Ok(injection::InjectionOutcome::AppChanged { target_title, current_title }) => {
+                        ensure_recoverable(&final_text);
                         tracing::info!(
                             "[Dictation] Foreground app changed from '{}' to '{}'. Prevented typing into wrong app.",
                             target_title, current_title
