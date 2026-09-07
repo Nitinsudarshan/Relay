@@ -70,7 +70,10 @@ pub use contract::{
 };
 pub use derived::{DerivedData, DerivedPayload, DerivedType};
 pub use prompts::{context_prompt_for, OutputContract, PromptBody, PromptDefinition, PromptId};
-pub use service::{context_request, parse_json_response, provider_name, AnalysisService};
+pub use service::{
+    context_request, parse_json_response, prompt_budget_chars_for, provider_name,
+    AnalysisService,
+};
 pub use source::{
     SourceCoverage, SourceDescriptor, SourceSubtype, SourceTrust, SourceType,
 };

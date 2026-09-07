@@ -48,6 +48,8 @@ pub enum PromptId {
     MeetingFacts,
     /// Stage B of a meeting: prose written from those facts, transcript closed.
     MeetingSummary,
+    /// One spoken Talkback answer, grounded in retrieved context.
+    TalkbackAnswer,
 }
 
 impl PromptId {
@@ -60,6 +62,7 @@ impl PromptId {
         PromptId::RepositoryContext,
         PromptId::MeetingFacts,
         PromptId::MeetingSummary,
+        PromptId::TalkbackAnswer,
     ];
 
     /// The wire name written into derived data. Stable — changing one is a
@@ -72,6 +75,7 @@ impl PromptId {
             Self::RepositoryContext => "repository.context",
             Self::MeetingFacts => "meeting.facts",
             Self::MeetingSummary => "meeting.summary",
+            Self::TalkbackAnswer => "talkback.answer",
         }
     }
 
@@ -238,6 +242,30 @@ pub fn definition(id: PromptId) -> PromptDefinition {
             // room to be creative.
             temperature: 0.1,
             max_output_tokens: 2_400,
+        },
+        PromptId::TalkbackAnswer => PromptDefinition {
+            id,
+            version: 1,
+            purpose: "One spoken Talkback answer, grounded in retrieved context.",
+            // Built per call, and more variably than either meeting stage: the
+            // instructions carry the voice rules, whether this intent requires
+            // grounding, the retrieved context and the recent conversation.
+            // `talkback::assemble` owns that assembly, including the per-item
+            // external framing a retrieved web capture needs.
+            body: PromptBody::Computed,
+            output_contract: OutputContract::Prose,
+            // Source-agnostic by nature: a Talkback turn answers over whatever
+            // retrieval found, which is routinely several source types at once.
+            applies_to: &[],
+            // Conversational warmth, still grounded. The answer is spoken, and
+            // a flat reading of retrieved text is worse than a slightly loose
+            // one; the grounding is enforced by the rules in the prompt and by
+            // retrieval, not by sampling.
+            temperature: 0.4,
+            // Spoken answers are short by design — two or three sentences by
+            // the voice rules. The low ceiling also bounds how long a runaway
+            // local model can hold the floor.
+            max_output_tokens: 400,
         },
         PromptId::MeetingSummary => PromptDefinition {
             id,

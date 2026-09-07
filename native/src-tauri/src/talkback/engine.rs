@@ -728,6 +728,29 @@ pub async fn run_turn(ctx: TurnContext<'_>, text: &str) -> Result<String, String
 /// a vector and synthesized afterwards. Time-to-first-audio is therefore
 /// retrieval + first-token + first-sentence + one synthesis, rather than
 /// the whole generation plus a synthesis.
+/// Completion options for one spoken turn.
+///
+/// Sampling comes from the prompt registry rather than from this module.
+/// Talkback's answer is a registered prompt like every other analysis Relay
+/// runs (`PromptId::TalkbackAnswer`), which is what makes "which prompt
+/// produced this, at what version, with what sampling?" answerable for a spoken
+/// turn as well as a written one. The two numbers that used to be literals here
+/// are that prompt's now, and the rationale for both sits with its definition.
+///
+/// The window and the timeout stay local: they are properties of this provider
+/// and this surface, not of the prompt. They are listed explicitly so they win
+/// over the spread — a prompt must not be able to reach in and change the
+/// window it is being fitted into.
+fn turn_options(llm: &LLMClient) -> CompletionOptions {
+    CompletionOptions {
+        context_tokens: llm.context_tokens(),
+        timeout_secs: 90,
+        ..crate::pipeline::analysis::PromptId::TalkbackAnswer
+            .definition()
+            .options(llm.default_options())
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn generate_streaming(
     ctx: &TurnContext<'_>,
@@ -744,14 +767,7 @@ async fn generate_streaming(
     let buffer = Mutex::new(PhraseBuffer::new());
     let speech = Mutex::new(speech);
 
-    let options = CompletionOptions {
-        // Spoken answers are short by design; a low ceiling also bounds
-        // how long a runaway local model can hold the floor.
-        max_output_tokens: 400,
-        temperature: 0.4,
-        context_tokens: llm.context_tokens(),
-        timeout_secs: 90,
-    };
+    let options = turn_options(llm);
 
     let response = llm
         .complete_streaming(question, Some(system_prompt), options, |delta| {
@@ -1070,6 +1086,34 @@ fn transcriber_threads() -> i32 {
 mod tests {
     use super::*;
     use crate::talkback::retrieval::SourceType;
+
+    #[test]
+    fn a_spoken_turn_takes_its_sampling_from_the_registry() {
+        // Talkback's prompt is registered, so its sampling has one home. This
+        // is the test that catches the registry and this surface drifting
+        // apart — and, more usefully, catches the field spread being written
+        // the other way round, which would let a prompt definition silently
+        // shrink the provider's configured window.
+        let llm = LLMClient::new(crate::providers::ProviderConfig {
+            context_tokens: 16_384,
+            ..Default::default()
+        });
+        let options = turn_options(&llm);
+
+        let prompt = crate::pipeline::analysis::PromptId::TalkbackAnswer.definition();
+        assert_eq!(options.temperature, prompt.temperature);
+        assert_eq!(options.max_output_tokens, prompt.max_output_tokens);
+        assert_eq!(
+            options.max_output_tokens, 400,
+            "a spoken answer is two or three sentences"
+        );
+
+        assert_eq!(
+            options.context_tokens, 16_384,
+            "the configured window survives the prompt's defaults"
+        );
+        assert_eq!(options.timeout_secs, 90, "and so does this surface's timeout");
+    }
 
     fn item(id: &str) -> ContextItem {
         ContextItem {

@@ -235,13 +235,7 @@ impl<'a> AnalysisService<'a> {
             .llm
             .map(|client| client.default_options().context_tokens)
             .unwrap_or_else(|| crate::providers::CompletionOptions::default().context_tokens);
-
-        let reserved = prompt_id
-            .definition()
-            .max_output_tokens
-            .saturating_add(INSTRUCTION_RESERVE_TOKENS);
-
-        window.saturating_sub(reserved) as usize * CHARS_PER_TOKEN
+        prompt_budget_chars_for(prompt_id, window)
     }
 
     /// Builds the metadata for a result produced by this service.
@@ -370,6 +364,22 @@ pub struct ExecutedAnalysis {
 pub fn context_request<'a>(source: &SourceDescriptor<'a>) -> Option<AnalysisRequest<'a>> {
     let prompt_id: PromptId = super::prompts::context_prompt_for(source.source_type)?;
     Some(AnalysisRequest::new(source, AnalysisType::Context, prompt_id))
+}
+
+/// [`AnalysisService::prompt_budget_chars`] for a window the caller already
+/// knows.
+///
+/// A free function because not every caller holds a service. Talkback sizes its
+/// retrieval from its own latency policy and then bounds it by this, so a
+/// surface that decides how much evidence it *wants* still cannot ask for more
+/// than the window can carry.
+pub fn prompt_budget_chars_for(prompt_id: PromptId, context_tokens: u32) -> usize {
+    let reserved = prompt_id
+        .definition()
+        .max_output_tokens
+        .saturating_add(INSTRUCTION_RESERVE_TOKENS);
+
+    context_tokens.saturating_sub(reserved) as usize * CHARS_PER_TOKEN
 }
 
 /// The provider family's stable name, for the provenance record.
