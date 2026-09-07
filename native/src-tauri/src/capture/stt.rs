@@ -33,6 +33,28 @@ pub const FAST_MODEL_FILENAME: &str = "ggml-base.bin";
 pub const FAST_MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
 
+/// The accuracy ceiling: `ggml-large-v3-turbo.bin`, 809M params, ~1.6 GB.
+///
+/// Offered because `small` is genuinely marginal on the audio Relay is used
+/// for. Its header above claims "reliable English/Hindi code-switching"; a
+/// five-minute Hinglish standup arriving as fifty-six words is what that claim
+/// failing looks like. Whisper's word error rate on Hindi falls sharply from
+/// `small` to `large-v3`, and the turbo variant keeps most of that gain at
+/// roughly a quarter of `large-v3`'s decode cost — which is what makes it
+/// viable at all in a local-first app.
+///
+/// Never a default. It is a deliberate download and a real latency cost, so
+/// the user chooses it and Diagnostics measures what it costs on their machine
+/// rather than either of us guessing.
+pub const ACCURATE_MODEL_FILENAME: &str = "ggml-large-v3-turbo.bin";
+pub const ACCURATE_MODEL_URL: &str =
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
+
+/// Fetches the accuracy-ceiling model. Large, so never called implicitly.
+pub async fn ensure_accurate_model(models_dir: &Path) -> Result<PathBuf, SttError> {
+    ensure_model_file(models_dir, ACCURATE_MODEL_FILENAME, ACCURATE_MODEL_URL).await
+}
+
 /// Checks if a configured model path represents a legacy default model
 /// (e.g. `ggml-tiny.en.bin`) so Relay can seamlessly promote to `ggml-small.bin`.
 /// The Whisper model a meeting recording would use, or `None` when none is
@@ -244,6 +266,16 @@ pub fn get_stt_models_overview(
         },
     });
 
+    // 3. The accuracy ceiling, listed whether or not it is present so the UI
+    // can offer the download rather than hiding that the option exists.
+    let accurate_path = models_dir.join(ACCURATE_MODEL_FILENAME);
+    let accurate_exists = accurate_path.is_file();
+    let accurate_size = if accurate_exists {
+        std::fs::metadata(&accurate_path).map(|m| m.len()).unwrap_or(0)
+    } else {
+        0
+    };
+
     // 2. Accurate Small Model (Production Default)
     let default_path = models_dir.join(DEFAULT_MODEL_FILENAME);
     let default_exists = default_path.is_file();
@@ -267,7 +299,22 @@ pub fn get_stt_models_overview(
         },
     });
 
-    // 3. Scan models_dir for any other .bin files
+    models.push(SttModelInfo {
+        name: "Whisper Large v3 Turbo".to_string(),
+        filename: ACCURATE_MODEL_FILENAME.to_string(),
+        path: accurate_path.to_string_lossy().to_string(),
+        size_bytes: accurate_size,
+        exists: accurate_exists,
+        is_managed: true,
+        profile: Some("maximum".to_string()),
+        status: if accurate_exists && accurate_size > 1_000_000 {
+            "ready".to_string()
+        } else {
+            "missing".to_string()
+        },
+    });
+
+    // 4. Scan models_dir for any other .bin files
     if let Ok(entries) = std::fs::read_dir(models_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -275,7 +322,10 @@ pub fn get_stt_models_overview(
                 if let Some(ext) = path.extension() {
                     if ext == "bin" {
                         let fname = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-                        if fname != FAST_MODEL_FILENAME && fname != DEFAULT_MODEL_FILENAME {
+                        if fname != FAST_MODEL_FILENAME
+                            && fname != DEFAULT_MODEL_FILENAME
+                            && fname != ACCURATE_MODEL_FILENAME
+                        {
                             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
                             models.push(SttModelInfo {
                                 name: format!("Custom ({})", fname),
@@ -1641,9 +1691,15 @@ mod tests {
         let overview = get_stt_models_overview(&temp_dir, &settings);
         assert_eq!(overview.active_profile, "fast");
         assert_eq!(overview.active_model_name, "Whisper Base");
-        assert_eq!(overview.models.len(), 2);
+        // Three managed tiers: fast, default, and the accuracy ceiling. The
+        // ceiling is listed whether or not it is on disk, so the UI can offer
+        // the download instead of hiding that the option exists.
+        assert_eq!(overview.models.len(), 3);
         assert_eq!(overview.models[0].filename, FAST_MODEL_FILENAME);
         assert_eq!(overview.models[1].filename, DEFAULT_MODEL_FILENAME);
+        assert_eq!(overview.models[2].filename, ACCURATE_MODEL_FILENAME);
+        assert!(!overview.models[2].exists, "not downloaded by default");
+        assert_eq!(overview.models[2].status, "missing");
 
         // Test file verification on nonexistent file
         let res = test_stt_model_file("nonexistent_model.bin");

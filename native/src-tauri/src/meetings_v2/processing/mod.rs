@@ -127,6 +127,9 @@ pub struct ProcessingOptions {
     /// Presentation only — see the summary contract, which subordinates them to
     /// the accuracy rules.
     pub user_instructions: Option<String>,
+    /// The language and alphabet the summary prose should be written in, from
+    /// `Settings › Languages & Script`.
+    pub language: summarize::LanguageDirective,
 }
 
 impl Default for ProcessingOptions {
@@ -143,6 +146,7 @@ impl Default for ProcessingOptions {
             extension_id: modes::DEFAULT_EXTENSION_ID.to_string(),
             user_extensions: Vec::new(),
             user_instructions: None,
+            language: summarize::LanguageDirective::default(),
         }
     }
 }
@@ -574,6 +578,7 @@ audio are unaffected."
             extension: &extension,
             notes: &notes,
             user_instructions: options.user_instructions.as_deref(),
+            language: &options.language,
         };
 
         let started = Instant::now();

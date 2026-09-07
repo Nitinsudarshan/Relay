@@ -2200,16 +2200,41 @@ pub async fn get_meeting_v2(
         .map_err(|e: String| CommandError::new("GET_MEETING_FAILED", &e))
 }
 
+/// The alphabet this user reads, from `Settings › Languages & Script`.
+fn output_script(state: &State<'_, AppState>) -> crate::capture::romanize::OutputScript {
+    crate::capture::romanize::OutputScript::from_setting(
+        &state.settings.lock_or_recover().language.output_script,
+    )
+}
+
+/// Projects a meeting payload into the user's alphabet on its way to the UI.
+///
+/// The transform happens *here*, at the boundary, and never on the way in:
+/// `transcript.jsonl` stays byte-identical, so switching the setting back
+/// shows the original Devanagari with nothing to undo. That is also why it is
+/// applied to `raw_text` — the Raw Transcript tab is a view like any other,
+/// and a diagnostic the user cannot read diagnoses nothing.
+fn project_for_reader<T: serde::Serialize>(
+    value: T,
+    state: &State<'_, AppState>,
+) -> Result<serde_json::Value, CommandError> {
+    let mut json = serde_json::to_value(value)
+        .map_err(|e| CommandError::new("SERIALIZE_FAILED", &e.to_string()))?;
+    crate::capture::romanize::project_json(&mut json, output_script(state));
+    Ok(json)
+}
+
 #[tauri::command]
 pub async fn get_meeting_v2_transcript(
     session_id: String,
     state: State<'_, AppState>,
-) -> Result<Vec<crate::meetings_v2::TranscriptSegment>, CommandError> {
-    state
+) -> Result<serde_json::Value, CommandError> {
+    let segments = state
         .meetings_v2
         .store()
         .get_transcript_segments(&session_id)
-        .map_err(|e: String| CommandError::new("GET_TRANSCRIPT_FAILED", &e))
+        .map_err(|e: String| CommandError::new("GET_TRANSCRIPT_FAILED", &e))?;
+    project_for_reader(segments, &state)
 }
 
 #[tauri::command]
@@ -2265,6 +2290,13 @@ fn meeting_processing_options(
         // The dictation dictionary doubles as the normalization glossary: these
         // are exactly the terms the user has already told Relay it mishears.
         glossary: settings.dictionary.clone(),
+        // The two language settings that had never reached a prompt.
+        language: crate::meetings_v2::processing::summarize::LanguageDirective {
+            notes_language: settings.language.notes_language.clone(),
+            script: crate::capture::romanize::OutputScript::from_setting(
+                &settings.language.output_script,
+            ),
+        },
         generate_conversation: settings.meetings.generate_conversation_transcript,
         speaker_identification: match settings.meetings.speaker_identification {
             SpeakerIdentification::Automatic => SpeakerIdentificationMode::Automatic,
@@ -2299,11 +2331,11 @@ fn meeting_processing_options(
 pub async fn get_meeting_v2_processing(
     session_id: String,
     state: State<'_, AppState>,
-) -> Result<Option<crate::meetings_v2::MeetingProcessing>, CommandError> {
+) -> Result<serde_json::Value, CommandError> {
     if session_id.trim().is_empty() {
         return Err(CommandError::new("INVALID_MEETING_ID", "A meeting id is required"));
     }
-    Ok(state.meeting_processor.get(&session_id))
+    project_for_reader(state.meeting_processor.get(&session_id), &state)
 }
 
 /// Runs the deterministic stages — normalize, attribute speakers, build the

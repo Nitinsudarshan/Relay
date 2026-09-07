@@ -1,4 +1,5 @@
 pub mod evaluation;
+pub mod romanize;
 pub mod speech_health;
 pub mod text_normalize;
 pub mod stt;
