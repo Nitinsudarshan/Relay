@@ -40,16 +40,17 @@ export type { MainTabType };
 
 const TAB_LABELS: Record<MainTabType, string> = {
   home: 'Home',
-  capture: 'Voice Note',
+  capture: 'Voice Notes',
   meetings: 'Meetings',
   scribble: 'Scribbles',
   graph: 'Knowledge Graph',
-  files: 'Files',
-  captures: 'Captures',
+  files: 'Files & Docs',
+  captures: 'Web Capture',
   talkback: 'Talkback',
   diagnostics: 'Diagnostics',
   settings: 'Settings',
 };
+
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<MainTabType>('home');
@@ -405,11 +406,24 @@ export const App: React.FC = () => {
 
             <div className="h-4 w-px bg-border" />
 
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono uppercase tracking-wider">
-              <span>RELAY</span>
-              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/60" />
-              <span className="font-semibold text-foreground">{TAB_LABELS[activeTab]}</span>
-            </div>
+            <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono uppercase tracking-wider">
+              {activeTab === 'home' ? (
+                <span className="font-semibold text-foreground">RELAY</span>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigateTo('home')}
+                    className="hover:text-foreground hover:underline transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-xs"
+                    aria-label="Navigate to Relay Home"
+                  >
+                    RELAY
+                  </button>
+                  <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/60" />
+                  <span className="font-semibold text-foreground">{TAB_LABELS[activeTab]}</span>
+                </>
+              )}
+            </nav>
           </div>
 
           <div className="flex items-center gap-2">

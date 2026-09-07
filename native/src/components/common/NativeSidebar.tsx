@@ -4,7 +4,6 @@ import {
   Calendar,
   MessageCircle,
   Sparkles,
-  FileText,
   Settings,
   ShieldCheck,
   Activity,
@@ -13,10 +12,9 @@ import {
   Cloud,
   Sparkle,
   Sliders,
-  Globe,
-  Home,
   Network,
 } from 'lucide-react';
+
 import { RelayLogo } from '@/components/common/RelayLogo';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -76,75 +74,65 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
     }
   }, [account?.authenticated]);
 
-  const navItems = [
+  interface NavItemConfig {
+    id: TabType;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    color: string;
+    activeBg: string;
+  }
+
+  const primaryNavItems: NavItemConfig[] = [
     {
-      id: 'home' as TabType,
-      label: 'Home',
-      icon: Home,
-      color: 'text-primary',
-      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-    },
-    {
-      id: 'capture' as TabType,
-      label: 'Voice Note',
-      icon: Mic,
-      color: 'text-emerald-500',
-      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-    },
-    {
-      id: 'meetings' as TabType,
-      label: 'Meetings',
-      icon: Calendar,
-      color: 'text-indigo-400',
-      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-    },
-    {
-      id: 'scribble' as TabType,
-      label: 'Scribbles',
-      icon: Sparkles,
-      color: 'text-amber-500',
-      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-    },
-    {
-      id: 'graph' as TabType,
-      label: 'Knowledge Graph',
-      icon: Network,
-      color: 'text-blue-500',
-      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-    },
-    {
-      id: 'files' as TabType,
-      label: 'Files',
-      icon: FileText,
-      color: 'text-blue-500',
-      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-    },
-    {
-      id: 'captures' as TabType,
-      label: 'Captures',
-      icon: Globe,
-      color: 'text-sky-500',
-      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
-    },
-    {
-      id: 'talkback' as TabType,
+      id: 'talkback',
       label: 'Talkback',
       icon: MessageCircle,
       color: 'text-emerald-400',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {
-      id: 'diagnostics' as TabType,
-      label: 'Diagnostics',
-      icon: Activity,
-      color: 'text-violet-400',
+      id: 'capture',
+      label: 'Voice Notes',
+      icon: Mic,
+      color: 'text-emerald-500',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
     {
-      id: 'settings' as TabType,
+      id: 'meetings',
+      label: 'Meetings',
+      icon: Calendar,
+      color: 'text-indigo-400',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+    {
+      id: 'scribble',
+      label: 'Scribbles',
+      icon: Sparkles,
+      color: 'text-amber-500',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+    {
+      id: 'graph',
+      label: 'Knowledge Graph',
+      icon: Network,
+      color: 'text-blue-500',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+  ];
+
+  const systemNavItems: NavItemConfig[] = [
+    {
+      id: 'settings',
       label: 'Settings',
       icon: Settings,
       color: 'text-muted-foreground',
+      activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
+    },
+    {
+      id: 'diagnostics',
+      label: 'Diagnostics',
+      icon: Activity,
+      color: 'text-violet-400',
       activeBg: 'bg-sidebar-accent text-sidebar-accent-foreground',
     },
   ];
@@ -152,6 +140,52 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
   const displayName = profile?.display_name || account?.display_name || 'Local User';
   const emailOrMode = account?.authenticated ? account.email : '100% On-Device';
   const initial = displayName && displayName !== 'Local User' ? displayName.charAt(0).toUpperCase() : 'R';
+
+  const renderNavButton = (item: NavItemConfig) => {
+    const Icon = item.icon;
+    const isActive = activeTab === item.id;
+
+    const button = (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => setActiveTab(item.id)}
+        className={`flex items-center rounded-lg text-xs font-medium transition-colors cursor-pointer overflow-hidden ${
+          isOpen
+            ? 'w-full h-9 px-2.5 py-1.5'
+            : 'size-8 justify-center p-0 shrink-0'
+        } ${
+          isActive
+            ? `${item.activeBg} font-semibold shadow-xs`
+            : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+        }`}
+        aria-label={item.label}
+      >
+        <Icon className={`w-4 h-4 shrink-0 ${item.color}`} />
+        {isOpen && (
+          <div className="flex items-center justify-between flex-1 min-w-0 ml-2.5 transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden whitespace-nowrap">
+            <span className="truncate">{item.label}</span>
+            {isActive && (
+              <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 ml-2" />
+            )}
+          </div>
+        )}
+      </button>
+    );
+
+    if (!isOpen) {
+      return (
+        <Tooltip key={item.id}>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipContent side="right" sideOffset={10}>
+            <span>{item.label}</span>
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    return button;
+  };
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -162,150 +196,127 @@ export const NativeSidebar: React.FC<NativeSidebarProps> = ({
       >
         {/* Workspace / Brand Header (sidebar-07 Team Switcher Pattern) */}
         <div className={`h-14 w-full shrink-0 flex items-center justify-center ${isOpen ? 'px-3' : 'px-2'}`}>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+          {isOpen ? (
+            <div className="w-full h-10 border border-sidebar-border bg-card/60 rounded-lg flex items-center p-1 justify-between shadow-2xs">
               <button
                 type="button"
-                className={`flex items-center rounded-lg transition-all cursor-pointer group shadow-2xs overflow-hidden ${
-                  isOpen
-                    ? 'w-full h-10 border border-sidebar-border bg-card/60 hover:bg-sidebar-accent/70 p-1.5'
-                    : 'size-8 rounded-lg border border-border bg-card hover:bg-sidebar-accent text-foreground justify-center p-0 shadow-xs'
-                }`}
-                title="Relay Workspace"
+                onClick={() => setActiveTab('home')}
+                className="flex items-center flex-1 min-w-0 h-full rounded-md hover:bg-sidebar-accent/70 px-1.5 transition-all cursor-pointer group text-left"
+                title="Relay Home"
+                aria-label="Relay Home"
               >
-                {isOpen ? (
-                  <>
-                    <div className="flex aspect-square size-8 items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                      <RelayLogo className="w-8 h-8" />
-                    </div>
-                    <div className="flex items-center flex-1 min-w-0 ml-2.5 transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden whitespace-nowrap">
-                      <div className="grid flex-1 text-left leading-tight min-w-0">
-                        <span className="truncate font-bold tracking-wider text-xs text-sidebar-foreground">
-                          RELAY
-                        </span>
-                        <span className="truncate text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
-                          {activeWorkspace === 'cloud' ? 'Hybrid Cloud' : 'Local Vault'}
-                        </span>
-                      </div>
-                      <ChevronsUpDown className="w-3.5 h-3.5 text-muted-foreground shrink-0 ml-1" />
-                    </div>
-                  </>
-                ) : (
-                  <RelayLogo className="w-8 h-8" />
-                )}
+                <div className="flex aspect-square size-7 items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                  <RelayLogo className="w-7 h-7" />
+                </div>
+                <div className="grid flex-1 leading-tight min-w-0 ml-2">
+                  <span className="truncate font-bold tracking-wider text-xs text-sidebar-foreground group-hover:text-primary transition-colors">
+                    RELAY
+                  </span>
+                  <span className="truncate text-[9px] text-muted-foreground font-mono uppercase tracking-wider">
+                    {activeWorkspace === 'cloud' ? 'Hybrid Cloud' : 'Local Vault'}
+                  </span>
+                </div>
               </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              side={isOpen ? 'bottom' : 'right'}
-              align="start"
-              sideOffset={8}
-              className="w-56"
-            >
-              <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">
-                Workspaces & Vaults
-              </DropdownMenuLabel>
-              <DropdownMenuItem
-                onClick={() => setActiveWorkspace('local')}
-                className="gap-2.5 cursor-pointer"
-              >
-                <div className="flex size-6 items-center justify-center rounded-md border bg-background">
-                  <Database className="size-3.5 text-emerald-500" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="font-semibold text-xs">Local Vault</span>
-                  <span className="text-[10px] text-muted-foreground">100% On-Device LanceDB</span>
-                </div>
-                {activeWorkspace === 'local' && (
-                  <span className="ml-auto text-[10px] font-bold text-primary">✓</span>
-                )}
-              </DropdownMenuItem>
 
-              <DropdownMenuItem
-                onClick={() => setActiveWorkspace('cloud')}
-                className="gap-2.5 cursor-pointer"
-              >
-                <div className="flex size-6 items-center justify-center rounded-md border bg-background">
-                  <Cloud className="size-3.5 text-blue-500" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="font-semibold text-xs">Hybrid Cloud Sync</span>
-                  <span className="text-[10px] text-muted-foreground">Supabase Multi-Device</span>
-                </div>
-                {activeWorkspace === 'cloud' && (
-                  <span className="ml-auto text-[10px] font-bold text-primary">✓</span>
-                )}
-              </DropdownMenuItem>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="size-7 rounded-md hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-foreground flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+                    title="Switch Workspace or Vault"
+                    aria-label="Switch Workspace or Vault"
+                  >
+                    <ChevronsUpDown className="w-3.5 h-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="bottom"
+                  align="end"
+                  sideOffset={8}
+                  className="w-56"
+                >
+                  <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">
+                    Workspaces & Vaults
+                  </DropdownMenuLabel>
+                  <DropdownMenuItem
+                    onClick={() => setActiveWorkspace('local')}
+                    className="gap-2.5 cursor-pointer"
+                  >
+                    <div className="flex size-6 items-center justify-center rounded-md border bg-background">
+                      <Database className="size-3.5 text-emerald-500" />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-xs">Local Vault</span>
+                      <span className="text-[10px] text-muted-foreground">100% On-Device LanceDB</span>
+                    </div>
+                    {activeWorkspace === 'local' && (
+                      <span className="ml-auto text-[10px] font-bold text-primary">✓</span>
+                    )}
+                  </DropdownMenuItem>
 
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={onOpenExplanation}
-                className="gap-2 text-xs text-muted-foreground cursor-pointer"
-              >
-                <ShieldCheck className="size-3.5 text-emerald-500" />
-                <span>Security & Local Guarantees</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  <DropdownMenuItem
+                    onClick={() => setActiveWorkspace('cloud')}
+                    className="gap-2.5 cursor-pointer"
+                  >
+                    <div className="flex size-6 items-center justify-center rounded-md border bg-background">
+                      <Cloud className="size-3.5 text-blue-500" />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-xs">Hybrid Cloud Sync</span>
+                      <span className="text-[10px] text-muted-foreground">Supabase Multi-Device</span>
+                    </div>
+                    {activeWorkspace === 'cloud' && (
+                      <span className="ml-auto text-[10px] font-bold text-primary">✓</span>
+                    )}
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={onOpenExplanation}
+                    className="gap-2 text-xs text-muted-foreground cursor-pointer"
+                  >
+                    <ShieldCheck className="size-3.5 text-emerald-500" />
+                    <span>Security & Local Guarantees</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('home')}
+                  className="size-8 rounded-lg border border-border bg-card hover:bg-sidebar-accent text-foreground flex items-center justify-center p-0 shadow-xs cursor-pointer group"
+                  title="Relay Home"
+                  aria-label="Relay Home"
+                >
+                  <RelayLogo className="w-8 h-8 group-hover:scale-105 transition-transform" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={10}>
+                <span>Relay Home</span>
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
 
         {/* Navigation & Quick Links Body */}
         <div className={`flex-1 w-full overflow-y-auto overflow-x-hidden flex flex-col ${isOpen ? 'px-3 py-1' : 'px-2 py-1 items-center'}`}>
-          {/* Section Label (Expanded Only) */}
-          {isOpen && (
-            <div className="w-full px-2 py-1 text-[10px] font-semibold text-muted-foreground/80 tracking-wider uppercase shrink-0">
-              Platform
-            </div>
-          )}
-
-          {/* Core Navigation */}
+          {/* Primary Navigation */}
           <nav className="w-full space-y-1 shrink-0 flex flex-col items-center">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
+            {primaryNavItems.map(renderNavButton)}
+          </nav>
 
-              const button = (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setActiveTab(item.id)}
-                  className={`flex items-center rounded-lg text-xs font-medium transition-colors cursor-pointer overflow-hidden ${
-                    isOpen
-                      ? 'w-full h-9 px-2.5 py-1.5'
-                      : 'size-8 justify-center p-0 shrink-0'
-                  } ${
-                    isActive
-                      ? `${item.activeBg} font-semibold shadow-xs`
-                      : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-                  }`}
-                  aria-label={item.label}
-                >
-                  <Icon className={`w-4 h-4 shrink-0 ${item.color}`} />
-                  {isOpen && (
-                    <div className="flex items-center justify-between flex-1 min-w-0 ml-2.5 transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden whitespace-nowrap">
-                      <span className="truncate">{item.label}</span>
-                      {isActive && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 ml-2" />
-                      )}
-                    </div>
-                  )}
-                </button>
-              );
+          {/* Visual Separator between Primary and System */}
+          <div className={`w-full border-t border-sidebar-border ${isOpen ? 'my-2.5' : 'my-2'} shrink-0`} />
 
-              if (!isOpen) {
-                return (
-                  <Tooltip key={item.id}>
-                    <TooltipTrigger asChild>{button}</TooltipTrigger>
-                    <TooltipContent side="right" sideOffset={10}>
-                      <span>{item.label}</span>
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              }
-
-              return button;
-            })}
+          {/* System Navigation */}
+          <nav className="w-full space-y-1 shrink-0 flex flex-col items-center">
+            {systemNavItems.map(renderNavButton)}
           </nav>
         </div>
+
 
         {/* User Footer Card & Popover Menu (sidebar-07 NavUser Pattern) */}
         <div className={`mt-auto w-full border-t border-sidebar-border flex flex-col items-center shrink-0 ${isOpen ? 'p-3 pt-2.5' : 'p-2 pt-2.5'}`}>
