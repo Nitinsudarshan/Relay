@@ -469,6 +469,21 @@ async fn process_captured_audio(
         return Err(CommandError::new("STT_FAILED", &err_msg));
     }
 
+    // The deterministic cleanup meetings have always had, now on this path
+    // too: bracketed ASR tags removed, decoder stutters collapsed, isolated
+    // fillers dropped, and the user's own dictionary applied by edit distance.
+    // No model runs, so nothing here can invent a word that was not spoken.
+    //
+    // The `Dictated` profile leaves sentence boundaries alone. This text is
+    // going into whatever field has focus, and a period Relay appended is a
+    // period the user has to delete.
+    let transcript = crate::capture::text_normalize::normalize_text(
+        &transcript,
+        &settings.dictionary,
+        crate::capture::text_normalize::TextProfile::Dictated,
+    )
+    .text;
+
     // had_audio only proves the mic measured sustained energy — Whisper can
     // still land on nothing (most commonly a short hallucination that its
     // own internal confidence/no-speech heuristics then reject, leaving an
@@ -1988,7 +2003,15 @@ fn start_meeting_session(
 ) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
     let settings = state.settings.lock_or_recover().clone();
     let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language, crate::capture::stt::SttWindow::LongForm);
-    let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
+    // Meetings default to the accuracy-first preset. A recording is decoded
+    // once and read later, so it can afford a wider beam — and it needs the
+    // lower no-speech threshold that beam makes safe, because in accented or
+    // code-switched audio nearly every segment is low-confidence and a
+    // threshold tuned for clean English discards most of the transcript.
+    let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings_defaulting(
+        &settings.stt,
+        crate::capture::stt::SttPreset::Quality,
+    );
 
     // Hand the recognizer the vocabulary before it guesses, rather than
     // repairing its guess afterwards.
@@ -3587,11 +3610,11 @@ pub async fn start_talkback(
         None
     };
 
-    // Talkback gets the same decode configuration dictation does — the
-    // vocabulary prompt and the hallucination thresholds included. It kept the
-    // short-window shape (`for_live_window`) until the utterance-truncation
-    // work lands, but it no longer decides its own parameters.
-    let mut decoding = crate::capture::stt::WhisperDecodingConfig::for_live_window();
+    // Talkback decodes one complete utterance when the turn ends, not a
+    // stream of short windows, so it gets the full encoder context and as many
+    // segments as the audio holds. A turn runs up to thirty seconds and the
+    // short-window shape truncated it at about fifteen.
+    let mut decoding = crate::capture::stt::WhisperDecodingConfig::for_utterance();
     if let Some(prompt) = settings.build_stt_prompt() {
         decoding.initial_prompt = Some(prompt);
     }

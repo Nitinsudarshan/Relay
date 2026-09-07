@@ -1,0 +1,656 @@
+//! The deterministic text-cleanup rules, shared by every surface that turns
+//! speech into text.
+//!
+//! These were written for meeting transcripts and were reachable only from the
+//! meeting pipeline, so dictation and Talkback shipped raw Whisper output while
+//! meetings got glossary repair, repetition collapsing and sentence casing.
+//! Nothing here is meeting-specific: a decoder stutter is a decoder stutter
+//! wherever it is decoded, and a mistranscribed project name is worth fixing in
+//! a dictated sentence too.
+//!
+//! Every rule is deterministic and reports itself. No model runs here, so
+//! nothing in this module can invent a word that was not spoken — which is what
+//! makes it safe to apply everywhere and without asking. The rules that *can*
+//! change meaning belong to the opt-in rewrite layer, not to this one.
+//!
+//! Each function names the rule it applied, so a misbehaving rule is visible in
+//! the artifact rather than only in the output.
+
+/// Rule names, recorded per segment and counted per transcript so a misbehaving
+/// rule is visible without re-running anything.
+pub const RULE_ASR_TAGS: &str = "asr_tags_removed";
+pub const RULE_WHITESPACE: &str = "whitespace_normalized";
+pub const RULE_REPEATED_WORDS: &str = "repeated_words_collapsed";
+pub const RULE_REPEATED_PHRASES: &str = "repeated_phrases_collapsed";
+pub const RULE_FILLERS: &str = "isolated_fillers_removed";
+pub const RULE_GLOSSARY: &str = "glossary_terms_corrected";
+pub const RULE_SENTENCE_BOUNDARIES: &str = "sentence_boundaries_repaired";
+
+/// Standalone filler tokens. Removed only when they stand alone as a whole
+/// token, never as a substring — "um" must not eat the "um" in "umbrella", and
+/// "so" is not in this list because it routinely carries meaning.
+const ISOLATED_FILLERS: &[&str] = &[
+    "um", "umm", "uh", "uhh", "erm", "ah", "ahh", "eh", "hmm", "mmm", "mm", "uhm", "er",
+];
+
+/// Longest repeated phrase length (in words) the loop detector looks for.
+/// Whisper's repetition loops can span full sentences (up to 16 words);
+/// searching up to 16 catches full sentence loops while preserving single-occurrence speech.
+const MAX_PHRASE_REPEAT_LEN: usize = 16;
+
+/// Minimum token length before a glossary term is matched by edit distance
+/// rather than exactly. Short tokens are far too easy to "correct" into
+/// something the speaker never said.
+const MIN_FUZZY_GLOSSARY_LEN: usize = 6;
+
+pub struct SegmentOutcome {
+    pub text: String,
+    pub applied_rules: Vec<String>,
+}
+
+/// Which rules a surface wants.
+///
+/// The chain is shared; this is the one place it legitimately differs, and it
+/// differs because the *destination* differs rather than because the surfaces
+/// disagree about what good text is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextProfile {
+    /// A recorded transcript segment. The full chain, including sentence
+    /// casing and a terminal period: a stored segment is read later, on its
+    /// own, and needs to read as a sentence.
+    Transcript,
+    /// Text about to be injected into whatever field has focus.
+    ///
+    /// Everything except sentence-boundary repair. The user may be mid-sentence,
+    /// filling a form field, or continuing after text that is already there —
+    /// and a period Relay added is a period they have to delete. Capitalising
+    /// the first letter is wrong for the same reason.
+    Dictated,
+}
+
+impl TextProfile {
+    fn repairs_sentence_boundaries(self) -> bool {
+        matches!(self, Self::Transcript)
+    }
+}
+
+/// Applies the full rule chain to one transcript segment's text.
+pub fn normalize_segment_text(raw: &str, glossary: &[String]) -> SegmentOutcome {
+    normalize_text(raw, glossary, TextProfile::Transcript)
+}
+
+/// Applies the rule chain for `profile`.
+pub fn normalize_text(raw: &str, glossary: &[String], profile: TextProfile) -> SegmentOutcome {
+    let mut applied = Vec::new();
+
+    let stripped = strip_bracketed_tags(raw);
+    if stripped != raw {
+        applied.push(RULE_ASR_TAGS.to_string());
+    }
+
+    let collapsed_ws = collapse_whitespace(&stripped);
+    if collapsed_ws != stripped.trim() {
+        applied.push(RULE_WHITESPACE.to_string());
+    }
+
+    let deduped_words = collapse_repeated_words(&collapsed_ws);
+    if deduped_words != collapsed_ws {
+        applied.push(RULE_REPEATED_WORDS.to_string());
+    }
+
+    let deduped_phrases = collapse_repeated_phrases(&deduped_words);
+    if deduped_phrases != deduped_words {
+        applied.push(RULE_REPEATED_PHRASES.to_string());
+    }
+
+    let defillered = remove_isolated_fillers(&deduped_phrases);
+    if defillered != deduped_phrases {
+        applied.push(RULE_FILLERS.to_string());
+    }
+
+    let glossed = apply_glossary(&defillered, glossary);
+    if glossed != defillered {
+        applied.push(RULE_GLOSSARY.to_string());
+    }
+
+    let repaired = if profile.repairs_sentence_boundaries() {
+        let repaired = repair_sentence_boundaries(&glossed);
+        if repaired != glossed {
+            applied.push(RULE_SENTENCE_BOUNDARIES.to_string());
+        }
+        repaired
+    } else {
+        glossed
+    };
+
+    SegmentOutcome {
+        text: repaired,
+        applied_rules: applied,
+    }
+}
+
+/// Removes `[bracketed]` and `(parenthesized)` ASR annotations such as
+/// `[BLANK_AUDIO]`, `[inaudible]`, `(music)`.
+///
+/// Unterminated openers are treated as running to the end of the segment, which
+/// is the common Whisper failure (`[BLANK_AUDIO` with no closer).
+fn strip_bracketed_tags(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut depth_square = 0usize;
+    let mut depth_round = 0usize;
+
+    for c in text.chars() {
+        match c {
+            '[' => depth_square += 1,
+            ']' => depth_square = depth_square.saturating_sub(1),
+            '(' => depth_round += 1,
+            ')' => depth_round = depth_round.saturating_sub(1),
+            _ if depth_square == 0 && depth_round == 0 => out.push(c),
+            _ => {}
+        }
+    }
+
+    out
+}
+
+fn collapse_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Returns true if the token is a conversational affirmation or emphasis word
+/// where saying it twice ("yes, yes", "haan haan", "theek theek") is natural human speech.
+fn is_conversational_affirmation(key: &str) -> bool {
+    matches!(
+        key,
+        "yes" | "no" | "haan" | "sure" | "right" | "theek" | "ok" | "okay" | "yeah"
+    )
+}
+
+/// Collapses immediate word repetition: "the the the plan" → "the plan".
+///
+/// Comparison ignores case and trailing punctuation so "Plan. plan" is caught,
+/// and the *first* occurrence is kept so its punctuation survives.
+///
+/// Conversational affirmations ("yes", "no", "haan", "sure", "right", "theek", "ok", "okay", "yeah")
+/// repeated up to 2 times for natural emphasis are preserved, while 3 or more occurrences
+/// are collapsed down to 2. Non-conversational words always collapse to 1 occurrence.
+fn collapse_repeated_words(text: &str) -> String {
+    let words: Vec<&str> = text.split(' ').filter(|w| !w.is_empty()).collect();
+    let mut out: Vec<&str> = Vec::with_capacity(words.len());
+    let mut current_repeat_count = 0usize;
+
+    for word in words {
+        let key = comparison_key(word);
+        if key.is_empty() {
+            out.push(word);
+            current_repeat_count = 0;
+            continue;
+        }
+
+        let matches_previous = out.last().is_some_and(|prev| {
+            comparison_key(prev) == key
+        });
+
+        if matches_previous {
+            current_repeat_count += 1;
+            let is_conversational = is_conversational_affirmation(&key);
+            if is_conversational && current_repeat_count <= 2 {
+                out.push(word);
+            }
+        } else {
+            current_repeat_count = 1;
+            out.push(word);
+        }
+    }
+
+    out.join(" ")
+}
+
+/// Collapses immediately repeated multi-word phrases, the shape a Whisper
+/// decoder loop takes: "we should ship it we should ship it we should ship it".
+///
+/// Only *adjacent* repetition is collapsed, and only when the phrase repeats in
+/// full. Legitimate repetition separated by other words is left alone.
+fn collapse_repeated_phrases(text: &str) -> String {
+    let mut words: Vec<String> = text
+        .split(' ')
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_string())
+        .collect();
+
+    // Longest phrase first: a 6-word loop should be recognized as one
+    // repetition, not as three collapses of a 2-word phrase.
+    for len in (2..=MAX_PHRASE_REPEAT_LEN).rev() {
+        let mut i = 0usize;
+        while words.len() >= len * 2 && i + len * 2 <= words.len() {
+            let first: Vec<String> = words[i..i + len]
+                .iter()
+                .map(|w| comparison_key(w))
+                .collect();
+            let second: Vec<String> = words[i + len..i + len * 2]
+                .iter()
+                .map(|w| comparison_key(w))
+                .collect();
+
+            if first == second && !first.iter().all(|w| w.is_empty()) {
+                words.drain(i + len..i + len * 2);
+                // Stay at `i` so a phrase repeated three or more times
+                // collapses down to one occurrence.
+                continue;
+            }
+            i += 1;
+        }
+    }
+
+    words.join(" ")
+}
+
+/// Drops filler tokens that stand alone. A filler carrying punctuation
+/// ("Um, no") loses only the filler; the punctuation is re-normalized by the
+/// sentence-boundary pass.
+fn remove_isolated_fillers(text: &str) -> String {
+    let kept: Vec<&str> = text
+        .split(' ')
+        .filter(|word| {
+            let key = comparison_key(word);
+            key.is_empty() || !ISOLATED_FILLERS.contains(&key.as_str())
+        })
+        .filter(|w| !w.is_empty())
+        .collect();
+
+    // Removing a leading filler can leave the segment starting with a comma.
+    let joined = kept.join(" ");
+    joined
+        .trim_start_matches([',', '.', '-', ' '])
+        .trim()
+        .to_string()
+}
+
+/// Rewrites known glossary terms to their canonical casing.
+///
+/// Two levels, both conservative: an exact case-insensitive token match, and —
+/// for tokens of at least `MIN_FUZZY_GLOSSARY_LEN` characters — a single-edit
+/// match, which is what catches Whisper hearing "Supabase" as "Supabass".
+/// Anything looser would start inventing words the speaker did not say.
+fn apply_glossary(text: &str, glossary: &[String]) -> String {
+    if glossary.is_empty() {
+        return text.to_string();
+    }
+
+    let terms: Vec<(String, &str)> = glossary
+        .iter()
+        .filter(|t| !t.trim().is_empty())
+        .map(|t| (t.trim().to_lowercase(), t.trim()))
+        .collect();
+
+    text.split(' ')
+        .map(|word| {
+            let key = comparison_key(word);
+            if key.is_empty() {
+                return word.to_string();
+            }
+
+            let exact = terms.iter().find(|(lower, _)| *lower == key);
+            let matched = match exact {
+                Some(hit) => Some(hit),
+                None if key.chars().count() >= MIN_FUZZY_GLOSSARY_LEN => terms
+                    .iter()
+                    .find(|(lower, _)| is_within_one_edit(lower, &key)),
+                None => None,
+            };
+
+            match matched {
+                // Already correct — don't record a spurious rule hit.
+                Some((_, canonical)) if *canonical == trimmed_core(word) => word.to_string(),
+                Some((_, canonical)) => replace_core(word, canonical),
+                None => word.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Capitalizes sentence openings and gives the segment terminal punctuation.
+///
+/// Adding a final period is the one insertion this module makes, and it adds no
+/// information: a 30-second chunk always ends at a wall-clock boundary, never
+/// on a decoder-supplied full stop.
+fn repair_sentence_boundaries(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::with_capacity(trimmed.len() + 1);
+    let mut at_sentence_start = true;
+
+    let mut chars = trimmed.chars().peekable();
+    while let Some(c) = chars.next() {
+        if at_sentence_start && c.is_alphabetic() {
+            out.extend(c.to_uppercase());
+            at_sentence_start = false;
+            continue;
+        }
+
+        out.push(c);
+
+        if matches!(c, '.' | '!' | '?') {
+            // Only treat this as a boundary if whitespace follows, so "e.g."
+            // and "3.5" are not re-capitalized mid-token.
+            if chars.peek().is_some_and(|n| n.is_whitespace()) {
+                at_sentence_start = true;
+            }
+        }
+    }
+
+    let ends_with_terminal = out
+        .trim_end()
+        .chars()
+        .last()
+        .is_some_and(|c| matches!(c, '.' | '!' | '?' | ':' | ';' | ','));
+    if !ends_with_terminal {
+        out.push('.');
+    }
+
+    out
+}
+
+/// Lowercased, punctuation-free form of a token, for comparisons only. Never
+/// written back into the transcript.
+fn comparison_key(word: &str) -> String {
+    word.chars()
+        .filter(|c| c.is_alphanumeric() || *c == '\'')
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// The token with leading/trailing punctuation removed.
+fn trimmed_core(word: &str) -> &str {
+    word.trim_matches(|c: char| !c.is_alphanumeric())
+}
+
+/// Substitutes a token's alphanumeric core while keeping the punctuation that
+/// surrounded it, so "supabase," becomes "Supabase,".
+fn replace_core(word: &str, replacement: &str) -> String {
+    let core = trimmed_core(word);
+    if core.is_empty() {
+        return word.to_string();
+    }
+    match word.find(core) {
+        Some(idx) => {
+            let mut out = String::with_capacity(word.len());
+            out.push_str(&word[..idx]);
+            out.push_str(replacement);
+            out.push_str(&word[idx + core.len()..]);
+            out
+        }
+        None => word.to_string(),
+    }
+}
+
+/// True when `a` and `b` differ by at most one substitution, insertion, or
+/// deletion. Bounded and cheap enough to run per token.
+fn is_within_one_edit(a: &str, b: &str) -> bool {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+
+    let (long, short) = if a.len() >= b.len() {
+        (&a, &b)
+    } else {
+        (&b, &a)
+    };
+    if long.len() - short.len() > 1 {
+        return false;
+    }
+    if long.len() == short.len() {
+        let diffs = long
+            .iter()
+            .zip(short.iter())
+            .filter(|(x, y)| x != y)
+            .count();
+        return diffs <= 1;
+    }
+
+    // Lengths differ by one: check for a single insertion.
+    let mut i = 0usize;
+    let mut j = 0usize;
+    let mut skipped = false;
+    while i < long.len() && j < short.len() {
+        if long[i] == short[j] {
+            i += 1;
+            j += 1;
+        } else if skipped {
+            return false;
+        } else {
+            skipped = true;
+            i += 1;
+        }
+    }
+    true
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn asr_tags_are_removed_including_unterminated_ones() {
+        assert_eq!(
+            strip_bracketed_tags("[BLANK_AUDIO] We shipped it (music)"),
+            " We shipped it "
+        );
+        assert_eq!(
+            strip_bracketed_tags("We shipped it [BLANK_AUDIO"),
+            "We shipped it "
+        );
+    }
+
+    #[test]
+    fn repeated_stt_fragments_collapse() {
+        // Fixture C: repeated fragments, the classic decoder loop.
+        assert_eq!(
+            collapse_repeated_words("the the the plan is ready"),
+            "the plan is ready"
+        );
+        assert_eq!(
+            collapse_repeated_phrases("we should ship it we should ship it we should ship it"),
+            "we should ship it"
+        );
+        // Long sentence repetition loop (regression for meeting failure)
+        assert_eq!(
+            collapse_repeated_phrases(
+                "If you are schedule for Monday then you can sit here. If you are schedule for Monday then you can sit here."
+            ),
+            "If you are schedule for Monday then you can sit here."
+        );
+
+        // 3-word repetition loop
+        assert_eq!(
+            collapse_repeated_phrases("we should ship we should ship"),
+            "we should ship"
+        );
+
+        // 8-word repetition loop
+        assert_eq!(
+            collapse_repeated_phrases(
+                "we need to verify all changes before shipping we need to verify all changes before shipping"
+            ),
+            "we need to verify all changes before shipping"
+        );
+
+        // 16-word repetition loop
+        let sixteen_words = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen";
+        let sixteen_repeated = format!("{sixteen_words} {sixteen_words}");
+        assert_eq!(collapse_repeated_phrases(&sixteen_repeated), sixteen_words);
+    }
+
+    #[test]
+    fn conversational_repetition_is_preserved_up_to_two_times() {
+        assert_eq!(
+            collapse_repeated_words("Yes, yes, I agree"),
+            "Yes, yes, I agree"
+        );
+        assert_eq!(
+            collapse_repeated_words("Haan, haan, theek hai"),
+            "Haan, haan, theek hai"
+        );
+        assert_eq!(
+            collapse_repeated_words("No, no, that is wrong"),
+            "No, no, that is wrong"
+        );
+        assert_eq!(
+            collapse_repeated_words("Sure, sure, we can do that"),
+            "Sure, sure, we can do that"
+        );
+        assert_eq!(
+            collapse_repeated_words("Right, right, exactly"),
+            "Right, right, exactly"
+        );
+
+        // 3 or more occurrences collapse down to 2
+        assert_eq!(
+            collapse_repeated_words("Yes, yes, yes, yes, I agree"),
+            "Yes, yes, I agree"
+        );
+        assert_eq!(
+            collapse_repeated_words("Haan, haan, haan, samjha"),
+            "Haan, haan, samjha"
+        );
+    }
+
+    #[test]
+    fn legitimate_repetition_separated_by_other_words_survives() {
+        let input = "ship it today and then ship it tomorrow";
+        assert_eq!(collapse_repeated_phrases(input), input);
+    }
+
+    #[test]
+    fn only_isolated_fillers_are_removed() {
+        assert_eq!(
+            remove_isolated_fillers("um I think uh we should go"),
+            "I think we should go"
+        );
+        // A filler as a substring must survive.
+        assert_eq!(
+            remove_isolated_fillers("bring an umbrella"),
+            "bring an umbrella"
+        );
+        // "so" is meaning-bearing and deliberately not a filler.
+        assert_eq!(remove_isolated_fillers("so we ship"), "so we ship");
+    }
+
+    #[test]
+    fn glossary_fixes_casing_and_one_character_mishearings() {
+        let glossary = vec![
+            "Relay".to_string(),
+            "Supabase".to_string(),
+            "LanceDB".to_string(),
+        ];
+        assert_eq!(
+            apply_glossary("we use relay daily", &glossary),
+            "we use Relay daily"
+        );
+        // Punctuation around the term is preserved.
+        assert_eq!(
+            apply_glossary("with supabase,", &glossary),
+            "with Supabase,"
+        );
+        // One-edit mishearing of a long term.
+        assert_eq!(
+            apply_glossary("try supabass now", &glossary),
+            "try Supabase now"
+        );
+        // Short unrelated words are never fuzzy-matched into a glossary term.
+        assert_eq!(apply_glossary("relax now", &glossary), "relax now");
+    }
+
+    #[test]
+    fn dictated_text_is_cleaned_but_never_punctuated() {
+        // The rules that fix what the decoder got wrong still run.
+        let outcome = normalize_text(
+            "[BLANK_AUDIO] um the the plan is ready",
+            &[],
+            TextProfile::Dictated,
+        );
+        assert_eq!(outcome.text, "the plan is ready");
+
+        // The rule that would add something does not. This text is going into
+        // whatever field has focus: a capital and a period Relay invented are
+        // two edits the user has to undo.
+        assert!(
+            !outcome.applied_rules.contains(&RULE_SENTENCE_BOUNDARIES.to_string()),
+            "{:?}",
+            outcome.applied_rules
+        );
+        assert!(outcome.applied_rules.contains(&RULE_ASR_TAGS.to_string()));
+        assert!(outcome.applied_rules.contains(&RULE_FILLERS.to_string()));
+    }
+
+    #[test]
+    fn a_transcript_segment_still_gets_full_punctuation() {
+        // The other half of the split: a stored segment is read on its own
+        // later and has to look like a sentence.
+        let outcome = normalize_text("we shipped the release", &[], TextProfile::Transcript);
+        assert_eq!(outcome.text, "We shipped the release.");
+        assert!(outcome
+            .applied_rules
+            .contains(&RULE_SENTENCE_BOUNDARIES.to_string()));
+    }
+
+    #[test]
+    fn the_profiles_differ_only_in_punctuation() {
+        // Everything else must be identical, or the two surfaces have quietly
+        // become two pipelines again.
+        let raw = "um we we use relay daily [music]";
+        let glossary = vec!["Relay".to_string()];
+        let dictated = normalize_text(raw, &glossary, TextProfile::Dictated);
+        let transcript = normalize_text(raw, &glossary, TextProfile::Transcript);
+
+        assert!(dictated.text.contains("Relay"), "{}", dictated.text);
+        assert!(transcript.text.contains("Relay"), "{}", transcript.text);
+        // The transcript form is the dictated form plus sentence repair.
+        assert_eq!(
+            transcript.text.trim_end_matches('.').to_lowercase(),
+            dictated.text.to_lowercase()
+        );
+    }
+
+    #[test]
+    fn dictated_devanagari_survives_the_chain() {
+        // The rules are script-agnostic, and dictation is where a Hindi user
+        // would notice first if they were not.
+        let raw = "मैं फॉर्म भर दूंगी";
+        let outcome = normalize_text(raw, &[], TextProfile::Dictated);
+        assert_eq!(outcome.text, raw);
+    }
+
+    #[test]
+    fn punctuation_is_repaired_without_adding_meaning() {
+        // Fixture D: poor punctuation.
+        assert_eq!(
+            repair_sentence_boundaries("we shipped the release"),
+            "We shipped the release."
+        );
+        assert_eq!(
+            repair_sentence_boundaries("we shipped it. then we tested"),
+            "We shipped it. Then we tested."
+        );
+        // A decimal must not be read as a sentence boundary.
+        assert_eq!(
+            repair_sentence_boundaries("version 3.5 is out"),
+            "Version 3.5 is out."
+        );
+        // An existing terminal mark is not doubled.
+        assert_eq!(repair_sentence_boundaries("Is it ready?"), "Is it ready?");
+    }
+
+    #[test]
+    fn edit_distance_stays_within_one() {
+        assert!(is_within_one_edit("supabase", "supabass"));
+        assert!(is_within_one_edit("lancedb", "lancedb"));
+        assert!(is_within_one_edit("relay", "relays"));
+        assert!(!is_within_one_edit("relay", "relaxed"));
+        assert!(!is_within_one_edit("whisper", "whispered"));
+    }
+}

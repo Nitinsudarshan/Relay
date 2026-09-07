@@ -602,8 +602,21 @@ fn stop_dictation_session(
         }
 
         if !text_res.trim().is_empty() {
-            let expanded_text = state.settings.lock_or_recover().expand_snippets(&text_res);
-            let final_text = if !expanded_text.trim().is_empty() { expanded_text } else { text_res };
+            // Deterministic cleanup before snippets, so a trigger is matched
+            // against tidied text and the snippet's own replacement is never
+            // re-normalized afterwards. No model runs here.
+            let (cleaned, expanded_text) = {
+                let s = state.settings.lock_or_recover();
+                let cleaned = crate::capture::text_normalize::normalize_text(
+                    &text_res,
+                    &s.dictionary,
+                    crate::capture::text_normalize::TextProfile::Dictated,
+                )
+                .text;
+                let expanded = s.expand_snippets(&cleaned);
+                (cleaned, expanded)
+            };
+            let final_text = if !expanded_text.trim().is_empty() { expanded_text } else { cleaned };
             let t_snippet_complete = std::time::Instant::now();
 
             let (auto_paste, copy_to_clipboard, injection_method) = {

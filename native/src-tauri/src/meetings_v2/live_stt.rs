@@ -11,7 +11,11 @@ use tauri::{AppHandle, Emitter};
 /// Longest an utterance may grow before it is committed regardless of silence.
 /// Also bounds the cost of each decode, since the whole window is re-decoded
 /// every tick.
-const MAX_UTTERANCE_SECS: f64 = 12.0;
+///
+/// Public because `capture::stt` asserts that `LIVE_AUDIO_CTX` covers it: the
+/// clamp and this cap are one decision expressed in two units, and raising
+/// either alone would silently lose the tail of a long utterance.
+pub const MAX_UTTERANCE_SECS: f64 = 12.0;
 const MAX_UTTERANCE_SAMPLES: usize = (TARGET_SAMPLE_RATE as f64 * MAX_UTTERANCE_SECS) as usize;
 
 /// Consecutive silent frames (1 s each) that close an utterance.

@@ -772,6 +772,30 @@ impl WhisperDecodingConfig {
         cfg
     }
 
+    /// The decode parameters for one complete, self-contained utterance.
+    ///
+    /// Talkback's case, and the one [`for_live_window`] gets wrong. A Talkback
+    /// turn is capped at thirty seconds (`TurnDetectorConfig::max_turn_ms`) and
+    /// decoded once, when the turn ends — so it can afford whisper's full
+    /// encoder context, and it needs it: at `LIVE_AUDIO_CTX` a question longer
+    /// than about fifteen seconds lost its tail, and `single_segment` merged
+    /// whatever survived into one segment. That is the reported "captures only
+    /// part of what I say".
+    ///
+    /// `no_context` stays set. Each utterance is a new question, so there is
+    /// nothing from the previous turn that should condition this decode.
+    ///
+    /// [`for_live_window`]: Self::for_live_window
+    pub fn for_utterance() -> Self {
+        let mut cfg = Self::baseline();
+        // Full context: 1500 frames covers thirty seconds, which is exactly the
+        // longest turn the detector will hand over.
+        cfg.audio_ctx = None;
+        cfg.single_segment = false;
+        cfg.no_context = true;
+        cfg
+    }
+
     /// Applies a quality preset, leaving every other field alone.
     ///
     /// Sampling strategy and the no-speech threshold move together, which is
@@ -787,7 +811,22 @@ impl WhisperDecodingConfig {
     /// Resolves the effective production decoding configuration from persisted user settings.
     /// If domain vocabulary prompt is disabled (default), returns the clean baseline configuration (initial_prompt = None).
     pub fn from_settings(stt_settings: &crate::settings::SttSettings) -> Self {
-        let mut cfg = Self::baseline().with_preset(SttPreset::from_setting(&stt_settings.preset));
+        Self::from_settings_defaulting(stt_settings, SttPreset::Fast)
+    }
+
+    /// As [`from_settings`], but the caller names the preset to use when the
+    /// user has not chosen one.
+    ///
+    /// This is where per-surface policy lives. An explicit user setting still
+    /// wins — `default_preset` only fills the gap.
+    ///
+    /// [`from_settings`]: Self::from_settings
+    pub fn from_settings_defaulting(
+        stt_settings: &crate::settings::SttSettings,
+        default_preset: SttPreset,
+    ) -> Self {
+        let preset = stt_settings.configured_preset().unwrap_or(default_preset);
+        let mut cfg = Self::baseline().with_preset(preset);
         if stt_settings.enable_initial_prompt {
             if let Some(ref prompt) = stt_settings.custom_initial_prompt {
                 let trimmed = prompt.trim();
@@ -800,10 +839,18 @@ impl WhisperDecodingConfig {
     }
 
     /// Resolves the effective decoding configuration specifically for Universal Dictation.
-    /// Uses user-configured thread override if provided, or clamps thread allocation between 1 and 12
-    /// to saturate available physical/logical cores without exceeding logical core boundaries.
+    ///
+    /// Defaults to [`SttPreset::Fast`], deliberately: push-to-talk is
+    /// latency-bound because the user is waiting for the text to appear, and a
+    /// beam search would be felt on every phrase. A meeting makes the opposite
+    /// trade. Both read the same setting, and an explicit choice overrides
+    /// either default.
+    ///
+    /// Uses the user-configured thread override if provided, or clamps thread
+    /// allocation between 1 and 12 to saturate available physical/logical cores
+    /// without exceeding logical core boundaries.
     pub fn for_dictation(stt_settings: &crate::settings::SttSettings) -> Self {
-        let mut cfg = Self::from_settings(stt_settings);
+        let mut cfg = Self::from_settings_defaulting(stt_settings, SttPreset::Fast);
         if let Some(threads) = stt_settings.dictation_threads {
             cfg.n_threads = Some(threads.clamp(1, 64));
         } else {
@@ -1802,6 +1849,67 @@ mod tests {
         assert_eq!(live.audio_ctx, Some(LIVE_AUDIO_CTX));
         assert!(live.single_segment);
         assert!(live.no_context);
+    }
+
+    #[test]
+    fn an_utterance_gets_the_full_context_and_every_segment() {
+        // The reported "captures only part of what I say". A Talkback turn
+        // runs up to thirty seconds; the live-window shape truncated it at the
+        // ~15 seconds `LIVE_AUDIO_CTX` covers and merged the rest into one
+        // segment.
+        let cfg = WhisperDecodingConfig::for_utterance();
+        assert_eq!(cfg.audio_ctx, None, "a full turn needs the full context");
+        assert!(!cfg.single_segment, "a 30-second question is not one segment");
+        // Still independent: each turn is a new question.
+        assert!(cfg.no_context);
+    }
+
+    #[test]
+    fn the_live_clamp_covers_the_longest_live_utterance() {
+        // Not a fix — a guard. The live clock's clamp is correctly sized: 768
+        // encoder frames is ~15.4s against a 12s utterance cap, so it never
+        // truncates. That relationship is load-bearing and nothing else states
+        // it, so raising the cap without raising the clamp would silently start
+        // losing the tail of long utterances.
+        const WHISPER_FULL_CTX_FRAMES: f64 = 1500.0;
+        const WHISPER_FULL_CTX_SECONDS: f64 = 30.0;
+        let clamp_seconds =
+            LIVE_AUDIO_CTX as f64 / WHISPER_FULL_CTX_FRAMES * WHISPER_FULL_CTX_SECONDS;
+        let live_cap = crate::meetings_v2::live_stt::MAX_UTTERANCE_SECS;
+        assert!(
+            clamp_seconds > live_cap,
+            "LIVE_AUDIO_CTX covers {clamp_seconds:.1}s but utterances run to {live_cap:.1}s"
+        );
+    }
+
+    #[test]
+    fn each_surface_defaults_the_preset_and_the_user_overrides_both() {
+        // Per-surface policy from one setting. Dictation is latency-bound and
+        // a meeting is recall-bound, so they cannot share a default — but a
+        // user who states a preference must not have to state it twice.
+        let unset = crate::settings::SttSettings::default();
+        assert_eq!(unset.configured_preset(), None);
+
+        let dictation = WhisperDecodingConfig::for_dictation(&unset);
+        let meeting = WhisperDecodingConfig::from_settings_defaulting(&unset, SttPreset::Quality);
+        assert_eq!(dictation.strategy, SttPreset::Fast.sampling());
+        assert_eq!(meeting.strategy, SttPreset::Quality.sampling());
+        assert!(meeting.no_speech_thold < dictation.no_speech_thold);
+
+        // An explicit choice wins on both surfaces.
+        let chosen = crate::settings::SttSettings {
+            preset: "balanced".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(chosen.configured_preset(), Some(SttPreset::Balanced));
+        assert_eq!(
+            WhisperDecodingConfig::for_dictation(&chosen).strategy,
+            SttPreset::Balanced.sampling()
+        );
+        assert_eq!(
+            WhisperDecodingConfig::from_settings_defaulting(&chosen, SttPreset::Quality).strategy,
+            SttPreset::Balanced.sampling()
+        );
     }
 
     #[test]
