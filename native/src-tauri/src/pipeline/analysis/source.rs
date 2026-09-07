@@ -195,6 +195,38 @@ impl<'a> SourceDescriptor<'a> {
         }
     }
 
+    /// Describes a meeting recording.
+    ///
+    /// `UserAuthored` deliberately, and it is worth saying why, because a
+    /// transcript is full of words Relay did not write. The trust level answers
+    /// "did this arrive from outside Relay carrying instructions?" — a captured
+    /// web page did, and is framed as data for that reason. A recording the
+    /// user made of their own meeting did not. The one genuinely external thing
+    /// in a meeting is the calendar invitation, written by whoever sent it, and
+    /// `meetings_v2::processing::context` already renders that inside the
+    /// evidence-not-instructions boundary itself. Marking the whole meeting
+    /// external would frame the transcript twice and the invitation not at all.
+    pub fn for_meeting(
+        id: &'a str,
+        title: &'a str,
+        started_at: &'a str,
+        coverage: SourceCoverage,
+        notes: &'a [String],
+    ) -> Self {
+        Self {
+            id,
+            source_type: SourceType::Meeting,
+            subtype: SourceSubtype::None,
+            title,
+            origin: "Relay recording",
+            canonical_location: None,
+            captured_at: started_at,
+            trust: SourceTrust::UserAuthored,
+            coverage,
+            notes,
+        }
+    }
+
     /// Describes a vault artifact — a capture or an imported document.
     ///
     /// The classification comes from `capture_type`, which

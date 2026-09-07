@@ -249,9 +249,14 @@ pub fn definition(id: PromptId) -> PromptDefinition {
             body: PromptBody::Computed,
             output_contract: OutputContract::Prose,
             applies_to: &[SourceType::Meeting],
-            // Prose needs a little room; the accuracy rules are enforced by
-            // validation rather than by sampling.
-            temperature: 0.4,
+            // Slightly above extraction because rewriting requires generation,
+            // low enough to stay grounded. This entry was written at 0.4 before
+            // anything ran on it; the pipeline it now serves has always sent
+            // 0.3, and the migration follows the shipped value rather than
+            // quietly raising the temperature of every meeting summary.
+            temperature: 0.3,
+            // A default the caller almost always overrides: the real allowance
+            // is computed from the length budget the user chose.
             max_output_tokens: 1_600,
         },
 

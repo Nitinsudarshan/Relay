@@ -25,28 +25,35 @@
 //! rather than another capture → normalize → prompt → LLM → parse → persist →
 //! provenance pipeline.
 //!
-//! # Not migrated yet
+//! # Everything runs here now
 //!
-//! The meetings pipeline (`meetings_v2::processing`) still runs its own
-//! `MeetingLlm`, but this module now models what it needs:
-//! [`contract::AnalysisStage`] describes a multi-pass analysis, and
-//! [`prompts::PromptBody::Computed`] admits a prompt whose instructions are
-//! built per call — which is what a meeting summary's are, since they
-//! interpolate the length budget, the depth mode, the extension and the user's
-//! language. `PromptId::MeetingFacts` and `PromptId::MeetingSummary` are
-//! registered, with their own output contracts and per-stage sampling.
+//! The meetings pipeline was the last holdout and has moved. Both of its
+//! stages go through [`service::AnalysisService`]:
+//! [`contract::AnalysisStage`] names the two passes,
+//! [`prompts::PromptBody::Computed`] carries instructions that cannot be
+//! constants — a meeting summary's interpolate the length budget, the depth
+//! mode, the extension and the user's language — and `PromptId::MeetingFacts`
+//! and `PromptId::MeetingSummary` supply the identity, version, output
+//! contract and sampling that the pipeline used to decide for itself.
 //!
-//! [`service::AnalysisService`] now holds `providers::Completer` rather than a
-//! concrete client, so a caller with a scripted stand-in can exercise its
-//! failure paths — which is what the meeting suites need in order to move.
-//! What is left is the swap itself: `MeetingLlm` also carries
-//! `prompt_budget_chars`, used to decide how many extraction passes a long
-//! transcript needs, and that has no equivalent here yet. Destabilising a
-//! working pipeline for architectural symmetry is still a bad trade, and §38
-//! still says so.
+//! The last blocker was a number. `MeetingLlm` carried `prompt_budget_chars`,
+//! which extraction uses to decide how many passes a long transcript needs, and
+//! nothing here could answer it. [`service::AnalysisService::prompt_budget_chars`]
+//! answers it now, and answers it better: per prompt, from the window less that
+//! prompt's own output allowance, rather than from one constant that assumed
+//! every analysis writes the same amount back.
 //!
-//! The one thing that was genuinely duplicated — the heuristic-filler marker —
-//! now comes from `providers` for both.
+//! What stayed in `meetings_v2::processing` is what should have: the repair
+//! loop, the deterministic floor, and the qualification pass. Those are the
+//! pipeline's own judgement about a meeting, not mechanics anyone else needed.
+//! §38 was right that destabilising a working pipeline for symmetry is a bad
+//! trade — the trade was worth making only once the symmetry was real, and the
+//! test that proves the chunk size did not move is the receipt.
+//!
+//! Two things that were genuinely duplicated are now single: the
+//! heuristic-filler marker, which comes from `providers` for both, and the
+//! definition of a parseable structured answer, which is
+//! [`service::parse_json_response`] for both.
 
 pub mod content;
 pub mod contract;
@@ -63,7 +70,7 @@ pub use contract::{
 };
 pub use derived::{DerivedData, DerivedPayload, DerivedType};
 pub use prompts::{context_prompt_for, OutputContract, PromptBody, PromptDefinition, PromptId};
-pub use service::{context_request, parse_json_response, AnalysisService};
+pub use service::{context_request, parse_json_response, provider_name, AnalysisService};
 pub use source::{
     SourceCoverage, SourceDescriptor, SourceSubtype, SourceTrust, SourceType,
 };

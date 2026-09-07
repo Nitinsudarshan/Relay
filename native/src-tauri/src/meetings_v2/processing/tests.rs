@@ -800,8 +800,8 @@ async fn regeneration_records_the_metadata_needed_to_explain_a_quality_change() 
     assert_eq!(summary.extension_id, "project_update");
     assert_eq!(summary.processing_version, PROCESSING_VERSION);
     assert_eq!(summary.rules_version, RULES_VERSION);
-    assert_eq!(summary.provider, "scripted");
-    assert_eq!(summary.model, "scripted-model");
+    assert_eq!(summary.provider, "ollama", "the family the stand-in declares");
+    assert_eq!(summary.model, "scripted-model", "and the model that answered");
     assert!(!summary.generated_at.is_empty());
 }
 
@@ -1025,7 +1025,11 @@ async fn the_processing_log_answers_what_happened_without_reading_source() {
     let summary_entry = log.iter().rev().find(|e| e.stage == "summary").unwrap();
     assert_eq!(summary_entry.status, "success");
     assert_eq!(summary_entry.model.as_deref(), Some("scripted-model"));
-    assert_eq!(summary_entry.provider.as_deref(), Some("scripted"));
+    // The provider field records a provider *family*, and `ProviderType` has no
+    // "scripted" member for a stand-in to claim — so the stand-in declares the
+    // one it is shaped like. The model is what still identifies it, which is the
+    // discriminating half of this assertion.
+    assert_eq!(summary_entry.provider.as_deref(), Some("ollama"));
     assert_eq!(summary_entry.validator_passed, Some(true));
     assert_eq!(summary_entry.processing_version, PROCESSING_VERSION);
     assert_eq!(summary_entry.rules_version, RULES_VERSION);

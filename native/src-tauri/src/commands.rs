@@ -2129,7 +2129,7 @@ pub fn spawn_meeting_processing(app: AppHandle, state: &AppState, meeting_id: St
             return;
         }
 
-        let llm = crate::meetings_v2::processing::llm::ProviderLlm::new(provider);
+        let llm = crate::providers::LLMClient::new(provider);
         match processor
             .generate_summary(&meeting_id, &llm, &options, false)
             .await
@@ -2419,7 +2419,7 @@ pub async fn generate_meeting_v2_summary(
         )
     };
 
-    let llm = crate::meetings_v2::processing::llm::ProviderLlm::new(provider);
+    let llm = crate::providers::LLMClient::new(provider);
     let processing = state
         .meeting_processor
         .generate_summary(&session_id, &llm, &options, force.unwrap_or(false))
