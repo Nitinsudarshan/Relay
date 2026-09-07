@@ -434,6 +434,33 @@ pub fn test_stt_model_file(path_str: &str) -> SttModelTestResult {
 
 use crate::settings::LanguageSettings;
 
+/// The `spoken_languages` entry that means "let Whisper decide".
+///
+/// Not an ISO code, so it is never a candidate to pin — it only ever expresses
+/// an intent. Kept out of the language count for the same reason: a profile of
+/// `["en", "auto"]` names one language the user speaks, not two.
+const AUTO_LANGUAGE: &str = "auto";
+
+/// How much audio one decode gets, which decides whether Whisper's own
+/// language detection can be trusted for it.
+///
+/// This distinction is the whole reason the enum exists. Detection reads the
+/// first window of a decode and commits; given a thirty-second meeting chunk it
+/// has ample evidence, and given a two-second push-to-talk phrase it is close to
+/// a guess. One resolution served to both surfaces means either meetings are
+/// hard-locked to the wrong language or short utterances are misclassified — and
+/// Relay had both, from the same call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SttWindow {
+    /// Tens of seconds per decode: meeting chunks, imported recordings.
+    /// Detection is reliable here, so a multilingual profile can be honoured.
+    LongForm,
+    /// One phrase or one utterance, often under three seconds: push-to-talk
+    /// dictation, a Scribble, a Talkback turn, the live-preview clock.
+    /// Detection is not reliable here, so the primary language is pinned.
+    ShortForm,
+}
+
 /// Resolved speech-to-text language configuration passed to the STT engine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SttLanguageConfig {
@@ -444,18 +471,27 @@ pub struct SttLanguageConfig {
 }
 
 impl SttLanguageConfig {
-    /// Resolves the optimal Whisper STT language configuration from user preferences.
+    /// Resolves the Whisper STT language configuration for one window class.
     ///
-    /// Rules:
-    /// 1. `translate` is always `false` to preserve original spoken words (e.g. never translating Hindi to English).
-    /// 2. If `primary_dictation_language` is "auto" or empty -> `None` (Whisper auto-detect).
-    /// 3. If user has multiple spoken languages (e.g. ["en", "hi"]) -> `None` (auto-detect) so Whisper is NOT
-    ///    hard-locked to a single language. This allows mixed-language / code-switching recognition without forcing
-    ///    non-English words through an English-only acoustic filter or causing hallucinations.
-    /// 4. If user has exactly one spoken language (e.g. ["en"] or ["hi"]) matching primary -> `Some(lang)` to
-    ///    eliminate detection latency and avoid short-audio misclassification.
-    /// 5. `output_script` ("latin" vs "native") is purely orthography and does NOT alter STT language selection.
-    pub fn from_settings(settings: &LanguageSettings) -> Self {
+    /// The window is a required argument rather than a defaulted one on purpose:
+    /// choosing it wrong is the defect this function exists to prevent, and a
+    /// default would let a new call site inherit the wrong policy in silence.
+    ///
+    /// Rules, in order:
+    /// 1. `translate` is always `false`, whatever the window — Relay never
+    ///    turns Hindi speech into English text.
+    /// 2. A primary of "auto" (or empty) means auto-detect for every window.
+    ///    There is nothing to pin to, and the user asked explicitly.
+    /// 3. [`SttWindow::ShortForm`] pins to the primary language. A phrase does
+    ///    not carry enough audio to detect from, so the setting is better
+    ///    evidence than the signal.
+    /// 4. [`SttWindow::LongForm`] honours a multilingual profile with `None`,
+    ///    so code-switched speech is not forced through one acoustic filter.
+    ///    `AUTO_LANGUAGE` anywhere in the spoken profile also means `None`.
+    /// 5. A single-language profile pins, in either window.
+    /// 6. `output_script` ("latin" vs "native") is orthography and never
+    ///    affects language selection. It is honoured downstream of the decode.
+    pub fn from_settings(settings: &LanguageSettings, window: SttWindow) -> Self {
         let primary = settings.primary_dictation_language.trim().to_lowercase();
         let spoken: Vec<String> = settings
             .spoken_languages
@@ -472,16 +508,28 @@ impl SttLanguageConfig {
             }
         }
 
-        let whisper_language = if primary == "auto" || primary.is_empty() {
+        let asked_for_auto = unique_spoken.iter().any(|s| s == AUTO_LANGUAGE);
+        // The languages that could actually be pinned, "auto" excluded.
+        let real_spoken: Vec<&String> = unique_spoken
+            .iter()
+            .filter(|s| *s != AUTO_LANGUAGE)
+            .collect();
+
+        let whisper_language = if primary == AUTO_LANGUAGE || primary.is_empty() {
             None
-        } else if unique_spoken.len() > 1 {
-            // Bilingual / multilingual user profile (e.g. English + Hindi, or Hinglish).
-            // Do not hard-lock Whisper to a single language or pass non-ISO tokens.
+        } else if window == SttWindow::ShortForm {
+            // Pinned even for a bilingual profile: on one phrase, the user's
+            // stated primary language beats a coin toss on the audio.
+            Some(primary)
+        } else if asked_for_auto || real_spoken.len() > 1 {
+            // Bilingual / multilingual profile (e.g. English + Hindi, or
+            // Hinglish) over long-form audio. Do not hard-lock Whisper to a
+            // single language, and never pass a non-ISO token.
             None
-        } else if unique_spoken.len() == 1 && unique_spoken[0] == primary {
+        } else if real_spoken.len() == 1 && *real_spoken[0] == primary {
             // Unambiguous single-language profile.
             Some(primary)
-        } else if unique_spoken.is_empty() {
+        } else if real_spoken.is_empty() {
             Some(primary)
         } else {
             None
@@ -1056,7 +1104,7 @@ mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        let config = SttLanguageConfig::from_settings(&settings);
+        let config = SttLanguageConfig::from_settings(&settings, SttWindow::LongForm);
         assert_eq!(config.whisper_language, Some("en".to_string()));
         assert!(!config.translate);
     }
@@ -1069,7 +1117,7 @@ mod tests {
             notes_language: "hi".to_string(),
             output_script: "native".to_string(),
         };
-        let config = SttLanguageConfig::from_settings(&settings);
+        let config = SttLanguageConfig::from_settings(&settings, SttWindow::LongForm);
         assert_eq!(config.whisper_language, Some("hi".to_string()));
         assert!(!config.translate);
     }
@@ -1083,7 +1131,7 @@ mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        let config = SttLanguageConfig::from_settings(&settings);
+        let config = SttLanguageConfig::from_settings(&settings, SttWindow::LongForm);
         // Must NOT pass "hinglish" or hard-lock to "en"
         assert_eq!(config.whisper_language, None);
         assert!(!config.translate);
@@ -1098,7 +1146,7 @@ mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        let config = SttLanguageConfig::from_settings(&settings);
+        let config = SttLanguageConfig::from_settings(&settings, SttWindow::LongForm);
         // Must NOT hard-lock to "hi"
         assert_eq!(config.whisper_language, None);
         assert!(!config.translate);
@@ -1112,7 +1160,7 @@ mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        let config = SttLanguageConfig::from_settings(&settings);
+        let config = SttLanguageConfig::from_settings(&settings, SttWindow::LongForm);
         assert_eq!(config.whisper_language, None);
         assert!(!config.translate);
     }
@@ -1125,7 +1173,7 @@ mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        let config = SttLanguageConfig::from_settings(&settings);
+        let config = SttLanguageConfig::from_settings(&settings, SttWindow::LongForm);
         assert_eq!(config.whisper_language, Some("en".to_string()));
         assert!(!config.translate);
     }
@@ -1138,7 +1186,7 @@ mod tests {
             notes_language: "hi".to_string(),
             output_script: "native".to_string(),
         };
-        let config = SttLanguageConfig::from_settings(&settings);
+        let config = SttLanguageConfig::from_settings(&settings, SttWindow::LongForm);
         assert_eq!(config.whisper_language, Some("hi".to_string()));
         assert!(!config.translate);
     }
@@ -1151,10 +1199,10 @@ mod tests {
             notes_language: "hi".to_string(),
             output_script: "latin".to_string(),
         };
-        let config_latin = SttLanguageConfig::from_settings(&settings);
+        let config_latin = SttLanguageConfig::from_settings(&settings, SttWindow::LongForm);
 
         settings.output_script = "native".to_string();
-        let config_native = SttLanguageConfig::from_settings(&settings);
+        let config_native = SttLanguageConfig::from_settings(&settings, SttWindow::LongForm);
 
         // Output script setting must NOT change STT language configuration
         assert_eq!(config_latin, config_native);
@@ -1383,5 +1431,123 @@ mod tests {
         assert_eq!(res.error, Some("File does not exist".to_string()));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    // ---------------------------------------------------------------------
+    // Window-class resolution.
+    //
+    // One resolution served both a thirty-second meeting chunk and a
+    // two-second push-to-talk phrase, and could not be right for both: the
+    // profile that stops a Hindi meeting being decoded as English is the same
+    // profile that makes Whisper guess the language of a short phrase. These
+    // tests pin the two answers apart.
+    // ---------------------------------------------------------------------
+
+    /// The profile a bilingual user actually ends up with in Settings ›
+    /// Languages & Script: a primary, a second language, and the explicit
+    /// auto-detect entry.
+    fn bilingual_profile() -> LanguageSettings {
+        LanguageSettings {
+            primary_dictation_language: "en".to_string(),
+            spoken_languages: vec!["en".to_string(), "hi".to_string(), "auto".to_string()],
+            notes_language: "en".to_string(),
+            output_script: "latin".to_string(),
+        }
+    }
+
+    #[test]
+    fn long_form_honours_a_bilingual_profile() {
+        // A meeting chunk carries enough audio for detection to work, so
+        // code-switched speech must not be forced through one language.
+        let config = SttLanguageConfig::from_settings(&bilingual_profile(), SttWindow::LongForm);
+        assert_eq!(config.whisper_language, None);
+        assert!(!config.translate);
+    }
+
+    #[test]
+    fn short_form_pins_the_primary_language() {
+        // One phrase is not enough evidence to detect from. The user's stated
+        // primary language is better information than the audio.
+        let config = SttLanguageConfig::from_settings(&bilingual_profile(), SttWindow::ShortForm);
+        assert_eq!(config.whisper_language, Some("en".to_string()));
+        assert!(!config.translate);
+    }
+
+    #[test]
+    fn the_two_windows_disagree_only_when_the_profile_is_multilingual() {
+        let bilingual = bilingual_profile();
+        assert_ne!(
+            SttLanguageConfig::from_settings(&bilingual, SttWindow::LongForm),
+            SttLanguageConfig::from_settings(&bilingual, SttWindow::ShortForm),
+        );
+
+        // A single-language profile has one right answer, so both windows
+        // give it. This is what stops the split becoming a second setting.
+        let monolingual = LanguageSettings {
+            primary_dictation_language: "hi".to_string(),
+            spoken_languages: vec!["hi".to_string()],
+            notes_language: "hi".to_string(),
+            output_script: "latin".to_string(),
+        };
+        assert_eq!(
+            SttLanguageConfig::from_settings(&monolingual, SttWindow::LongForm),
+            SttLanguageConfig::from_settings(&monolingual, SttWindow::ShortForm),
+        );
+        assert_eq!(
+            SttLanguageConfig::from_settings(&monolingual, SttWindow::ShortForm).whisper_language,
+            Some("hi".to_string())
+        );
+    }
+
+    #[test]
+    fn an_explicit_auto_primary_detects_in_both_windows() {
+        // Choosing "auto" as the primary language is a deliberate request, and
+        // there is nothing to pin to. Short-form obeys it rather than
+        // inventing a language.
+        let settings = LanguageSettings {
+            primary_dictation_language: "auto".to_string(),
+            spoken_languages: vec!["en".to_string(), "hi".to_string()],
+            notes_language: "en".to_string(),
+            output_script: "latin".to_string(),
+        };
+        assert_eq!(
+            SttLanguageConfig::from_settings(&settings, SttWindow::LongForm).whisper_language,
+            None
+        );
+        assert_eq!(
+            SttLanguageConfig::from_settings(&settings, SttWindow::ShortForm).whisper_language,
+            None
+        );
+    }
+
+    #[test]
+    fn auto_in_the_spoken_profile_is_not_a_language() {
+        // `auto` is not an ISO code, so it is never pinned and never counted.
+        // Long-form reads it as the request it is; a profile of one real
+        // language plus `auto` still means "detect", not "two languages".
+        let settings = LanguageSettings {
+            primary_dictation_language: "en".to_string(),
+            spoken_languages: vec!["en".to_string(), "auto".to_string()],
+            notes_language: "en".to_string(),
+            output_script: "latin".to_string(),
+        };
+        assert_eq!(
+            SttLanguageConfig::from_settings(&settings, SttWindow::LongForm).whisper_language,
+            None
+        );
+        // Whatever the profile says, a non-ISO token must never reach Whisper.
+        for window in [SttWindow::LongForm, SttWindow::ShortForm] {
+            let resolved = SttLanguageConfig::from_settings(&settings, window);
+            assert_ne!(resolved.whisper_language, Some(AUTO_LANGUAGE.to_string()));
+        }
+    }
+
+    #[test]
+    fn no_window_ever_enables_translation() {
+        // Relay never turns Hindi speech into English text. This is the one
+        // property the window class must not be able to change.
+        for window in [SttWindow::LongForm, SttWindow::ShortForm] {
+            assert!(!SttLanguageConfig::from_settings(&bilingual_profile(), window).translate);
+        }
     }
 }

@@ -2,7 +2,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::capture::stt::{
-    SttEngine, SttLanguageConfig, SttSamplingStrategy, WhisperDecodingConfig,
+    SttEngine, SttLanguageConfig, SttSamplingStrategy, SttWindow, WhisperDecodingConfig,
     DEFAULT_MODEL_FILENAME,
 };
 use crate::capture::{resample_to_16k_mono, AudioStats, VadConfig};
@@ -959,7 +959,7 @@ pub fn evaluate_audio_buffer(
     let vad = VadConfig::default();
     let (vad_samples, vad_result) = vad.process(&mono_16k, 16000);
 
-    let language_config = SttLanguageConfig::from_settings(language_settings);
+    let language_config = SttLanguageConfig::from_settings(language_settings, SttWindow::LongForm);
     let primary_decoding_config = variant.to_decoding_config();
 
     let model_filename = model_path
@@ -1267,7 +1267,7 @@ pub mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        assert_eq!(SttLanguageConfig::from_settings(&s_a).whisper_language, Some("en".to_string()));
+        assert_eq!(SttLanguageConfig::from_settings(&s_a, SttWindow::LongForm).whisper_language, Some("en".to_string()));
 
         // Case B: primary=hi, spoken=[hi] -> "hi"
         let s_b = LanguageSettings {
@@ -1276,7 +1276,7 @@ pub mod tests {
             notes_language: "hi".to_string(),
             output_script: "native".to_string(),
         };
-        assert_eq!(SttLanguageConfig::from_settings(&s_b).whisper_language, Some("hi".to_string()));
+        assert_eq!(SttLanguageConfig::from_settings(&s_b, SttWindow::LongForm).whisper_language, Some("hi".to_string()));
 
         // Case C: primary=en, spoken=[en, hi] -> None (multilingual)
         let s_c = LanguageSettings {
@@ -1285,7 +1285,7 @@ pub mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        assert_eq!(SttLanguageConfig::from_settings(&s_c).whisper_language, None);
+        assert_eq!(SttLanguageConfig::from_settings(&s_c, SttWindow::LongForm).whisper_language, None);
 
         // Case D: primary=hi, spoken=[hi, en] -> None (multilingual)
         let s_d = LanguageSettings {
@@ -1294,7 +1294,7 @@ pub mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        assert_eq!(SttLanguageConfig::from_settings(&s_d).whisper_language, None);
+        assert_eq!(SttLanguageConfig::from_settings(&s_d, SttWindow::LongForm).whisper_language, None);
 
         // Case E: primary=auto -> None
         let s_e = LanguageSettings {
@@ -1303,7 +1303,7 @@ pub mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        assert_eq!(SttLanguageConfig::from_settings(&s_e).whisper_language, None);
+        assert_eq!(SttLanguageConfig::from_settings(&s_e, SttWindow::LongForm).whisper_language, None);
 
         // Case F: spoken empty, primary=en -> Some("en")
         let s_f = LanguageSettings {
@@ -1312,7 +1312,7 @@ pub mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        assert_eq!(SttLanguageConfig::from_settings(&s_f).whisper_language, Some("en".to_string()));
+        assert_eq!(SttLanguageConfig::from_settings(&s_f, SttWindow::LongForm).whisper_language, Some("en".to_string()));
     }
 
     #[test]
@@ -1496,7 +1496,7 @@ pub mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        let lang_cfg = SttLanguageConfig::from_settings(&lang_settings);
+        let lang_cfg = SttLanguageConfig::from_settings(&lang_settings, SttWindow::LongForm);
         let dec_cfg = WhisperDecodingConfig::baseline();
 
         let diag = crate::capture::stt::SttSessionDiagnostics {
@@ -1664,7 +1664,7 @@ pub mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        let cfg_en = SttLanguageConfig::from_settings(&lang_en);
+        let cfg_en = SttLanguageConfig::from_settings(&lang_en, SttWindow::LongForm);
         assert_eq!(cfg_en.whisper_language, Some("en".to_string()));
         assert!(!(cfg_en.translate));
 
@@ -1675,7 +1675,7 @@ pub mod tests {
             notes_language: "hi".to_string(),
             output_script: "native".to_string(),
         };
-        let cfg_hi = SttLanguageConfig::from_settings(&lang_hi);
+        let cfg_hi = SttLanguageConfig::from_settings(&lang_hi, SttWindow::LongForm);
         assert_eq!(cfg_hi.whisper_language, Some("hi".to_string()));
         assert!(!(cfg_hi.translate));
 
@@ -1686,7 +1686,7 @@ pub mod tests {
             notes_language: "es".to_string(),
             output_script: "latin".to_string(),
         };
-        let cfg_es = SttLanguageConfig::from_settings(&lang_es);
+        let cfg_es = SttLanguageConfig::from_settings(&lang_es, SttWindow::LongForm);
         assert_eq!(cfg_es.whisper_language, Some("es".to_string()));
         assert!(!(cfg_es.translate));
 
@@ -1697,7 +1697,7 @@ pub mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        let cfg_hinglish = SttLanguageConfig::from_settings(&lang_hinglish);
+        let cfg_hinglish = SttLanguageConfig::from_settings(&lang_hinglish, SttWindow::LongForm);
         assert_eq!(cfg_hinglish.whisper_language, None);
         assert!(!(cfg_hinglish.translate));
 
@@ -1708,7 +1708,7 @@ pub mod tests {
             notes_language: "en".to_string(),
             output_script: "latin".to_string(),
         };
-        let cfg_auto = SttLanguageConfig::from_settings(&lang_auto);
+        let cfg_auto = SttLanguageConfig::from_settings(&lang_auto, SttWindow::LongForm);
         assert_eq!(cfg_auto.whisper_language, None);
         assert!(!(cfg_auto.translate));
     }
@@ -1889,11 +1889,11 @@ pub mod tests {
         };
 
         assert_eq!(
-            SttLanguageConfig::from_settings(&s_latin).whisper_language,
-            SttLanguageConfig::from_settings(&s_native).whisper_language
+            SttLanguageConfig::from_settings(&s_latin, SttWindow::LongForm).whisper_language,
+            SttLanguageConfig::from_settings(&s_native, SttWindow::LongForm).whisper_language
         );
         assert_eq!(
-            SttLanguageConfig::from_settings(&s_latin).whisper_language,
+            SttLanguageConfig::from_settings(&s_latin, SttWindow::LongForm).whisper_language,
             Some("hi".to_string())
         );
     }

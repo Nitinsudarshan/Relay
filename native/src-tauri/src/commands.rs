@@ -426,7 +426,7 @@ async fn process_captured_audio(
     let models_dir = state.config_dir.join("models");
     let model_path = crate::capture::stt::resolve_dictation_model_path(&models_dir, &settings.stt).await;
 
-    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
+    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language, crate::capture::stt::SttWindow::ShortForm);
     let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::for_dictation(&settings.stt);
     if let Some(prompt) = settings.build_stt_prompt() {
         decoding_config.initial_prompt = Some(prompt);
@@ -1987,7 +1987,7 @@ fn start_meeting_session(
     state: &AppState,
 ) -> Result<crate::meetings_v2::MeetingSession, CommandError> {
     let settings = state.settings.lock_or_recover().clone();
-    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language);
+    let language_config = crate::capture::SttLanguageConfig::from_settings(&settings.language, crate::capture::stt::SttWindow::LongForm);
     let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::from_settings(&settings.stt);
 
     // Hand the recognizer the vocabulary before it guesses, rather than
@@ -3577,7 +3577,7 @@ pub async fn start_talkback(
     }
 
     let settings = state.settings.lock_or_recover().clone();
-    let language = crate::capture::SttLanguageConfig::from_settings(&settings.language);
+    let language = crate::capture::SttLanguageConfig::from_settings(&settings.language, crate::capture::stt::SttWindow::ShortForm);
     let models_dir = state.config_dir.join("models");
     let model_path = if voice {
         crate::capture::stt::resolve_dictation_model_path(&models_dir, &settings.stt)

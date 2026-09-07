@@ -591,7 +591,7 @@ pub async fn run_turn(ctx: TurnContext<'_>, text: &str) -> Result<String, String
         let llm_window = ctx.settings.provider.context_tokens;
         let query = RetrievalQuery::new(text)
             .with_sources(wanted)
-            .with_char_budget(assemble::char_budget_for(llm_window))
+            .with_char_budget(assemble::turn_char_budget_for(llm_window))
             .with_since(routed.lookback_days.map(|days| {
                 (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339()
             }));

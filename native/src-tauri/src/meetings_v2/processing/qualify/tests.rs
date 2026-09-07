@@ -590,3 +590,80 @@ fn retained_items_keep_meeting_order_not_ranking_order() {
     assert_eq!(retained[1].id, "action_1");
 }
 
+
+// ---------------------------------------------------------------------------
+// Non-Latin coverage — and the gap it exposes.
+//
+// Every gate in this module tests a phrase against an English lexicon:
+// DELIVERABLE_VERBS, FIRST_PERSON_CUES, ACCEPTANCE_TOKENS, ASSIGNMENT_CUES and
+// ten more, roughly 286 literals in total. That is correct and well-tested for
+// English, and it means a commitment made in Hindi or Hinglish matches nothing
+// and is dropped by Gate 3 — from a *perfect* transcript.
+//
+// These tests record that. The English control passes today; the two
+// non-English cases are `#[ignore]`d because they describe the behaviour the
+// lexicon work (M3) will deliver, not the behaviour that exists. Running
+// `cargo test -- --ignored` is the check that the gap is still open.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_english_control_for_the_hinglish_gap_qualifies() {
+    // The same commitment, in English. This is the baseline the two ignored
+    // tests below are measured against: if this ever stops passing, the
+    // comparison is broken rather than the lexicon.
+    let segments = vec![segment(
+        0,
+        "I'll send the final volunteer list to Pragati by Wednesday.",
+        Some(SPEAKER_ID_ME),
+    )];
+    let candidates = vec![candidate(
+        "Send the final volunteer list to Pragati",
+        OwnerType::Me,
+        &["seg_00000"],
+    )];
+    let (retained, _) = qualify_action_items(candidates, &segments);
+    assert_eq!(retained.len(), 1, "the English form must qualify");
+}
+
+#[test]
+#[ignore = "M3: qualify.rs lexicons are English-only, so a romanized Hinglish commitment fails Gate 3"]
+fn a_romanized_hinglish_commitment_qualifies() {
+    // "I will send the final volunteer list to Pragati by Wednesday."
+    let segments = vec![segment(
+        0,
+        "Main final volunteer list Pragati ko Wednesday tak bhej dungi.",
+        Some(SPEAKER_ID_ME),
+    )];
+    let candidates = vec![candidate(
+        "Send the final volunteer list to Pragati",
+        OwnerType::Me,
+        &["seg_00000"],
+    )];
+    let (retained, _) = qualify_action_items(candidates, &segments);
+    assert_eq!(
+        retained.len(),
+        1,
+        "a Hinglish commitment is still a commitment"
+    );
+}
+
+#[test]
+#[ignore = "M3: qualify.rs lexicons are English-only, so a Devanagari commitment fails Gate 3"]
+fn a_devanagari_commitment_qualifies() {
+    let segments = vec![segment(
+        0,
+        "मैं फाइनल वॉलंटियर लिस्ट प्रगति को बुधवार तक भेज दूंगी।",
+        Some(SPEAKER_ID_ME),
+    )];
+    let candidates = vec![candidate(
+        "Send the final volunteer list to Pragati",
+        OwnerType::Me,
+        &["seg_00000"],
+    )];
+    let (retained, _) = qualify_action_items(candidates, &segments);
+    assert_eq!(
+        retained.len(),
+        1,
+        "a Devanagari commitment is still a commitment"
+    );
+}

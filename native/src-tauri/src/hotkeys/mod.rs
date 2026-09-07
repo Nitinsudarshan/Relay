@@ -542,7 +542,7 @@ fn stop_dictation_session(
         let language_settings = state.settings.lock_or_recover().language.clone();
         let stt_settings = state.settings.lock_or_recover().stt.clone();
         let model_path = crate::capture::stt::resolve_dictation_model_path(&models_dir, &stt_settings).await;
-        let language_config = crate::capture::SttLanguageConfig::from_settings(&language_settings);
+        let language_config = crate::capture::SttLanguageConfig::from_settings(&language_settings, crate::capture::stt::SttWindow::ShortForm);
         let mut decoding_config = crate::capture::stt::WhisperDecodingConfig::for_dictation(&stt_settings);
         if let Some(prompt) = state.settings.lock_or_recover().build_stt_prompt() {
             decoding_config.initial_prompt = Some(prompt);

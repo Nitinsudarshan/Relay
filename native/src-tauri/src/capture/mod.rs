@@ -19,7 +19,7 @@ pub use evaluation::{
     BenchmarkReport, CorpusItem, EvalConfigVariant, EvaluationResult, SttDiagnosticSnapshot,
     SttFailureCategory, SttFailureDiagnostic,
 };
-pub use stt::{SttEngine, SttError, SttLanguageConfig};
+pub use stt::{SttEngine, SttError, SttLanguageConfig, SttWindow};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 

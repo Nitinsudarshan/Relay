@@ -807,4 +807,76 @@ migration finished, tested, and reviewed by someone other than me.";
         assert!(dominant_repeat("hello").is_none());
         assert_eq!(assess("", evidence(0.0, 30.0, 0.9)), None);
     }
+
+    // ---------------------------------------------------------------------
+    // Non-Latin coverage.
+    //
+    // Until these existed there was no Devanagari anywhere in this crate, so
+    // every rule in this module was only ever exercised against English. The
+    // screen has to do the same job in both scripts: keep speech, reject what
+    // no speech could have produced. A screen that quietly passed everything
+    // non-Latin would be as wrong as one that rejected it.
+    //
+    // The sentences are from a real recording — a volunteer-interview
+    // standup — rather than invented, so the word counts and speaking rates
+    // are ones the pipeline actually sees.
+    // ---------------------------------------------------------------------
+
+    /// Devanagari: "three interviews happened but nobody could join because
+    /// there was a problem with the link."
+    const HINDI_SPEECH: &str =
+        "तीन इंटरव्यू हो गए लेकिन कोई भी जॉइन नहीं कर पाया क्योंकि लिंक में दिक्कत थी";
+
+    /// The same meeting, code-switched and romanized — what Whisper emits for
+    /// Hinglish when it is not locked to one language.
+    const HINGLISH_SPEECH: &str =
+        "Mansi ne teen interview liye lekin link ka issue tha to koi join nahi kar paya";
+
+    #[test]
+    fn hindi_meeting_speech_is_never_rejected() {
+        // 16 words over 6 voiced seconds — an ordinary conversational rate.
+        assert_eq!(assess(HINDI_SPEECH, evidence(6.0, 30.0, 0.08)), None);
+    }
+
+    #[test]
+    fn romanized_hinglish_speech_is_never_rejected() {
+        assert_eq!(assess(HINGLISH_SPEECH, evidence(7.0, 30.0, 0.10)), None);
+    }
+
+    #[test]
+    fn a_devanagari_loop_is_still_rejected() {
+        // The loop detector must be script-agnostic. "I will fill the form",
+        // four times over, is a decoder loop in Hindi exactly as it is in
+        // English — and this is the failure mode that filled nine chunks.
+        let looped = "मैं फॉर्म भर दूंगी मैं फॉर्म भर दूंगी मैं फॉर्म भर दूंगी मैं फॉर्म भर दूंगी";
+        let reason = assess(looped, evidence(9.0, 30.0, 0.1))
+            .expect("a phrase repeated four times is a loop in any script");
+        assert!(matches!(reason, HallucinationReason::RepetitionLoop { .. }));
+    }
+
+    #[test]
+    fn devanagari_words_are_counted_as_words() {
+        // The rate rule divides words by voiced seconds, so a counter that
+        // only recognised Latin script would read every Hindi chunk as zero
+        // words and never fire. Whitespace splitting is what makes it work,
+        // and this is the test that says so.
+        assert_eq!(word_count(HINDI_SPEECH), 16);
+        assert_eq!(word_count(HINGLISH_SPEECH), 16);
+    }
+
+    #[test]
+    fn an_implausible_devanagari_rate_is_still_rejected() {
+        // 16 words in half a second is not speech, whatever the script.
+        let reason = assess(HINDI_SPEECH, evidence(0.5, 30.0, 0.1))
+            .expect("28 words/s is not speech");
+        assert!(matches!(reason, HallucinationReason::ImplausibleRate { .. }));
+    }
+
+    #[test]
+    fn devanagari_speech_is_safe_to_carry_as_a_prompt() {
+        // The cross-chunk prompt is how context survives a boundary. Refusing
+        // Hindi here would cost every Hindi chunk its continuity.
+        assert!(is_safe_as_prompt(HINDI_SPEECH));
+        assert!(is_safe_as_prompt(HINGLISH_SPEECH));
+    }
 }
