@@ -236,10 +236,22 @@ pub async fn rewrite_dictation(
     text: String,
     style: Option<String>,
 ) -> Result<crate::capture::rewrite::RewriteProposal, CommandError> {
-    let (provider, configured) = {
+    let (provider, configured, enabled) = {
         let settings = state.settings.lock_or_recover();
-        (settings.provider.clone(), settings.stt.cleanup_style.clone())
+        (
+            settings.provider.clone(),
+            settings.stt.cleanup_style.clone(),
+            settings.stt.text_transform,
+        )
     };
+
+    // The setting decides, not the caller. The pill hides the button when this
+    // is off, and gating only there would leave `text_transform` as a
+    // preference nothing enforces — which is how a setting comes to mean
+    // whatever the newest call site assumed.
+    if !enabled {
+        return Ok(crate::capture::rewrite::RewriteProposal::unchanged(text));
+    }
     let style = crate::capture::rewrite::CleanupStyle::from_setting(
         style.as_deref().unwrap_or(&configured),
     );
