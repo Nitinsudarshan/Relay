@@ -741,6 +741,10 @@ export interface AppSettings {
   talkback?: TalkbackSettings;
   dictionary?: string[];
   snippets?: SnippetItem[];
+  /** Learned "what Whisper said" → "what it meant" repairs, added only when
+   *  the user ticks "Teach Relay this correction" on a Voice Note. Distinct
+   *  from `dictionary`, which primes the recognizer before it guesses. */
+  vocabulary_corrections?: VocabularyCorrection[];
 }
 
 export type SpeakerIdentificationSetting = 'automatic' | 'off';
@@ -2502,3 +2506,11 @@ export interface KnowledgeTelemetrySnapshot {
 
 
 export * from './navigation';
+
+/** A phrase Whisper keeps getting wrong, and what it should say instead. */
+export interface VocabularyCorrection {
+  source: string;
+  replacement: string;
+  enabled: boolean;
+  created_at: string;
+}

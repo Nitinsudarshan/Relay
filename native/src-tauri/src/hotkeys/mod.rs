@@ -609,7 +609,10 @@ fn stop_dictation_session(
                 let s = state.settings.lock_or_recover();
                 let cleaned = crate::capture::text_normalize::normalize_text(
                     &text_res,
-                    &s.dictionary,
+                    crate::capture::text_normalize::Vocabulary::new(
+                        &s.dictionary,
+                        &s.vocabulary_corrections,
+                    ),
                     crate::capture::text_normalize::TextProfile::Dictated,
                 )
                 .text;

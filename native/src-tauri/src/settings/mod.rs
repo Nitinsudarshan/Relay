@@ -705,6 +705,61 @@ pub fn default_dictionary_words() -> Vec<String> {
     ]
 }
 
+/// A phrase Whisper keeps getting wrong, and what it should say instead.
+///
+/// Distinct from `AppSettings::dictionary`, which is a list of canonical words
+/// used to prime the recognizer before it guesses. Priming helps the model
+/// reach for "Supabase"; it does nothing once the model has already produced
+/// "super base". A correction is the other half: a deterministic repair of a
+/// form the recognizer keeps emitting.
+///
+/// Learned only from an explicit correction the user makes inside Relay, never
+/// by watching what they type elsewhere.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VocabularyCorrection {
+    /// What the recognizer produced, e.g. "super base".
+    pub source: String,
+    /// What it should have produced, e.g. "Supabase".
+    pub replacement: String,
+    /// Off keeps the entry visible and stops it being applied, so a correction
+    /// that turns out to be wrong can be silenced without losing the record of
+    /// having made it.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// When it was learned. The whole of the correction history Relay keeps —
+    /// see the note in `vault::correction` about why there is no second store.
+    #[serde(default)]
+    pub created_at: String,
+}
+
+impl VocabularyCorrection {
+    pub fn new(source: &str, replacement: &str) -> Self {
+        Self {
+            source: source.trim().to_string(),
+            replacement: replacement.trim().to_string(),
+            enabled: true,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Whether this entry could ever do anything.
+    ///
+    /// An empty side, or a source equal to its replacement, is a no-op that
+    /// would sit in the list looking like a rule.
+    pub fn is_meaningful(&self) -> bool {
+        !self.source.trim().is_empty()
+            && !self.replacement.trim().is_empty()
+            && !self.source.eq_ignore_ascii_case(self.replacement.trim())
+    }
+
+    /// Two corrections are the same rule when they read the same source,
+    /// regardless of case — the recognizer's capitalisation of a phrase it got
+    /// wrong is not a distinction worth two entries.
+    pub fn same_source_as(&self, other: &str) -> bool {
+        self.source.trim().eq_ignore_ascii_case(other.trim())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
@@ -743,6 +798,11 @@ pub struct AppSettings {
     pub dictionary: Vec<String>,
     #[serde(default = "default_snippets")]
     pub snippets: Vec<SnippetItem>,
+    /// Learned "what Whisper said" → "what it meant" repairs. Empty by
+    /// default: every entry here was put there by the user correcting
+    /// something inside Relay.
+    #[serde(default, alias = "vocabularyCorrections")]
+    pub vocabulary_corrections: Vec<VocabularyCorrection>,
 
 }
 
@@ -767,6 +827,7 @@ impl Default for AppSettings {
             talkback: TalkbackSettings::default(),
             dictionary: default_dictionary_words(),
             snippets: default_snippets(),
+            vocabulary_corrections: Vec::new(),
         }
     }
 }

@@ -655,7 +655,10 @@ async fn process_captured_audio(
     // period the user has to delete.
     let transcript = crate::capture::text_normalize::normalize_text(
         &transcript,
-        &settings.dictionary,
+        crate::capture::text_normalize::Vocabulary::new(
+            &settings.dictionary,
+            &settings.vocabulary_corrections,
+        ),
         crate::capture::text_normalize::TextProfile::Dictated,
     )
     .text;
@@ -765,6 +768,115 @@ pub async fn update_voice_note(
         .vault
         .update_note_content(&id, &content)
         .map_err(|e| CommandError::new("VAULT_UPDATE_FAILED", &e.to_string()))
+}
+
+/// A correction that was applied, and what it takes to undo it.
+#[derive(Debug, Clone, Serialize)]
+pub struct PhraseCorrectionResult {
+    pub note: VaultNote,
+    /// The content as it stood before. Undo is `update_voice_note` with this,
+    /// which is why no versioning system is needed for it.
+    pub previous_content: String,
+    /// True when the phrase was also added to the learned vocabulary.
+    pub learned: bool,
+}
+
+/// Corrects one selected phrase inside a Voice Note.
+///
+/// A deterministic range edit, saved through the same `update_note_content`
+/// the full editor uses — so this is a second way into the existing
+/// persistence, not a second persistence. No model is called: the user has
+/// already said what the text should be.
+///
+/// `start` and `end` are character offsets into the note's current content,
+/// and `original` is what the caller believes is there. The edit refuses
+/// rather than applying stale offsets to changed content.
+///
+/// `learn` is opt-in per correction. Most corrections are ordinary edits —
+/// "Thursday" to "Tuesday" is not vocabulary — so nothing is added to the
+/// learned list unless the user ticks the box.
+#[tauri::command]
+pub async fn correct_voice_note_phrase(
+    state: State<'_, AppState>,
+    id: String,
+    start: usize,
+    end: usize,
+    original: String,
+    replacement: String,
+    learn: Option<bool>,
+) -> Result<PhraseCorrectionResult, CommandError> {
+    let note = state
+        .vault
+        .get_note(&id)
+        .map_err(|e| CommandError::new("VAULT_READ_FAILED", &e.to_string()))?;
+    let previous_content = note.content.clone();
+
+    let corrected = crate::vault::correction::replace_range(
+        &previous_content,
+        start,
+        end,
+        &original,
+        &replacement,
+    )
+    .map_err(|e| CommandError::new("CORRECTION_FAILED", &e.to_string()))?;
+
+    let note = state
+        .vault
+        .update_note_content(&id, &corrected)
+        .map_err(|e| CommandError::new("VAULT_UPDATE_FAILED", &e.to_string()))?;
+
+    let learned = if learn.unwrap_or(false) {
+        let mut settings = state.settings.lock_or_recover();
+        let added = upsert_vocabulary_correction(
+            &mut settings.vocabulary_corrections,
+            &original,
+            &replacement,
+        );
+        if added {
+            let _ = settings.save(&state.settings_path());
+        }
+        added
+    } else {
+        false
+    };
+
+    Ok(PhraseCorrectionResult {
+        note,
+        previous_content,
+        learned,
+    })
+}
+
+/// Adds or updates a learned correction, in place.
+///
+/// Teaching the same source twice replaces the replacement rather than
+/// appending a second rule — two rules for one phrase means the applied result
+/// depends on list order, which is not something a user can see or reason
+/// about. Re-teaching also re-enables an entry that had been switched off,
+/// because teaching it again is a clear statement that it is wanted.
+fn upsert_vocabulary_correction(
+    corrections: &mut Vec<crate::settings::VocabularyCorrection>,
+    source: &str,
+    replacement: &str,
+) -> bool {
+    let candidate = crate::settings::VocabularyCorrection::new(source, replacement);
+    if !candidate.is_meaningful() {
+        return false;
+    }
+    match corrections
+        .iter_mut()
+        .find(|existing| existing.same_source_as(source))
+    {
+        Some(existing) => {
+            existing.replacement = candidate.replacement;
+            existing.enabled = true;
+            true
+        }
+        None => {
+            corrections.push(candidate);
+            true
+        }
+    }
 }
 
 #[tauri::command]
