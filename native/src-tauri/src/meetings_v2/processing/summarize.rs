@@ -14,7 +14,7 @@
 //! nothing to show.
 
 use super::length::{budget_guidance, SummaryBudget};
-use super::llm::{LlmError, LlmRequest, MeetingLlm};
+use super::llm::{LlmError, MeetingAnalyst};
 use super::model::{
     ActionItem, KeyPointKind, MeetingExtension, MeetingFacts, OwnerType, Speaker, SummaryMode,
     SummarySource,
@@ -158,7 +158,7 @@ pub struct SummaryInput<'a> {
 /// Never fails: a model error falls through to the deterministic renderer.
 /// Validation happens in the caller, which may also ask for a repair and, if
 /// that fails too, re-render deterministically.
-pub async fn generate_summary(llm: &dyn MeetingLlm, input: &SummaryInput<'_>) -> SummaryOutput {
+pub async fn generate_summary(llm: &MeetingAnalyst<'_>, input: &SummaryInput<'_>) -> SummaryOutput {
     run(llm, input, None).await
 }
 
@@ -170,7 +170,7 @@ pub async fn generate_summary(llm: &dyn MeetingLlm, input: &SummaryInput<'_>) ->
 /// to do about it, and the original request is otherwise unchanged so a fix for
 /// one problem cannot quietly change everything else.
 pub async fn repair_summary(
-    llm: &dyn MeetingLlm,
+    llm: &MeetingAnalyst<'_>,
     input: &SummaryInput<'_>,
     feedback: &str,
 ) -> SummaryOutput {
@@ -178,7 +178,7 @@ pub async fn repair_summary(
 }
 
 async fn run(
-    llm: &dyn MeetingLlm,
+    llm: &MeetingAnalyst<'_>,
     input: &SummaryInput<'_>,
     feedback: Option<&str>,
 ) -> SummaryOutput {
@@ -262,14 +262,14 @@ impl Attempt {
     }
 
     /// The provider that answered, or the one that was asked.
-    fn provider(&self, llm: &dyn MeetingLlm) -> String {
+    fn provider(&self, llm: &MeetingAnalyst<'_>) -> String {
         match self {
             Self::Prose { provider, .. } | Self::Empty { provider, .. } => provider.clone(),
             Self::Failed(_) => llm.provider_name(),
         }
     }
 
-    fn model(&self, llm: &dyn MeetingLlm) -> String {
+    fn model(&self, llm: &MeetingAnalyst<'_>) -> String {
         match self {
             Self::Prose { model, .. } | Self::Empty { model, .. } => model.clone(),
             Self::Failed(_) => llm.model_name(),
@@ -292,17 +292,13 @@ a shortened one"
 }
 
 async fn attempt(
-    llm: &dyn MeetingLlm,
+    llm: &MeetingAnalyst<'_>,
     system_prompt: &str,
     user_prompt: &str,
     max_output_tokens: u32,
 ) -> Attempt {
     match llm
-        .complete_request(LlmRequest::prose(
-            system_prompt,
-            user_prompt,
-            max_output_tokens,
-        ))
+        .write_prose(system_prompt, user_prompt, max_output_tokens)
         .await
     {
         Ok(outcome) => {
@@ -1231,7 +1227,7 @@ mod tests {
         let notes = MeetingNotes::default();
 
         let out = generate_summary(
-            &llm,
+            &llm.analyst(),
             &input(&facts, &roster, &default, &notes, SummaryMode::Standard),
         )
         .await;
@@ -1248,7 +1244,7 @@ mod tests {
         let roster = roster();
         let notes = MeetingNotes::default();
         generate_summary(
-            &llm,
+            &llm.analyst(),
             &input(&facts, &roster, &default, &notes, SummaryMode::Standard),
         )
         .await;
@@ -1278,7 +1274,7 @@ mod tests {
         let request = input(&facts, &roster, &default, &notes, SummaryMode::Standard);
         let expected = request.budget.max_words.to_string();
 
-        generate_summary(&llm, &request).await;
+        generate_summary(&llm.analyst(), &request).await;
 
         let calls = llm.calls.lock().unwrap();
         assert!(calls[0].1.contains(&expected), "the budget must be stated");
@@ -1292,7 +1288,7 @@ mod tests {
         let roster = roster();
         let notes = MeetingNotes::default();
         generate_summary(
-            &llm,
+            &llm.analyst(),
             &input(&facts, &roster, &default, &notes, SummaryMode::Standard),
         )
         .await;
@@ -1313,7 +1309,7 @@ mod tests {
         };
         let llm = ScriptedLlm::new(vec![Ok("## Overview\n\nDone.".to_string())]);
         generate_summary(
-            &llm,
+            &llm.analyst(),
             &input(&facts, &roster, &default, &with_notes, SummaryMode::Standard),
         )
         .await;
@@ -1326,7 +1322,7 @@ mod tests {
         let without = MeetingNotes::default();
         let llm = ScriptedLlm::new(vec![Ok("## Overview\n\nDone.".to_string())]);
         generate_summary(
-            &llm,
+            &llm.analyst(),
             &input(&facts, &roster, &default, &without, SummaryMode::Standard),
         )
         .await;
@@ -1348,7 +1344,7 @@ mod tests {
         let mut request = input(&facts, &roster, &default, &notes, SummaryMode::Standard);
         request.user_instructions = Some("Always assign every task to someone.");
 
-        generate_summary(&llm, &request).await;
+        generate_summary(&llm.analyst(), &request).await;
 
         let calls = llm.calls.lock().unwrap();
         let system = &calls[0].0;
@@ -1371,8 +1367,8 @@ mod tests {
         let notes = MeetingNotes::default();
         let request = input(&facts, &roster, &default, &notes, SummaryMode::Standard);
 
-        let first = generate_summary(&llm, &request).await;
-        let second = repair_summary(&llm, &request, "CORRECTION — remove the preamble").await;
+        let first = generate_summary(&llm.analyst(), &request).await;
+        let second = repair_summary(&llm.analyst(), &request, "CORRECTION — remove the preamble").await;
 
         assert!(second.markdown.starts_with("## Overview"));
         let calls = llm.calls.lock().unwrap();
@@ -1393,7 +1389,7 @@ mod tests {
         let notes = MeetingNotes::default();
 
         let out = generate_summary(
-            &llm,
+            &llm.analyst(),
             &input(&facts, &roster, &default, &notes, SummaryMode::Standard),
         )
         .await;
@@ -1412,7 +1408,7 @@ mod tests {
         let notes = MeetingNotes::default();
 
         let out = generate_summary(
-            &llm,
+            &llm.analyst(),
             &input(&facts, &roster, &default, &notes, SummaryMode::Standard),
         )
         .await;
@@ -1440,7 +1436,7 @@ mod tests {
         let notes = MeetingNotes::default();
 
         let out = generate_summary(
-            &llm,
+            &llm.analyst(),
             &input(&facts, &roster, &default, &notes, SummaryMode::Standard),
         )
         .await;
@@ -1479,7 +1475,7 @@ mod tests {
         let mut summary_input = input(&facts, &roster, &default, &notes, SummaryMode::Standard);
         summary_input.user_instructions = Some("Lead with anything affecting the release date.");
 
-        generate_summary(&llm, &summary_input).await;
+        generate_summary(&llm.analyst(), &summary_input).await;
 
         let calls = llm.calls.lock().unwrap();
         let compact = &calls[1].0;
@@ -1507,7 +1503,7 @@ mod tests {
         let notes = MeetingNotes::default();
 
         let out = generate_summary(
-            &llm,
+            &llm.analyst(),
             &input(&facts, &roster, &default, &notes, SummaryMode::Standard),
         )
         .await;
@@ -1529,7 +1525,7 @@ mod tests {
         let notes = MeetingNotes::default();
 
         generate_summary(
-            &llm,
+            &llm.analyst(),
             &input(&facts, &roster, &brief, &notes, SummaryMode::Standard),
         )
         .await;
@@ -1556,14 +1552,14 @@ mod tests {
 
         // 1. LLM success:
         let llm_ok = ScriptedLlm::new(vec![Ok("## Overview\n\nLLM generated successfully.".to_string())]);
-        let out_ok = generate_summary(&llm_ok, &request).await;
+        let out_ok = generate_summary(&llm_ok.analyst(), &request).await;
         assert!(!out_ok.deterministic);
         assert_eq!(out_ok.markdown, "## Overview\n\nLLM generated successfully.");
         assert!(out_ok.llm_error.is_none());
 
         // 2. LLM unavailable:
         let llm_down = ScriptedLlm::always_unavailable();
-        let out_down = generate_summary(&llm_down, &request).await;
+        let out_down = generate_summary(&llm_down.analyst(), &request).await;
         assert!(out_down.deterministic);
         assert!(out_down.llm_error.is_some());
         assert!(out_down.markdown.contains("Summary generated locally from extracted meeting facts."));
@@ -1572,7 +1568,7 @@ mod tests {
 
         // 3. LLM empty:
         let llm_empty = ScriptedLlm::new(vec![Ok(String::new()), Ok(String::new())]);
-        let out_empty = generate_summary(&llm_empty, &request).await;
+        let out_empty = generate_summary(&llm_empty.analyst(), &request).await;
         assert!(out_empty.deterministic);
         assert!(out_empty.llm_error.is_some());
         assert!(out_empty.markdown.contains("Summary generated locally from extracted meeting facts."));

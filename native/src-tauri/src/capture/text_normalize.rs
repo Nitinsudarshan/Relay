@@ -24,6 +24,7 @@ pub const RULE_REPEATED_WORDS: &str = "repeated_words_collapsed";
 pub const RULE_REPEATED_PHRASES: &str = "repeated_phrases_collapsed";
 pub const RULE_FILLERS: &str = "isolated_fillers_removed";
 pub const RULE_GLOSSARY: &str = "glossary_terms_corrected";
+pub const RULE_LEARNED_CORRECTIONS: &str = "learned_corrections_applied";
 pub const RULE_SENTENCE_BOUNDARIES: &str = "sentence_boundaries_repaired";
 
 /// Standalone filler tokens. Removed only when they stand alone as a whole
@@ -67,6 +68,159 @@ pub fn is_word_internal(c: char) -> bool {
     c.is_alphanumeric() || matches!(c, '\u{094D}' | '\u{093C}' | '\u{200C}' | '\u{200D}')
 }
 
+/// The words this normalizer knows about.
+///
+/// A struct rather than two more parameters because the two halves answer
+/// different questions and are easy to transpose: `glossary` is a list of
+/// canonical *words* matched by token and edit distance, and `corrections` are
+/// whole-*phrase* repairs of forms the recognizer keeps producing. Priming and
+/// repair are not the same mechanism and neither replaces the other.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Vocabulary<'a> {
+    pub glossary: &'a [String],
+    pub corrections: &'a [crate::settings::VocabularyCorrection],
+}
+
+impl<'a> Vocabulary<'a> {
+    pub fn new(
+        glossary: &'a [String],
+        corrections: &'a [crate::settings::VocabularyCorrection],
+    ) -> Self {
+        Self {
+            glossary,
+            corrections,
+        }
+    }
+
+    /// For a caller that has no learned corrections to apply.
+    pub fn glossary_only(glossary: &'a [String]) -> Self {
+        Self {
+            glossary,
+            corrections: &[],
+        }
+    }
+}
+
+/// Replaces phrases the user has taught Relay to repair.
+///
+/// Case-insensitive and bounded by word edges, so "super base" in "super
+/// basement" is left alone. The replacement is written exactly as the user
+/// typed it — the whole point is that they chose the capitalisation.
+///
+/// This cannot make Whisper *hear* differently; it repairs what Whisper wrote.
+/// The dictionary handles the other half by priming the recognizer before it
+/// guesses.
+pub fn apply_learned_corrections(
+    text: &str,
+    corrections: &[crate::settings::VocabularyCorrection],
+) -> String {
+    let mut out = text.to_string();
+    for correction in corrections
+        .iter()
+        .filter(|c| c.enabled && c.is_meaningful())
+    {
+        out = replace_phrase_ignoring_case(&out, correction.source.trim(), &correction.replacement);
+    }
+    out
+}
+
+/// Every whole-word occurrence of `needle`, replaced.
+fn replace_phrase_ignoring_case(haystack: &str, needle: &str, replacement: &str) -> String {
+    if needle.is_empty() {
+        return haystack.to_string();
+    }
+    let lower_hay = haystack.to_lowercase();
+    let lower_needle = needle.to_lowercase();
+
+    let mut out = String::with_capacity(haystack.len());
+    let mut cursor = 0usize;
+    // Lowercasing can change byte lengths for some scripts, which would make
+    // offsets from the lowered string wrong against the original. Fall back to
+    // leaving the text alone rather than slicing at a bad index.
+    if lower_hay.len() != haystack.len() {
+        return haystack.to_string();
+    }
+
+    while let Some(found) = lower_hay[cursor..].find(&lower_needle) {
+        let start = cursor + found;
+        let end = start + lower_needle.len();
+        let bounded = !preceded_by_word_char(haystack, start) && !followed_by_word_char(haystack, end);
+        out.push_str(&haystack[cursor..start]);
+        if bounded {
+            out.push_str(replacement);
+        } else {
+            out.push_str(&haystack[start..end]);
+        }
+        cursor = end;
+    }
+    out.push_str(&haystack[cursor..]);
+    out
+}
+
+fn preceded_by_word_char(text: &str, index: usize) -> bool {
+    text[..index].chars().next_back().is_some_and(is_word_internal)
+}
+
+fn followed_by_word_char(text: &str, index: usize) -> bool {
+    text[index..].chars().next().is_some_and(is_word_internal)
+}
+
+/// How many cursor steps this text occupies — grapheme clusters, not chars.
+///
+/// Exists for one purpose: walking a cursor back over text Relay itself
+/// injected, so the dictation cleanup can select what it wrote and replace it.
+/// The count has to match what an arrow key does, and an arrow key moves by
+/// cluster.
+///
+/// Getting this wrong is not a cosmetic bug. `क्या` is three chars and one
+/// cursor step; counting chars would select two steps too many and delete
+/// whatever the user had written before the dictation — on the script Relay is
+/// most used for. Over-counting destroys their text, so the rule below errs
+/// towards treating a mark as part of the preceding cluster.
+///
+/// An approximation of UAX #29, deliberately, rather than a dependency: what is
+/// needed is combining marks, and the Indic blocks put theirs at consistent
+/// offsets. It is exact for Latin, correct for the Indic scripts Relay sees,
+/// and conservative everywhere else.
+pub fn cursor_steps(text: &str) -> usize {
+    let mut steps = 0usize;
+    for c in text.chars() {
+        if !continues_cluster(c) {
+            steps += 1;
+        }
+    }
+    steps
+}
+
+/// Whether this char attaches to the cluster before it rather than starting one.
+fn continues_cluster(c: char) -> bool {
+    let code = c as u32;
+
+    // Joiners and variation selectors bind what surrounds them.
+    if matches!(code, 0x200C | 0x200D | 0xFE00..=0xFE0F) {
+        return true;
+    }
+    // General combining marks: Latin/Greek/Cyrillic diacritics and enclosing
+    // marks.
+    if matches!(code, 0x0300..=0x036F | 0x0483..=0x0489 | 0x20D0..=0x20F0) {
+        return true;
+    }
+    // Hebrew points and Arabic marks.
+    if matches!(code, 0x0591..=0x05C7 | 0x0610..=0x061A | 0x064B..=0x065F | 0x0670) {
+        return true;
+    }
+
+    // The Indic blocks, which is the case that actually matters here. Each is
+    // 0x80 wide from Devanagari at 0x0900, and each puts its signs, matras,
+    // virama and nukta at the same offsets within the block.
+    if (0x0900..0x0E00).contains(&code) {
+        let offset = code % 0x80;
+        return matches!(offset, 0x00..=0x03 | 0x3A..=0x4F | 0x51..=0x57 | 0x62..=0x63);
+    }
+
+    false
+}
+
 /// Which rules a surface wants.
 ///
 /// The chain is shared; this is the one place it legitimately differs, and it
@@ -95,11 +249,22 @@ impl TextProfile {
 
 /// Applies the full rule chain to one transcript segment's text.
 pub fn normalize_segment_text(raw: &str, glossary: &[String]) -> SegmentOutcome {
-    normalize_text(raw, glossary, TextProfile::Transcript)
+    normalize_text(raw, Vocabulary::glossary_only(glossary), TextProfile::Transcript)
+}
+
+/// As [`normalize_segment_text`], for a caller that also has learned
+/// corrections. Kept separate so the meeting pipeline's many call sites do not
+/// all have to grow a parameter they mostly pass empty.
+pub fn normalize_segment_text_with(raw: &str, vocabulary: Vocabulary<'_>) -> SegmentOutcome {
+    normalize_text(raw, vocabulary, TextProfile::Transcript)
 }
 
 /// Applies the rule chain for `profile`.
-pub fn normalize_text(raw: &str, glossary: &[String], profile: TextProfile) -> SegmentOutcome {
+pub fn normalize_text(
+    raw: &str,
+    vocabulary: Vocabulary<'_>,
+    profile: TextProfile,
+) -> SegmentOutcome {
     let mut applied = Vec::new();
 
     let stripped = strip_bracketed_tags(raw);
@@ -127,8 +292,17 @@ pub fn normalize_text(raw: &str, glossary: &[String], profile: TextProfile) -> S
         applied.push(RULE_FILLERS.to_string());
     }
 
-    let glossed = apply_glossary(&defillered, glossary);
-    if glossed != defillered {
+    // Before the glossary, deliberately. A learned correction is the user's
+    // own statement about a specific phrase; the glossary is a token-level
+    // guess by edit distance. The specific rule should win, and running it
+    // first also means the glossary sees the corrected form.
+    let corrected = apply_learned_corrections(&defillered, vocabulary.corrections);
+    if corrected != defillered {
+        applied.push(RULE_LEARNED_CORRECTIONS.to_string());
+    }
+
+    let glossed = apply_glossary(&corrected, vocabulary.glossary);
+    if glossed != corrected {
         applied.push(RULE_GLOSSARY.to_string());
     }
 
@@ -450,6 +624,216 @@ fn is_within_one_edit(a: &str, b: &str) -> bool {
 
 
 #[cfg(test)]
+mod learned_correction_tests {
+    use super::*;
+    use crate::settings::VocabularyCorrection;
+
+    fn corrections(pairs: &[(&str, &str)]) -> Vec<VocabularyCorrection> {
+        pairs
+            .iter()
+            .map(|(s, r)| VocabularyCorrection::new(s, r))
+            .collect()
+    }
+
+    #[test]
+    fn a_learned_phrase_is_repaired() {
+        let list = corrections(&[("super base", "Supabase")]);
+        assert_eq!(
+            apply_learned_corrections("I was testing super base yesterday", &list),
+            "I was testing Supabase yesterday"
+        );
+    }
+
+    #[test]
+    fn every_occurrence_in_later_transcripts_is_repaired() {
+        // Unlike a single Voice Note correction, which is scoped to the range
+        // the user selected, a *learned* rule is a standing statement about the
+        // phrase and applies wherever it appears.
+        let list = corrections(&[("super base", "Supabase")]);
+        assert_eq!(
+            apply_learned_corrections("super base and super base", &list),
+            "Supabase and Supabase"
+        );
+    }
+
+    #[test]
+    fn matching_ignores_case_but_the_replacement_does_not() {
+        // Whisper's capitalisation of a phrase it got wrong is noise; the
+        // user's capitalisation of the fix is the entire point.
+        let list = corrections(&[("super base", "Supabase")]);
+        assert_eq!(
+            apply_learned_corrections("Super Base is fast", &list),
+            "Supabase is fast"
+        );
+    }
+
+    #[test]
+    fn a_phrase_inside_a_longer_word_is_left_alone() {
+        let list = corrections(&[("lance", "LanceDB")]);
+        assert_eq!(
+            apply_learned_corrections("a freelancer used lance today", &list),
+            "a freelancer used LanceDB today"
+        );
+    }
+
+    #[test]
+    fn a_disabled_correction_stops_being_applied() {
+        let mut list = corrections(&[("super base", "Supabase")]);
+        list[0].enabled = false;
+        assert_eq!(
+            apply_learned_corrections("testing super base", &list),
+            "testing super base"
+        );
+    }
+
+    #[test]
+    fn a_removed_correction_stops_being_applied() {
+        assert_eq!(
+            apply_learned_corrections("testing super base", &[]),
+            "testing super base"
+        );
+    }
+
+    #[test]
+    fn a_no_op_rule_is_ignored() {
+        let list = vec![
+            VocabularyCorrection::new("", "Supabase"),
+            VocabularyCorrection::new("ollama", "  "),
+            VocabularyCorrection::new("Ollama", "ollama"),
+        ];
+        assert!(!list[0].is_meaningful());
+        assert!(!list[1].is_meaningful());
+        assert!(!list[2].is_meaningful(), "differing only by case is not a repair");
+        assert_eq!(apply_learned_corrections("ollama and Supabase", &list), "ollama and Supabase");
+    }
+
+    #[test]
+    fn corrections_run_before_the_glossary_so_the_specific_rule_wins() {
+        // The glossary would fuzzily pull "super base" nowhere useful; the
+        // learned rule is the user's own statement and is applied first, and
+        // the glossary then sees the corrected form.
+        let glossary = vec!["Supabase".to_string()];
+        let list = corrections(&[("super base", "Supabase")]);
+        let outcome = normalize_text(
+            "we tested super base",
+            Vocabulary::new(&glossary, &list),
+            TextProfile::Dictated,
+        );
+        assert_eq!(outcome.text, "we tested Supabase");
+        assert!(outcome
+            .applied_rules
+            .contains(&RULE_LEARNED_CORRECTIONS.to_string()));
+    }
+
+    #[test]
+    fn no_corrections_means_the_rule_is_not_reported() {
+        let outcome = normalize_text(
+            "we tested super base",
+            Vocabulary::default(),
+            TextProfile::Dictated,
+        );
+        assert!(!outcome
+            .applied_rules
+            .contains(&RULE_LEARNED_CORRECTIONS.to_string()));
+        assert_eq!(outcome.text, "we tested super base");
+    }
+
+    #[test]
+    fn a_correction_inside_hinglish_applies_and_leaves_the_rest_alone() {
+        // Devanagari is caseless, so lowercasing does not move any offsets and
+        // the repair lands normally in mixed text — which is the common shape
+        // of what Relay actually transcribes.
+        let list = corrections(&[("super base", "Supabase")]);
+        assert_eq!(
+            apply_learned_corrections("मैं super base चला रहा हूं", &list),
+            "मैं Supabase चला रहा हूं"
+        );
+    }
+
+    #[test]
+    fn text_whose_length_changes_when_lowercased_is_left_alone() {
+        // The guard that stops a bad slice. Turkish dotted capital I lowercases
+        // to two code points, so byte offsets taken from the lowered string no
+        // longer line up with the original; the pass declines rather than
+        // cutting mid-character.
+        let text = "\u{0130}stanbul super base";
+        assert_ne!(text.to_lowercase().len(), text.len(), "premise of this test");
+
+        let list = corrections(&[("super base", "Supabase")]);
+        assert_eq!(
+            apply_learned_corrections(text, &list),
+            text,
+            "declining is correct; corrupting the text is not"
+        );
+    }
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::cursor_steps;
+
+    #[test]
+    fn latin_counts_one_step_per_character() {
+        assert_eq!(cursor_steps("hello"), 5);
+        assert_eq!(cursor_steps("send it to Pragati"), 18);
+        assert_eq!(cursor_steps(""), 0);
+    }
+
+    #[test]
+    fn a_devanagari_cluster_is_one_step_not_three() {
+        // The case that makes this function necessary. Counting chars here
+        // would walk the cursor two steps too far and delete text the user
+        // wrote before dictating.
+        assert_eq!("क्या".chars().count(), 4, "four chars…");
+        assert_eq!(cursor_steps("क्या"), 2, "…but क् + या is two cursor steps");
+
+        // A matra binds to its consonant.
+        assert_eq!("मैं".chars().count(), 3);
+        assert_eq!(cursor_steps("मैं"), 1);
+
+        // And a whole phrase: मैं(1) + space + कल(2) + space + आऊंगा(3), where
+        // आऊंगा is आ, ऊ carrying the anusvara, and ग carrying its matra.
+        assert_eq!(cursor_steps("मैं कल आऊंगा"), 8);
+        assert_eq!("मैं कल आऊंगा".chars().count(), 12, "twelve chars, eight steps");
+    }
+
+    #[test]
+    fn combining_marks_never_add_a_step() {
+        // e + combining acute is one step, however it was typed.
+        assert_eq!(cursor_steps("e\u{0301}"), 1);
+        assert_eq!(cursor_steps("cafe\u{0301}"), 4);
+    }
+
+    #[test]
+    fn a_joined_sequence_is_one_step() {
+        // Zero-width joiner binds what surrounds it, so a joined pair does not
+        // count as two.
+        assert_eq!(cursor_steps("\u{0915}\u{200D}\u{0937}"), 2);
+    }
+
+    #[test]
+    fn the_count_never_exceeds_the_character_count() {
+        // The invariant that makes over-selection impossible: whatever the
+        // rule decides, it can only ever merge steps, never invent them.
+        for text in [
+            "hello",
+            "क्या हाल है",
+            "cafe\u{0301}",
+            "mixed मैं text",
+            "",
+            "   ",
+        ] {
+            assert!(
+                cursor_steps(text) <= text.chars().count(),
+                "{text:?} counted {} steps for {} chars",
+                cursor_steps(text),
+                text.chars().count()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -589,7 +973,7 @@ mod tests {
         // The rules that fix what the decoder got wrong still run.
         let outcome = normalize_text(
             "[BLANK_AUDIO] um the the plan is ready",
-            &[],
+            Vocabulary::default(),
             TextProfile::Dictated,
         );
         assert_eq!(outcome.text, "the plan is ready");
@@ -610,7 +994,7 @@ mod tests {
     fn a_transcript_segment_still_gets_full_punctuation() {
         // The other half of the split: a stored segment is read on its own
         // later and has to look like a sentence.
-        let outcome = normalize_text("we shipped the release", &[], TextProfile::Transcript);
+        let outcome = normalize_text("we shipped the release", Vocabulary::default(), TextProfile::Transcript);
         assert_eq!(outcome.text, "We shipped the release.");
         assert!(outcome
             .applied_rules
@@ -623,8 +1007,8 @@ mod tests {
         // become two pipelines again.
         let raw = "um we we use relay daily [music]";
         let glossary = vec!["Relay".to_string()];
-        let dictated = normalize_text(raw, &glossary, TextProfile::Dictated);
-        let transcript = normalize_text(raw, &glossary, TextProfile::Transcript);
+        let dictated = normalize_text(raw, Vocabulary::glossary_only(&glossary), TextProfile::Dictated);
+        let transcript = normalize_text(raw, Vocabulary::glossary_only(&glossary), TextProfile::Transcript);
 
         assert!(dictated.text.contains("Relay"), "{}", dictated.text);
         assert!(transcript.text.contains("Relay"), "{}", transcript.text);
@@ -656,7 +1040,7 @@ mod tests {
         // The rules are script-agnostic, and dictation is where a Hindi user
         // would notice first if they were not.
         let raw = "मैं फॉर्म भर दूंगी";
-        let outcome = normalize_text(raw, &[], TextProfile::Dictated);
+        let outcome = normalize_text(raw, Vocabulary::default(), TextProfile::Dictated);
         assert_eq!(outcome.text, raw);
     }
 

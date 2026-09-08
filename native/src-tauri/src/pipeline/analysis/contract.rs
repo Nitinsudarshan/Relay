@@ -112,6 +112,13 @@ pub enum AnalysisFailure {
     /// No model answered. Includes the client substituting heuristic filler,
     /// because for analysis that is the same thing as silence.
     NoCompletion(String),
+    /// The model answered with nothing at all.
+    ///
+    /// Distinct from [`NoCompletion`](Self::NoCompletion) because a caller can
+    /// do something about it: the same facts put behind a shorter contract
+    /// often get an answer where the full one got silence. A caller with no
+    /// second prompt to try treats it exactly like `NoCompletion`.
+    EmptyCompletion,
     /// The model answered with something that is not the requested format.
     Unparseable(String),
     /// The model answered in the right format with contents the contract
@@ -127,6 +134,7 @@ impl std::fmt::Display for AnalysisFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoCompletion(m) => write!(f, "no completion available: {m}"),
+            Self::EmptyCompletion => write!(f, "the model returned an empty response"),
             Self::Unparseable(m) => write!(f, "response could not be parsed: {m}"),
             Self::ValidationFailed(m) => write!(f, "response failed validation: {m}"),
             Self::EmptySource => write!(f, "the source has no content to analyse"),

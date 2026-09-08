@@ -21,6 +21,20 @@ use super::prompts::PromptId;
 use super::source::SourceDescriptor;
 use crate::pipeline::source_boundary;
 
+/// Characters per token, deliberately on the low side.
+///
+/// Under-estimating wastes a little of the window. Over-estimating silently
+/// truncates the source, which is the failure the budget exists to prevent, so
+/// the error is taken in the harmless direction.
+const CHARS_PER_TOKEN: usize = 3;
+
+/// Window reserved for the instructions themselves.
+///
+/// The instructions are not free: a meeting's extraction contract is a
+/// substantial prompt in its own right, and a budget that forgot it would hand
+/// the provider a prompt that overflows by exactly the size of the contract.
+const INSTRUCTION_RESERVE_TOKENS: u32 = 1_200;
+
 /// Executes analyses against a provider.
 ///
 /// Holds a borrowed client rather than building its own: §39 says there is one
@@ -163,6 +177,10 @@ impl<'a> AnalysisService<'a> {
             .await
             .map_err(|err| match err {
                 ProviderError::NoCompletion(msg) => AnalysisFailure::NoCompletion(msg),
+                // Kept distinct all the way to the caller: a second, shorter
+                // prompt is worth sending after silence and worthless after an
+                // outage, and only this variant tells them apart.
+                ProviderError::EmptyCompletion => AnalysisFailure::EmptyCompletion,
                 other => AnalysisFailure::NoCompletion(other.to_string()),
             })?;
 
@@ -183,6 +201,41 @@ impl<'a> AnalysisService<'a> {
             response,
             json,
         })
+    }
+
+    /// The provider's own sampling defaults.
+    ///
+    /// For the caller that has to build `CompletionOptions` itself because one
+    /// field of them is computed — a meeting's prose budget comes from the
+    /// length the user chose, so it cannot live in the registry.
+    pub fn provider_defaults(&self) -> crate::providers::CompletionOptions {
+        self.llm
+            .map(|client| client.default_options())
+            .unwrap_or_default()
+    }
+
+    /// How many characters of *source* a prompt may be handed.
+    ///
+    /// Not a nicety, and the reason this is on the service rather than left to
+    /// callers: a provider handed more than its window silently discards the
+    /// overflow — from the front, on Ollama — and nothing in the response says
+    /// it happened. An analysis over a long source has to be split into passes,
+    /// and it can only size those passes if something tells it the window.
+    ///
+    /// Computed per prompt rather than as one constant, because the answer
+    /// genuinely differs: what is left for the source is the window minus what
+    /// the model is allowed to write back, and a prompt that may answer with
+    /// 2,400 tokens leaves less than one capped at 900.
+    ///
+    /// This is the shared-spine equivalent of the `prompt_budget_chars` that
+    /// `meetings_v2::processing::llm::MeetingLlm` carried, and the last thing
+    /// that kept the meeting pipeline off this service.
+    pub fn prompt_budget_chars(&self, prompt_id: PromptId) -> usize {
+        let window = self
+            .llm
+            .map(|client| client.default_options().context_tokens)
+            .unwrap_or_else(|| crate::providers::CompletionOptions::default().context_tokens);
+        prompt_budget_chars_for(prompt_id, window)
     }
 
     /// Builds the metadata for a result produced by this service.
@@ -313,7 +366,28 @@ pub fn context_request<'a>(source: &SourceDescriptor<'a>) -> Option<AnalysisRequ
     Some(AnalysisRequest::new(source, AnalysisType::Context, prompt_id))
 }
 
-fn provider_name(provider: &ProviderType) -> String {
+/// [`AnalysisService::prompt_budget_chars`] for a window the caller already
+/// knows.
+///
+/// A free function because not every caller holds a service. Talkback sizes its
+/// retrieval from its own latency policy and then bounds it by this, so a
+/// surface that decides how much evidence it *wants* still cannot ask for more
+/// than the window can carry.
+pub fn prompt_budget_chars_for(prompt_id: PromptId, context_tokens: u32) -> usize {
+    let reserved = prompt_id
+        .definition()
+        .max_output_tokens
+        .saturating_add(INSTRUCTION_RESERVE_TOKENS);
+
+    context_tokens.saturating_sub(reserved) as usize * CHARS_PER_TOKEN
+}
+
+/// The provider family's stable name, for the provenance record.
+///
+/// Public because a caller that records provenance for a *failed* call has no
+/// `ExecutedAnalysis` to read it off, and a second copy of this mapping is a
+/// second thing to get wrong.
+pub fn provider_name(provider: &ProviderType) -> String {
     match provider {
         ProviderType::Ollama => "ollama",
         ProviderType::CloudOpenAI => "cloud_openai",
@@ -342,7 +416,32 @@ pub fn parse_json_response(raw: &str) -> Option<serde_json::Value> {
         text
     };
 
-    let value: serde_json::Value = serde_json::from_str(candidate).ok()?;
+    // Whatever the candidate parses as, its shape decides. An array or a scalar
+    // is well-formed JSON and still not a structured analysis, and it must not
+    // reach the rescue below — digging an object out of `[{…}]` is precisely how
+    // filler shaped like a result gets treated as one.
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(candidate) {
+        return value.is_object().then_some(value);
+    }
+
+    // Only now, with the response established as not-JSON-at-all: the outermost
+    // braces in it.
+    //
+    // A small local model asked for strict JSON sometimes delivers it wrapped in
+    // a sentence — "Here is the JSON: {…}" — and refusing that throws away an
+    // answer that is entirely present. `meetings_v2::processing::extract` has
+    // always been this tolerant privately, which is precisely why the claim
+    // above ("answered in one place rather than re-implemented per analysis")
+    // was not yet true. Folding the rule in here makes it true. It is narrower
+    // than the private version it replaces, which scanned braces unconditionally
+    // and so would rescue an object out of an array; the shared contract has
+    // always refused that, and goes on refusing it.
+    let start = candidate.find('{')?;
+    let end = candidate.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(&candidate[start..=end]).ok()?;
     value.is_object().then_some(value)
 }
 
@@ -402,6 +501,10 @@ mod computed_prompt_tests {
 
         fn provider_type(&self) -> &ProviderType {
             &ProviderType::Ollama
+        }
+
+        fn model_name(&self) -> String {
+            "scripted".to_string()
         }
 
         fn complete_verified<'a>(

@@ -55,11 +55,31 @@ const TURN_CONTEXT_CHAR_CEILING: usize = 3_600;
 
 /// The character budget for retrieved context on one Talkback turn.
 ///
-/// Takes the smaller of the provider-derived budget and the turn ceiling, so a
-/// user who has configured a *small* window still gets their own figure rather
-/// than this one.
+/// The smallest of three figures, and each one is answering a different
+/// question:
+///
+/// * [`char_budget_for`] — how much grounding this window *buys*. Scales up, so
+///   configuring a larger window is worth something.
+/// * [`TURN_CONTEXT_CHAR_CEILING`] — how much a spoken turn can *use* before
+///   more evidence stops improving the answer and starts delaying it.
+/// * [`prompt_budget_chars_for`] — how much actually *fits* alongside the
+///   answer and the voice rules.
+///
+/// The third was missing, and it is the one that fails silently. At the
+/// smallest window Relay allows (2,048 tokens, the floor
+/// `LLMClient::default_options` clamps to) the other two agreed on 2,580
+/// characters of retrieval where 1,344 fit — and an overlong prompt is not
+/// refused by Ollama, it is truncated from the front, which is where the voice
+/// rules and the grounding instruction live. The turn would have kept its
+/// evidence and quietly lost the rules telling it to stay grounded in that
+/// evidence.
 pub fn turn_char_budget_for(context_tokens: u32) -> usize {
-    char_budget_for(context_tokens).min(TURN_CONTEXT_CHAR_CEILING)
+    char_budget_for(context_tokens)
+        .min(TURN_CONTEXT_CHAR_CEILING)
+        .min(crate::pipeline::analysis::prompt_budget_chars_for(
+            crate::pipeline::analysis::PromptId::TalkbackAnswer,
+            context_tokens,
+        ))
 }
 
 /// The shared voice rules. Every prompt below starts from these, so
@@ -531,7 +551,37 @@ mod external_source_tests {
         // maximum, never a floor that would overrun their model's context.
         let small = char_budget_for(2_048);
         assert!(small < TURN_CONTEXT_CHAR_CEILING, "small {small}");
-        assert_eq!(turn_char_budget_for(2_048), small);
+
+        // …and the window-derived figure is not the last word either. This
+        // test used to assert `small` (2,580 characters) and was wrong on its
+        // own terms: at 2,048 tokens only 1,344 characters fit once the answer
+        // and the voice rules are accounted for, so the figure it was
+        // protecting *did* overrun the model's context — silently, because an
+        // overlong prompt is truncated from the front rather than refused.
+        let fits = crate::pipeline::analysis::prompt_budget_chars_for(
+            crate::pipeline::analysis::PromptId::TalkbackAnswer,
+            2_048,
+        );
+        assert!(fits < small, "fits {fits}, derived {small}");
+        assert_eq!(turn_char_budget_for(2_048), fits);
+    }
+
+    #[test]
+    fn a_turn_never_asks_for_more_than_the_window_can_carry() {
+        // The invariant the case above is one instance of. Talkback decides how
+        // much evidence it *wants* from its own latency policy; what *fits* is
+        // the analysis spine's answer, and it wins wherever the two disagree.
+        for window in [2_048u32, 4_096, 8_192, 16_384, 32_768] {
+            let fits = crate::pipeline::analysis::prompt_budget_chars_for(
+                crate::pipeline::analysis::PromptId::TalkbackAnswer,
+                window,
+            );
+            assert!(
+                turn_char_budget_for(window) <= fits,
+                "window {window}: asked for {} where {fits} fit",
+                turn_char_budget_for(window)
+            );
+        }
     }
 
     #[test]

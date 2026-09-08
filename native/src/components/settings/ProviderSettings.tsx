@@ -178,7 +178,6 @@ const DEFAULT_SETTINGS: AppSettings = {
     prefer_builtin_mic: true,
     selected_device: null,
     keep_microphone_warm: 'off',
-    auto_learn_words: true,
   },
   talkback: DEFAULT_TALKBACK_SETTINGS,
   dictionary: ['Relay', 'Whisper', 'Tauri', 'Rust', 'Supabase', 'LanceDB', 'Ollama'],
@@ -226,6 +225,11 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
   // STT Model discovery state
   const [sttOverview, setSttOverview] = useState<SttModelsOverview | null>(null);
   const [loadingSttModels, setLoadingSttModels] = useState(false);
+  // Which managed model is downloading, and why the last attempt failed.
+  // `large-v3-turbo` is ~1.6 GB, so the button has to stay honest about being
+  // busy rather than looking inert for several minutes.
+  const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
+  const [modelDownloadError, setModelDownloadError] = useState<string | null>(null);
   const [customSttMode, setCustomSttMode] = useState(false);
 
   const checkLocalLlm = async (overrideHost?: string) => {
@@ -253,6 +257,50 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
       setLoadingOllamaModels(false);
     }
   };
+
+  // Fetches a managed model on request.
+  //
+  // Downloading does not select the model. The accuracy ceiling costs real
+  // decode time on every utterance, so making it active is a separate press —
+  // the same separation the backend command documents.
+  const downloadSttModel = async (filename: string) => {
+    setDownloadingModel(filename);
+    setModelDownloadError(null);
+    try {
+      const status = await invoke<SttModelStatus>('download_stt_model', { filename });
+      if (status.state === 'failed') {
+        setModelDownloadError(status.message);
+      }
+      await fetchSttModels();
+    } catch (e) {
+      setModelDownloadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloadingModel(null);
+    }
+  };
+
+  // Scoped to meetings deliberately. Dictation already has its own Fast /
+  // Accurate profile above, and the reason to reach for a model this large is
+  // a recording that is transcribed once and read for weeks — not push-to-talk,
+  // where the extra decode time is paid on every utterance.
+  const useSttModelForMeetings = (path: string) => {
+    setSettings({
+      ...settings,
+      stt: { ...settings.stt, meeting_model_path: path, meetingModelPath: path },
+    });
+  };
+
+  const clearMeetingModel = () => {
+    setSettings({
+      ...settings,
+      stt: { ...settings.stt, meeting_model_path: null, meetingModelPath: null },
+    });
+  };
+
+  // What meetings will actually load. Null means they follow the global
+  // setting, which is the shipped behaviour and stays the default.
+  const meetingModel =
+    settings.stt.meeting_model_path ?? settings.stt.meetingModelPath ?? null;
 
   const fetchSttModels = async () => {
     setLoadingSttModels(true);
@@ -989,7 +1037,6 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                             prefer_builtin_mic: checked,
                             selected_device: settings.audio_input?.selected_device,
                             keep_microphone_warm: settings.audio_input?.keep_microphone_warm || 'off',
-                            auto_learn_words: settings.audio_input?.auto_learn_words ?? true,
                           },
                         };
                         setSettings(updated);
@@ -1000,6 +1047,51 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                         }
                       }}
                     />
+                  </div>
+
+                  {/* Microphone choice. Until this existed the banner below
+                      reported a device from a setting nothing could set. */}
+                  <div className="space-y-1.5">
+                    <label htmlFor="input-device" className="block text-xs font-semibold text-foreground">
+                      Microphone
+                    </label>
+                    <select
+                      id="input-device"
+                      value={settings.audio_input?.selected_device ?? ''}
+                      onChange={async (e) => {
+                        const value = e.target.value;
+                        const updated: AppSettings = {
+                          ...settings,
+                          audio_input: {
+                            ...settings.audio_input,
+                            prefer_builtin_mic: settings.audio_input?.prefer_builtin_mic ?? true,
+                            selected_device: value === '' ? null : value,
+                            keep_microphone_warm: settings.audio_input?.keep_microphone_warm || 'off',
+                          },
+                        };
+                        setSettings(updated);
+                        try {
+                          await invoke('save_settings', { settings: updated });
+                        } catch (err) {
+                          console.error('Failed to save microphone selection', err);
+                        }
+                      }}
+                      className="w-full text-xs rounded-lg border border-border bg-card/50 px-2 py-1.5 text-foreground"
+                    >
+                      <option value="">
+                        System default{defaultDevice ? ` (${defaultDevice.name})` : ''}
+                      </option>
+                      {audioDevices.map((device) => (
+                        <option key={device.name} value={device.name}>
+                          {device.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-muted-foreground leading-snug">
+                      Applies to dictation, meetings and Talkback alike. A device that is
+                      unplugged falls back to the system default rather than failing the
+                      recording.
+                    </p>
                   </div>
 
                   {/* Active Input Device Badge (Green Banner) */}
@@ -1028,7 +1120,6 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                             ...settings.audio_input,
                             prefer_builtin_mic: settings.audio_input?.prefer_builtin_mic ?? true,
                             keep_microphone_warm: val,
-                            auto_learn_words: settings.audio_input?.auto_learn_words ?? true,
                           },
                         };
                         setSettings(updated);
@@ -1047,39 +1138,6 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                       <option value="5m">5 minutes</option>
                     </select>
                   </div>
-                </div>
-              </div>
-
-              {/* Auto-learn from corrections (OpenWhispr Style) */}
-              <div className="py-3 border-b border-border space-y-3">
-                <p className="text-xs font-semibold text-foreground">Auto-learn from corrections</p>
-                <div className="p-3.5 rounded-lg bg-muted/40 border border-border flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Auto-learn from corrections</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      When you correct a transcription in the target app, the corrected word is automatically added to your dictionary.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={settings.audio_input?.auto_learn_words ?? true}
-                    onCheckedChange={async (checked) => {
-                      const updated: AppSettings = {
-                        ...settings,
-                        audio_input: {
-                          ...settings.audio_input,
-                          prefer_builtin_mic: settings.audio_input?.prefer_builtin_mic ?? true,
-                          keep_microphone_warm: settings.audio_input?.keep_microphone_warm || 'off',
-                          auto_learn_words: checked,
-                        },
-                      };
-                      setSettings(updated);
-                      try {
-                        await invoke('save_settings', { settings: updated });
-                      } catch (err) {
-                        console.error('Failed to update auto learn words', err);
-                      }
-                    }}
-                  />
                 </div>
               </div>
 
@@ -1818,10 +1876,79 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                               <span>{m.filename}</span>
                               <span>{m.size_bytes ? `${(m.size_bytes / (1024 * 1024)).toFixed(0)} MB` : ''}</span>
                             </div>
+
+                            {/* The overview has always listed a missing managed
+                                model so the option is visible rather than
+                                hidden. This is the offer it was listed for. */}
+                            {m.is_managed && m.status !== 'ready' && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => downloadSttModel(m.filename)}
+                                disabled={downloadingModel !== null}
+                                className="w-full text-[11px] h-7 gap-1.5 mt-1"
+                              >
+                                {downloadingModel === m.filename ? (
+                                  <>
+                                    <RefreshCw className="w-3 h-3 animate-spin" />
+                                    Downloading…
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3 h-3" />
+                                    Download
+                                  </>
+                                )}
+                              </Button>
+                            )}
+
+                            {m.status === 'ready' &&
+                              (meetingModel === m.path ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={clearMeetingModel}
+                                  className="w-full text-[11px] h-7 gap-1.5 mt-1 text-primary"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  Meetings use this
+                                </Button>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => useSttModelForMeetings(m.path)}
+                                  className="w-full text-[11px] h-7 gap-1.5 mt-1"
+                                >
+                                  Use for meetings
+                                </Button>
+                              ))}
                           </div>
                         );
                       })}
                     </div>
+
+                    {modelDownloadError && (
+                      <div className="p-2 rounded-lg border border-destructive/30 bg-destructive/10 text-destructive text-[11px] flex items-start gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                        <span>{modelDownloadError}</span>
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-muted-foreground leading-snug">
+                      Whisper Large v3 Turbo is the accuracy ceiling and a ~1.6 GB download. It is
+                      markedly better on Hindi and other non-English speech than Small, and slower
+                      on every utterance — worth it for meetings, usually not for push-to-talk.
+                      Downloading it does not switch to it.
+                    </p>
+                    <p className="text-[10px] text-muted-foreground leading-snug">
+                      {meetingModel
+                        ? 'Meetings use the model marked above. Dictation is unaffected and keeps the profile you chose below.'
+                        : 'Meetings currently follow the global model. Choose Use for meetings to give them a more accurate one without slowing dictation.'}
+                    </p>
                   </div>
 
                   {/* Performance Profile Toggle */}
@@ -1887,6 +2014,62 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                           Maximum vocabulary fidelity (244M params). Recommended for complex technical monologues.
                         </p>
                       </button>
+                    </div>
+                  </div>
+
+                  {/* Decode Preset */}
+                  <div className="space-y-2 pt-2">
+                    <label className="block text-xs font-semibold text-foreground">
+                      Decode Preset
+                    </label>
+                    <p className="text-[11px] text-muted-foreground leading-snug">
+                      Trades decode time for how much borderline speech survives. Automatic lets
+                      each surface pick what suits it — dictation is latency-bound because someone
+                      is waiting for the text, a meeting is recall-bound because it is decoded once
+                      and read later. Choosing one here overrides both.
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {([
+                        {
+                          value: '',
+                          label: 'Automatic',
+                          hint: 'Fast for dictation, Quality for meetings',
+                        },
+                        { value: 'fast', label: 'Fast', hint: 'Greedy. Lowest latency' },
+                        { value: 'balanced', label: 'Balanced', hint: 'Beam search at 3' },
+                        { value: 'quality', label: 'Quality', hint: 'Beam search at 5. Keeps the most' },
+                      ] as const).map((option) => {
+                        const current = settings.stt.preset ?? settings.stt.sttPreset ?? '';
+                        const selected = current === option.value;
+                        return (
+                          <button
+                            key={option.value || 'auto'}
+                            type="button"
+                            onClick={() => {
+                              setSettings({
+                                ...settings,
+                                stt: {
+                                  ...settings.stt,
+                                  preset: option.value,
+                                  sttPreset: option.value,
+                                },
+                              });
+                            }}
+                            className={`p-2.5 rounded-lg border text-left transition-all ${
+                              selected
+                                ? 'border-primary bg-primary/10 text-foreground shadow-xs'
+                                : 'border-border bg-card/50 text-muted-foreground hover:border-border/80'
+                            }`}
+                          >
+                            <div className="text-[11px] font-bold text-foreground mb-0.5">
+                              {option.label}
+                            </div>
+                            <p className="text-[10px] text-muted-foreground leading-snug">
+                              {option.hint}
+                            </p>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 

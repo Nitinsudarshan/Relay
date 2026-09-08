@@ -34,43 +34,30 @@
 //! * **Nothing here blocks recording.** The pipeline runs after finalization,
 //!   holds no capture resources, and shares no state with either audio clock.
 
-// TODO(context): migrate this pipeline onto `pipeline::analysis`.
+// This pipeline runs on `pipeline::analysis`.
 //
-// The foundation added in the 01-10 convergence (source contract, analysis
-// contract, prompt registry, derived data) covers captures, files and
-// scribbles. Meetings deliberately did not move in that pass: this pipeline
-// has staged extraction, validation and a repair loop that the shared service
-// does not model yet, and destabilising it for architectural symmetry is a bad
-// trade.
+// It was the last thing that did not, and the migration finished in three
+// pieces rather than one rename:
 //
-// Both blockers this TODO originally named are now gone:
+// * `AnalysisStage` names the two passes, and `PromptBody::Computed` admits
+//   instructions built per call. `PromptId::MeetingFacts` / `::MeetingSummary`
+//   own the identity, version, output contract and sampling that `llm.rs` used
+//   to restate in prose.
+// * `AnalysisService` takes `providers::Completer`, so `ScriptedLlm` drives the
+//   real service instead of a parallel path that merely resembled it. The three
+//   suites here kept their coverage and gained the registry, the boundary and
+//   the JSON gate along with it.
+// * `AnalysisService::prompt_budget_chars` replaced the `prompt_budget_chars`
+//   that `MeetingLlm` carried — the last genuine gap, since extraction sizes
+//   its passes from it. It is computed per prompt now, from the window less
+//   that prompt's own output allowance, and `llm.rs` has a test asserting it
+//   comes out at exactly the number the old constant produced. A migration that
+//   silently re-chunks every long meeting is not a migration.
 //
-// * `AnalysisStage` describes a multi-pass analysis, and `AnalysisStage::FACTS`
-//   / `::PROSE` name this pipeline's two passes.
-// * `PromptBody::Computed` admits a prompt whose instructions are built per
-//   call, and `PromptId::MeetingFacts` / `::MeetingSummary` are registered
-//   against it with their own output contracts and per-stage sampling.
-//   `AnalysisService::execute_computed` runs them.
-//
-// A third blocker, which neither this comment nor `analysis/mod.rs` had
-// identified, is also gone: `AnalysisService` took a concrete `&LLMClient`,
-// so migrating would have meant rewriting the three suites that drive this
-// pipeline through `ScriptedLlm`. It now takes `providers::Completer`, and
-// `service.rs` has a scripted implementation of its own proving a computed,
-// staged prompt runs end to end without a network.
-//
-// So nothing structural is in the way. What is left is the swap itself, and
-// it is a real piece of work rather than a rename: `MeetingLlm` carries
-// `prompt_budget_chars`, which extraction uses to decide how many passes a
-// long transcript needs, and that has no equivalent on the shared service
-// yet. Do it stage by stage, keep the repair loop and the deterministic floor
-// in this module where they already are, and keep `ScriptedLlm`'s coverage by
-// pointing it at the new seam rather than deleting it.
-//
-// What is already shared: the provider layer, the completion seam, and the
-// heuristic-filler marker, which comes from
-// `providers::HEURISTIC_FALLBACK_MODEL` for both.
-
+// What deliberately stayed: the repair loop, the deterministic floor, and
+// action-item qualification. Those are this pipeline's judgement about a
+// meeting, not transport, and moving them would have been the bad trade §38
+// warned about rather than the good one.
 
 pub mod context;
 pub mod conversation;
@@ -107,7 +94,8 @@ use super::session_store::SessionStore;
 use super::diarize::{self, Diarization};
 use super::transcript_health::{self, DecodeEvidence};
 use super::types::{MeetingNotes, TranscriptSegment, TranscriptSegmentStatus};
-use llm::MeetingLlm;
+use crate::pipeline::analysis::{SourceCoverage, SourceDescriptor};
+use llm::MeetingAnalyst;
 pub use model::MeetingProcessing;
 use model::{
     ActionItemStatus, MeetingExtension, ProcessingLogEntry, ProcessingStatus, ProviderOutputStatus,
@@ -437,7 +425,7 @@ impl MeetingProcessor {
     pub async fn generate_summary(
         &self,
         meeting_id: &str,
-        llm: &dyn MeetingLlm,
+        llm: &dyn crate::providers::Completer,
         options: &ProcessingOptions,
         force_extraction: bool,
     ) -> Result<MeetingProcessing, String> {
@@ -508,6 +496,34 @@ audio are unaffected."
             glossary: &options.glossary,
         };
 
+        // The meeting as the shared analysis layer sees it, built once so both
+        // stages describe the same recording.
+        //
+        // Coverage is not a formality. This pipeline already measures how much
+        // of the recording produced usable speech, and §29 is the rule that
+        // what capture knows must reach the model rather than stopping at the
+        // UI. A meeting that lost half its audio to rejected chunks now says so
+        // in the prompt, which is the difference between a model reporting
+        // thin evidence and a model inferring around a hole it cannot see.
+        let coverage_notes: Vec<String> = processing
+            .metadata
+            .as_ref()
+            .and_then(|m| m.health.describe())
+            .into_iter()
+            .collect();
+        let source = SourceDescriptor::for_meeting(
+            meeting_id,
+            &session.title,
+            session.started_at.as_deref().unwrap_or(&session.created_at),
+            if coverage_notes.is_empty() {
+                SourceCoverage::Complete
+            } else {
+                SourceCoverage::Partial
+            },
+            &coverage_notes,
+        );
+        let analyst = MeetingAnalyst::new(llm, source);
+
         let reuse_facts = !force_extraction
             && processing.facts.as_ref().is_some_and(|f| !f.deterministic)
             && processing.stages.extraction.status == StageStatus::Success;
@@ -524,7 +540,7 @@ audio are unaffected."
                 .expect("reuse_facts implies facts are present")
         } else {
             let started = Instant::now();
-            let output = extract::extract_facts(llm, &context, &session.title).await;
+            let output = extract::extract_facts(&analyst, &context, &session.title).await;
             let duration_ms = started.elapsed().as_millis() as u64;
 
             let mut facts = output.facts;
@@ -604,7 +620,7 @@ audio are unaffected."
         };
 
         let started = Instant::now();
-        let summary_output = summarize::generate_summary(llm, &summary_input).await;
+        let summary_output = summarize::generate_summary(&analyst, &summary_input).await;
         let transcript_text = normalized.plain_text();
 
         // Step 7 — validate, and act on the verdict.
@@ -671,7 +687,7 @@ audio are unaffected."
                         "meeting_processing: model prose failed validation; asking for a repair"
                     );
 
-                    let repaired = summarize::repair_summary(llm, &summary_input, &feedback).await;
+                    let repaired = summarize::repair_summary(&analyst, &summary_input, &feedback).await;
                     if repaired.deterministic {
                         // The repair call itself could not be made. Keep the
                         // first draft's diagnosis rather than the retry's.

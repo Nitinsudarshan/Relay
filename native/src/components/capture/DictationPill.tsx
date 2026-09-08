@@ -9,7 +9,11 @@ import {
   OllamaStatusInfo, 
   HotkeyStatusInfo, 
   DiagnosticInfo, 
-  CleanupStyle, 
+  CleanupStyle,
+  RewriteProposal,
+  CleanupTarget,
+  CleanupApplied,
+  
   SpeechLanguage 
 } from './PillTypes';
 import { 
@@ -89,7 +93,7 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   
   // Settings & Toggles
   const [autoPaste, setAutoPaste] = useState(true);
-  const [textTransform, setTextTransform] = useState(true);
+  const [textTransform, setTextTransform] = useState(false);
   const [cleanupStyle, setCleanupStyle] = useState<CleanupStyle>('faithful');
   const [language, setLanguage] = useState<SpeechLanguage>('auto');
   const [dictationShortcut, setDictationShortcut] = useState('Ctrl+Space');
@@ -102,6 +106,9 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
   const [successMessage, setSuccessMessage] = useState<string>('Text inserted');
   const [processingMessage, setProcessingMessage] = useState<string>('Transcribing...');
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [cleanupProposal, setCleanupProposal] = useState<RewriteProposal | null>(null);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupAvailable, setCleanupAvailable] = useState(false);
 
   // Dependency Verification Statuses
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -240,6 +247,110 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
     }
   };
 
+  // The two controls that shipped as local state and were sent nowhere. They
+  // are settings now, because the layer behind them is real.
+  const persistStt = async (patch: Record<string, unknown>) => {
+    let current = settings || settingsRef.current;
+    if (!current) {
+      try {
+        current = await invoke<AppSettings>('get_settings');
+      } catch {
+        return;
+      }
+    }
+    const updated: AppSettings = { ...current, stt: { ...current.stt, ...patch } };
+    setSettings(updated);
+    settingsRef.current = updated;
+    try {
+      await invoke('save_settings', { settings: updated });
+    } catch (err) {
+      console.error('Failed to save cleanup setting from pill', err);
+    }
+  };
+
+  const handleToggleTextTransform = (val: boolean) => {
+    setTextTransform(val);
+    void persistStt({ text_transform: val, textTransform: val });
+  };
+
+  const handleChangeCleanupStyle = (style: CleanupStyle) => {
+    setCleanupStyle(style);
+    void persistStt({ cleanup_style: style, cleanupStyle: style });
+  };
+
+  // Explicitly after the fact. The text is already in the field — dictation
+  // never waits on a model — and this is the user asking for a second pass on
+  // what landed.
+  const handleCleanup = async () => {
+    setCleanupBusy(true);
+    try {
+      const target = await invoke<CleanupTarget>('get_cleanup_target');
+      if (!target.available) {
+        setCleanupAvailable(false);
+        return;
+      }
+      const proposal = await invoke<RewriteProposal>('rewrite_dictation', {
+        text: target.text,
+        style: cleanupStyle,
+      });
+      if (!proposal.changed) {
+        setSuccessMessage('Already clean — nothing to change');
+        setPhase('success');
+        return;
+      }
+      setCleanupProposal(proposal);
+      setPhase('cleanup');
+    } catch (err) {
+      console.error('Cleanup failed', err);
+      setSuccessMessage('Cleanup unavailable');
+      setPhase('success');
+    } finally {
+      setCleanupBusy(false);
+    }
+  };
+
+  const handleApplyCleanup = async () => {
+    if (!cleanupProposal) return;
+    setCleanupBusy(true);
+    try {
+      const result = await invoke<CleanupApplied>('apply_dictation_cleanup', {
+        cleaned: cleanupProposal.rewritten,
+      });
+      setSuccessMessage(
+        result.state === 'replaced' ? 'Cleaned up' : result.message
+      );
+    } catch (err) {
+      console.error('Apply cleanup failed', err);
+      setSuccessMessage('Could not apply the cleanup');
+    } finally {
+      setCleanupBusy(false);
+      setCleanupProposal(null);
+      setCleanupAvailable(false);
+      setPhase('success');
+    }
+  };
+
+  // Whether anything is still replaceable. Asked of the backend rather than
+  // inferred from the pill's own state: applying a cleanup consumes the
+  // target, so this answer is self-correcting and a second press cannot act on
+  // text that has already been replaced.
+  useEffect(() => {
+    if (phase !== 'success') {
+      return;
+    }
+    let cancelled = false;
+    invoke<CleanupTarget>('get_cleanup_target')
+      .then((target) => {
+        if (!cancelled) setCleanupAvailable(target.available);
+      })
+      .catch(() => {
+        if (!cancelled) setCleanupAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [phase]);
+
   // Real-time Theme Syncing (Light / Dark / System)
   useEffect(() => {
     const applyTheme = (mode: string) => {
@@ -272,6 +383,14 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
         }
         if (payload.clipboard) {
           setAutoPaste(payload.clipboard.auto_paste ?? true);
+        }
+        if (payload.stt) {
+          // Off unless chosen: the cleanup layer costs a model call and may
+          // change words, so it is turned on rather than discovered.
+          setTextTransform(payload.stt.text_transform ?? payload.stt.textTransform ?? false);
+          setCleanupStyle(
+            (payload.stt.cleanup_style || payload.stt.cleanupStyle || 'faithful') as CleanupStyle
+          );
         }
         if (payload.hotkeys?.dictation_hotkey) {
           setDictationShortcut(payload.hotkeys.dictation_hotkey);
@@ -770,6 +889,75 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
               <div className="flex items-center gap-1.5 w-full overflow-hidden text-blue-600 dark:text-blue-400 text-xs font-semibold animate-in fade-in duration-200">
                 <Check className="w-3.5 h-3.5 stroke-[2.5] shrink-0" />
                 <span className="truncate">{successMessage}</span>
+                {textTransform && cleanupAvailable && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleCleanup();
+                    }}
+                    disabled={cleanupBusy}
+                    className="ml-auto shrink-0 px-2 py-0.5 rounded-lg border border-slate-200 dark:border-[#404040] bg-transparent text-[11px] font-semibold text-slate-700 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-[#262626] disabled:opacity-50 cursor-pointer"
+                  >
+                    {cleanupBusy ? 'Cleaning…' : 'Clean up'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Phase 7: CLEANUP REVIEW — the diff, before anything is replaced. */}
+            {phase === 'cleanup' && cleanupProposal && (
+              <div className="flex flex-col gap-1.5 w-full overflow-hidden animate-in fade-in duration-200">
+                <div className="max-h-[64px] overflow-y-auto text-xs leading-snug text-slate-700 dark:text-neutral-300">
+                  {cleanupProposal.spans.map((span, index) => {
+                    if (span.kind === 'same') {
+                      return <span key={index}>{span.text}</span>;
+                    }
+                    if (span.kind === 'removed') {
+                      return (
+                        <span
+                          key={index}
+                          className="line-through text-rose-600 dark:text-rose-400 bg-rose-500/10 rounded-sm"
+                        >
+                          {span.text}
+                        </span>
+                      );
+                    }
+                    return (
+                      <span
+                        key={index}
+                        className="text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 rounded-sm"
+                      >
+                        {span.text}
+                      </span>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleApplyCleanup();
+                    }}
+                    disabled={cleanupBusy}
+                    className="px-2 py-0.5 rounded-lg border-none bg-blue-600 text-white text-[11px] font-semibold hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+                  >
+                    Replace
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCleanupProposal(null);
+                      setSuccessMessage('Kept what you said');
+                      setPhase('success');
+                    }}
+                    className="px-2 py-0.5 rounded-lg border border-slate-200 dark:border-[#404040] bg-transparent text-[11px] font-semibold text-slate-700 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-[#262626] cursor-pointer"
+                  >
+                    Keep mine
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -808,10 +996,10 @@ export const DictationPill: React.FC<DictationPillProps> = ({ onProcessComplete 
           autoPaste={autoPaste}
           onToggleAutoPaste={handleToggleAutoPaste}
           textTransform={textTransform}
-          onToggleTextTransform={setTextTransform}
+          onToggleTextTransform={handleToggleTextTransform}
           onToggleDictationSounds={handleToggleDictationSounds}
           cleanupStyle={cleanupStyle}
-          onChangeCleanupStyle={setCleanupStyle}
+          onChangeCleanupStyle={handleChangeCleanupStyle}
           language={language}
           onChangeLanguage={handleLanguageChange}
           whisperStatus={whisperStatus}

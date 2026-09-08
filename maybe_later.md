@@ -175,13 +175,23 @@ This document tracks deferred features, rejected/postponed UI patterns, and arch
 
 ### 12. Calendar Sync for Meeting Attendees and Titles
 
-- **Status**: Deferred — no calendar integration exists
+- **Status**: Partly shipped (0.41.0) — calendar integration exists; the
+  expected-speaker hint does not
 - **Area**: Native backend (`native/src-tauri/src/meetings_v2/processing/metadata.rs`, `native/src-tauri/src/oauth/*`)
 - **Original Context**:
   - Rung 3 of `Meeting-rules/meeting_speaker_identification.md` is "calendar
     attendees + conferencing display names", and §2.2 specifies that a
     recording's expected-speaker count should default to the calendar attendee
-    count. Neither is built.
+    count.
+  - **The first half shipped and this entry did not get updated.** Google
+    Calendar accounts, event matching and `ParticipantOrigin::Invited` all
+    exist, and `processing/metadata.rs` populates participants from the matched
+    event's likely attendees — ordered after the voices actually heard and
+    before names merely mentioned, and never marked confirmed, because the
+    calendar is a record rather than evidence that somebody spoke.
+  - What is still missing is §2.2: the attendee count is not used as the
+    expected-speaker hint for diarization, which is the parameter that would
+    let separation know how many voices to look for.
   - 0.31.0 built the surface those would fill: `MeetingMetadata` carries a
     participant list with a `ParticipantOrigin`, and `Stated` already covers "a
     name a person supplied". A calendar attendee is the same shape with a
@@ -200,3 +210,36 @@ This document tracks deferred features, rejected/postponed UI patterns, and arch
     one, and never overwrite a title the extraction stage produced.
   - Treat the calendar as external source material, per `rules/security.md`: an
     event description is data, never an instruction to Relay's AI.
+
+### 13. Auto-Learning Dictionary Words From Corrections
+
+- **Status**: Removed — the setting existed, the mechanism could not
+- **Area**: Native backend (`native/src-tauri/src/settings/mod.rs`), Settings › Engine
+- **Original Context**:
+  - `AudioInputSettings::auto_learn_words` shipped as a persisted setting with a
+    rendered toggle, defaulting on, and was read by nothing. Its own copy
+    promised: "When you correct a transcription in the target app, the
+    corrected word is automatically added to your dictionary."
+  - That is not a feature that was left unfinished. It describes observing what
+    the user edits **in another application**, which needs accessibility text
+    APIs — reading the contents of somebody else's window. Relay does not do
+    that anywhere, and the capture surfaces are deliberately built the other
+    way round: `hotkeys::injection` can put text into a focused field and has
+    no way to read one back.
+  - Left in place it was worse than absent: a toggle that is on by default and
+    silently does nothing teaches the user that the setting does not matter.
+- **What would have to be true first**:
+  - A decision to take an accessibility-API dependency (UI Automation on
+    Windows, AX on macOS) and the privacy posture to go with it — Relay would
+    be reading the user's other applications, which is a different product
+    promise from recording their microphone when they press a key.
+  - That is the same class of decision as the ONNX runtime in item 1: a
+    dependency and a stance, not an afternoon.
+- **The cheaper thing that is actually available**:
+  - Relay already has a user dictionary and a glossary that primes the
+    recognizer, and it now has a rewrite layer (`capture::rewrite`) where the
+    user explicitly accepts or rejects a proposed change to their own dictated
+    text. A word the user *accepts* there is a correction Relay can observe
+    without reading anybody's window. That is a real feature and a different
+    one, and it should be designed as itself rather than smuggled in under this
+    setting's name.

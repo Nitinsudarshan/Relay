@@ -302,6 +302,73 @@ pub fn paste_from_clipboard() -> Result<(), InjectionError> {
     Ok(())
 }
 
+/// Whether the caret is still where it was when `before` was captured.
+///
+/// The guard on replacing text Relay already injected. Getting this wrong does
+/// not fail safe: a selection sent to the wrong window selects and overwrites
+/// somebody else's text.
+///
+/// The asymmetric case is the one worth stating. If focus information was
+/// available at injection and is missing now — or the reverse — that is not
+/// evidence of sameness, and it is refused. Only two present-and-matching
+/// contexts, or two absent ones on a platform that reports none at all, count
+/// as unchanged.
+pub fn focus_unchanged(
+    before: Option<&TargetFocusContext>,
+    now: Option<&TargetFocusContext>,
+) -> bool {
+    match (before, now) {
+        (Some(before), Some(now)) => {
+            before.hwnd == now.hwnd && is_same_tab_or_document(&before.title, &now.title)
+        }
+        // Neither time reported a context: the platform does not provide one.
+        // Refusing here would disable replacement outright there, and the
+        // selection is bounded by what Relay itself typed.
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// Selects the last `steps` cursor positions before the caret.
+///
+/// Shift+Left, repeated. Used by the dictation cleanup to select exactly what
+/// Relay injected so a replacement overwrites it rather than appending to it.
+///
+/// `steps` must come from `capture::text_normalize::cursor_steps`, not from
+/// `chars().count()`. An arrow key moves by grapheme cluster, so counting chars
+/// over-selects on any script with combining marks and would swallow whatever
+/// the user had written before dictating.
+///
+/// Selecting nothing is a success: the caller has nothing to replace and a
+/// subsequent injection simply inserts.
+pub fn select_previous(steps: usize) -> Result<(), InjectionError> {
+    use enigo::{Direction, Key};
+    if steps == 0 {
+        return Ok(());
+    }
+
+    release_modifier_keys();
+
+    let mut enigo = Enigo::new(&Settings::default())
+        .map_err(|e| InjectionError::ConnectionFailed(e.to_string()))?;
+    enigo
+        .key(Key::Shift, Direction::Press)
+        .map_err(|e| InjectionError::SimulationFailed(e.to_string()))?;
+    let mut result = Ok(());
+    for _ in 0..steps {
+        if let Err(e) = enigo.key(Key::LeftArrow, Direction::Click) {
+            result = Err(InjectionError::SimulationFailed(e.to_string()));
+            break;
+        }
+    }
+    // Released even when a press failed part-way: leaving Shift held would
+    // turn the user's next keystroke into a selection.
+    let released = enigo
+        .key(Key::Shift, Direction::Release)
+        .map_err(|e| InjectionError::SimulationFailed(e.to_string()));
+    result.and(released)
+}
+
 /// Injects text using simulated individual keystrokes.
 pub fn inject_keystrokes(text: &str) -> Result<(), InjectionError> {
     if text.trim().is_empty() {
@@ -505,6 +572,53 @@ pub fn copy_to_clipboard(text: &str) -> Result<(), InjectionError> {
 
 #[cfg(test)]
 mod tests {
+
+    fn focus(hwnd: isize, title: &str) -> TargetFocusContext {
+        TargetFocusContext {
+            hwnd,
+            title: title.to_string(),
+            process_id: 42,
+        }
+    }
+
+    #[test]
+    fn replacement_is_refused_when_the_window_changed() {
+        // The failure this guard exists for: a selection sent to the wrong
+        // window selects and overwrites somebody else's text.
+        let before = focus(1, "Untitled - Notepad");
+        let elsewhere = focus(2, "Slack");
+        assert!(!focus_unchanged(Some(&before), Some(&elsewhere)));
+    }
+
+    #[test]
+    fn replacement_is_allowed_in_the_same_field() {
+        let before = focus(1, "Untitled - Notepad");
+        assert!(focus_unchanged(Some(&before), Some(&focus(1, "Untitled - Notepad"))));
+    }
+
+    #[test]
+    fn a_volatile_title_decoration_does_not_count_as_moving() {
+        // An unread badge or a dirty marker changes the title without moving
+        // the caret; refusing there would make the feature feel broken in
+        // exactly the apps people dictate into.
+        let before = focus(1, "inbox - Gmail");
+        assert!(focus_unchanged(Some(&before), Some(&focus(1, "(3) inbox - Gmail"))));
+    }
+
+    #[test]
+    fn missing_focus_information_on_one_side_only_is_refused() {
+        // Not evidence of sameness. Treating it as such is how a replacement
+        // reaches a window nobody checked.
+        let before = focus(1, "Untitled - Notepad");
+        assert!(!focus_unchanged(Some(&before), None));
+        assert!(!focus_unchanged(None, Some(&before)));
+    }
+
+    #[test]
+    fn a_platform_that_reports_no_focus_at_all_still_works() {
+        assert!(focus_unchanged(None, None));
+    }
+
     use super::*;
 
     #[test]
