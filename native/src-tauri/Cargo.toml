@@ -59,6 +59,13 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 tar = "0.4"
 flate2 = "1"
 
+# Spike only (`--features onnx-spike`), never in a shipped build. Present so
+# `developer::onnx_spike` can prove ONNX Runtime builds, bundles and runs
+# inside a real Windows Tauri binary before G6 denoise or T4 turn detection are
+# started. Pinned exactly: 2.0 is a release candidate, and a spike that answers
+# a packaging question has to answer it about one known version.
+ort = { version = "=2.0.0-rc.13", optional = true }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
@@ -70,4 +77,7 @@ windows-sys = { version = "0.60", features = [
 [features]
 default = ["whisper-local"]
 whisper-local = ["dep:whisper-rs"]
+# Compiles the ONNX packaging spike's inference call and runs it at launch.
+# See docs/spikes/onnx-windows.md. Not part of any shipped configuration.
+onnx-spike = ["dep:ort"]
 

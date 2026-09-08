@@ -21,7 +21,7 @@ This document tracks deferred features, rejected/postponed UI patterns, and arch
   - **Pipecat Smart Turn v3** (open weights, open training data, ~8M parameters, <60 ms CPU) answers the harder question — has this person *finished* — from the waveform rather than the transcript. That is what removes the hangover tradeoff.
   - **openWakeWord** / **microWakeWord** (both Apache-2.0) for `wake_word` activation. Both are Python/MCU-targeted today, so the realistic path is their ONNX exports, not the frameworks.
   - All three land through the same seam: `TurnDetector::push` takes a frame and returns a `TurnEvent`. Same signature, better decision.
-- **Blocked on**: the same `ort`-on-Windows packaging proof as the ONNX runtime evaluation. One packaging spike unblocks both.
+- **Blocked on**: the `ort`-on-Windows packaging proof. That spike is now written — `docs/spikes/onnx-windows.md`, behind the `onnx-spike` cargo feature — and has never been run; it needs a Windows machine and half an hour. One run unblocks this item and G6 denoise together.
 
 ### 2. A Second Local TTS Provider for Talkback (Kokoro)
 

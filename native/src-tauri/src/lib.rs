@@ -58,6 +58,13 @@ fn set_app_user_model_id() {
 pub fn run() {
     #[cfg(target_os = "windows")]
     set_app_user_model_id();
+
+    // The ONNX packaging spike, when this binary was built with it. First
+    // thing, before any window or plugin, because what it is measuring is
+    // whether the ONNX Runtime this executable was *shipped with* can be
+    // loaded at all — and that answer must survive anything else failing.
+    #[cfg(feature = "onnx-spike")]
+    developer::onnx_spike::run_and_record();
     // Load environment variables from .env — search CWD and ancestor directories
     // so the repo-root .env is found even when Tauri runs from native/src-tauri/.
     if dotenvy::dotenv().is_err() {
