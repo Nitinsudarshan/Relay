@@ -23,6 +23,12 @@ tauri-plugin-global-shortcut = "2.0"
 # they press Join on a reminder. `tauri-plugin-shell`'s `open` is deprecated
 # in favour of this.
 tauri-plugin-opener = "2"
+# Writes the OS launch entry behind Settings › Startup › "Launch at login" —
+# the registry Run key on Windows, a LaunchAgent on macOS, a .desktop file on
+# Linux. Tauri's own plugin rather than three hand-rolled platform paths,
+# because the interesting part of this feature is that the setting is finally
+# read at all, not the file formats.
+tauri-plugin-autostart = "2"
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
