@@ -68,3 +68,21 @@ export interface SttModelTestResult {
   latency_ms: number;
   error?: string | null;
 }
+
+/** What the retained STT decode history says, in the terms the open audio
+ *  decisions are posed in. Counts and percentiles only — the history itself
+ *  holds no transcript. */
+export interface SttDecodeSummary {
+  decodes: number;
+  failed: number;
+  rms_p10: number;
+  rms_median: number;
+  peak_p10: number;
+  peak_median: number;
+  quiet_decodes: number;
+  pinned_decodes: number;
+  auto_detected_decodes: number;
+  pinned_words_per_second_median: number;
+  auto_words_per_second_median: number;
+  starved_decodes: number;
+}

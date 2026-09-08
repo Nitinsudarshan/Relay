@@ -27,15 +27,30 @@ pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T
 /// so migrating meant rewriting three test suites alongside the pipeline. This
 /// is the seam that removes that coupling.
 ///
-/// Deliberately three methods. A wider trait would tempt the analysis layer
-/// into knowing about streaming, hosts and model names, none of which an
-/// analysis has any business deciding.
+/// Deliberately narrow, and narrow in a specific way: every method here is
+/// either *what the completion needs* or *what provenance needs*. What is
+/// excluded is anything that would let the analysis layer start **deciding** —
+/// streaming, hosts, model selection — none of which an analysis has any
+/// business doing.
+///
+/// `model_name` is the provenance kind, not the deciding kind. It is the exact
+/// analogue of [`provider_type`](Self::provider_type): a caller cannot choose
+/// the model with it, only record which one was asked. Meetings need it because
+/// "which model ran?" has to stay answerable for a meeting whose call *failed*,
+/// where there is no response to read a model off.
 pub trait Completer: Send + Sync {
     /// The provider's own sampling defaults, which a prompt then narrows.
     fn default_options(&self) -> CompletionOptions;
 
     /// Which service will answer, for the provenance record.
     fn provider_type(&self) -> &ProviderType;
+
+    /// Which model will answer, for the provenance record.
+    ///
+    /// The configured model, so it is still answerable when nothing came back.
+    /// A successful response reports the model that *actually* answered, which
+    /// can differ; prefer that one when you have it.
+    fn model_name(&self) -> String;
 
     /// One completion, with heuristic filler reported as the failure it is
     /// rather than returned as an answer.
@@ -67,6 +82,18 @@ pub enum ProviderError {
     /// what is missing is the completion.
     #[error("No completion available: {0}")]
     NoCompletion(String),
+
+    /// The model was reached and answered with nothing.
+    ///
+    /// Split from [`NoCompletion`](Self::NoCompletion) because the two deserve
+    /// different responses. A provider that could not be reached will not be
+    /// reached by a second, differently-shaped request either, so retrying
+    /// there only doubles the wait before the fallback. A model that answered
+    /// with nothing *has* said something — that this prompt, as posed, got no
+    /// engagement — and a shorter contract can genuinely fix it. Meetings'
+    /// Stage B relies on exactly that distinction.
+    #[error("The provider answered with an empty completion")]
+    EmptyCompletion,
 }
 
 /// The `model` value [`LLMClient::complete`] reports when it has silently
@@ -201,6 +228,10 @@ impl Completer for LLMClient {
 
     fn provider_type(&self) -> &ProviderType {
         LLMClient::provider_type(self)
+    }
+
+    fn model_name(&self) -> String {
+        LLMClient::model_name(self)
     }
 
     fn complete_verified<'a>(
@@ -582,9 +613,7 @@ impl LLMClient {
             ));
         }
         if response.text.trim().is_empty() {
-            return Err(ProviderError::NoCompletion(
-                "provider returned an empty completion".to_string(),
-            ));
+            return Err(ProviderError::EmptyCompletion);
         }
         Ok(response)
     }
@@ -684,6 +713,14 @@ impl LLMClient {
     }
 
     /// The model that will actually be asked, for observability.
+    ///
+    /// Also the [`Completer::model_name`] answer: read from configuration
+    /// rather than from a response, so it stays answerable when nothing came
+    /// back. `meetings_v2::processing::llm::ProviderLlm` used to derive this
+    /// same mapping privately, with `unwrap_or_default()` where this falls back
+    /// to the provider's default cloud model — so the migration onto this one
+    /// also stops an unset `cloud_model` recording provenance as the empty
+    /// string.
     pub fn model_name(&self) -> String {
         match self.config.active_provider {
             ProviderType::Ollama => self.config.ollama_model.clone(),

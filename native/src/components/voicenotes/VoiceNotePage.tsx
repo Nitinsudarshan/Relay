@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { HardDrive, Mic, ShieldCheck, Edit3, Trash2, GitMerge, Copy, Check, X, Save, Sparkles, Undo, AlertCircle, CheckSquare } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { readSelection, looksLikeVocabulary, type PhraseSelection } from './selection';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '../common/EmptyState';
 import { AppSettings, VaultLocationInfo, VaultNote } from '../../types';
@@ -250,6 +251,88 @@ export const VoiceNotePage: React.FC = () => {
       setError(err?.message || 'Could not use the default Relay Vault.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Phrase correction. Deliberately separate from the full editor above: a
+  // one-word fix should not require opening a textarea over the whole note.
+  const [selection, setSelection] = useState<PhraseSelection | null>(null);
+  const [replacement, setReplacement] = useState('');
+  const [teachRelay, setTeachRelay] = useState(false);
+  const [correcting, setCorrecting] = useState(false);
+  const [undoState, setUndoState] = useState<
+    { noteId: string; previousContent: string; message: string } | null
+  >(null);
+  const noteBodyRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  const handleTextSelected = (noteId: string, content: string) => {
+    const found = readSelection(noteBodyRefs.current[noteId] ?? null, noteId, content);
+    // A cleared selection closes the popover, but never while the correction
+    // form is open — clicking into the input collapses the selection, and
+    // losing the range at that moment would be maddening.
+    if (!found && replacement === '' && !correcting) {
+      setSelection(null);
+      return;
+    }
+    if (found) {
+      setSelection(found);
+      setReplacement('');
+      setTeachRelay(false);
+    }
+  };
+
+  const cancelCorrection = () => {
+    setSelection(null);
+    setReplacement('');
+    setTeachRelay(false);
+  };
+
+  const handleApplyCorrection = async () => {
+    if (!selection || !replacement.trim()) return;
+    setCorrecting(true);
+    try {
+      const result = await invoke<{
+        note: VaultNote;
+        previous_content: string;
+        learned: boolean;
+      }>('correct_voice_note_phrase', {
+        id: selection.noteId,
+        start: selection.start,
+        end: selection.end,
+        original: selection.text,
+        replacement: replacement.trim(),
+        learn: teachRelay,
+      });
+      setNotes((prev) => prev.map((n) => (n.id === result.note.id ? result.note : n)));
+      setUndoState({
+        noteId: result.note.id,
+        previousContent: result.previous_content,
+        message: `Corrected "${selection.text}" → "${replacement.trim()}"${
+          result.learned ? ' · learned' : ''
+        }`,
+      });
+      cancelCorrection();
+    } catch (err) {
+      console.error('Failed to correct phrase', err);
+    } finally {
+      setCorrecting(false);
+    }
+  };
+
+  // Undo is the previous content saved back through the same command the full
+  // editor uses — which is why this needs no versioning of its own.
+  const handleUndoCorrection = async () => {
+    if (!undoState) return;
+    try {
+      const restored = await invoke<VaultNote>('update_voice_note', {
+        id: undoState.noteId,
+        content: undoState.previousContent,
+      });
+      setNotes((prev) => prev.map((n) => (n.id === restored.id ? restored : n)));
+    } catch (err) {
+      console.error('Failed to undo correction', err);
+    } finally {
+      setUndoState(null);
     }
   };
 
@@ -764,9 +847,112 @@ export const VoiceNotePage: React.FC = () => {
                       </div>
                     </div>
                   ) : (
-                    <p className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
-                      {note.content}
-                    </p>
+                    <div className="space-y-2">
+                      <p
+                        ref={(el) => {
+                          noteBodyRefs.current[note.id] = el;
+                        }}
+                        onMouseUp={() => handleTextSelected(note.id, note.content)}
+                        onKeyUp={() => handleTextSelected(note.id, note.content)}
+                        className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed"
+                      >
+                        {note.content}
+                      </p>
+
+                      {/* Selection popover — the lightweight path. The pencil
+                          above still opens the whole note. */}
+                      {selection?.noteId === note.id && (
+                        <div className="rounded-lg border border-border bg-card p-2.5 space-y-2 animate-in fade-in duration-150">
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-muted-foreground shrink-0">Selected</span>
+                            <code className="px-1.5 py-0.5 rounded-lg bg-muted text-foreground break-all">
+                              {selection.text}
+                            </code>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <input
+                              autoFocus
+                              value={replacement}
+                              onChange={(e) => setReplacement(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') void handleApplyCorrection();
+                                if (e.key === 'Escape') cancelCorrection();
+                              }}
+                              placeholder="Replace with…"
+                              aria-label="Replacement text"
+                              className="flex-1 min-w-[140px] text-xs rounded-lg border border-border bg-background px-2 py-1.5 text-foreground"
+                            />
+                            <Button
+                              size="sm"
+                              variant="default"
+                              disabled={!replacement.trim() || correcting}
+                              onClick={() => void handleApplyCorrection()}
+                              className="h-7 text-xs"
+                            >
+                              Replace
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={cancelCorrection}
+                              className="h-7 text-xs"
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+
+                          <label className="flex items-center gap-2 text-[11px] text-muted-foreground cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={teachRelay}
+                              onChange={(e) => setTeachRelay(e.target.checked)}
+                              className="accent-primary"
+                            />
+                            <span>
+                              Teach Relay this correction
+                              {replacement.trim() && looksLikeVocabulary(selection.text, replacement) && (
+                                <span className="ml-1 text-emerald-600 dark:text-emerald-400">
+                                  · looks like a name Relay keeps mishearing
+                                </span>
+                              )}
+                            </span>
+                          </label>
+                          <p className="text-[10px] text-muted-foreground leading-snug">
+                            Replaces only this occurrence. Teaching also repairs it in future
+                            transcripts.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Undo, inline rather than a toast: this page has no
+                          toast system, and inventing one for a single action
+                          would be a larger change than the feature. */}
+                      {undoState?.noteId === note.id && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-xs animate-in fade-in duration-150">
+                          <span className="text-muted-foreground break-all">{undoState.message}</span>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => void handleUndoCorrection()}
+                              className="h-6 text-xs gap-1"
+                            >
+                              <Undo className="w-3 h-3" />
+                              Undo
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setUndoState(null)}
+                              className="h-6 text-xs"
+                            >
+                              Dismiss
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {/* Delete Confirmation Inline Banner */}

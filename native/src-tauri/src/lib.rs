@@ -133,6 +133,7 @@ pub fn run() {
 
     let recorder = AudioRecorder::new();
     recorder.set_keep_warm_duration(settings.audio_input.parse_keep_warm_duration());
+    crate::capture::device::set_preference(&settings.audio_input);
 
     let memory_store = Arc::new(memory::MemoryStore::new(&vault_dir));
     let relationship_store = Arc::new(relationships::RelationshipStore::new(&vault_dir));
@@ -146,6 +147,7 @@ pub fn run() {
         settings: Mutex::new(settings),
         stt,
         last_stt_diagnostics: Mutex::new(None),
+        last_dictation: Mutex::new(None),
         meetings_v2,
         meeting_processor,
         talkback: Arc::new(talkback::TalkbackEngine::new()),
@@ -236,7 +238,12 @@ pub fn run() {
             commands::get_available_llm_models,
             commands::test_llm_prompt,
             commands::ensure_stt_model_ready,
+            commands::get_stt_decode_summary,
+            commands::rewrite_dictation,
+            commands::get_cleanup_target,
+            commands::apply_dictation_cleanup,
             commands::get_available_stt_models,
+            commands::download_stt_model,
             commands::test_stt_model,
             commands::copy_to_clipboard,
             commands::get_kanban_cards,
@@ -248,6 +255,7 @@ pub fn run() {
             commands::open_settings_window,
             commands::get_voice_notes,
             commands::update_voice_note,
+            commands::correct_voice_note_phrase,
             commands::delete_voice_note,
             commands::delete_voice_notes,
             commands::merge_voice_notes,

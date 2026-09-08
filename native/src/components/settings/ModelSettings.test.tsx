@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { invoke } from '@tauri-apps/api/core';
 import { ProviderSettings } from './ProviderSettings';
@@ -44,7 +44,7 @@ const DEFAULT_TEST_SETTINGS: AppSettings = {
   sound: { dictation_sounds: true },
   clipboard: { auto_paste: true, copy_to_clipboard: true },
   startup: { launch_at_login: false, start_minimized: false },
-  audio_input: { prefer_builtin_mic: true, selected_device: null, keep_microphone_warm: 'off', auto_learn_words: true },
+  audio_input: { prefer_builtin_mic: true, selected_device: null, keep_microphone_warm: 'off' },
   talkback: { activation_mode: 'toggle', speak_responses: true, allow_barge_in: true, sources: [], end_of_turn_silence_ms: 1000 },
   dictionary: ['Relay', 'Whisper'],
   snippets: [],
@@ -97,6 +97,20 @@ const MOCK_STT_OVERVIEW: SttModelsOverview = {
       profile: 'accurate',
       status: 'ready',
     },
+    // The accuracy ceiling, absent from disk. `get_stt_models_overview` always
+    // returns all three tiers and lists this one whether or not it has been
+    // downloaded, so the mock has to as well — a two-model mock could not see
+    // the download offer at all.
+    {
+      name: 'Whisper Large v3 Turbo',
+      filename: 'ggml-large-v3-turbo.bin',
+      path: 'C:\\Relay\\models\\ggml-large-v3-turbo.bin',
+      size_bytes: 0,
+      exists: false,
+      is_managed: true,
+      profile: null,
+      status: 'missing',
+    },
   ],
 };
 
@@ -123,6 +137,8 @@ describe('AI Models & STT Settings — Refactored Model Selection', () => {
           return { path: 'C:\\Vault' };
         case 'save_settings':
           return undefined;
+        case 'download_stt_model':
+          return { state: 'ready', path: 'C:\\Relay\\models\\ggml-large-v3-turbo.bin' };
         default:
           return null;
       }
@@ -179,9 +195,92 @@ describe('AI Models & STT Settings — Refactored Model Selection', () => {
     expect(screen.getByText('✓ Model ready · Whisper')).toBeDefined();
 
     // Available models list should show Whisper Base and Whisper Small
-    expect(screen.getByText('Available STT Models on Disk (2)')).toBeDefined();
+    expect(screen.getByText('Available STT Models on Disk (3)')).toBeDefined();
     expect(screen.getByText('Fast (Base Model)')).toBeDefined();
     expect(screen.getByText('Accurate (Small Model)')).toBeDefined();
+  });
+
+  // Two settings that shipped without a way to reach them: the accuracy tier
+  // was listed as "missing" with no download, and the decode preset had
+  // per-surface defaults with no control to override them.
+
+  it('offers a download for a managed model that is listed but not on disk', async () => {
+    const user = userEvent.setup();
+    render(<ProviderSettings initialSection="advanced" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Whisper Large v3 Turbo')).toBeDefined();
+    });
+
+    const card = screen.getByText('Whisper Large v3 Turbo').closest('div.p-2\\.5');
+    expect(card).not.toBeNull();
+    const download = within(card as HTMLElement).getByRole('button', { name: /download/i });
+
+    await user.click(download);
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith('download_stt_model', {
+        filename: 'ggml-large-v3-turbo.bin',
+      });
+    });
+  });
+
+  it('does not offer a download for a model already on disk', async () => {
+    render(<ProviderSettings initialSection="advanced" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Whisper Base')).toBeDefined();
+    });
+
+    const card = screen.getByText('Whisper Base').closest('div.p-2\\.5');
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).queryByRole('button', { name: /download/i })).toBeNull();
+  });
+
+  it('scopes a model choice to meetings so dictation is not slowed with it', async () => {
+    const user = userEvent.setup();
+    render(<ProviderSettings initialSection="advanced" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Whisper Base')).toBeDefined();
+    });
+
+    expect(screen.getByText(/Meetings currently follow the global model/)).toBeDefined();
+
+    const card = screen.getByText('Whisper Base').closest('div.p-2\\.5');
+    const use = within(card as HTMLElement).getByRole('button', { name: /use for meetings/i });
+    await user.click(use);
+
+    // The choice is meetings-only: the card now reports it, and the global
+    // dictation profile below is untouched.
+    await waitFor(() => {
+      expect(screen.getByText(/Meetings use the model marked above/)).toBeDefined();
+    });
+    expect(
+      within(card as HTMLElement).getByRole('button', { name: /meetings use this/i }),
+    ).toBeDefined();
+  });
+
+  it('exposes the decode preset and defaults to letting each surface choose', async () => {
+    const user = userEvent.setup();
+    render(<ProviderSettings initialSection="advanced" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Decode Preset')).toBeDefined();
+    });
+
+    // Automatic is the shipped default: the empty preset is what lets dictation
+    // run Fast and meetings run Quality.
+    const automatic = screen.getByText('Automatic').closest('button');
+    expect(automatic?.className).toContain('border-primary');
+
+    const quality = screen.getByText('Quality').closest('button');
+    expect(quality).not.toBeNull();
+    await user.click(quality as HTMLElement);
+
+    await waitFor(() => {
+      expect(screen.getByText('Quality').closest('button')?.className).toContain('border-primary');
+    });
   });
 
   it('includes a link to dedicated Diagnostics page and removes telemetry from configuration view', async () => {

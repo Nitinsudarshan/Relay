@@ -48,6 +48,10 @@ pub enum PromptId {
     MeetingFacts,
     /// Stage B of a meeting: prose written from those facts, transcript closed.
     MeetingSummary,
+    /// One spoken Talkback answer, grounded in retrieved context.
+    TalkbackAnswer,
+    /// Tier 2 cleanup of dictated text. Never a meeting transcript.
+    DictationRewrite,
 }
 
 impl PromptId {
@@ -60,6 +64,8 @@ impl PromptId {
         PromptId::RepositoryContext,
         PromptId::MeetingFacts,
         PromptId::MeetingSummary,
+        PromptId::TalkbackAnswer,
+        PromptId::DictationRewrite,
     ];
 
     /// The wire name written into derived data. Stable — changing one is a
@@ -72,6 +78,8 @@ impl PromptId {
             Self::RepositoryContext => "repository.context",
             Self::MeetingFacts => "meeting.facts",
             Self::MeetingSummary => "meeting.summary",
+            Self::TalkbackAnswer => "talkback.answer",
+            Self::DictationRewrite => "dictation.rewrite",
         }
     }
 
@@ -239,6 +247,52 @@ pub fn definition(id: PromptId) -> PromptDefinition {
             temperature: 0.1,
             max_output_tokens: 2_400,
         },
+        PromptId::DictationRewrite => PromptDefinition {
+            id,
+            version: 1,
+            purpose: "Tier 2 cleanup of dictated text, shown to the user as a diff.",
+            // Built per call: the latitude depends on the style the user chose,
+            // and `capture::rewrite` owns both the styles and the diff that
+            // makes whatever this returns reviewable.
+            body: PromptBody::Computed,
+            output_contract: OutputContract::Prose,
+            // Dictation only, by Decision 65. A meeting transcript is evidence
+            // read back weeks later and cited by segment id; dictated text is a
+            // draft the user is watching land.
+            applies_to: &[SourceType::Audio],
+            // Near zero. This prompt's failure mode is a fluent sentence that
+            // says something the speaker did not, and temperature buys nothing
+            // here — the user asked for their own words tidied, not for prose.
+            temperature: 0.1,
+            // Cleanup returns roughly what it was given. Dictation is a
+            // sentence or two; this leaves room for a long one without
+            // licensing an essay.
+            max_output_tokens: 800,
+        },
+        PromptId::TalkbackAnswer => PromptDefinition {
+            id,
+            version: 1,
+            purpose: "One spoken Talkback answer, grounded in retrieved context.",
+            // Built per call, and more variably than either meeting stage: the
+            // instructions carry the voice rules, whether this intent requires
+            // grounding, the retrieved context and the recent conversation.
+            // `talkback::assemble` owns that assembly, including the per-item
+            // external framing a retrieved web capture needs.
+            body: PromptBody::Computed,
+            output_contract: OutputContract::Prose,
+            // Source-agnostic by nature: a Talkback turn answers over whatever
+            // retrieval found, which is routinely several source types at once.
+            applies_to: &[],
+            // Conversational warmth, still grounded. The answer is spoken, and
+            // a flat reading of retrieved text is worse than a slightly loose
+            // one; the grounding is enforced by the rules in the prompt and by
+            // retrieval, not by sampling.
+            temperature: 0.4,
+            // Spoken answers are short by design — two or three sentences by
+            // the voice rules. The low ceiling also bounds how long a runaway
+            // local model can hold the floor.
+            max_output_tokens: 400,
+        },
         PromptId::MeetingSummary => PromptDefinition {
             id,
             version: 1,
@@ -249,9 +303,14 @@ pub fn definition(id: PromptId) -> PromptDefinition {
             body: PromptBody::Computed,
             output_contract: OutputContract::Prose,
             applies_to: &[SourceType::Meeting],
-            // Prose needs a little room; the accuracy rules are enforced by
-            // validation rather than by sampling.
-            temperature: 0.4,
+            // Slightly above extraction because rewriting requires generation,
+            // low enough to stay grounded. This entry was written at 0.4 before
+            // anything ran on it; the pipeline it now serves has always sent
+            // 0.3, and the migration follows the shipped value rather than
+            // quietly raising the temperature of every meeting summary.
+            temperature: 0.3,
+            // A default the caller almost always overrides: the real allowance
+            // is computed from the length budget the user chose.
             max_output_tokens: 1_600,
         },
 

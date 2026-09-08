@@ -609,7 +609,10 @@ fn stop_dictation_session(
                 let s = state.settings.lock_or_recover();
                 let cleaned = crate::capture::text_normalize::normalize_text(
                     &text_res,
-                    &s.dictionary,
+                    crate::capture::text_normalize::Vocabulary::new(
+                        &s.dictionary,
+                        &s.vocabulary_corrections,
+                    ),
                     crate::capture::text_normalize::TextProfile::Dictated,
                 )
                 .text;
@@ -703,6 +706,16 @@ fn stop_dictation_session(
 
                 match outcome {
                     Ok(injection::InjectionOutcome::Success) => {
+                        // Remember what landed and where, so the cleanup
+                        // offered afterwards can select exactly this text back.
+                        // Only on Success: every other branch left the text in
+                        // the clipboard rather than in a field, and there is
+                        // nothing in place to replace.
+                        *state.last_dictation.lock_or_recover() =
+                            Some(crate::commands::LastDictation {
+                                text: final_text.clone(),
+                                focus: injection::capture_target_focus_context(),
+                            });
                         emit_capture_status_event(&app, false, None, "SUCCESS", None);
                     }
                     Ok(injection::InjectionOutcome::TimedOutWaitingForReturn { target_title }) => {

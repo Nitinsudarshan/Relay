@@ -17,7 +17,7 @@
 //! only claims traceable to a real segment id survive it.
 
 use super::context::{MeetingContext, Window};
-use super::llm::{LlmRequest, MeetingLlm};
+use super::llm::{LlmError, LlmOutcome, MeetingAnalyst};
 use super::model::{
     ActionItem, ActionItemStatus, Decision, Entity, EntityKind, KeyPoint, KeyPointKind,
     MeetingFacts, MeetingType, NormalizedSegment, OpenQuestion, OwnerType, Risk, RiskKind, Speaker,
@@ -251,7 +251,7 @@ pub struct ExtractionOutput {
 /// minutes cannot disappear because the meeting ran for ninety — which is what
 /// used to happen, silently, inside the provider.
 pub async fn extract_facts(
-    llm: &dyn MeetingLlm,
+    llm: &MeetingAnalyst<'_>,
     context: &MeetingContext<'_>,
     fallback_title: &str,
 ) -> ExtractionOutput {
@@ -332,7 +332,7 @@ struct ExtractionPass {
 /// extractor. A ninety-minute meeting where the fourth of five passes timed out
 /// is still four-fifths understood, which is a great deal better than nothing.
 async fn extract_across_windows(
-    llm: &dyn MeetingLlm,
+    llm: &MeetingAnalyst<'_>,
     context: &MeetingContext<'_>,
     windows: &[Window],
     fallback_title: &str,
@@ -348,14 +348,11 @@ async fn extract_across_windows(
         let user_prompt = context.render_extraction_input(window);
         input_chars += user_prompt.len();
 
-        match llm
-            .complete_request(LlmRequest::extraction(&system_prompt, &user_prompt))
-            .await
-        {
+        match llm.extract_facts(&system_prompt, &user_prompt).await {
             Ok(outcome) => {
                 provider.get_or_insert(outcome.provider.clone());
                 model.get_or_insert(outcome.model.clone());
-                match parse_facts_draft(&outcome.text) {
+                match parse_facts_draft(&outcome) {
                     Some(draft) => {
                         // Sanitized against this window's own segments, so a
                         // pass can never cite something it was not shown.
@@ -380,7 +377,17 @@ async fn extract_across_windows(
             Err(err) => {
                 provider.get_or_insert(llm.provider_name());
                 model.get_or_insert(llm.model_name());
-                failures.push(format!("part {}: {}", window.index + 1, err));
+                // The shared service applies the prompt's JSON contract before
+                // this returns, so a prose answer to Stage A arrives here as a
+                // failure rather than as text that fails to parse below. Same
+                // window, same message, same merge.
+                failures.push(match err {
+                    LlmError::Unparseable(_) => format!(
+                        "part {} returned no parseable JSON object",
+                        window.index + 1
+                    ),
+                    other => format!("part {}: {}", window.index + 1, other),
+                });
             }
         }
     }
@@ -761,17 +768,17 @@ pub fn title_is_generic(title: &str) -> bool {
 
 /// Extracts the JSON object from a model response.
 ///
-/// Tolerant by design: models wrap JSON in code fences, prefix it with "Here is
-/// the JSON:", and occasionally append a closing remark. Slicing to the outermost
-/// braces handles all three without a second model call.
-fn parse_facts_draft(raw: &str) -> Option<FactsDraft> {
-    let trimmed = raw.trim();
-    let start = trimmed.find('{')?;
-    let end = trimmed.rfind('}')?;
-    if end <= start {
-        return None;
-    }
-    serde_json::from_str::<FactsDraft>(&trimmed[start..=end]).ok()
+/// Reads a draft out of the JSON the shared service already parsed.
+///
+/// This used to do its own brace-scan of the raw text. That rule was not
+/// wrong — a small local model does wrap its JSON in a sentence — it was just
+/// in the wrong place, since `pipeline::analysis::parse_json_response` claims
+/// to be the one definition of what a parseable structured answer is. The
+/// tolerance moved there; what is left here is the part that is genuinely
+/// this stage's business, which is what the object has to contain.
+fn parse_facts_draft(outcome: &LlmOutcome) -> Option<FactsDraft> {
+    let json = outcome.json.clone()?;
+    serde_json::from_value::<FactsDraft>(json).ok()
 }
 
 /// Discards everything in a draft that the transcript does not support.
@@ -1548,7 +1555,7 @@ script review with the platform team as soon as the release is out",
         .to_string();
 
         let llm = ScriptedLlm::new(vec![Ok(draft)]);
-        let out = extract_facts(&llm, &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
+        let out = extract_facts(&llm.analyst(), &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
 
         assert!(out.llm_error.is_none());
         assert!(!out.facts.deterministic);
@@ -1599,7 +1606,7 @@ going to own that piece so it does not keep slipping between the two of us",
         .to_string();
 
         let llm = ScriptedLlm::new(vec![Ok(draft)]);
-        let out = extract_facts(&llm, &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
+        let out = extract_facts(&llm.analyst(), &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
 
         let action = out
             .facts
@@ -1631,7 +1638,7 @@ going to own that piece so it does not keep slipping between the two of us",
         .to_string();
 
         let llm = ScriptedLlm::new(vec![Ok(draft)]);
-        let out = extract_facts(&llm, &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
+        let out = extract_facts(&llm.analyst(), &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
         assert_eq!(
             out.facts.action_items[0].deadline.as_deref(),
             Some("2026-08-28")
@@ -1643,7 +1650,7 @@ going to own that piece so it does not keep slipping between the two of us",
     async fn invalid_json_falls_back_to_deterministic_facts_rather_than_failing() {
         let (segments, speakers) = fixture_a();
         let llm = ScriptedLlm::new(vec![Ok("I'm afraid I can't do that.".to_string())]);
-        let out = extract_facts(&llm, &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
+        let out = extract_facts(&llm.analyst(), &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
 
         assert!(out.facts.deterministic);
         assert!(out.llm_error.as_deref().unwrap().contains("parseable"));
@@ -1659,7 +1666,7 @@ going to own that piece so it does not keep slipping between the two of us",
     async fn an_unavailable_model_still_produces_facts() {
         let (segments, speakers) = fixture_a();
         let llm = ScriptedLlm::always_unavailable();
-        let out = extract_facts(&llm, &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
+        let out = extract_facts(&llm.analyst(), &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
 
         assert!(out.facts.deterministic);
         assert!(out.llm_error.is_some());
@@ -1674,7 +1681,7 @@ going to own that piece so it does not keep slipping between the two of us",
         let fenced =
             "Here you go:\n```json\n{\"title\": \"Fenced Title Works\"}\n```\nHope that helps!";
         let llm = ScriptedLlm::new(vec![Ok(fenced.to_string())]);
-        let out = extract_facts(&llm, &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
+        let out = extract_facts(&llm.analyst(), &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
         assert_eq!(out.facts.title, "Fenced Title Works");
         assert!(!out.facts.deterministic);
     }
@@ -1683,7 +1690,7 @@ going to own that piece so it does not keep slipping between the two of us",
     async fn a_transcript_too_short_to_reason_about_never_reaches_the_model() {
         let (segments, speakers) = prepared(vec![raw(0, "Hello can you hear me", true, false)]);
         let llm = ScriptedLlm::new(vec![Ok("{}".to_string())]);
-        let out = extract_facts(&llm, &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
+        let out = extract_facts(&llm.analyst(), &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
 
         assert_eq!(llm.call_count(), 0, "no model call is worth making here");
         assert!(out.facts.deterministic);
@@ -1738,7 +1745,7 @@ going to own that piece so it does not keep slipping between the two of us",
             false,
         )]);
         let llm = ScriptedLlm::always_unavailable();
-        let out = extract_facts(&llm, &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
+        let out = extract_facts(&llm.analyst(), &ctx(&segments, &speakers, &MeetingNotes::default()), "Fallback").await;
         assert!(
             out.facts.action_items.is_empty(),
             "demo narration is not durable work, got {:?}",
@@ -1822,7 +1829,7 @@ going to own that piece so it does not keep slipping between the two of us",
         let draft = serde_json::json!({"title": "Meeting Discussion"}).to_string();
         let llm = ScriptedLlm::new(vec![Ok(draft)]);
 
-        let out = extract_facts(&llm, &ctx(&segments, &speakers, &MeetingNotes::default()), "Q3 Board Prep").await;
+        let out = extract_facts(&llm.analyst(), &ctx(&segments, &speakers, &MeetingNotes::default()), "Q3 Board Prep").await;
         assert_eq!(out.facts.title, "Q3 Board Prep");
     }
 
@@ -1832,7 +1839,7 @@ going to own that piece so it does not keep slipping between the two of us",
         let draft = serde_json::json!({"title": "Release Cut Review"}).to_string();
         let llm = ScriptedLlm::new(vec![Ok(draft)]);
 
-        let out = extract_facts(&llm, &ctx(&segments, &speakers, &MeetingNotes::default()), "Meeting — Aug 27, 2026 10:00 AM")
+        let out = extract_facts(&llm.analyst(), &ctx(&segments, &speakers, &MeetingNotes::default()), "Meeting — Aug 27, 2026 10:00 AM")
         .await;
         assert_eq!(out.facts.title, "Release Cut Review");
     }

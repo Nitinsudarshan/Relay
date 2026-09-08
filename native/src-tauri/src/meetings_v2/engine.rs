@@ -104,11 +104,18 @@ impl MeetingsV2Engine {
         self.finalizing_session.lock_or_recover().clone()
     }
 
+    /// Starts recording.
+    ///
+    /// `meeting_model_override` is the model *this meeting* should use, already
+    /// resolved through `SttSettings::meeting_model_override` — not the global
+    /// `whisper_model_path`. The two were the same value until meetings could
+    /// name their own model, and a parameter named after the global setting is
+    /// how they would quietly become the same again.
     pub fn start_session(
         &self,
         title: Option<String>,
         models_dir: &Path,
-        whisper_model_path: Option<String>,
+        meeting_model_override: Option<String>,
         language_config: SttLanguageConfig,
         decoding_config: WhisperDecodingConfig,
         app: Option<AppHandle>,
@@ -128,7 +135,7 @@ impl MeetingsV2Engine {
 
         let resolved_model_path = crate::capture::stt::resolve_meeting_model_path(
             models_dir,
-            whisper_model_path.as_deref(),
+            meeting_model_override.as_deref(),
         );
 
         // CLOCK A: durable 30 s chunks. Unbounded — durable audio is never dropped.

@@ -27,6 +27,7 @@ pub const CAPTURES_DIR: &str = "captures";
 /// was captured, and analysis must not be able to rewrite it.
 pub const DERIVED_DIR: &str = "derived";
 
+pub mod correction;
 pub mod scribble;
 pub use scribble::*;
 

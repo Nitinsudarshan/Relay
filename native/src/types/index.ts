@@ -378,10 +378,39 @@ export interface SttSettings {
    * Decode quality preset. Trades decode time for how much borderline speech
    * survives: 'fast' is greedy at whisper's stock no-speech threshold,
    * 'quality' is a wider beam at a lower one so little is dropped silently.
-   * Defaults to 'fast', which is what Relay did before the setting existed.
+   *
+   * `''` — the default — means the user has not chosen, and each surface uses
+   * what suits it: Fast for dictation, which is latency-bound, and Quality for
+   * meetings, which are recall-bound. Any other value is an explicit override
+   * and applies everywhere. The empty string is a real state rather than a
+   * missing one, which is why it is in the union: it is what distinguishes
+   * "let each surface decide" from "the user picked Fast".
    */
-  preset?: 'fast' | 'balanced' | 'quality';
-  sttPreset?: 'fast' | 'balanced' | 'quality';
+  preset?: '' | 'fast' | 'balanced' | 'quality';
+  sttPreset?: '' | 'fast' | 'balanced' | 'quality';
+  /**
+   * A Whisper model meetings should use instead of the global one.
+   *
+   * The two surfaces want opposite things from a model: the accuracy ceiling
+   * earns its decode cost on a recording transcribed once and read for weeks,
+   * and loses on push-to-talk where somebody is waiting. Null or empty means
+   * meetings follow `whisper_model_path`, which is what they always did.
+   */
+  meeting_model_path?: string | null;
+  meetingModelPath?: string | null;
+  /**
+   * Whether dictated text is offered to the Tier 2 cleanup layer.
+   *
+   * Off by default. The layer costs a model call and may change words, so it
+   * is something the user turns on rather than something they discover has
+   * been happening.
+   */
+  text_transform?: boolean;
+  textTransform?: boolean;
+  /** How far that cleanup may go. Empty means `faithful`, the only style that
+   *  cannot change meaning. */
+  cleanup_style?: '' | 'faithful' | 'clean' | 'professional' | 'concise';
+  cleanupStyle?: '' | 'faithful' | 'clean' | 'professional' | 'concise';
   enableInitialPrompt?: boolean;
   customInitialPrompt?: string | null;
 }
@@ -675,11 +704,9 @@ export interface AudioInputSettings {
   /** Keep microphone stream warm ("off", "15s", "30s", "1m", "5m") to avoid warm-up clipping. */
   keep_microphone_warm: string;
   /** Auto-learn corrections made in the target app into user dictionary. */
-  auto_learn_words: boolean;
   preferBuiltinMic?: boolean;
   selectedDevice?: string | null;
   keepMicrophoneWarm?: string;
-  autoLearnWords?: boolean;
 }
 
 export interface SnippetItem {
@@ -714,6 +741,10 @@ export interface AppSettings {
   talkback?: TalkbackSettings;
   dictionary?: string[];
   snippets?: SnippetItem[];
+  /** Learned "what Whisper said" → "what it meant" repairs, added only when
+   *  the user ticks "Teach Relay this correction" on a Voice Note. Distinct
+   *  from `dictionary`, which primes the recognizer before it guesses. */
+  vocabulary_corrections?: VocabularyCorrection[];
 }
 
 export type SpeakerIdentificationSetting = 'automatic' | 'off';
@@ -2475,3 +2506,11 @@ export interface KnowledgeTelemetrySnapshot {
 
 
 export * from './navigation';
+
+/** A phrase Whisper keeps getting wrong, and what it should say instead. */
+export interface VocabularyCorrection {
+  source: string;
+  replacement: string;
+  enabled: boolean;
+  created_at: string;
+}

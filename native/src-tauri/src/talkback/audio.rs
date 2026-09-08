@@ -21,7 +21,7 @@
 
 use crate::capture::resample_to_16k_mono;
 use crate::sync::MutexExt;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
@@ -160,8 +160,7 @@ fn run_stream(
     stop: Arc<AtomicBool>,
 ) -> Result<(), TalkbackAudioError> {
     let host = cpal::default_host();
-    let device = host
-        .default_input_device()
+    let device = crate::capture::device::open_preferred(&host)
         .ok_or_else(|| TalkbackAudioError::NoDevice("no default input device".to_string()))?;
     let config = device
         .default_input_config()

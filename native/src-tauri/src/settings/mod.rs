@@ -110,6 +110,30 @@ pub struct SttSettings {
     /// override and applies everywhere.
     #[serde(default, alias = "sttPreset")]
     pub preset: String,
+    /// A Whisper model meetings should use instead of the global one.
+    ///
+    /// Exists because the two surfaces want opposite things from a model and
+    /// `whisper_model_path` could only give them the same answer. The accuracy
+    /// ceiling is worth its decode cost on a recording that is transcribed once
+    /// and read for weeks; it is a bad trade on push-to-talk, where somebody is
+    /// waiting for the text. Selecting `large-v3-turbo` used to mean accepting
+    /// both.
+    ///
+    /// `None` means meetings follow the global setting, which is what they have
+    /// always done — so this changes nothing until it is set.
+    #[serde(default, alias = "meetingModelPath")]
+    pub meeting_model_path: Option<String>,
+    /// Whether dictated text is offered to the Tier 2 cleanup layer.
+    ///
+    /// Off by default. The layer costs a model call before the text is usable
+    /// and may change words, so it is something the user turns on rather than
+    /// something they discover has been happening.
+    #[serde(default, alias = "textTransform")]
+    pub text_transform: bool,
+    /// How far that cleanup may go — see `capture::rewrite::CleanupStyle`.
+    /// Empty means `faithful`, the only style that cannot change meaning.
+    #[serde(default, alias = "cleanupStyle")]
+    pub cleanup_style: String,
 }
 
 impl SttSettings {
@@ -128,6 +152,26 @@ impl SttSettings {
             return None;
         }
         Some(crate::capture::stt::SttPreset::from_setting(raw))
+    }
+
+    /// The model override a meeting should use.
+    ///
+    /// `meeting_model_path` when set, otherwise the global `whisper_model_path`.
+    /// The precedence lives here rather than at the call sites because there
+    /// are two of them — the recorder and the pipeline self-test — and a
+    /// self-test that resolved a different model than the recorder would report
+    /// green for a model the user never records with.
+    pub fn meeting_model_override(&self) -> Option<&str> {
+        self.meeting_model_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .or_else(|| {
+                self.whisper_model_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+            })
     }
 }
 
@@ -391,9 +435,6 @@ pub struct AudioInputSettings {
     /// Keep microphone stream warm ("off", "15s", "30s", "1m", "5m") to avoid warm-up clipping.
     #[serde(default = "default_keep_microphone_warm", alias = "keepMicrophoneWarm")]
     pub keep_microphone_warm: String,
-    /// Auto-learn corrections made in the target app into user dictionary.
-    #[serde(default = "default_auto_learn_words", alias = "autoLearnWords")]
-    pub auto_learn_words: bool,
 }
 
 fn default_prefer_builtin_mic() -> bool {
@@ -404,17 +445,12 @@ fn default_keep_microphone_warm() -> String {
     "off".to_string()
 }
 
-fn default_auto_learn_words() -> bool {
-    true
-}
-
 impl Default for AudioInputSettings {
     fn default() -> Self {
         Self {
             prefer_builtin_mic: default_prefer_builtin_mic(),
             selected_device: None,
             keep_microphone_warm: default_keep_microphone_warm(),
-            auto_learn_words: default_auto_learn_words(),
         }
     }
 }
@@ -669,6 +705,61 @@ pub fn default_dictionary_words() -> Vec<String> {
     ]
 }
 
+/// A phrase Whisper keeps getting wrong, and what it should say instead.
+///
+/// Distinct from `AppSettings::dictionary`, which is a list of canonical words
+/// used to prime the recognizer before it guesses. Priming helps the model
+/// reach for "Supabase"; it does nothing once the model has already produced
+/// "super base". A correction is the other half: a deterministic repair of a
+/// form the recognizer keeps emitting.
+///
+/// Learned only from an explicit correction the user makes inside Relay, never
+/// by watching what they type elsewhere.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VocabularyCorrection {
+    /// What the recognizer produced, e.g. "super base".
+    pub source: String,
+    /// What it should have produced, e.g. "Supabase".
+    pub replacement: String,
+    /// Off keeps the entry visible and stops it being applied, so a correction
+    /// that turns out to be wrong can be silenced without losing the record of
+    /// having made it.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// When it was learned. The whole of the correction history Relay keeps —
+    /// see the note in `vault::correction` about why there is no second store.
+    #[serde(default)]
+    pub created_at: String,
+}
+
+impl VocabularyCorrection {
+    pub fn new(source: &str, replacement: &str) -> Self {
+        Self {
+            source: source.trim().to_string(),
+            replacement: replacement.trim().to_string(),
+            enabled: true,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Whether this entry could ever do anything.
+    ///
+    /// An empty side, or a source equal to its replacement, is a no-op that
+    /// would sit in the list looking like a rule.
+    pub fn is_meaningful(&self) -> bool {
+        !self.source.trim().is_empty()
+            && !self.replacement.trim().is_empty()
+            && !self.source.eq_ignore_ascii_case(self.replacement.trim())
+    }
+
+    /// Two corrections are the same rule when they read the same source,
+    /// regardless of case — the recognizer's capitalisation of a phrase it got
+    /// wrong is not a distinction worth two entries.
+    pub fn same_source_as(&self, other: &str) -> bool {
+        self.source.trim().eq_ignore_ascii_case(other.trim())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
@@ -707,6 +798,11 @@ pub struct AppSettings {
     pub dictionary: Vec<String>,
     #[serde(default = "default_snippets")]
     pub snippets: Vec<SnippetItem>,
+    /// Learned "what Whisper said" → "what it meant" repairs. Empty by
+    /// default: every entry here was put there by the user correcting
+    /// something inside Relay.
+    #[serde(default, alias = "vocabularyCorrections")]
+    pub vocabulary_corrections: Vec<VocabularyCorrection>,
 
 }
 
@@ -731,6 +827,7 @@ impl Default for AppSettings {
             talkback: TalkbackSettings::default(),
             dictionary: default_dictionary_words(),
             snippets: default_snippets(),
+            vocabulary_corrections: Vec::new(),
         }
     }
 }
@@ -838,7 +935,6 @@ mod tests {
         assert!(!defaults.startup.start_minimized);
         assert!(defaults.audio_input.prefer_builtin_mic);
         assert_eq!(defaults.audio_input.keep_microphone_warm, "off");
-        assert!(defaults.audio_input.auto_learn_words);
         assert!(!defaults.dictionary.is_empty());
     }
 

@@ -1,22 +1,38 @@
 //! The processing pipeline's view of a language model.
 //!
-//! The pipeline never names a provider. It asks a `MeetingLlm` for a
-//! completion and is told honestly whether one happened. Ollama, a cloud
-//! endpoint, and a future local runtime are all the same to it, and a test can
-//! substitute a scripted implementation without a network.
+//! The pipeline never names a provider. It asks for a stage to be run and is
+//! told honestly whether a model answered. Ollama, a cloud endpoint, and a
+//! future local runtime are all the same to it, and a test can substitute a
+//! scripted [`Completer`] without a network.
 //!
-//! Boxed futures rather than `async_trait` keep this dependency-free; the
-//! pipeline makes a handful of model calls per meeting at most, so the
-//! allocation is irrelevant. The alias itself now lives in `providers`, which
-//! grew the same seam as [`providers::Completer`] — so there is one of it.
+//! # What this module is now
 //!
-//! Two things the trait carries beyond "send a prompt": the sampling each stage
-//! needs, and how much prompt the model can actually read. Both were previously
-//! left to whatever the provider defaulted to, and both silently cost quality —
-//! extraction ran at a creative-writing temperature, and a transcript longer
-//! than the model's window was cut off with nothing in the response to say so.
+//! It used to be a second pipeline. `MeetingLlm` was a trait over "send a
+//! prompt", `ProviderLlm` adapted the shared client to it, and everything the
+//! analysis layer knows about a call — which prompt this is, what version, what
+//! it may answer with, what sampling it needs, where the source boundary goes —
+//! was re-decided here in prose. That is the duplication M1 set out to remove.
+//!
+//! What is left is an adapter, and a thin one: it holds a
+//! [`AnalysisService`](crate::pipeline::analysis::AnalysisService), names the
+//! two registered meeting prompts, and translates the shared failure vocabulary
+//! into the one this pipeline's repair loop already speaks. The prompts
+//! themselves, the sampling, the JSON gate and the boundary now come from the
+//! registry, which means they are the same mechanisms every other analysis in
+//! Relay runs on.
+//!
+//! # What deliberately stayed
+//!
+//! [`LlmError`] and the two stage methods, because the repair loop and the
+//! deterministic floor in `super::mod` are written against them and are the
+//! part of this pipeline worth protecting. Migrating the transport did not
+//! require rewriting the recovery.
 
-pub use crate::providers::BoxFuture;
+use crate::pipeline::analysis::{
+    AnalysisFailure, AnalysisRequest, AnalysisService, AnalysisStage, AnalysisType,
+    CanonicalContent, PromptId, SourceDescriptor,
+};
+use crate::providers::Completer;
 
 /// A completion that actually came from a model.
 #[derive(Debug, Clone, PartialEq)]
@@ -24,17 +40,29 @@ pub struct LlmOutcome {
     pub text: String,
     pub provider: String,
     pub model: String,
+    /// The response parsed as JSON, for a stage whose contract asks for it.
+    ///
+    /// Parsed by the shared service rather than here. Stage A used to run its
+    /// own brace-scan; that rule now lives in
+    /// `pipeline::analysis::parse_json_response`, which is where the claim that
+    /// there is one definition of "parseable" finally became true.
+    pub json: Option<serde_json::Value>,
 }
 
-/// Why no completion is available. Both variants mean the same thing to the
-/// pipeline — fall back to the deterministic path — but they are recorded
-/// separately so the processing log says which happened.
+/// Why no completion is available.
+///
+/// Three variants where the transport has two, because the pipeline acts on the
+/// difference. `Empty` earns a second attempt behind a shorter contract;
+/// `Unavailable` does not, since a provider that could not be reached will not
+/// be reached by a differently-worded prompt either.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LlmError {
     /// The provider could not be reached, or answered with filler.
     Unavailable(String),
     /// The provider answered, but with nothing usable.
     Empty,
+    /// The provider answered in the wrong shape for the stage's contract.
+    Unparseable(String),
 }
 
 impl std::fmt::Display for LlmError {
@@ -42,202 +70,160 @@ impl std::fmt::Display for LlmError {
         match self {
             Self::Unavailable(msg) => write!(f, "model unavailable: {}", msg),
             Self::Empty => write!(f, "model returned an empty response"),
+            Self::Unparseable(msg) => write!(f, "model returned an unusable response: {}", msg),
         }
     }
 }
 
-/// One call's sampling and budget.
-///
-/// The pipeline's two stages are different jobs and want different settings:
-/// extraction is a strict-JSON read of a transcript and wants near-zero
-/// temperature, while writing prose needs a little room. Before this existed
-/// neither could be expressed, so both ran at whatever the provider defaulted
-/// to — 0.8 on Ollama, which is a creative-writing setting applied to the stage
-/// whose failure mode is inventing an owner.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LlmRequest<'a> {
-    pub system_prompt: &'a str,
-    pub user_prompt: &'a str,
-    pub temperature: f32,
-    pub max_output_tokens: u32,
-}
-
-impl<'a> LlmRequest<'a> {
-    /// Stage A: comprehension into strict JSON. Temperature from
-    /// `Meeting-rules/meeting_transcript_summary.md` §11.
-    pub fn extraction(system_prompt: &'a str, user_prompt: &'a str) -> Self {
-        Self {
-            system_prompt,
-            user_prompt,
-            temperature: 0.1,
-            max_output_tokens: 2_400,
-        }
-    }
-
-    /// Stage B: writing. Slightly above extraction because rewriting requires
-    /// generation, low enough to stay grounded.
-    pub fn prose(system_prompt: &'a str, user_prompt: &'a str, max_output_tokens: u32) -> Self {
-        Self {
-            system_prompt,
-            user_prompt,
-            temperature: 0.3,
-            max_output_tokens,
+impl From<AnalysisFailure> for LlmError {
+    fn from(failure: AnalysisFailure) -> Self {
+        match failure {
+            AnalysisFailure::EmptyCompletion => Self::Empty,
+            AnalysisFailure::Unparseable(preview) => Self::Unparseable(preview),
+            // The rest are all "nothing came back", and the pipeline's answer to
+            // every one of them is the same: fall through to the deterministic
+            // path and record why.
+            other => Self::Unavailable(other.to_string()),
         }
     }
 }
 
-/// A language model the meeting pipeline can call.
-pub trait MeetingLlm: Send + Sync {
-    fn complete_request<'a>(
-        &'a self,
-        request: LlmRequest<'a>,
-    ) -> BoxFuture<'a, Result<LlmOutcome, LlmError>>;
-
-    /// The convenience form, kept because most call sites want the defaults.
-    fn complete<'a>(
-        &'a self,
-        system_prompt: &'a str,
-        user_prompt: &'a str,
-    ) -> BoxFuture<'a, Result<LlmOutcome, LlmError>> {
-        self.complete_request(LlmRequest {
-            system_prompt,
-            user_prompt,
-            temperature: 0.3,
-            max_output_tokens: 1_500,
-        })
-    }
-
-    /// How many characters of user prompt this model can actually read.
-    ///
-    /// Not a nicety: a provider that is handed more than its window silently
-    /// discards the overflow, and the pipeline has no way to tell from the
-    /// response that it happened. Extraction sizes its own chunking from this
-    /// so a long meeting is processed in passes rather than half-read.
-    fn prompt_budget_chars(&self) -> usize;
-
-    /// Reported in stage state and the processing log even when the call fails,
-    /// so "which model ran?" is answerable for a failed meeting.
-    fn provider_name(&self) -> String;
-    fn model_name(&self) -> String;
-}
-
-/// Characters per token, conservatively low.
+/// Runs a meeting's analysis stages on the shared spine.
 ///
-/// Under-estimating wastes a little window; over-estimating silently truncates
-/// a transcript, which is the failure this whole mechanism exists to prevent.
-const CHARS_PER_TOKEN: usize = 3;
-
-/// The marker `providers::LLMClient` returns when it has silently substituted
-/// its own canned text for a real completion.
+/// Borrows the completer rather than building a client, for the same reason
+/// [`AnalysisService`] does: §39 says there is one authoritative provider
+/// abstraction, and a type that constructs its own is the first step towards a
+/// second one.
 ///
-/// Re-exported from the provider layer rather than restated here: it describes
-/// that layer's behaviour, and a second copy is a second thing to get wrong.
-use crate::providers::HEURISTIC_FALLBACK_MODEL as HEURISTIC_MODEL_MARKER;
-
-/// Adapts the app's shared `LLMClient` to the pipeline's contract.
-///
-/// `LLMClient::complete` never returns `Err`: on any provider failure it logs a
-/// warning and returns canned filler tagged `model: "heuristic-fallback"`. That
-/// is fine for dictation, where some output beats none, and wrong for a meeting
-/// summary, where filler presented as a model's work would be validated,
-/// persisted, and shown to the user as an AI summary. This adapter therefore
-/// goes through `complete_with`, which reports a provider failure as a failure,
-/// and still checks the marker as defence in depth.
-pub struct ProviderLlm {
-    client: crate::providers::LLMClient,
+/// Holds the source descriptor because it is constant for the whole meeting —
+/// both stages describe the same recording — and because building it once is
+/// what stops the two stages from describing it differently.
+pub struct MeetingAnalyst<'a> {
+    service: AnalysisService<'a>,
+    source: SourceDescriptor<'a>,
     provider: String,
     model: String,
 }
 
-impl ProviderLlm {
-    pub fn new(config: crate::providers::ProviderConfig) -> Self {
-        let (provider, model) = match config.active_provider {
-            crate::providers::ProviderType::Ollama => {
-                ("ollama".to_string(), config.ollama_model.clone())
-            }
-            crate::providers::ProviderType::CloudOpenAI => (
-                "cloud_openai".to_string(),
-                config.cloud_model.clone().unwrap_or_default(),
-            ),
-            crate::providers::ProviderType::CloudGemini => (
-                "cloud_gemini".to_string(),
-                config.cloud_model.clone().unwrap_or_default(),
-            ),
-            crate::providers::ProviderType::CloudAnthropic => (
-                "cloud_anthropic".to_string(),
-                config.cloud_model.clone().unwrap_or_default(),
-            ),
-        };
-
+impl<'a> MeetingAnalyst<'a> {
+    pub fn new(completer: &'a dyn Completer, source: SourceDescriptor<'a>) -> Self {
         Self {
-            client: crate::providers::LLMClient::new(config),
-            provider,
-            model,
+            service: AnalysisService::new(completer),
+            source,
+            provider: crate::pipeline::analysis::provider_name(completer.provider_type()),
+            model: completer.model_name(),
         }
     }
-}
 
-impl MeetingLlm for ProviderLlm {
-    fn complete_request<'a>(
-        &'a self,
-        request: LlmRequest<'a>,
-    ) -> BoxFuture<'a, Result<LlmOutcome, LlmError>> {
-        Box::pin(async move {
-            let options = crate::providers::CompletionOptions {
-                temperature: request.temperature,
-                max_output_tokens: request.max_output_tokens,
-                ..self.client.default_options()
-            };
-            let response = self
-                .client
-                .complete_with(request.user_prompt, Some(request.system_prompt), options)
-                .await
-                .map_err(|e| LlmError::Unavailable(e.to_string()))?;
-
-            if response.model == HEURISTIC_MODEL_MARKER {
-                return Err(LlmError::Unavailable(
-                    "provider unreachable; the shared client substituted heuristic filler"
-                        .to_string(),
-                ));
-            }
-            if response.text.trim().is_empty() {
-                return Err(LlmError::Empty);
-            }
-
-            Ok(LlmOutcome {
-                text: response.text,
-                provider: self.provider.clone(),
-                model: response.model,
-            })
-        })
+    /// How many characters of transcript one extraction pass may carry.
+    ///
+    /// Delegates to the service, which sizes it from the configured window and
+    /// the prompt's own output allowance. This is the method whose absence on
+    /// the shared service was the last thing keeping meetings off it.
+    pub fn prompt_budget_chars(&self) -> usize {
+        self.service.prompt_budget_chars(PromptId::MeetingFacts)
     }
 
-    fn prompt_budget_chars(&self) -> usize {
-        // Reserve room for the system prompt and the model's own answer; what
-        // is left is what a transcript may occupy.
-        let reserved_tokens = 2_400 + 1_200;
-        (self.client.context_tokens().saturating_sub(reserved_tokens) as usize) * CHARS_PER_TOKEN
-    }
-
-    fn provider_name(&self) -> String {
+    /// Reported in stage state and the processing log even when the call fails,
+    /// so "which model ran?" is answerable for a failed meeting.
+    pub fn provider_name(&self) -> String {
         self.provider.clone()
     }
 
-    fn model_name(&self) -> String {
+    pub fn model_name(&self) -> String {
         self.model.clone()
+    }
+
+    /// Stage A: one window of transcript becomes facts.
+    ///
+    /// The response is JSON by contract, so the service parses and rejects
+    /// prose before this returns.
+    pub async fn extract_facts(
+        &self,
+        instructions: &str,
+        transcript_window: &str,
+    ) -> Result<LlmOutcome, LlmError> {
+        let request = self
+            .request(AnalysisType::Extraction, PromptId::MeetingFacts)
+            .at_stage(AnalysisStage::FACTS);
+        self.run(&request, instructions, transcript_window).await
+    }
+
+    /// Stage B: the facts become prose, with the transcript closed.
+    ///
+    /// `max_output_tokens` is computed from the length budget the user chose,
+    /// so it overrides the registry's default rather than being decided here.
+    pub async fn write_prose(
+        &self,
+        instructions: &str,
+        facts: &str,
+        max_output_tokens: u32,
+    ) -> Result<LlmOutcome, LlmError> {
+        let prompt = PromptId::MeetingSummary.definition();
+        let base = crate::providers::CompletionOptions {
+            max_output_tokens,
+            ..prompt.options(self.default_options())
+        };
+        let request = self
+            .request(AnalysisType::Summary, PromptId::MeetingSummary)
+            .at_stage(AnalysisStage::PROSE)
+            .with_options(base);
+        self.run(&request, instructions, facts).await
+    }
+
+    fn request(&self, analysis_type: AnalysisType, prompt_id: PromptId) -> AnalysisRequest<'_> {
+        AnalysisRequest::new(&self.source, analysis_type, prompt_id)
+    }
+
+    fn default_options(&self) -> crate::providers::CompletionOptions {
+        self.service.provider_defaults()
+    }
+
+    async fn run(
+        &self,
+        request: &AnalysisRequest<'_>,
+        instructions: &str,
+        body: &str,
+    ) -> Result<LlmOutcome, LlmError> {
+        // No title: a meeting's prompt body is the rendered transcript or the
+        // rendered facts, and `CanonicalContent` prepends nothing to markdown
+        // with no segments. The stage prompts already say what they are reading.
+        let content = CanonicalContent::from_markdown("", body);
+
+        let executed = self
+            .service
+            .execute_computed(request, &self.source, &content, instructions)
+            .await?;
+
+        Ok(LlmOutcome {
+            text: executed.response.text,
+            provider: executed.provider,
+            model: executed.response.model,
+            json: executed.json,
+        })
     }
 }
 
 #[cfg(test)]
 pub mod test_support {
     use super::*;
+    use crate::pipeline::analysis::SourceType;
+    use crate::providers::{
+        BoxFuture, CompletionOptions, LLMResponse, ProviderError, ProviderType,
+    };
     use std::sync::Mutex;
 
-    /// A model stand-in that replays queued responses. Lets the pipeline's
-    /// failure paths — timeouts, invalid JSON, empty output — be tested without
-    /// a network or an Ollama instance.
+    /// A model stand-in that replays queued responses.
+    ///
+    /// Still here, and still driving the three meeting suites, but pointed at
+    /// [`Completer`] rather than at a meetings-only trait. That is the whole
+    /// difference M1 makes to the tests: they now exercise the same service
+    /// production runs, including its prompt registry, its boundary and its
+    /// JSON gate, instead of a parallel path that merely resembled it.
     pub struct ScriptedLlm {
         responses: Mutex<Vec<Result<String, LlmError>>>,
+        /// System and user prompt per call, so a test can assert what the model
+        /// was actually shown.
         pub calls: Mutex<Vec<(String, String)>>,
         /// Sampling recorded per call, so a test can assert that extraction ran
         /// cold and prose did not.
@@ -260,6 +246,10 @@ pub mod test_support {
 
         /// Shrinks the usable window, so chunked extraction can be exercised on
         /// a fixture small enough to read.
+        ///
+        /// Expressed as a context window rather than a character count now,
+        /// because the budget is the service's to compute. The arithmetic is
+        /// inverted here so a test can still say "give me N characters".
         pub fn with_prompt_budget(mut self, chars: usize) -> Self {
             self.budget_chars = chars;
             self
@@ -272,47 +262,78 @@ pub mod test_support {
         pub fn call_count(&self) -> usize {
             self.calls.lock().unwrap().len()
         }
+
+        /// An analyst backed by this script, over a synthetic meeting.
+        pub fn analyst(&self) -> MeetingAnalyst<'_> {
+            MeetingAnalyst::new(self, SourceDescriptor::synthetic("meeting", SourceType::Meeting))
+        }
     }
 
-    impl MeetingLlm for ScriptedLlm {
-        fn complete_request<'a>(
-            &'a self,
-            request: LlmRequest<'a>,
-        ) -> BoxFuture<'a, Result<LlmOutcome, LlmError>> {
-            self.calls.lock().unwrap().push((
-                request.system_prompt.to_string(),
-                request.user_prompt.to_string(),
-            ));
-            self.requests
-                .lock().unwrap()
-                .push((request.temperature, request.max_output_tokens));
+    /// The context window that yields `chars` of Stage A prompt budget.
+    ///
+    /// The inverse of [`AnalysisService::prompt_budget_chars`], so a test can
+    /// go on asking for a character count now that the budget is the service's
+    /// to compute. `the_test_helper_inverts_the_budget_it_stands_in_for` is
+    /// what stops the two drifting apart.
+    fn budget_to_window(chars: usize) -> u32 {
+        const CHARS_PER_TOKEN: usize = 3;
+        const INSTRUCTION_RESERVE_TOKENS: u32 = 1_200;
+        let source_tokens = chars.div_ceil(CHARS_PER_TOKEN) as u32;
+        source_tokens
+            .saturating_add(PromptId::MeetingFacts.definition().max_output_tokens)
+            .saturating_add(INSTRUCTION_RESERVE_TOKENS)
+    }
 
-            let next = self.responses.lock().unwrap().pop();
-            Box::pin(async move {
-                match next {
-                    Some(Ok(text)) => Ok(LlmOutcome {
-                        text,
-                        provider: "scripted".to_string(),
-                        model: "scripted-model".to_string(),
-                    }),
-                    Some(Err(e)) => Err(e),
-                    None => Err(LlmError::Unavailable(
-                        "no scripted response left".to_string(),
-                    )),
-                }
-            })
+    impl Completer for ScriptedLlm {
+        fn default_options(&self) -> CompletionOptions {
+            // The window the service will subtract the prompt's output
+            // allowance from. Chosen so `prompt_budget_chars` lands on the
+            // character count the test asked for.
+            CompletionOptions {
+                context_tokens: budget_to_window(self.budget_chars),
+                ..CompletionOptions::default()
+            }
         }
 
-        fn prompt_budget_chars(&self) -> usize {
-            self.budget_chars
-        }
-
-        fn provider_name(&self) -> String {
-            "scripted".to_string()
+        fn provider_type(&self) -> &ProviderType {
+            &ProviderType::Ollama
         }
 
         fn model_name(&self) -> String {
             "scripted-model".to_string()
+        }
+
+        fn complete_verified<'a>(
+            &'a self,
+            prompt: &'a str,
+            system_prompt: Option<&'a str>,
+            options: CompletionOptions,
+        ) -> BoxFuture<'a, Result<LLMResponse, ProviderError>> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((system_prompt.unwrap_or_default().to_string(), prompt.to_string()));
+            self.requests
+                .lock()
+                .unwrap()
+                .push((options.temperature, options.max_output_tokens));
+
+            let next = self.responses.lock().unwrap().pop();
+            Box::pin(async move {
+                match next {
+                    Some(Ok(text)) => Ok(LLMResponse {
+                        text,
+                        model: "scripted-model".to_string(),
+                        prompt_tokens: None,
+                        completion_tokens: None,
+                    }),
+                    Some(Err(LlmError::Empty)) => Err(ProviderError::EmptyCompletion),
+                    Some(Err(e)) => Err(ProviderError::NoCompletion(e.to_string())),
+                    None => Err(ProviderError::NoCompletion(
+                        "no scripted response left".to_string(),
+                    )),
+                }
+            })
         }
     }
 }
@@ -321,15 +342,22 @@ pub mod test_support {
 mod tests {
     use super::test_support::ScriptedLlm;
     use super::*;
+    use crate::pipeline::analysis::SourceType;
+    use crate::providers::{LLMClient, ProviderConfig};
+
+    fn meeting() -> SourceDescriptor<'static> {
+        SourceDescriptor::synthetic("meeting", SourceType::Meeting)
+    }
 
     #[tokio::test]
     async fn scripted_responses_are_replayed_in_order_then_fail() {
         let llm = ScriptedLlm::new(vec![Ok("first".into()), Ok("second".into())]);
+        let analyst = llm.analyst();
 
-        assert_eq!(llm.complete("s", "u").await.unwrap().text, "first");
-        assert_eq!(llm.complete("s", "u").await.unwrap().text, "second");
+        assert_eq!(analyst.write_prose("s", "u", 600).await.unwrap().text, "first");
+        assert_eq!(analyst.write_prose("s", "u", 600).await.unwrap().text, "second");
         assert!(matches!(
-            llm.complete("s", "u").await,
+            analyst.write_prose("s", "u", 600).await,
             Err(LlmError::Unavailable(_))
         ));
         assert_eq!(llm.call_count(), 3);
@@ -338,16 +366,16 @@ mod tests {
     #[tokio::test]
     async fn an_unreachable_provider_is_a_failure_not_canned_filler() {
         // `LLMClient::complete` masks provider outages with canned filler; the
-        // pipeline goes through `complete_with`, which does not, so an outage
+        // service goes through `complete_verified`, which does not, so an outage
         // reaches the pipeline as the failure it is and the deterministic path
         // is chosen deliberately rather than by accident.
-        let config = crate::providers::ProviderConfig {
+        let client = LLMClient::new(ProviderConfig {
             ollama_host: "http://127.0.0.1:1".to_string(),
             ..Default::default()
-        };
-        let llm = ProviderLlm::new(config);
+        });
+        let analyst = MeetingAnalyst::new(&client, meeting());
 
-        match llm.complete("Return JSON", "some transcript").await {
+        match analyst.write_prose("Write prose", "some facts", 600).await {
             Err(LlmError::Unavailable(_)) => {}
             other => panic!("expected an unavailable error, got {:?}", other),
         }
@@ -355,34 +383,94 @@ mod tests {
 
     #[tokio::test]
     async fn each_stage_asks_for_the_sampling_its_job_needs() {
-        let llm = ScriptedLlm::new(vec![Ok("a".into()), Ok("b".into())]);
-        llm.complete_request(LlmRequest::extraction("s", "u"))
-            .await
-            .unwrap();
-        llm.complete_request(LlmRequest::prose("s", "u", 900))
-            .await
-            .unwrap();
+        // Now a statement about the prompt registry rather than about this
+        // module: neither number is written here any more, and this is the test
+        // that would catch the registry drifting away from what ships.
+        let llm = ScriptedLlm::new(vec![Ok("{\"title\":\"x\"}".into()), Ok("prose".into())]);
+        let analyst = llm.analyst();
+        analyst.extract_facts("s", "u").await.unwrap();
+        analyst.write_prose("s", "u", 900).await.unwrap();
 
         let requests = llm.requests.lock().unwrap();
         assert_eq!(requests[0].0, 0.1, "extraction runs cold");
+        assert_eq!(requests[0].1, 2_400);
         assert_eq!(requests[1].0, 0.3, "prose gets a little room");
-        assert_eq!(requests[1].1, 900);
+        assert_eq!(requests[1].1, 900, "and the caller's computed budget wins");
+    }
+
+    #[tokio::test]
+    async fn a_prose_answer_to_stage_a_is_refused_by_the_contract() {
+        // Stage A's JSON contract is the registry's now, and it is applied
+        // before this returns rather than discovered by a parse that fails.
+        let llm = ScriptedLlm::new(vec![Ok("I could not find any facts.".into())]);
+        assert!(matches!(
+            llm.analyst().extract_facts("s", "u").await,
+            Err(LlmError::Unparseable(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_empty_answer_stays_distinguishable_from_an_outage() {
+        // The distinction Stage B's compact-contract retry is built on. It now
+        // travels provider → `ProviderError` → `AnalysisFailure` → here, and
+        // every one of those hops had to preserve it.
+        let empty = ScriptedLlm::new(vec![Err(LlmError::Empty)]);
+        assert!(matches!(
+            empty.analyst().write_prose("s", "u", 600).await,
+            Err(LlmError::Empty)
+        ));
+
+        let down = ScriptedLlm::new(vec![Err(LlmError::Unavailable("refused".into()))]);
+        assert!(matches!(
+            down.analyst().write_prose("s", "u", 600).await,
+            Err(LlmError::Unavailable(_))
+        ));
     }
 
     #[test]
     fn the_prompt_budget_shrinks_with_the_configured_window() {
-        let small = ProviderLlm::new(crate::providers::ProviderConfig {
+        let small = LLMClient::new(ProviderConfig {
             context_tokens: 8_192,
             ..Default::default()
         });
-        let large = ProviderLlm::new(crate::providers::ProviderConfig {
+        let large = LLMClient::new(ProviderConfig {
             context_tokens: 32_768,
             ..Default::default()
         });
-        assert!(small.prompt_budget_chars() < large.prompt_budget_chars());
+        let small_budget = MeetingAnalyst::new(&small, meeting()).prompt_budget_chars();
+        let large_budget = MeetingAnalyst::new(&large, meeting()).prompt_budget_chars();
+
+        assert!(small_budget < large_budget);
         assert!(
-            small.prompt_budget_chars() > 10_000,
+            small_budget > 10_000,
             "an 8k window must still fit a meaningful stretch of transcript"
         );
+    }
+
+    #[test]
+    fn the_migrated_budget_is_the_one_the_pipeline_always_had() {
+        // The number this replaced: window, less 2,400 tokens of answer and
+        // 1,200 of contract, at three characters a token. Computed from the
+        // registry now, and it has to come out the same — a migration that
+        // silently re-chunks every long meeting is not a migration.
+        let client = LLMClient::new(ProviderConfig {
+            context_tokens: 8_192,
+            ..Default::default()
+        });
+        assert_eq!(
+            MeetingAnalyst::new(&client, meeting()).prompt_budget_chars(),
+            (8_192 - (2_400 + 1_200)) * 3
+        );
+    }
+
+    #[test]
+    fn the_test_helper_inverts_the_budget_it_stands_in_for() {
+        // `with_prompt_budget` lets a test ask for characters while the service
+        // computes them from a window. If the two ever disagree, chunked
+        // extraction is being exercised at a size nobody chose.
+        for chars in [12_000usize, 30_000, 120_000] {
+            let llm = ScriptedLlm::new(Vec::new()).with_prompt_budget(chars);
+            assert_eq!(llm.analyst().prompt_budget_chars(), chars);
+        }
     }
 }

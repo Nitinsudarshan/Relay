@@ -45,6 +45,9 @@ pub mod assemble;
 pub mod audio;
 pub mod chunk;
 pub mod engine;
+/// Bounds the generation tail with a duplicate request. Cloud only — see the
+/// module docs for why a local model cannot be hedged.
+pub mod hedge;
 pub mod intent;
 pub mod retrieval;
 pub mod session;

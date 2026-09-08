@@ -95,6 +95,32 @@ export const DictionarySnippetsSettings: React.FC<DictionarySnippetsSettingsProp
     await onSaveDirect();
   };
 
+  // --- LEARNED CORRECTION HANDLERS ---
+  // Same shape as the dictionary handlers above, and the same settings object:
+  // corrections are vocabulary, so they are managed where vocabulary is
+  // managed rather than on a page of their own.
+  const corrections = settings.vocabulary_corrections || [];
+
+  const handleToggleCorrection = async (source: string) => {
+    onUpdateSettings((prev) => ({
+      ...prev,
+      vocabulary_corrections: (prev.vocabulary_corrections || []).map((c) =>
+        c.source === source ? { ...c, enabled: !c.enabled } : c,
+      ),
+    }));
+    await onSaveDirect();
+  };
+
+  const handleDeleteCorrection = async (source: string) => {
+    onUpdateSettings((prev) => ({
+      ...prev,
+      vocabulary_corrections: (prev.vocabulary_corrections || []).filter(
+        (c) => c.source !== source,
+      ),
+    }));
+    await onSaveDirect();
+  };
+
   const handleExportDictionary = () => {
     const currentWords = settings.dictionary || DEFAULT_SYSTEM_WORDS;
     const blob = new Blob([currentWords.join(', ')], { type: 'text/plain;charset=utf-8' });
@@ -387,6 +413,72 @@ export const DictionarySnippetsSettings: React.FC<DictionarySnippetsSettingsProp
               </div>
             </div>
           )}
+
+          {/* Learned corrections. Distinct from the words above: those prime
+              the recognizer before it guesses, these repair a phrase it keeps
+              getting wrong afterwards. Only the user's own in-app corrections
+              land here. */}
+          <div className="space-y-2 pt-2">
+            <div>
+              <p className="text-xs font-semibold text-foreground">
+                Learned corrections ({corrections.length})
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                Added when you tick "Teach Relay this correction" while fixing a Voice Note.
+                Applied to new transcripts; turn one off to stop it without losing it.
+              </p>
+            </div>
+
+            {corrections.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground italic">
+                Nothing learned yet.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {corrections.map((correction) => (
+                  <div
+                    key={correction.source}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-2.5 py-1.5"
+                  >
+                    <div className="flex items-center gap-1.5 text-xs min-w-0">
+                      <code
+                        className={`px-1.5 py-0.5 rounded-lg bg-muted break-all ${
+                          correction.enabled ? 'text-muted-foreground' : 'text-muted-foreground/50 line-through'
+                        }`}
+                      >
+                        {correction.source}
+                      </code>
+                      <span className="text-muted-foreground shrink-0">→</span>
+                      <code
+                        className={`px-1.5 py-0.5 rounded-lg bg-muted break-all ${
+                          correction.enabled ? 'text-foreground' : 'text-muted-foreground/50 line-through'
+                        }`}
+                      >
+                        {correction.replacement}
+                      </code>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => void handleToggleCorrection(correction.source)}
+                        className="text-[11px] px-1.5 py-0.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
+                      >
+                        {correction.enabled ? 'Disable' : 'Enable'}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Remove correction ${correction.source}`}
+                        onClick={() => void handleDeleteCorrection(correction.source)}
+                        className="text-[11px] px-1.5 py-0.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-muted"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

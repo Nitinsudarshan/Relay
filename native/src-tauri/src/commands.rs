@@ -95,6 +95,12 @@ pub struct AppState {
     pub settings: Mutex<AppSettings>,
     pub stt: SttEngine,
     pub last_stt_diagnostics: Mutex<Option<crate::capture::SttDiagnosticSnapshot>>,
+    /// What the last dictation put into a field, and where.
+    ///
+    /// Held so the cleanup offered afterwards can select exactly that text and
+    /// replace it. Cleared on the next dictation, because the offer is only
+    /// ever about the most recent one.
+    pub last_dictation: Mutex<Option<LastDictation>>,
     pub meetings_v2: Arc<crate::meetings_v2::MeetingsV2Engine>,
     /// Derived meeting intelligence. Shares the recorder's session directory but
     /// only reads from it — everything it produces goes to `processing.json`.
@@ -165,11 +171,32 @@ impl AppState {
     }
 }
 
+/// The dictation a cleanup may still replace.
+#[derive(Debug, Clone)]
+pub struct LastDictation {
+    /// Exactly the text that was injected — not the transcript before
+    /// normalization, because what has to be selected back is what landed.
+    pub text: String,
+    /// Where it landed. A cleanup that cannot prove the caret is still in the
+    /// same place does not touch the field.
+    pub focus: Option<crate::hotkeys::injection::TargetFocusContext>,
+}
+
 pub fn record_stt_diagnostics(
     app: &AppHandle,
     state: &AppState,
     snapshot: crate::capture::SttDiagnosticSnapshot,
 ) {
+    // The full snapshot stays in memory for the panel showing the last run.
+    // A reduced, transcript-free record is retained on disk, because the
+    // questions worth asking of this data — are input levels low enough to
+    // want a gain stage, does pinning the language starve decodes — are about
+    // the distribution across runs and cannot be answered from the last one.
+    crate::capture::decode_history::append(
+        &state.config_dir,
+        &crate::capture::decode_history::DecodeRecord::from_snapshot(&snapshot),
+    );
+
     let mut guard = state.last_stt_diagnostics.lock_or_recover();
     *guard = Some(snapshot.clone());
     let _ = app.emit(STT_DIAGNOSTICS_EVENT, &snapshot);
@@ -181,6 +208,155 @@ pub async fn get_last_stt_diagnostics(
 ) -> Result<Option<crate::capture::SttDiagnosticSnapshot>, CommandError> {
     let guard = state.last_stt_diagnostics.lock_or_recover();
     Ok(guard.clone())
+}
+
+/// What the retained decode history says.
+///
+/// Deliberately a summary rather than the rows: the decision this exists to
+/// support is "are levels low" or "does pinning starve decodes", and a caller
+/// that has to compute percentiles itself will compute them differently from
+/// the next caller.
+#[tauri::command]
+pub async fn get_stt_decode_summary(
+    state: State<'_, AppState>,
+) -> Result<crate::capture::decode_history::DecodeSummary, CommandError> {
+    let records = crate::capture::decode_history::load(&state.config_dir);
+    Ok(crate::capture::decode_history::summarize(&records))
+}
+
+/// Proposes a cleanup of dictated text, with the diff that makes it reviewable.
+///
+/// Returns a proposal rather than replacing anything. The decision to accept it
+/// is the user's, made against the diff — which is the entire reason this layer
+/// is allowed to exist (Decision 65 for where it may not be used, and
+/// `capture::rewrite` for why a diff rather than a more careful prompt).
+#[tauri::command]
+pub async fn rewrite_dictation(
+    state: State<'_, AppState>,
+    text: String,
+    style: Option<String>,
+) -> Result<crate::capture::rewrite::RewriteProposal, CommandError> {
+    let (provider, configured, enabled) = {
+        let settings = state.settings.lock_or_recover();
+        (
+            settings.provider.clone(),
+            settings.stt.cleanup_style.clone(),
+            settings.stt.text_transform,
+        )
+    };
+
+    // The setting decides, not the caller. The pill hides the button when this
+    // is off, and gating only there would leave `text_transform` as a
+    // preference nothing enforces — which is how a setting comes to mean
+    // whatever the newest call site assumed.
+    if !enabled {
+        return Ok(crate::capture::rewrite::RewriteProposal::unchanged(text));
+    }
+    let style = crate::capture::rewrite::CleanupStyle::from_setting(
+        style.as_deref().unwrap_or(&configured),
+    );
+    let client = crate::providers::LLMClient::new(provider);
+    Ok(crate::capture::rewrite::propose(&client, &text, style).await)
+}
+
+/// Whether a cleanup can still be offered for the last dictation, and of what.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CleanupTarget {
+    pub available: bool,
+    pub text: String,
+}
+
+/// The dictation a cleanup would act on, if any.
+#[tauri::command]
+pub async fn get_cleanup_target(
+    state: State<'_, AppState>,
+) -> Result<CleanupTarget, CommandError> {
+    let guard = state.last_dictation.lock_or_recover();
+    Ok(match guard.as_ref() {
+        Some(last) => CleanupTarget {
+            available: !last.text.trim().is_empty(),
+            text: last.text.clone(),
+        },
+        None => CleanupTarget {
+            available: false,
+            text: String::new(),
+        },
+    })
+}
+
+/// How an apply ended, in the terms the pill has to render.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum CleanupApplied {
+    /// The field now holds the cleaned text.
+    Replaced,
+    /// The caret is no longer where the dictation landed, so nothing was
+    /// touched. The cleaned text is on the clipboard instead.
+    Moved { message: String },
+    Failed { message: String },
+}
+
+/// Replaces the last dictation with its cleaned form.
+///
+/// Selects exactly what Relay injected and types over it. Three things make
+/// that safe enough to do to somebody's document:
+///
+/// * The selection is counted in cursor steps, not characters
+///   (`text_normalize::cursor_steps`), so a Devanagari cluster is one step and
+///   the selection cannot run past what was written.
+/// * The focus context is compared against the one captured at injection. If
+///   the user has moved to another window or tab, nothing is selected and
+///   nothing is typed.
+/// * The target is consumed. A second apply has nothing to act on, so a
+///   double-press cannot delete a second helping of the user's text.
+#[tauri::command]
+pub async fn apply_dictation_cleanup(
+    state: State<'_, AppState>,
+    cleaned: String,
+) -> Result<CleanupApplied, CommandError> {
+    use crate::hotkeys::injection;
+
+    // Taken, not read: whatever happens next, this dictation is no longer a
+    // thing a later press may replace.
+    let Some(last) = state.last_dictation.lock_or_recover().take() else {
+        return Ok(CleanupApplied::Failed {
+            message: "There is no recent dictation to clean up.".to_string(),
+        });
+    };
+
+    let still_there = injection::focus_unchanged(
+        last.focus.as_ref(),
+        injection::capture_target_focus_context().as_ref(),
+    );
+
+    if !still_there {
+        let _ = injection::copy_to_clipboard(&cleaned);
+        return Ok(CleanupApplied::Moved {
+            message: "You've moved since dictating, so nothing was changed. The cleaned text is on the clipboard.".to_string(),
+        });
+    }
+
+    let steps = crate::capture::text_normalize::cursor_steps(&last.text);
+    if let Err(e) = injection::select_previous(steps) {
+        let _ = injection::copy_to_clipboard(&cleaned);
+        return Ok(CleanupApplied::Failed {
+            message: format!("Could not select the dictated text ({e}). It is on the clipboard."),
+        });
+    }
+
+    let method = state.settings.lock_or_recover().clipboard.injection_method;
+    match injection::inject_text(&cleaned, method) {
+        Ok(()) => Ok(CleanupApplied::Replaced),
+        Err(e) => {
+            // The selection is still live and the replacement did not land.
+            // The clipboard is the recovery path, and saying so is the whole
+            // of the contract the injection branches already keep.
+            let _ = injection::copy_to_clipboard(&cleaned);
+            Ok(CleanupApplied::Failed {
+                message: format!("Could not type the cleaned text ({e}). It is on the clipboard."),
+            })
+        }
+    }
 }
 
 #[tauri::command]
@@ -479,7 +655,10 @@ async fn process_captured_audio(
     // period the user has to delete.
     let transcript = crate::capture::text_normalize::normalize_text(
         &transcript,
-        &settings.dictionary,
+        crate::capture::text_normalize::Vocabulary::new(
+            &settings.dictionary,
+            &settings.vocabulary_corrections,
+        ),
         crate::capture::text_normalize::TextProfile::Dictated,
     )
     .text;
@@ -589,6 +768,115 @@ pub async fn update_voice_note(
         .vault
         .update_note_content(&id, &content)
         .map_err(|e| CommandError::new("VAULT_UPDATE_FAILED", &e.to_string()))
+}
+
+/// A correction that was applied, and what it takes to undo it.
+#[derive(Debug, Clone, Serialize)]
+pub struct PhraseCorrectionResult {
+    pub note: VaultNote,
+    /// The content as it stood before. Undo is `update_voice_note` with this,
+    /// which is why no versioning system is needed for it.
+    pub previous_content: String,
+    /// True when the phrase was also added to the learned vocabulary.
+    pub learned: bool,
+}
+
+/// Corrects one selected phrase inside a Voice Note.
+///
+/// A deterministic range edit, saved through the same `update_note_content`
+/// the full editor uses — so this is a second way into the existing
+/// persistence, not a second persistence. No model is called: the user has
+/// already said what the text should be.
+///
+/// `start` and `end` are character offsets into the note's current content,
+/// and `original` is what the caller believes is there. The edit refuses
+/// rather than applying stale offsets to changed content.
+///
+/// `learn` is opt-in per correction. Most corrections are ordinary edits —
+/// "Thursday" to "Tuesday" is not vocabulary — so nothing is added to the
+/// learned list unless the user ticks the box.
+#[tauri::command]
+pub async fn correct_voice_note_phrase(
+    state: State<'_, AppState>,
+    id: String,
+    start: usize,
+    end: usize,
+    original: String,
+    replacement: String,
+    learn: Option<bool>,
+) -> Result<PhraseCorrectionResult, CommandError> {
+    let note = state
+        .vault
+        .get_note(&id)
+        .map_err(|e| CommandError::new("VAULT_READ_FAILED", &e.to_string()))?;
+    let previous_content = note.content.clone();
+
+    let corrected = crate::vault::correction::replace_range(
+        &previous_content,
+        start,
+        end,
+        &original,
+        &replacement,
+    )
+    .map_err(|e| CommandError::new("CORRECTION_FAILED", &e.to_string()))?;
+
+    let note = state
+        .vault
+        .update_note_content(&id, &corrected)
+        .map_err(|e| CommandError::new("VAULT_UPDATE_FAILED", &e.to_string()))?;
+
+    let learned = if learn.unwrap_or(false) {
+        let mut settings = state.settings.lock_or_recover();
+        let added = upsert_vocabulary_correction(
+            &mut settings.vocabulary_corrections,
+            &original,
+            &replacement,
+        );
+        if added {
+            let _ = settings.save(&state.settings_path());
+        }
+        added
+    } else {
+        false
+    };
+
+    Ok(PhraseCorrectionResult {
+        note,
+        previous_content,
+        learned,
+    })
+}
+
+/// Adds or updates a learned correction, in place.
+///
+/// Teaching the same source twice replaces the replacement rather than
+/// appending a second rule — two rules for one phrase means the applied result
+/// depends on list order, which is not something a user can see or reason
+/// about. Re-teaching also re-enables an entry that had been switched off,
+/// because teaching it again is a clear statement that it is wanted.
+fn upsert_vocabulary_correction(
+    corrections: &mut Vec<crate::settings::VocabularyCorrection>,
+    source: &str,
+    replacement: &str,
+) -> bool {
+    let candidate = crate::settings::VocabularyCorrection::new(source, replacement);
+    if !candidate.is_meaningful() {
+        return false;
+    }
+    match corrections
+        .iter_mut()
+        .find(|existing| existing.same_source_as(source))
+    {
+        Some(existing) => {
+            existing.replacement = candidate.replacement;
+            existing.enabled = true;
+            true
+        }
+        None => {
+            corrections.push(candidate);
+            true
+        }
+    }
 }
 
 #[tauri::command]
@@ -1345,6 +1633,33 @@ pub async fn get_available_stt_models(
     Ok(crate::capture::stt::get_stt_models_overview(&models_dir, &stt_settings))
 }
 
+/// Downloads a managed Whisper model the user asked for.
+///
+/// Separate from [`ensure_stt_model_ready`], which fetches the default so a
+/// first capture works at all. This one is a deliberate choice: the accuracy
+/// ceiling is ~1.6 GB and costs real decode time, so it is never fetched
+/// implicitly and never becomes the active model as a side effect of being
+/// downloaded. Selecting it stays the user's separate act.
+///
+/// Reports a failed download as `Failed` rather than as a command error, the
+/// same way `ensure_stt_model_ready` does, so Settings can render the reason
+/// instead of a toast with a stack in it.
+#[tauri::command]
+pub async fn download_stt_model(
+    state: State<'_, AppState>,
+    filename: String,
+) -> Result<SttModelStatus, CommandError> {
+    let models_dir = state.config_dir.join("models");
+    match crate::capture::stt::ensure_managed_model(&models_dir, &filename).await {
+        Ok(path) => Ok(SttModelStatus::Ready {
+            path: path.to_string_lossy().to_string(),
+        }),
+        Err(e) => Ok(SttModelStatus::Failed {
+            message: e.to_string(),
+        }),
+    }
+}
+
 #[tauri::command]
 pub async fn test_stt_model(
     model_path: String,
@@ -1382,6 +1697,7 @@ pub async fn save_settings(
     state
         .recorder
         .set_keep_warm_duration(settings.audio_input.parse_keep_warm_duration());
+    crate::capture::device::set_preference(&settings.audio_input);
     *state.settings.lock_or_recover() = settings.clone();
 
     // Re-register hotkeys dynamically with the OS immediately
@@ -2028,7 +2344,9 @@ fn start_meeting_session(
     }
 
     let models_dir = state.config_dir.join("models");
-    let whisper_model_path = settings.stt.whisper_model_path;
+    // Meetings may name their own model. Falls back to the global one, so this
+    // is unchanged for anyone who has not set it.
+    let whisper_model_path = settings.stt.meeting_model_override().map(str::to_string);
 
     let session = state
         .meetings_v2
@@ -2129,7 +2447,7 @@ pub fn spawn_meeting_processing(app: AppHandle, state: &AppState, meeting_id: St
             return;
         }
 
-        let llm = crate::meetings_v2::processing::llm::ProviderLlm::new(provider);
+        let llm = crate::providers::LLMClient::new(provider);
         match processor
             .generate_summary(&meeting_id, &llm, &options, false)
             .await
@@ -2419,7 +2737,7 @@ pub async fn generate_meeting_v2_summary(
         )
     };
 
-    let llm = crate::meetings_v2::processing::llm::ProviderLlm::new(provider);
+    let llm = crate::providers::LLMClient::new(provider);
     let processing = state
         .meeting_processor
         .generate_summary(&session_id, &llm, &options, force.unwrap_or(false))
@@ -2621,7 +2939,7 @@ pub async fn run_meeting_pipeline_selftest(
         let settings = state.settings.lock_or_recover();
         crate::capture::stt::resolve_meeting_model_path(
             &state.config_dir.join("models"),
-            settings.stt.whisper_model_path.as_deref(),
+            settings.stt.meeting_model_override(),
         )
     };
 

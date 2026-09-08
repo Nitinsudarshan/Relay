@@ -1,4 +1,7 @@
+pub mod decode_history;
+pub mod device;
 pub mod evaluation;
+pub mod rewrite;
 pub mod romanize;
 pub mod speech_health;
 pub mod text_normalize;
@@ -6,7 +9,7 @@ pub mod stt;
 pub mod web;
 
 use crate::sync::MutexExt;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc as std_mpsc;
@@ -405,7 +408,7 @@ fn spawn_warm_capture_thread(
         let _alive_guard = AliveGuard(alive.clone());
 
         let host = cpal::default_host();
-        let device = match host.default_input_device() {
+        let device = match device::open_preferred(&host) {
             Some(d) => d,
             None => {
                 let _ = init_tx.send(Err("No input (microphone) device available".to_string()));
