@@ -170,6 +170,16 @@ pub fn record_stt_diagnostics(
     state: &AppState,
     snapshot: crate::capture::SttDiagnosticSnapshot,
 ) {
+    // The full snapshot stays in memory for the panel showing the last run.
+    // A reduced, transcript-free record is retained on disk, because the
+    // questions worth asking of this data — are input levels low enough to
+    // want a gain stage, does pinning the language starve decodes — are about
+    // the distribution across runs and cannot be answered from the last one.
+    crate::capture::decode_history::append(
+        &state.config_dir,
+        &crate::capture::decode_history::DecodeRecord::from_snapshot(&snapshot),
+    );
+
     let mut guard = state.last_stt_diagnostics.lock_or_recover();
     *guard = Some(snapshot.clone());
     let _ = app.emit(STT_DIAGNOSTICS_EVENT, &snapshot);
@@ -181,6 +191,20 @@ pub async fn get_last_stt_diagnostics(
 ) -> Result<Option<crate::capture::SttDiagnosticSnapshot>, CommandError> {
     let guard = state.last_stt_diagnostics.lock_or_recover();
     Ok(guard.clone())
+}
+
+/// What the retained decode history says.
+///
+/// Deliberately a summary rather than the rows: the decision this exists to
+/// support is "are levels low" or "does pinning starve decodes", and a caller
+/// that has to compute percentiles itself will compute them differently from
+/// the next caller.
+#[tauri::command]
+pub async fn get_stt_decode_summary(
+    state: State<'_, AppState>,
+) -> Result<crate::capture::decode_history::DecodeSummary, CommandError> {
+    let records = crate::capture::decode_history::load(&state.config_dir);
+    Ok(crate::capture::decode_history::summarize(&records))
 }
 
 #[tauri::command]

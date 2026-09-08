@@ -1,3 +1,4 @@
+pub mod decode_history;
 pub mod evaluation;
 pub mod romanize;
 pub mod speech_health;

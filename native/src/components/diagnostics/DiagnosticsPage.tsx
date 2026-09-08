@@ -34,6 +34,7 @@ import {
   OllamaModelDetails,
   OllamaPromptTestResult,
   SttModelsOverview,
+  SttDecodeSummary,
   SttModelTestResult,
   AudioDeviceInfo,
   VaultLocationInfo,
@@ -81,6 +82,7 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
   const [sttTestResult, setSttTestResult] = useState<SttModelTestResult | null>(null);
 
   // Audio devices
+  const [decodeSummary, setDecodeSummary] = useState<SttDecodeSummary | null>(null);
   const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
 
@@ -142,6 +144,14 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
     }
   };
 
+  const fetchDecodeSummary = async () => {
+    try {
+      setDecodeSummary(await invoke<SttDecodeSummary>('get_stt_decode_summary'));
+    } catch (e) {
+      console.error('Failed to load STT decode history', e);
+    }
+  };
+
   const fetchAudioDevices = async () => {
     setLoadingDevices(true);
     try {
@@ -171,6 +181,7 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
     checkLlmBackend();
     fetchLlmModels();
     fetchSttModels();
+    fetchDecodeSummary();
     fetchAudioDevices();
   }, []);
 
@@ -484,6 +495,88 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
       {/* TAB CONTENT 1: STT DIAGNOSTICS */}
       {activeTab === 'stt' && (
         <div className="space-y-6 animate-in fade-in-50">
+          {/* Retained decode history — the distribution, not the last run. */}
+          <div className="p-4 rounded-lg border border-border bg-card/60 space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-border/60">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-primary" />
+                <span className="text-xs font-bold text-foreground">
+                  Decode History ({decodeSummary?.decodes ?? 0} runs)
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={fetchDecodeSummary}
+                className="text-xs h-7 gap-1"
+              >
+                <RefreshCw className="w-3 h-3" />
+                Refresh
+              </Button>
+            </div>
+
+            {!decodeSummary || decodeSummary.decodes === 0 ? (
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                No decodes recorded yet. Dictate something or record a meeting, and the last 500
+                runs are kept here — counts and levels only, never any transcript.
+              </p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    {
+                      label: 'Peak, median',
+                      value: decodeSummary.peak_median.toFixed(2),
+                      hint: `p10 ${decodeSummary.peak_p10.toFixed(2)}`,
+                    },
+                    {
+                      label: 'RMS, median',
+                      value: decodeSummary.rms_median.toFixed(3),
+                      hint: `p10 ${decodeSummary.rms_p10.toFixed(3)}`,
+                    },
+                    {
+                      label: 'Quiet runs',
+                      value: `${decodeSummary.quiet_decodes}`,
+                      hint: 'peak under 0.25',
+                    },
+                    {
+                      label: 'Starved runs',
+                      value: `${decodeSummary.starved_decodes}`,
+                      hint: 'under 1 word/sec',
+                    },
+                  ].map((cell) => (
+                    <div key={cell.label} className="p-2.5 rounded-lg border border-border bg-muted/20">
+                      <div className="text-[10px] text-muted-foreground">{cell.label}</div>
+                      <div className="text-sm font-bold text-foreground font-mono">{cell.value}</div>
+                      <div className="text-[10px] text-muted-foreground">{cell.hint}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="text-[11px] text-muted-foreground leading-snug space-y-1">
+                  <p>
+                    Language pinned on {decodeSummary.pinned_decodes} run
+                    {decodeSummary.pinned_decodes === 1 ? '' : 's'} at{' '}
+                    <span className="font-mono text-foreground">
+                      {decodeSummary.pinned_words_per_second_median.toFixed(2)}
+                    </span>{' '}
+                    words/sec median; auto-detected on {decodeSummary.auto_detected_decodes} at{' '}
+                    <span className="font-mono text-foreground">
+                      {decodeSummary.auto_words_per_second_median.toFixed(2)}
+                    </span>
+                    .
+                  </p>
+                  <p>
+                    Conversation runs 2–4 words per second. A pinned figure well below the
+                    auto-detected one is a recognizer locked to the wrong language — it does not
+                    error, it just returns less.
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+
           {/* STT Model Readiness & Disk Verification */}
           <div className="p-4 rounded-lg border border-border bg-card/60 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-border/60">
