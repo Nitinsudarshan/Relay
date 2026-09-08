@@ -11,7 +11,7 @@
 //! prompt, a payload type and a builder — not another capture → normalize →
 //! prompt → LLM → parse → persist → provenance pipeline.
 
-use crate::providers::{Completer, ProviderError, ProviderType};
+use crate::providers::{Completer, ProviderError, ProviderType, CHARS_PER_TOKEN};
 
 use super::content::CanonicalContent;
 use super::contract::{
@@ -21,19 +21,15 @@ use super::prompts::PromptId;
 use super::source::SourceDescriptor;
 use crate::pipeline::source_boundary;
 
-/// Characters per token, deliberately on the low side.
-///
-/// Under-estimating wastes a little of the window. Over-estimating silently
-/// truncates the source, which is the failure the budget exists to prevent, so
-/// the error is taken in the harmless direction.
-const CHARS_PER_TOKEN: usize = 3;
-
 /// Window reserved for the instructions themselves.
 ///
 /// The instructions are not free: a meeting's extraction contract is a
 /// substantial prompt in its own right, and a budget that forgot it would hand
 /// the provider a prompt that overflows by exactly the size of the contract.
-const INSTRUCTION_RESERVE_TOKENS: u32 = 1_200;
+///
+/// `pub(crate)` so a test that has to invert [`prompt_budget_chars_for`] can
+/// use the figure the budget was computed from rather than a copy of it.
+pub(crate) const INSTRUCTION_RESERVE_TOKENS: u32 = 1_200;
 
 /// Executes analyses against a provider.
 ///

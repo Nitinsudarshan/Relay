@@ -10,17 +10,13 @@
 use super::intent::Intent;
 use super::retrieval::{ContextItem, RetrievalResult};
 use super::session::{Role, TalkbackSession};
+use crate::providers::CHARS_PER_TOKEN;
 
 /// What Talkback says when a memory question has no evidence behind it.
 ///
 /// Returned *without* calling the model. The cheapest way never to
 /// hallucinate a memory is not to ask a model to avoid hallucinating one.
 pub const NO_EVIDENCE_RESPONSE: &str = "I couldn't find that in your Relay data.";
-
-/// Roughly how many characters one token is worth for budgeting. English
-/// prose sits near 4; 3.6 leaves headroom for Devanagari and for
-/// tokenizers less generous than the estimate.
-const CHARS_PER_TOKEN: f32 = 3.6;
 
 /// Share of the model's window that retrieved context may occupy. The
 /// rest is the system prompt, the conversation, and the answer itself.
@@ -33,7 +29,8 @@ const CONTEXT_WINDOW_SHARE: f32 = 0.35;
 /// Settings actually buys more grounding, which is the whole reason that
 /// setting exists (`providers::ProviderConfig::context_tokens`).
 pub fn char_budget_for(context_tokens: u32) -> usize {
-    let budget = (context_tokens as f32 * CONTEXT_WINDOW_SHARE * CHARS_PER_TOKEN) as usize;
+    let context_share_tokens = (context_tokens as f32 * CONTEXT_WINDOW_SHARE) as usize;
+    let budget = context_share_tokens.saturating_mul(CHARS_PER_TOKEN);
     budget.clamp(1_500, 40_000)
 }
 
@@ -46,7 +43,7 @@ pub fn char_budget_for(context_tokens: u32) -> usize {
 /// sentences by [`VOICE_RULES`], so past a point more evidence cannot make the
 /// answer better, and on a local model it makes it *later*: prompt ingestion,
 /// not generation, dominates time-to-first-token, and at the default
-/// 8192-token window retrieval alone claims ~10,300 characters. That is tens of
+/// 8192-token window retrieval alone claims ~8,600 characters. That is tens of
 /// seconds of silence before the first word — the wait that makes Talkback feel
 /// broken rather than slow.
 ///
@@ -67,7 +64,7 @@ const TURN_CONTEXT_CHAR_CEILING: usize = 3_600;
 ///
 /// The third was missing, and it is the one that fails silently. At the
 /// smallest window Relay allows (2,048 tokens, the floor
-/// `LLMClient::default_options` clamps to) the other two agreed on 2,580
+/// `LLMClient::default_options` clamps to) the other two agreed on 2,148
 /// characters of retrieval where 1,344 fit — and an overlong prompt is not
 /// refused by Ollama, it is truncated from the front, which is where the voice
 /// rules and the grounding instruction live. The turn would have kept its
@@ -527,7 +524,7 @@ mod external_source_tests {
 
     #[test]
     fn the_default_window_is_capped_for_a_turn() {
-        // 8192 tokens — the shipped default — derives ~10,300 characters of
+        // 8192 tokens — the shipped default — derives ~8,600 characters of
         // retrieval, which is the wait that makes Talkback feel broken.
         let derived = char_budget_for(8_192);
         assert!(derived > TURN_CONTEXT_CHAR_CEILING, "derived {derived}");
@@ -553,7 +550,7 @@ mod external_source_tests {
         assert!(small < TURN_CONTEXT_CHAR_CEILING, "small {small}");
 
         // …and the window-derived figure is not the last word either. This
-        // test used to assert `small` (2,580 characters) and was wrong on its
+        // test used to assert `small` (2,148 characters) and was wrong on its
         // own terms: at 2,048 tokens only 1,344 characters fit once the answer
         // and the voice rules are accounted for, so the figure it was
         // protecting *did* overrun the model's context — silently, because an

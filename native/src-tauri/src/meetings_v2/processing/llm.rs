@@ -276,8 +276,8 @@ pub mod test_support {
     /// to compute. `the_test_helper_inverts_the_budget_it_stands_in_for` is
     /// what stops the two drifting apart.
     fn budget_to_window(chars: usize) -> u32 {
-        const CHARS_PER_TOKEN: usize = 3;
-        const INSTRUCTION_RESERVE_TOKENS: u32 = 1_200;
+        use crate::pipeline::analysis::service::INSTRUCTION_RESERVE_TOKENS;
+        use crate::providers::CHARS_PER_TOKEN;
         let source_tokens = chars.div_ceil(CHARS_PER_TOKEN) as u32;
         source_tokens
             .saturating_add(PromptId::MeetingFacts.definition().max_output_tokens)
