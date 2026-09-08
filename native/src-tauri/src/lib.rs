@@ -19,6 +19,7 @@ pub mod providers;
 pub mod relationships;
 pub mod retrieval;
 pub mod settings;
+pub mod startup;
 pub mod sync;
 pub mod talkback;
 pub mod triggers;
@@ -57,6 +58,13 @@ fn set_app_user_model_id() {
 pub fn run() {
     #[cfg(target_os = "windows")]
     set_app_user_model_id();
+
+    // The ONNX packaging spike, when this binary was built with it. First
+    // thing, before any window or plugin, because what it is measuring is
+    // whether the ONNX Runtime this executable was *shipped with* can be
+    // loaded at all — and that answer must survive anything else failing.
+    #[cfg(feature = "onnx-spike")]
+    developer::onnx_spike::run_and_record();
     // Load environment variables from .env — search CWD and ancestor directories
     // so the repo-root .env is found even when Tauri runs from native/src-tauri/.
     if dotenvy::dotenv().is_err() {
@@ -85,6 +93,7 @@ pub fn run() {
     let settings = AppSettings::load(&config_dir.join("settings.json")).unwrap_or_default();
     let hotkeys_config = settings.hotkeys.clone();
     let pill_position = settings.ui.pill_position;
+    let startup_config = settings.startup.clone();
 
     // An explicitly configured Vault Directory Location always wins; a
     // fresh install (or one where the user never confirmed a location)
@@ -166,6 +175,14 @@ pub fn run() {
         // Opens a meeting's conferencing link in the user's browser when they
         // press Join on a reminder. Relay opens the call; it never joins one.
         .plugin(tauri_plugin_opener::init())
+        // Writes the OS launch entry for Settings › Startup › "Launch at
+        // login". Registered here; driven from `startup::reconcile_launch_at_login`,
+        // never from the frontend — the plugin's JS commands are deliberately
+        // not granted in `capabilities/`.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(state)
         // Reminders are two pieces of state, deliberately: the queue is what
         // should be said, the service is what is currently on screen. Keeping
@@ -174,6 +191,14 @@ pub fn run() {
         .manage(Arc::new(meetings_v2::NotificationService::new()))
         .setup(move |app| {
             let handle = app.handle();
+
+            // First, and before anything that can fail: the main window is
+            // configured hidden so "start minimized" does not flash the
+            // control panel on screen, which means *something* has to show it.
+            // A tray builder that errors below must not be what decides
+            // whether Relay has a window.
+            startup::apply_at_launch(handle, &startup_config);
+
             let quit_i = tauri::menu::MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let show_i = tauri::menu::MenuItem::with_id(app, "show", "Show Relay", true, None::<&str>)?;
             let record_i = tauri::menu::MenuItem::with_id(app, "record", "Start Recording", true, None::<&str>)?;

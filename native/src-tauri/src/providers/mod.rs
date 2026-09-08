@@ -152,6 +152,30 @@ fn default_context_tokens() -> u32 {
     8192
 }
 
+/// Characters one token is worth, for every budget Relay computes against a
+/// context window.
+///
+/// One constant because the four places that used to carry their own were not
+/// agreeing: the analysis spine estimated 3, Talkback's retrieval and the
+/// context packs estimated 3.6. The failure modes are not symmetric. Too
+/// conservative wastes a little of the window and nothing else; too optimistic
+/// builds a prompt that does not fit, and Ollama does not refuse an overlong
+/// prompt — it truncates it from the *front*, which is where the system
+/// instructions live. So the estimate is deliberately low and the error is
+/// taken in the direction that only costs headroom.
+///
+/// 3 rather than the ~4 English prose measures because Relay's content is not
+/// only English prose: Devanagari tokenizes far denser, and a Hinglish standup
+/// is the workload this app was built for.
+///
+/// It is an estimate, and tuning it no longer has to be guesswork:
+/// `capture::decode_history` retains `char_count` and `word_count` for the last
+/// 500 real decodes, so the length and script mix of the text Relay actually
+/// sends is measurable. Pairing that with one tokenizer count is what would
+/// justify moving this number — not another reading of what English prose
+/// averages.
+pub const CHARS_PER_TOKEN: usize = 3;
+
 impl Default for ProviderConfig {
     fn default() -> Self {
         Self {

@@ -1,3 +1,7 @@
+/// The ONNX packaging spike. Compiled always so its fixture stays tested;
+/// only its inference call needs `--features onnx-spike`.
+pub mod onnx_spike;
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};

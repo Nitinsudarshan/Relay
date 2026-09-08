@@ -39,6 +39,7 @@ that was reversed gets a new entry saying so.
 |---|---|
 | [roadmap.md](roadmap.md) | What is real vs. stubbed, and what's next. |
 | [../maybe_later.md](../maybe_later.md) | Deferred features, per `rules/maybe-later.md`. |
+| [spikes/onnx-windows.md](spikes/onnx-windows.md) | Whether `ort` builds, bundles and runs in a real Windows Tauri binary — written, never run, and blocking two approved features until someone runs it. |
 
 ## Deep records
 

@@ -305,6 +305,14 @@ pub struct CloudSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SoundSettings {
     /// Whether sound effects (start/stop tones) are played during dictation.
+    ///
+    /// Read only by the frontend, and correctly so: the tones are synthesized
+    /// in the Web Audio API (`src/lib/soundEffects.ts`) by the pill that is
+    /// already listening for the state change that should sound them
+    /// (`DictationPill.tsx`, on `capture-state-changed`). A Rust reader would
+    /// be a second audio path opened to duplicate a decision the frontend has
+    /// already made. Audited and left alone deliberately — not another setting
+    /// nothing reads.
     #[serde(default = "default_dictation_sounds", alias = "dictationSounds")]
     pub dictation_sounds: bool,
 }
@@ -413,12 +421,25 @@ impl Default for CaptureSettings {
 }
 
 /// App launch and startup behavior preferences.
+///
+/// Both fields describe what happens *before* a webview exists, so neither
+/// could ever have been honoured by the frontend that rendered their switches.
+/// [`crate::startup`] is the reader they went without: it applies them from the
+/// Tauri setup hook, and re-applies `launch_at_login` from `save_settings` so
+/// the switch takes effect when it is flipped.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct StartupSettings {
     /// Start Relay in the background when logging into the OS.
+    ///
+    /// Written to the OS by `tauri-plugin-autostart` — the registry Run key on
+    /// Windows, a LaunchAgent on macOS, a `.desktop` entry on Linux.
     #[serde(default, alias = "launchAtLogin")]
     pub launch_at_login: bool,
     /// Launch Relay minimized without showing the main control panel window.
+    ///
+    /// Withheld rather than minimized: the tray's "Show Relay" item and the
+    /// show/hide hotkey both toggle on `Window::is_visible`, so hidden is the
+    /// state they can bring back.
     #[serde(default, alias = "startMinimized")]
     pub start_minimized: bool,
 }
@@ -576,6 +597,10 @@ pub struct MeetingSettings {
     /// source artifact for everything derived from a meeting, and turning this
     /// off never deletes it — `transcript.jsonl` stays on disk and the pipeline
     /// keeps reading it.
+    ///
+    /// Which is why it has no Rust reader and needs none: it decides whether a
+    /// tab is rendered, and that decision belongs where the tabs are
+    /// (`MeetingsV2View.tsx`). Audited and left alone deliberately.
     #[serde(default = "default_true", alias = "showRawTranscript")]
     pub show_raw_transcript: bool,
     /// Whether the speaker-labelled conversation transcript is built.

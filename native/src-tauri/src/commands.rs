@@ -1712,6 +1712,11 @@ pub async fn save_settings(
     // the socket immediately rather than at the next launch.
     apply_capture_bridge(&app, &state);
 
+    // Same reason, for the OS launch entry. `start_minimized` has no
+    // counterpart here on purpose — it is a decision taken at launch, and the
+    // switch says so.
+    crate::startup::reconcile_launch_at_login(&app, settings.startup.launch_at_login);
+
     let _ = app.emit("settings-changed", &settings);
     Ok(())
 }
