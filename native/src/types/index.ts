@@ -398,6 +398,19 @@ export interface SttSettings {
    */
   meeting_model_path?: string | null;
   meetingModelPath?: string | null;
+  /**
+   * Whether dictated text is offered to the Tier 2 cleanup layer.
+   *
+   * Off by default. The layer costs a model call and may change words, so it
+   * is something the user turns on rather than something they discover has
+   * been happening.
+   */
+  text_transform?: boolean;
+  textTransform?: boolean;
+  /** How far that cleanup may go. Empty means `faithful`, the only style that
+   *  cannot change meaning. */
+  cleanup_style?: '' | 'faithful' | 'clean' | 'professional' | 'concise';
+  cleanupStyle?: '' | 'faithful' | 'clean' | 'professional' | 'concise';
   enableInitialPrompt?: boolean;
   customInitialPrompt?: string | null;
 }

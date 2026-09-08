@@ -95,6 +95,12 @@ pub struct AppState {
     pub settings: Mutex<AppSettings>,
     pub stt: SttEngine,
     pub last_stt_diagnostics: Mutex<Option<crate::capture::SttDiagnosticSnapshot>>,
+    /// What the last dictation put into a field, and where.
+    ///
+    /// Held so the cleanup offered afterwards can select exactly that text and
+    /// replace it. Cleared on the next dictation, because the offer is only
+    /// ever about the most recent one.
+    pub last_dictation: Mutex<Option<LastDictation>>,
     pub meetings_v2: Arc<crate::meetings_v2::MeetingsV2Engine>,
     /// Derived meeting intelligence. Shares the recorder's session directory but
     /// only reads from it — everything it produces goes to `processing.json`.
@@ -165,6 +171,17 @@ impl AppState {
     }
 }
 
+/// The dictation a cleanup may still replace.
+#[derive(Debug, Clone)]
+pub struct LastDictation {
+    /// Exactly the text that was injected — not the transcript before
+    /// normalization, because what has to be selected back is what landed.
+    pub text: String,
+    /// Where it landed. A cleanup that cannot prove the caret is still in the
+    /// same place does not touch the field.
+    pub focus: Option<crate::hotkeys::injection::TargetFocusContext>,
+}
+
 pub fn record_stt_diagnostics(
     app: &AppHandle,
     state: &AppState,
@@ -228,6 +245,106 @@ pub async fn rewrite_dictation(
     );
     let client = crate::providers::LLMClient::new(provider);
     Ok(crate::capture::rewrite::propose(&client, &text, style).await)
+}
+
+/// Whether a cleanup can still be offered for the last dictation, and of what.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CleanupTarget {
+    pub available: bool,
+    pub text: String,
+}
+
+/// The dictation a cleanup would act on, if any.
+#[tauri::command]
+pub async fn get_cleanup_target(
+    state: State<'_, AppState>,
+) -> Result<CleanupTarget, CommandError> {
+    let guard = state.last_dictation.lock_or_recover();
+    Ok(match guard.as_ref() {
+        Some(last) => CleanupTarget {
+            available: !last.text.trim().is_empty(),
+            text: last.text.clone(),
+        },
+        None => CleanupTarget {
+            available: false,
+            text: String::new(),
+        },
+    })
+}
+
+/// How an apply ended, in the terms the pill has to render.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum CleanupApplied {
+    /// The field now holds the cleaned text.
+    Replaced,
+    /// The caret is no longer where the dictation landed, so nothing was
+    /// touched. The cleaned text is on the clipboard instead.
+    Moved { message: String },
+    Failed { message: String },
+}
+
+/// Replaces the last dictation with its cleaned form.
+///
+/// Selects exactly what Relay injected and types over it. Three things make
+/// that safe enough to do to somebody's document:
+///
+/// * The selection is counted in cursor steps, not characters
+///   (`text_normalize::cursor_steps`), so a Devanagari cluster is one step and
+///   the selection cannot run past what was written.
+/// * The focus context is compared against the one captured at injection. If
+///   the user has moved to another window or tab, nothing is selected and
+///   nothing is typed.
+/// * The target is consumed. A second apply has nothing to act on, so a
+///   double-press cannot delete a second helping of the user's text.
+#[tauri::command]
+pub async fn apply_dictation_cleanup(
+    state: State<'_, AppState>,
+    cleaned: String,
+) -> Result<CleanupApplied, CommandError> {
+    use crate::hotkeys::injection;
+
+    // Taken, not read: whatever happens next, this dictation is no longer a
+    // thing a later press may replace.
+    let Some(last) = state.last_dictation.lock_or_recover().take() else {
+        return Ok(CleanupApplied::Failed {
+            message: "There is no recent dictation to clean up.".to_string(),
+        });
+    };
+
+    let still_there = injection::focus_unchanged(
+        last.focus.as_ref(),
+        injection::capture_target_focus_context().as_ref(),
+    );
+
+    if !still_there {
+        let _ = injection::copy_to_clipboard(&cleaned);
+        return Ok(CleanupApplied::Moved {
+            message: "You've moved since dictating, so nothing was changed. The cleaned text is on the clipboard.".to_string(),
+        });
+    }
+
+    let steps = crate::capture::text_normalize::cursor_steps(&last.text);
+    if let Err(e) = injection::select_previous(steps) {
+        let _ = injection::copy_to_clipboard(&cleaned);
+        return Ok(CleanupApplied::Failed {
+            message: format!("Could not select the dictated text ({e}). It is on the clipboard."),
+        });
+    }
+
+    let method = state.settings.lock_or_recover().clipboard.injection_method;
+    match injection::inject_text(&cleaned, method) {
+        Ok(()) => Ok(CleanupApplied::Replaced),
+        Err(e) => {
+            // The selection is still live and the replacement did not land.
+            // The clipboard is the recovery path, and saying so is the whole
+            // of the contract the injection branches already keep.
+            let _ = injection::copy_to_clipboard(&cleaned);
+            Ok(CleanupApplied::Failed {
+                message: format!("Could not type the cleaned text ({e}). It is on the clipboard."),
+            })
+        }
+    }
 }
 
 #[tauri::command]

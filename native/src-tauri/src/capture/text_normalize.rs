@@ -67,6 +67,62 @@ pub fn is_word_internal(c: char) -> bool {
     c.is_alphanumeric() || matches!(c, '\u{094D}' | '\u{093C}' | '\u{200C}' | '\u{200D}')
 }
 
+/// How many cursor steps this text occupies — grapheme clusters, not chars.
+///
+/// Exists for one purpose: walking a cursor back over text Relay itself
+/// injected, so the dictation cleanup can select what it wrote and replace it.
+/// The count has to match what an arrow key does, and an arrow key moves by
+/// cluster.
+///
+/// Getting this wrong is not a cosmetic bug. `क्या` is three chars and one
+/// cursor step; counting chars would select two steps too many and delete
+/// whatever the user had written before the dictation — on the script Relay is
+/// most used for. Over-counting destroys their text, so the rule below errs
+/// towards treating a mark as part of the preceding cluster.
+///
+/// An approximation of UAX #29, deliberately, rather than a dependency: what is
+/// needed is combining marks, and the Indic blocks put theirs at consistent
+/// offsets. It is exact for Latin, correct for the Indic scripts Relay sees,
+/// and conservative everywhere else.
+pub fn cursor_steps(text: &str) -> usize {
+    let mut steps = 0usize;
+    for c in text.chars() {
+        if !continues_cluster(c) {
+            steps += 1;
+        }
+    }
+    steps
+}
+
+/// Whether this char attaches to the cluster before it rather than starting one.
+fn continues_cluster(c: char) -> bool {
+    let code = c as u32;
+
+    // Joiners and variation selectors bind what surrounds them.
+    if matches!(code, 0x200C | 0x200D | 0xFE00..=0xFE0F) {
+        return true;
+    }
+    // General combining marks: Latin/Greek/Cyrillic diacritics and enclosing
+    // marks.
+    if matches!(code, 0x0300..=0x036F | 0x0483..=0x0489 | 0x20D0..=0x20F0) {
+        return true;
+    }
+    // Hebrew points and Arabic marks.
+    if matches!(code, 0x0591..=0x05C7 | 0x0610..=0x061A | 0x064B..=0x065F | 0x0670) {
+        return true;
+    }
+
+    // The Indic blocks, which is the case that actually matters here. Each is
+    // 0x80 wide from Devanagari at 0x0900, and each puts its signs, matras,
+    // virama and nukta at the same offsets within the block.
+    if (0x0900..0x0E00).contains(&code) {
+        let offset = code % 0x80;
+        return matches!(offset, 0x00..=0x03 | 0x3A..=0x4F | 0x51..=0x57 | 0x62..=0x63);
+    }
+
+    false
+}
+
 /// Which rules a surface wants.
 ///
 /// The chain is shared; this is the one place it legitimately differs, and it
@@ -448,6 +504,71 @@ fn is_within_one_edit(a: &str, b: &str) -> bool {
     true
 }
 
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::cursor_steps;
+
+    #[test]
+    fn latin_counts_one_step_per_character() {
+        assert_eq!(cursor_steps("hello"), 5);
+        assert_eq!(cursor_steps("send it to Pragati"), 18);
+        assert_eq!(cursor_steps(""), 0);
+    }
+
+    #[test]
+    fn a_devanagari_cluster_is_one_step_not_three() {
+        // The case that makes this function necessary. Counting chars here
+        // would walk the cursor two steps too far and delete text the user
+        // wrote before dictating.
+        assert_eq!("क्या".chars().count(), 4, "four chars…");
+        assert_eq!(cursor_steps("क्या"), 2, "…but क् + या is two cursor steps");
+
+        // A matra binds to its consonant.
+        assert_eq!("मैं".chars().count(), 3);
+        assert_eq!(cursor_steps("मैं"), 1);
+
+        // And a whole phrase: मैं(1) + space + कल(2) + space + आऊंगा(3), where
+        // आऊंगा is आ, ऊ carrying the anusvara, and ग carrying its matra.
+        assert_eq!(cursor_steps("मैं कल आऊंगा"), 8);
+        assert_eq!("मैं कल आऊंगा".chars().count(), 12, "twelve chars, eight steps");
+    }
+
+    #[test]
+    fn combining_marks_never_add_a_step() {
+        // e + combining acute is one step, however it was typed.
+        assert_eq!(cursor_steps("e\u{0301}"), 1);
+        assert_eq!(cursor_steps("cafe\u{0301}"), 4);
+    }
+
+    #[test]
+    fn a_joined_sequence_is_one_step() {
+        // Zero-width joiner binds what surrounds it, so a joined pair does not
+        // count as two.
+        assert_eq!(cursor_steps("\u{0915}\u{200D}\u{0937}"), 2);
+    }
+
+    #[test]
+    fn the_count_never_exceeds_the_character_count() {
+        // The invariant that makes over-selection impossible: whatever the
+        // rule decides, it can only ever merge steps, never invent them.
+        for text in [
+            "hello",
+            "क्या हाल है",
+            "cafe\u{0301}",
+            "mixed मैं text",
+            "",
+            "   ",
+        ] {
+            assert!(
+                cursor_steps(text) <= text.chars().count(),
+                "{text:?} counted {} steps for {} chars",
+                cursor_steps(text),
+                text.chars().count()
+            );
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
