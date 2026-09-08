@@ -207,6 +207,29 @@ pub async fn get_stt_decode_summary(
     Ok(crate::capture::decode_history::summarize(&records))
 }
 
+/// Proposes a cleanup of dictated text, with the diff that makes it reviewable.
+///
+/// Returns a proposal rather than replacing anything. The decision to accept it
+/// is the user's, made against the diff — which is the entire reason this layer
+/// is allowed to exist (Decision 65 for where it may not be used, and
+/// `capture::rewrite` for why a diff rather than a more careful prompt).
+#[tauri::command]
+pub async fn rewrite_dictation(
+    state: State<'_, AppState>,
+    text: String,
+    style: Option<String>,
+) -> Result<crate::capture::rewrite::RewriteProposal, CommandError> {
+    let (provider, configured) = {
+        let settings = state.settings.lock_or_recover();
+        (settings.provider.clone(), settings.stt.cleanup_style.clone())
+    };
+    let style = crate::capture::rewrite::CleanupStyle::from_setting(
+        style.as_deref().unwrap_or(&configured),
+    );
+    let client = crate::providers::LLMClient::new(provider);
+    Ok(crate::capture::rewrite::propose(&client, &text, style).await)
+}
+
 #[tauri::command]
 pub async fn get_capture_status(state: State<'_, AppState>) -> Result<CaptureStatus, CommandError> {
     let active = state.recorder.is_active();

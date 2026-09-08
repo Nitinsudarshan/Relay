@@ -195,6 +195,27 @@ impl<'a> SourceDescriptor<'a> {
         }
     }
 
+    /// Describes one piece of dictated text on its way into a field.
+    ///
+    /// `UserAuthored` and `Complete`: it is the user's own speech, transcribed
+    /// whole, seconds ago. There is nothing external in it and nothing missing
+    /// from it — which is why the only analysis registered against this source
+    /// type is the cleanup the user explicitly asked for.
+    pub fn for_dictation(id: &'a str, captured_at: &'a str) -> Self {
+        Self {
+            id,
+            source_type: SourceType::Audio,
+            subtype: SourceSubtype::None,
+            title: "Dictation",
+            origin: "Relay dictation",
+            canonical_location: None,
+            captured_at,
+            trust: SourceTrust::UserAuthored,
+            coverage: SourceCoverage::Complete,
+            notes: &[],
+        }
+    }
+
     /// Describes a meeting recording.
     ///
     /// `UserAuthored` deliberately, and it is worth saying why, because a

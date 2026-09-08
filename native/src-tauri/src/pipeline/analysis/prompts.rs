@@ -50,6 +50,8 @@ pub enum PromptId {
     MeetingSummary,
     /// One spoken Talkback answer, grounded in retrieved context.
     TalkbackAnswer,
+    /// Tier 2 cleanup of dictated text. Never a meeting transcript.
+    DictationRewrite,
 }
 
 impl PromptId {
@@ -63,6 +65,7 @@ impl PromptId {
         PromptId::MeetingFacts,
         PromptId::MeetingSummary,
         PromptId::TalkbackAnswer,
+        PromptId::DictationRewrite,
     ];
 
     /// The wire name written into derived data. Stable — changing one is a
@@ -76,6 +79,7 @@ impl PromptId {
             Self::MeetingFacts => "meeting.facts",
             Self::MeetingSummary => "meeting.summary",
             Self::TalkbackAnswer => "talkback.answer",
+            Self::DictationRewrite => "dictation.rewrite",
         }
     }
 
@@ -242,6 +246,28 @@ pub fn definition(id: PromptId) -> PromptDefinition {
             // room to be creative.
             temperature: 0.1,
             max_output_tokens: 2_400,
+        },
+        PromptId::DictationRewrite => PromptDefinition {
+            id,
+            version: 1,
+            purpose: "Tier 2 cleanup of dictated text, shown to the user as a diff.",
+            // Built per call: the latitude depends on the style the user chose,
+            // and `capture::rewrite` owns both the styles and the diff that
+            // makes whatever this returns reviewable.
+            body: PromptBody::Computed,
+            output_contract: OutputContract::Prose,
+            // Dictation only, by Decision 65. A meeting transcript is evidence
+            // read back weeks later and cited by segment id; dictated text is a
+            // draft the user is watching land.
+            applies_to: &[SourceType::Audio],
+            // Near zero. This prompt's failure mode is a fluent sentence that
+            // says something the speaker did not, and temperature buys nothing
+            // here — the user asked for their own words tidied, not for prose.
+            temperature: 0.1,
+            // Cleanup returns roughly what it was given. Dictation is a
+            // sentence or two; this leaves room for a long one without
+            // licensing an essay.
+            max_output_tokens: 800,
         },
         PromptId::TalkbackAnswer => PromptDefinition {
             id,

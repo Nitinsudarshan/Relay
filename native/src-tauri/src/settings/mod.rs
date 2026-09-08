@@ -123,6 +123,17 @@ pub struct SttSettings {
     /// always done — so this changes nothing until it is set.
     #[serde(default, alias = "meetingModelPath")]
     pub meeting_model_path: Option<String>,
+    /// Whether dictated text is offered to the Tier 2 cleanup layer.
+    ///
+    /// Off by default. The layer costs a model call before the text is usable
+    /// and may change words, so it is something the user turns on rather than
+    /// something they discover has been happening.
+    #[serde(default, alias = "textTransform")]
+    pub text_transform: bool,
+    /// How far that cleanup may go — see `capture::rewrite::CleanupStyle`.
+    /// Empty means `faithful`, the only style that cannot change meaning.
+    #[serde(default, alias = "cleanupStyle")]
+    pub cleanup_style: String,
 }
 
 impl SttSettings {

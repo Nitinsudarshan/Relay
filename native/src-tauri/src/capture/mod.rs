@@ -1,5 +1,6 @@
 pub mod decode_history;
 pub mod evaluation;
+pub mod rewrite;
 pub mod romanize;
 pub mod speech_health;
 pub mod text_normalize;
