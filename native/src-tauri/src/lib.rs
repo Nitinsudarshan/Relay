@@ -133,6 +133,7 @@ pub fn run() {
 
     let recorder = AudioRecorder::new();
     recorder.set_keep_warm_duration(settings.audio_input.parse_keep_warm_duration());
+    crate::capture::device::set_preference(&settings.audio_input);
 
     let memory_store = Arc::new(memory::MemoryStore::new(&vault_dir));
     let relationship_store = Arc::new(relationships::RelationshipStore::new(&vault_dir));

@@ -44,7 +44,7 @@ const DEFAULT_TEST_SETTINGS: AppSettings = {
   sound: { dictation_sounds: true },
   clipboard: { auto_paste: true, copy_to_clipboard: true },
   startup: { launch_at_login: false, start_minimized: false },
-  audio_input: { prefer_builtin_mic: true, selected_device: null, keep_microphone_warm: 'off', auto_learn_words: true },
+  audio_input: { prefer_builtin_mic: true, selected_device: null, keep_microphone_warm: 'off' },
   talkback: { activation_mode: 'toggle', speak_responses: true, allow_barge_in: true, sources: [], end_of_turn_silence_ms: 1000 },
   dictionary: ['Relay', 'Whisper'],
   snippets: [],

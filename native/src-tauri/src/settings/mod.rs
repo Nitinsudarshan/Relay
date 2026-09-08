@@ -435,9 +435,6 @@ pub struct AudioInputSettings {
     /// Keep microphone stream warm ("off", "15s", "30s", "1m", "5m") to avoid warm-up clipping.
     #[serde(default = "default_keep_microphone_warm", alias = "keepMicrophoneWarm")]
     pub keep_microphone_warm: String,
-    /// Auto-learn corrections made in the target app into user dictionary.
-    #[serde(default = "default_auto_learn_words", alias = "autoLearnWords")]
-    pub auto_learn_words: bool,
 }
 
 fn default_prefer_builtin_mic() -> bool {
@@ -448,17 +445,12 @@ fn default_keep_microphone_warm() -> String {
     "off".to_string()
 }
 
-fn default_auto_learn_words() -> bool {
-    true
-}
-
 impl Default for AudioInputSettings {
     fn default() -> Self {
         Self {
             prefer_builtin_mic: default_prefer_builtin_mic(),
             selected_device: None,
             keep_microphone_warm: default_keep_microphone_warm(),
-            auto_learn_words: default_auto_learn_words(),
         }
     }
 }
@@ -882,7 +874,6 @@ mod tests {
         assert!(!defaults.startup.start_minimized);
         assert!(defaults.audio_input.prefer_builtin_mic);
         assert_eq!(defaults.audio_input.keep_microphone_warm, "off");
-        assert!(defaults.audio_input.auto_learn_words);
         assert!(!defaults.dictionary.is_empty());
     }
 

@@ -621,7 +621,7 @@ fn run_dual_capture_loop(
     let sys_fifo: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::with_capacity(32_000)));
 
     let _mic_stream = build_input_stream(
-        host.default_input_device(),
+        crate::capture::device::open_preferred(&host),
         false,
         &mic_fifo,
         &mic_active,

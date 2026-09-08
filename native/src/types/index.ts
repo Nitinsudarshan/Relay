@@ -704,11 +704,9 @@ export interface AudioInputSettings {
   /** Keep microphone stream warm ("off", "15s", "30s", "1m", "5m") to avoid warm-up clipping. */
   keep_microphone_warm: string;
   /** Auto-learn corrections made in the target app into user dictionary. */
-  auto_learn_words: boolean;
   preferBuiltinMic?: boolean;
   selectedDevice?: string | null;
   keepMicrophoneWarm?: string;
-  autoLearnWords?: boolean;
 }
 
 export interface SnippetItem {

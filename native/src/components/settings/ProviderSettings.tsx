@@ -178,7 +178,6 @@ const DEFAULT_SETTINGS: AppSettings = {
     prefer_builtin_mic: true,
     selected_device: null,
     keep_microphone_warm: 'off',
-    auto_learn_words: true,
   },
   talkback: DEFAULT_TALKBACK_SETTINGS,
   dictionary: ['Relay', 'Whisper', 'Tauri', 'Rust', 'Supabase', 'LanceDB', 'Ollama'],
@@ -1038,7 +1037,6 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                             prefer_builtin_mic: checked,
                             selected_device: settings.audio_input?.selected_device,
                             keep_microphone_warm: settings.audio_input?.keep_microphone_warm || 'off',
-                            auto_learn_words: settings.audio_input?.auto_learn_words ?? true,
                           },
                         };
                         setSettings(updated);
@@ -1049,6 +1047,51 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                         }
                       }}
                     />
+                  </div>
+
+                  {/* Microphone choice. Until this existed the banner below
+                      reported a device from a setting nothing could set. */}
+                  <div className="space-y-1.5">
+                    <label htmlFor="input-device" className="block text-xs font-semibold text-foreground">
+                      Microphone
+                    </label>
+                    <select
+                      id="input-device"
+                      value={settings.audio_input?.selected_device ?? ''}
+                      onChange={async (e) => {
+                        const value = e.target.value;
+                        const updated: AppSettings = {
+                          ...settings,
+                          audio_input: {
+                            ...settings.audio_input,
+                            prefer_builtin_mic: settings.audio_input?.prefer_builtin_mic ?? true,
+                            selected_device: value === '' ? null : value,
+                            keep_microphone_warm: settings.audio_input?.keep_microphone_warm || 'off',
+                          },
+                        };
+                        setSettings(updated);
+                        try {
+                          await invoke('save_settings', { settings: updated });
+                        } catch (err) {
+                          console.error('Failed to save microphone selection', err);
+                        }
+                      }}
+                      className="w-full text-xs rounded-lg border border-border bg-card/50 px-2 py-1.5 text-foreground"
+                    >
+                      <option value="">
+                        System default{defaultDevice ? ` (${defaultDevice.name})` : ''}
+                      </option>
+                      {audioDevices.map((device) => (
+                        <option key={device.name} value={device.name}>
+                          {device.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-muted-foreground leading-snug">
+                      Applies to dictation, meetings and Talkback alike. A device that is
+                      unplugged falls back to the system default rather than failing the
+                      recording.
+                    </p>
                   </div>
 
                   {/* Active Input Device Badge (Green Banner) */}
@@ -1077,7 +1120,6 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                             ...settings.audio_input,
                             prefer_builtin_mic: settings.audio_input?.prefer_builtin_mic ?? true,
                             keep_microphone_warm: val,
-                            auto_learn_words: settings.audio_input?.auto_learn_words ?? true,
                           },
                         };
                         setSettings(updated);
@@ -1096,39 +1138,6 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                       <option value="5m">5 minutes</option>
                     </select>
                   </div>
-                </div>
-              </div>
-
-              {/* Auto-learn from corrections (OpenWhispr Style) */}
-              <div className="py-3 border-b border-border space-y-3">
-                <p className="text-xs font-semibold text-foreground">Auto-learn from corrections</p>
-                <div className="p-3.5 rounded-lg bg-muted/40 border border-border flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Auto-learn from corrections</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      When you correct a transcription in the target app, the corrected word is automatically added to your dictionary.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={settings.audio_input?.auto_learn_words ?? true}
-                    onCheckedChange={async (checked) => {
-                      const updated: AppSettings = {
-                        ...settings,
-                        audio_input: {
-                          ...settings.audio_input,
-                          prefer_builtin_mic: settings.audio_input?.prefer_builtin_mic ?? true,
-                          keep_microphone_warm: settings.audio_input?.keep_microphone_warm || 'off',
-                          auto_learn_words: checked,
-                        },
-                      };
-                      setSettings(updated);
-                      try {
-                        await invoke('save_settings', { settings: updated });
-                      } catch (err) {
-                        console.error('Failed to update auto learn words', err);
-                      }
-                    }}
-                  />
                 </div>
               </div>
 

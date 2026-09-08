@@ -1585,6 +1585,7 @@ pub async fn save_settings(
     state
         .recorder
         .set_keep_warm_duration(settings.audio_input.parse_keep_warm_duration());
+    crate::capture::device::set_preference(&settings.audio_input);
     *state.settings.lock_or_recover() = settings.clone();
 
     // Re-register hotkeys dynamically with the OS immediately
