@@ -294,8 +294,6 @@ export const ScribbleDetailEditor: React.FC<ScribbleDetailEditorProps> = ({
       case 'browser_page':
       case 'browser_conversation':
         return { label: 'BROWSER', icon: Globe, color: 'text-purple-500' };
-      case 'meeting':
-        return { label: 'MEETING', icon: Users, color: 'text-indigo-500' };
       default:
         return { label: sourceType.toUpperCase(), icon: FileText, color: 'text-muted-foreground' };
     }

@@ -1,6 +1,4 @@
 pub mod actions;
-/// Google Calendar: what a meeting was called, who was invited, and what for.
-pub mod calendar;
 pub mod capture;
 pub mod commands;
 pub mod context;
@@ -10,7 +8,6 @@ pub mod entities;
 pub mod hotkeys;
 pub mod identity;
 pub mod mcp;
-pub mod meetings_v2;
 pub mod memory;
 pub mod oauth;
 pub mod overlay;
@@ -21,9 +18,7 @@ pub mod retrieval;
 pub mod settings;
 pub mod startup;
 pub mod sync;
-pub mod talkback;
 pub mod triggers;
-pub mod tts;
 pub mod updates;
 pub mod vault;
 
@@ -113,33 +108,7 @@ pub fn run() {
     #[cfg(feature = "whisper-local")]
     whisper_rs::install_logging_hooks();
 
-    // A crash mid-synthesis leaves a WAV behind and nothing else will
-    // ever remove it. One phrase per sentence makes that worth doing.
-    let tts_root = tts::discovery::default_tts_root(&config_dir);
-    tts::discovery::clear_scratch(&tts_root);
-    // A process killed mid-download cannot run its own cleanup, and a
-    // half-extracted engine left in staging would be mistaken for a
-    // finished one by the next run.
-    tts::installer::clear_staging(&tts_root);
-
     let stt = SttEngine::new();
-    let meetings_v2 = Arc::new(meetings_v2::MeetingsV2Engine::new(
-        vault_dir.clone(),
-        stt.clone(),
-    ));
-
-    // Run startup crash recovery on launch: reconcile any interrupted recordings
-    if let Ok(recovered) = meetings_v2.recover_interrupted_sessions() {
-        if !recovered.is_empty() {
-            tracing::info!(
-                "Startup: Reconciled {} interrupted meeting recording session(s).",
-                recovered.len()
-            );
-        }
-    }
-
-    let meeting_processor = Arc::new(meetings_v2::MeetingProcessor::new(meetings_v2.store()));
-
     let recorder = AudioRecorder::new();
     recorder.set_keep_warm_duration(settings.audio_input.parse_keep_warm_duration());
     crate::capture::device::set_preference(&settings.audio_input);
@@ -157,11 +126,6 @@ pub fn run() {
         stt,
         last_stt_diagnostics: Mutex::new(None),
         last_dictation: Mutex::new(None),
-        meetings_v2,
-        meeting_processor,
-        talkback: Arc::new(talkback::TalkbackEngine::new()),
-        tts_root,
-        voice_install: Arc::new(commands::VoiceInstall::default()),
         capture_bridge: Mutex::new(None),
         memory_store,
         relationship_store,
@@ -172,8 +136,6 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        // Opens a meeting's conferencing link in the user's browser when they
-        // press Join on a reminder. Relay opens the call; it never joins one.
         .plugin(tauri_plugin_opener::init())
         // Writes the OS launch entry for Settings › Startup › "Launch at
         // login". Registered here; driven from `startup::reconcile_launch_at_login`,
@@ -184,11 +146,6 @@ pub fn run() {
             None,
         ))
         .manage(state)
-        // Reminders are two pieces of state, deliberately: the queue is what
-        // should be said, the service is what is currently on screen. Keeping
-        // them apart is what stops a card's lifecycle from owning the queue.
-        .manage(Arc::new(meetings_v2::ReminderQueue::default()))
-        .manage(Arc::new(meetings_v2::NotificationService::new()))
         .setup(move |app| {
             let handle = app.handle();
 
@@ -243,11 +200,6 @@ pub fn run() {
             // more docked/floating product-mode choice to hide it behind
             // (see docs/decisions.md Decision 36) — so it's always shown.
             overlay::ensure_pill_window(handle, true, pill_position);
-            // Created hidden and reused for every reminder. Building the
-            // webview on demand is what produced the creation races and the
-            // flash of white this surface used to be known for.
-            overlay::ensure_reminder_window(handle);
-            meetings_v2::reminders::scheduler::spawn(handle.clone());
 
             Ok(())
         })
@@ -320,16 +272,6 @@ pub fn run() {
             commands::complete_profile_onboarding,
             commands::get_developer_settings,
             commands::set_developer_force_onboarding,
-            commands::set_developer_notification_surface_mode,
-            commands::get_pending_meeting_reminder,
-            commands::meeting_reminder_ready,
-            commands::meeting_reminder_hover_changed,
-            commands::dismiss_meeting_reminder,
-            commands::snooze_meeting_reminder,
-            commands::join_meeting_from_reminder,
-            commands::start_meeting_from_reminder,
-            commands::trigger_mock_meeting_reminder,
-            commands::debug_detect_conferencing_windows,
             commands::get_account_state,
             commands::start_google_sign_in,
             commands::sign_out_account,
@@ -338,68 +280,6 @@ pub fn run() {
             commands::check_for_app_updates,
             commands::set_diagnostics_consent,
             commands::complete_first_run,
-            commands::start_meeting_v2,
-            commands::stop_meeting_v2,
-            commands::pause_meeting_v2,
-            commands::resume_meeting_v2,
-            commands::get_active_meeting_v2,
-            commands::list_meetings_v2,
-            commands::get_meeting_v2,
-            commands::get_meeting_v2_transcript,
-            commands::get_meeting_v2_diagnostics,
-            commands::delete_meeting_v2,
-            commands::summarize_meeting_v2,
-            commands::get_meeting_v2_processing,
-            commands::prepare_meeting_v2,
-            commands::generate_meeting_v2_summary,
-            commands::rename_meeting_v2_speaker,
-            commands::identify_meeting_v2_speakers,
-            commands::compare_meeting_v2_speaker_engines,
-            commands::merge_meeting_v2_speakers,
-            commands::get_meeting_v2_audio_chunk_path,
-            commands::get_calendar_connection,
-            commands::connect_google_calendar,
-            commands::sync_google_calendar,
-            commands::list_calendar_accounts,
-            commands::add_google_calendar_account,
-            commands::update_calendar_account,
-            commands::disconnect_calendar_account,
-            commands::sync_calendar_accounts,
-            commands::get_upcoming_calendar_events,
-            commands::disconnect_google_calendar,
-            commands::link_meeting_v2_to_calendar,
-            commands::set_meeting_v2_calendar_event,
-            commands::get_meeting_v2_calendar_link,
-            commands::share_meeting_v2,
-            commands::run_meeting_pipeline_selftest,
-            commands::get_meeting_v2_transcript_health,
-            commands::get_meeting_v2_notes,
-            commands::save_meeting_v2_notes,
-            commands::add_meeting_v2_directive,
-            commands::remove_meeting_v2_directive,
-            commands::set_meeting_v2_action_item_status,
-            commands::get_meeting_v2_related,
-            commands::get_meeting_v2_processing_log,
-            commands::get_meeting_v2_extensions,
-            commands::list_meeting_v2_processing,
-            commands::promote_meeting_v2_to_scribble,
-            commands::push_meeting_v2_action_items_to_kanban,
-            commands::set_meeting_overlay_expanded,
-            commands::start_talkback,
-            commands::stop_talkback,
-            commands::get_talkback_state,
-            commands::get_talkback_session,
-            commands::submit_talkback_turn,
-            commands::interrupt_talkback,
-            commands::search_talkback_context,
-            commands::get_tts_status,
-            commands::browse_for_piper_binary,
-            commands::browse_for_piper_voice,
-            commands::set_tts_configuration,
-            commands::test_tts_voice,
-            commands::prepare_tts_folders,
-            commands::install_local_voice,
-            commands::cancel_voice_install,
             commands::import_vault_file,
             commands::import_vault_file_bytes,
             commands::analyze_vault_file,

@@ -9,7 +9,7 @@ describe('NativeSidebar', () => {
   const defaultProps = {
     isOpen: true,
     onToggle: vi.fn(),
-    activeTab: 'talkback' as MainTabType,
+    activeTab: 'scribble' as MainTabType,
     setActiveTab: vi.fn(),
     account: null,
     profile: null,
@@ -22,14 +22,12 @@ describe('NativeSidebar', () => {
   it('renders primary destinations in expected order and does not include Home or capture actions', () => {
     render(<NativeSidebar {...defaultProps} />);
 
-    // Primary items in requested order: Voice notes, Scribbles, Meetings, Talkback, Knowledge Graph
+    // Primary items: Voice notes, Scribbles, Knowledge Graph
     const buttons = screen.getAllByRole('button');
     const buttonLabels = buttons.map((b) => b.getAttribute('aria-label')).filter(Boolean);
     const expectedOrder = [
       'Voice Notes',
       'Scribbles',
-      'Meetings',
-      'Talkback',
       'Knowledge Graph',
     ];
     let lastIdx = -1;
@@ -83,14 +81,8 @@ describe('NativeSidebar', () => {
     const user = userEvent.setup();
     render(<NativeSidebar {...defaultProps} setActiveTab={setActiveTab} />);
 
-    await user.click(screen.getByRole('button', { name: 'Talkback' }));
-    expect(setActiveTab).toHaveBeenCalledWith('talkback');
-
     await user.click(screen.getByRole('button', { name: 'Voice Notes' }));
     expect(setActiveTab).toHaveBeenCalledWith('capture');
-
-    await user.click(screen.getByRole('button', { name: 'Meetings' }));
-    expect(setActiveTab).toHaveBeenCalledWith('meetings');
 
     await user.click(screen.getByRole('button', { name: 'Scribbles' }));
     expect(setActiveTab).toHaveBeenCalledWith('scribble');

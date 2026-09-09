@@ -12,8 +12,6 @@ use serde::{Deserialize, Serialize};
 pub enum RetrievalSourceType {
     VoiceNote,
     Scribble,
-    Meeting,
-    MeetingFacts,
     File,
     Capture,
     Memory,
@@ -26,8 +24,6 @@ impl RetrievalSourceType {
         match self {
             Self::VoiceNote => "voice_note",
             Self::Scribble => "scribble",
-            Self::Meeting => "meeting",
-            Self::MeetingFacts => "meeting_facts",
             Self::File => "file",
             Self::Capture => "capture",
             Self::Memory => "memory",
@@ -46,12 +42,10 @@ impl RetrievalSourceType {
         match self {
             Self::Memory => 1.30,
             Self::DerivedArtifact => 1.25,
-            Self::MeetingFacts => 1.20,
             Self::Entity => 1.15,
             Self::Scribble => 1.10,
             Self::Capture => 1.05,
             Self::File => 1.05,
-            Self::Meeting => 1.00,
             Self::VoiceNote => 0.95,
         }
     }

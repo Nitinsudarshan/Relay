@@ -11,7 +11,7 @@ each file is for. `rules/` is the coding-convention layer underneath it.
 
 | Path | What it is |
 |---|---|
-| `native/src-tauri/` | Rust backend: capture, STT, the meetings pipeline, vault, triggers, MCP wiring. |
+| `native/src-tauri/` | Rust backend: capture, STT, vault, triggers, MCP wiring. |
 | `native/src/` | React frontend rendered inside the Tauri window. |
 | `native/browser-extension/` | Browser extension for structured web and AI conversation capture into the vault. |
 
@@ -39,11 +39,6 @@ All paths are relative to `rules/`.
 - [version-and-changelog.md](rules/version-and-changelog.md): Release versioning, changelog ownership, and conventional change metadata.
 - [readme.md](rules/readme.md): Machine-readable rules for generating, auditing, or rewriting `README.md`.
 - [maybe-later.md](rules/maybe-later.md): Policy and format for logging deferred features to `maybe_later.md`.
-
-`Meeting-rules/` is a separate, load-bearing set of behavioural specs for the
-meeting pipeline's prompts and extraction stages. It is cited directly from
-Rust doc comments in `meetings_v2/processing/*` — treat those files as the
-specification those modules implement, and update both together.
 
 ## Verifying a change
 
@@ -97,7 +92,7 @@ If two rules conflict, resolve in this order (most specific wins):
 ## Working in an established codebase
 
 This repo is well past its from-scratch phase — it is at v0.41.0 with a
-shipped capture pipeline, meetings v2, scribbles, and a vault. Two habits
+shipped capture pipeline, scribbles, and a vault. Two habits
 matter more here than they did at the start:
 
 - **Read the code before the prose.** Where a document and the source

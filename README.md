@@ -13,20 +13,18 @@
 
 Traditional dictation tools stream raw audio to third-party clouds and leave you with walls of transcript text that require manual re-reading and manual copying.
 
-Relay processes speech locally using Whisper and structured pipelines to instantly convert spoken thoughts into organized Kanban tasks, meeting agendas, and grounded vault notes while keeping all audio and notes strictly on your machine.
+Relay processes speech locally using Whisper and structured pipelines to instantly convert spoken thoughts into organized Kanban tasks and grounded vault notes while keeping all audio and notes strictly on your machine.
 
 ## Features
 
-- **Home** — The surface Relay opens on: every capture mode one click away, live counts of what is in your vault (voice notes, scribbles, meetings, documents, captures, entities, connections, memories) with a seven-day delta, the newest records across every surface, and an honest readout of what is configured on this machine — a missing language model or speech engine says so, next to the way to fix it. Every number is read from the local vault, not from a separate statistics store.
+- **Home** — The surface Relay opens on: every capture mode one click away, live counts of what is in your vault (voice notes, scribbles, documents, captures, entities, connections, memories) with a seven-day delta, the newest records across every surface, and an honest readout of what is configured on this machine — a missing language model or speech engine says so, next to the way to fix it. Every number is read from the local vault, not from a separate statistics store.
 - **Knowledge Graph** — A first-class surface, not a tab inside Scribbles: the whole Obsidian-compatible graph of thoughts, topics, entities and sources in one 2D canvas with real force physics, filters, groups, per-node inspection, and connect/merge actions. Double-clicking a thought opens it in Scribbles.
 - **Universal Dictation** — Transcribes push-to-talk audio and injects text directly into whatever Windows app or field has active focus.
-- **Knowledge Architecture (Foundation 11–20)** — Connected, explainable knowledge system combining multi-signal unified retrieval (Vault files, web captures, scribbles, meetings, derived artifacts, memories), persistent entity resolution, operational relationship linking, deliberate memory formation with conflict superseding, bounded canonical context packs with prompt boundary isolation, and truthful universal actions with enforced confirmation gating.
-- **Meeting Intelligence** — Records mic and system audio into durable 30-second chunks with live transcription, then derives a summary, decisions and the reasoning behind them, owned action items, risks, open questions, topics, and speakers from the transcript. Individual voices are separated acoustically, so a call with several participants reads as several speakers rather than one — assigned as each 30-second chunk lands, not only once the recording ends; three separation methods are available and Diagnostics runs all of them over one recording so the right one can be chosen by looking rather than by holding another meeting; names the meeting said out loud are offered as unconfirmed suggestions you can accept or correct. A meeting can be matched to the Google Calendar event it was, read-only, which supplies the title it was scheduled under, who was invited, and the agenda — three things the audio cannot; where two events fit equally well Relay shows both rather than guessing. A reminder card appears in the corner of the screen shortly before a scheduled meeting starts, while one is running with nothing recording it, or for a Meet, Zoom, Teams or Webex call the calendar never knew about — with Record, Join and Snooze on it, and never stealing focus or appearing in a screen share. Every chunk is screened before and after transcription so background noise is never stored as speech — a rejected chunk says what was discarded and why instead of quietly filling the transcript with subtitle filler. Each meeting carries a counted header (date, duration, participants and their share of the talking, and what became of every chunk) that a shared summary is assembled on top of. Your own input is typed rather than prose: a name correction, a misheard term, a participant, an agenda line, each read by the part of Relay that can act on it. The raw speech-to-text output is kept immutable as the diagnostic source, and any meeting can become a Scribble that references it.
+- **Knowledge Architecture (Foundation 11–20)** — Connected, explainable knowledge system combining multi-signal unified retrieval (Vault files, web captures, scribbles, derived artifacts, memories), persistent entity resolution, operational relationship linking, deliberate memory formation with conflict superseding, bounded canonical context packs with prompt boundary isolation, and truthful universal actions with enforced confirmation gating.
 - **Scribble Pipeline** — Parses rough voice scribbles into structured Kanban task cards and vault notes.
 - **AI Conversation Capture & Import** — Saves the web page or AI conversation you are looking at into your vault as structured text, not a screenshot: live turn-by-turn capture from ChatGPT, Claude, and Gemini, repositories, issues and pull requests from GitHub, and article text, tables, code and metadata from anything else. Relay also supports **AI Conversation Import**, ingesting official data export packages (.zip or .json) from ChatGPT and Claude, extracting and preserving working assets (PDFs, code, images, docs) in the local vault, and linearizing conversation branches into immutable source material. Relay extracts a canonical derived context model from captured and imported conversations—grounding settled decisions, requirements, boundaries/constraints, open questions, and next actions with source-turn provenance. It reads more than the screen: Relay scrolls a long conversation from its start, waits for content that loads as you go, and opens sections that are genuinely collapsed — then puts your scroll position back. Captured pages are stored as external source material, never as instructions to Relay's AI. See [`docs/capture.md`](docs/capture.md).
-- **Document Vault & Files** — Import `.md`, `.txt`, `.pdf`, and `.docx` documents into Relay's vault with a 100% non-destructive immutability guarantee for your original files. Relay extracts text, generates AI summaries, derives topics and named entities, supports linked Scribbles, and cites documents in Talkback context.
-- **Talkback** — A conversational agent over everything Relay has captured. Ask out loud what you decided, what you said, or what happened in a meeting; answers about your own history come only from your Voice Notes, Scribbles, Files and Meetings, with the sources shown. Speak over it to interrupt, and turn a conversation into a Voice Note or a Scribble by saying so. Its voice runs locally: `Settings › Talkback › Make Relay speak` downloads, verifies and self-tests the speech engine in one click.
-- **Diagnostics & Observability Hub** — Dedicated technical testing and inspection workspace featuring real-time audio telemetry (RMS, peak amplitude, VAD segmentation, decoding diagnostics), STT accuracy benchmarking against reference corpora, live LLM prompt latency testing, verified disk-level model readiness, and runnable meeting-pipeline checks that exercise the speech gate, the hallucination screen and speaker separation against synthesized audio — including asking your own Whisper model to transcribe thirty seconds of room tone so you can see what it invents and that none of it reaches a transcript.
+- **Document Vault & Files** — Import `.md`, `.txt`, `.pdf`, and `.docx` documents into Relay's vault with a 100% non-destructive immutability guarantee for your original files. Relay extracts text, generates AI summaries, derives topics and named entities, supports linked Scribbles, and cites documents in knowledge context.
+- **Diagnostics & Observability Hub** — Dedicated technical testing and inspection workspace featuring real-time audio telemetry (RMS, peak amplitude, VAD segmentation, decoding diagnostics), STT accuracy benchmarking against reference corpora, live LLM prompt latency testing, verified disk-level model readiness, and speech gating diagnostics.
 - **Local Vault Storage** — Saves audio recordings, transcripts, and structured entities locally as Markdown files with YAML frontmatter.
 
 ## Requirements
@@ -67,21 +65,20 @@ flowchart TD
     A[Push-to-Talk / Audio Capture] --> B[Local Whisper STT Engine]
     B --> C{Pipeline Dispatcher}
     C -->|Dictation| D[Windows Active Focus Injection]
-    C -->|Scribble / Meeting| E[Kanban & Note Structuring]
+    C -->|Scribble| E[Kanban & Note Structuring]
     W[Browser Extension] -->|loopback, structured text| X[Web Capture: detect → sanitize → normalize → verify completeness]
     X --> F[(Local Markdown Vault)]
     E --> F
-    F --> H[Talkback: retrieval → LLM → speech]
     F -.->|Updates & Telemetry| G[Supabase Cloud Backend]
 ```
 
 ## Tests
 
 ```bash
-# Rust backend — 1117 tests (+4 ignored benchmarks)
+# Rust backend — 527 tests
 cd native/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 
-# Native frontend — 498 tests
+# Native frontend — 348 tests
 cd native && npm test && npm run typecheck
 ```
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, FileText, Globe, History, Mic, Sparkles, type LucideIcon } from 'lucide-react';
+import { FileText, Globe, History, Mic, Sparkles, type LucideIcon } from 'lucide-react';
 
 import { EmptyState } from '@/components/common/EmptyState';
 
@@ -16,7 +16,6 @@ export interface HomeRecentActivityProps {
 const KIND_ICON: Record<HomeActivityKind, LucideIcon> = {
   voice_note: Mic,
   scribble: Sparkles,
-  meeting: Calendar,
   file: FileText,
   capture: Globe,
 };
@@ -24,7 +23,6 @@ const KIND_ICON: Record<HomeActivityKind, LucideIcon> = {
 const KIND_ACCENT: Record<HomeActivityKind, string> = {
   voice_note: 'text-emerald-500',
   scribble: 'text-amber-500',
-  meeting: 'text-indigo-400',
   file: 'text-blue-500',
   capture: 'text-sky-500',
 };
@@ -55,7 +53,7 @@ export const HomeRecentActivity: React.FC<HomeRecentActivityProps> = ({
           description={
             loading
               ? 'Counting what is already there.'
-              : 'Dictate a thought, record a meeting or import a document and it will show up here.'
+              : 'Dictate a thought, capture a page, or import a document and it will show up here.'
           }
           minHeight="min-h-[160px]"
           className="border-none bg-transparent"

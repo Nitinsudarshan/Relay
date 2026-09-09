@@ -4,9 +4,7 @@
 //! Employs multi-signal deterministic scoring, provenance preservation, and explainability.
 
 use super::model::*;
-use super::providers::{DerivedDataProvider, MeetingProvider, MemoryProvider, VaultProvider};
-use crate::meetings_v2::processing::MeetingProcessor;
-use crate::meetings_v2::session_store::SessionStore;
+use super::providers::{DerivedDataProvider, MemoryProvider, VaultProvider};
 use crate::memory::MemoryStore;
 use crate::vault::VaultManager;
 
@@ -120,19 +118,15 @@ impl UnifiedRetrievalService {
     /// multi-signal scoring, and explainability.
     pub fn search(
         vault: &VaultManager,
-        session_store: Option<&SessionStore>,
-        meeting_processor: Option<&MeetingProcessor>,
         query: &RetrievalQuery,
     ) -> RetrievalResult {
-        Self::search_with_memory(vault, None, session_store, meeting_processor, query)
+        Self::search_with_memory(vault, None, query)
     }
 
     /// Extended search allowing optional memory store injection.
     pub fn search_with_memory(
         vault: &VaultManager,
         memory_store: Option<&MemoryStore>,
-        session_store: Option<&SessionStore>,
-        meeting_processor: Option<&MeetingProcessor>,
         query: &RetrievalQuery,
     ) -> RetrievalResult {
         let terms = tokenize(&query.text);
@@ -151,10 +145,6 @@ impl UnifiedRetrievalService {
             let memory_provider = MemoryProvider::new(mem_store);
             candidates.extend(memory_provider.gather(query));
         }
-
-        // 4. Gather Meetings if available
-        let meeting_provider = MeetingProvider::new(session_store, meeting_processor);
-        candidates.extend(meeting_provider.gather(query));
 
         // Score candidates
         let mut scored_items: Vec<RetrievedItem> = Vec::new();

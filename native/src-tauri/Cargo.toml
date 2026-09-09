@@ -52,12 +52,6 @@ sha2 = "0.10"
 pdf-extract = "0.7"
 quick-xml = "0.36"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-# Upstream ships Windows as a zip and every Unix platform as a tarball,
-# so the installer has to read both. `zip` already pulls flate2 in for
-# deflate; naming it here makes the gzip side explicit rather than
-# inherited from another crate's feature choice.
-tar = "0.4"
-flate2 = "1"
 
 # Spike only (`--features onnx-spike`), never in a shipped build. Present so
 # `developer::onnx_spike` can prove ONNX Runtime builds, bundles and runs

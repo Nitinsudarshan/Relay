@@ -64,8 +64,8 @@ from a docs site, and from an anonymous blog are all equally untrusted — and
 
 ## In Relay's code
 
-Any code path that assembles an LLM prompt — `pipeline/`, Talkback context
-packs, meeting derivation, the capture→context model — must:
+Any code path that assembles an LLM prompt — `pipeline/`, context
+packs, the capture→context model — must:
 
 - Keep external source material in a **framed, labeled** region distinct from
   Relay's own instructions, per the canonical context-pack boundary.

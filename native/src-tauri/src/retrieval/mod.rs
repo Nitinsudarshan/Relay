@@ -11,7 +11,7 @@ pub use model::{
     RetrievalResult, RetrievalSourceType, RetrievedItem, TimeFilter,
 };
 pub use providers::{
-    CandidateProvider, DerivedDataProvider, MeetingProvider, MemoryProvider, RelationshipProvider,
+    CandidateProvider, DerivedDataProvider, MemoryProvider, RelationshipProvider,
     VaultProvider,
 };
 pub use service::{extract_snippet, tokenize, UnifiedRetrievalService};

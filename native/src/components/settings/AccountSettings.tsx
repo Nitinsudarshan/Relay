@@ -368,7 +368,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
                 <span>Disconnect Google Account?</span>
               </h4>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Your local Scribbles, Voice Notes, and Meetings will remain 100% untouched on this device.
+                Your local Scribbles and Voice Notes will remain 100% untouched on this device.
                 You will return to Local Mode.
               </p>
             </div>
@@ -393,7 +393,7 @@ export const AccountSettings: React.FC<AccountSettingsProps> = ({
               <h3 className="text-sm font-semibold text-foreground">Current Operating Mode: Local</h3>
             </div>
             <p className="text-xs text-muted-foreground">
-              Your markdown files, vector embeddings, meeting audio, and knowledge graph live exclusively on this computer.
+              Your markdown files, vector embeddings, voice audio, and knowledge graph live exclusively on this computer.
             </p>
           </div>
           <Button

@@ -16,7 +16,6 @@ import {
 
 import type {
   KnowledgeTelemetrySnapshot,
-  MeetingSession,
   Scribble,
   VaultFile,
   VaultNote,
@@ -57,26 +56,6 @@ const makeScribble = (overrides: Partial<Scribble> = {}): Scribble => ({
     suggested_questions: [],
     suggested_relations: [],
   },
-  ...overrides,
-});
-
-const makeMeeting = (overrides: Partial<MeetingSession> = {}): MeetingSession => ({
-  id: 'mtg_1',
-  title: 'Weekly sync',
-  state: 'COMPLETED',
-  created_at: daysAgo(1),
-  updated_at: daysAgo(1),
-  duration_seconds: 3660,
-  chunk_count: 10,
-  mic_active: false,
-  sys_audio_active: false,
-  mic_heard: true,
-  sys_audio_heard: true,
-  paused_seconds: 0,
-  total_audio_bytes: 1024,
-  transcript_segment_count: 40,
-  word_count: 900,
-  pending_transcription_chunks: 0,
   ...overrides,
 });
 
@@ -127,7 +106,6 @@ const populated = (): HomeSnapshot => ({
     makeVoiceNote({ id: 'note_2', created_at: daysAgo(20), content: 'one two' }),
   ],
   scribbles: [makeScribble()],
-  meetings: [makeMeeting()],
   files: [makeVaultFile()],
   captures: [
     makeVaultFile({
@@ -190,7 +168,6 @@ describe('buildHomeStats', () => {
     expect(byId.voice_notes.value).toBe(2);
     expect(byId.voice_notes.thisWeek).toBe(1);
     expect(byId.scribbles.value).toBe(1);
-    expect(byId.meetings.value).toBe(1);
     expect(byId.files.value).toBe(1);
     expect(byId.captures.value).toBe(1);
     expect(byId.entities.value).toBe(12);
@@ -203,7 +180,6 @@ describe('buildHomeStats', () => {
     expect(stats.map((s) => s.surface)).toEqual([
       'capture',
       'scribble',
-      'meetings',
       'files',
       'captures',
       'graph',
@@ -214,7 +190,7 @@ describe('buildHomeStats', () => {
 
   test('an empty vault reads as zeros, not as missing data', () => {
     const stats = buildHomeStats(emptySnapshot(), NOW);
-    expect(stats).toHaveLength(8);
+    expect(stats).toHaveLength(7);
     expect(stats.every((s) => s.value === 0 && s.thisWeek === 0)).toBe(true);
   });
 
@@ -228,13 +204,9 @@ describe('buildHomeStats', () => {
 });
 
 describe('buildHomeVitals', () => {
-  test('sums transcribed words across voice notes and meetings', () => {
-    // 3 words + 2 words + a 900-word meeting transcript.
-    expect(buildHomeVitals(populated()).spokenWords).toBe(905);
-  });
-
-  test('sums recorded meeting time', () => {
-    expect(buildHomeVitals(populated()).recordedSeconds).toBe(3660);
+  test('sums transcribed words across voice notes', () => {
+    // 3 words + 2 words.
+    expect(buildHomeVitals(populated()).spokenWords).toBe(5);
   });
 
   test('counts scribbles still awaiting enrichment', () => {
@@ -288,7 +260,6 @@ describe('buildHomeVitals', () => {
   test('an empty vault produces zeros', () => {
     expect(buildHomeVitals(emptySnapshot())).toEqual({
       spokenWords: 0,
-      recordedSeconds: 0,
       awaitingEnrichment: 0,
       awaitingPromotion: 0,
       connectedScribbles: 0,
@@ -305,9 +276,8 @@ describe('buildRecentActivity', () => {
     expect(activity[0].detail).toBe('example.com');
   });
 
-  test('a meeting carries its duration, a document its type', () => {
+  test('a document carries its type', () => {
     const activity = buildRecentActivity(populated(), 10);
-    expect(activity.find((a) => a.kind === 'meeting')?.detail).toBe('1h 1m');
     expect(activity.find((a) => a.kind === 'file')?.detail).toBe('PDF');
   });
 

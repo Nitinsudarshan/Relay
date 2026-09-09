@@ -4,8 +4,6 @@
 
 use super::model::{CandidateItem, RetrievalProvenance, RetrievalQuery, RetrievalSourceType};
 use crate::capture::web::context::{ConversationContext, RepositoryContext};
-use crate::meetings_v2::processing::MeetingProcessor;
-use crate::meetings_v2::session_store::SessionStore;
 use crate::memory::{EpistemicState, MemoryStatus, MemoryStore};
 use crate::pipeline::analysis::DerivedPayload;
 use crate::relationships::RelationshipStore;
@@ -329,69 +327,6 @@ impl<'a> MemoryProvider<'a> {
     }
 }
 
-/// Provider for Meetings from SessionStore and MeetingProcessor.
-pub struct MeetingProvider<'a> {
-    pub session_store: Option<&'a SessionStore>,
-    pub _meeting_processor: Option<&'a MeetingProcessor>,
-}
-
-impl<'a> MeetingProvider<'a> {
-    pub fn new(
-        session_store: Option<&'a SessionStore>,
-        meeting_processor: Option<&'a MeetingProcessor>,
-    ) -> Self {
-        Self {
-            session_store,
-            _meeting_processor: meeting_processor,
-        }
-    }
-
-    pub fn gather(&self, query: &RetrievalQuery) -> Vec<CandidateItem> {
-        let allowed = query.filter.source_types.is_empty()
-            || query.filter.source_types.contains(&RetrievalSourceType::Meeting);
-        if !allowed {
-            return Vec::new();
-        }
-
-        let mut items = Vec::new();
-        if let Some(store) = self.session_store {
-            if let Ok(sessions) = store.list_sessions() {
-                for s in sessions {
-                    let title = if s.title.is_empty() {
-                        "Untitled Meeting".to_string()
-                    } else {
-                        s.title.clone()
-                    };
-
-                    let mut body = s.summary.clone().unwrap_or_default();
-                    if !s.action_items.is_empty() {
-                        body.push_str("\n\nAction Items:\n");
-                        for item in &s.action_items {
-                            body.push_str(&format!("- {}\n", item));
-                        }
-                    }
-                    if body.trim().is_empty() {
-                        body = format!("Meeting session {}", s.id);
-                    }
-
-                    let prov = RetrievalProvenance::new(&s.id, RetrievalSourceType::Meeting);
-                    items.push(CandidateItem {
-                        id: s.id.clone(),
-                        source_type: RetrievalSourceType::Meeting,
-                        title,
-                        content: body,
-                        timestamp: Some(s.created_at.clone()),
-                        topics: vec!["meeting".to_string()],
-                        entity_refs: Vec::new(),
-                        provenance: prov,
-                        metadata: serde_json::json!({ "action_items": s.action_items }),
-                    });
-                }
-            }
-        }
-        items
-    }
-}
 
 /// Provider for Relationships and Entity graph expansions.
 pub struct RelationshipProvider<'a> {

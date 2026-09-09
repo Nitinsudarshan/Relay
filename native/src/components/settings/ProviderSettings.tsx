@@ -53,17 +53,13 @@ import { AccountSettings } from './AccountSettings';
 import { DeveloperSettingsView } from './DeveloperSettingsView';
 import { DictionarySnippetsSettings } from './DictionarySnippetsSettings';
 import { CaptureSettingsView } from './CaptureSettingsView';
-import { MeetingsSettings } from './MeetingsSettings';
-import { TalkbackSettingsView, DEFAULT_TALKBACK_SETTINGS } from './TalkbackSettingsView';
 
 export type SettingsSection =
   | 'account'
   | 'general'
   | 'dictation'
   | 'dictionary'
-  | 'meetings'
   | 'capture'
-  | 'talkback'
   | 'languages'
   | 'advanced'
   | 'privacy'
@@ -92,9 +88,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   { id: 'general', label: 'General', icon: Sliders },
   { id: 'dictation', label: 'Dictation & Audio', icon: Mic },
   { id: 'dictionary', label: 'Dictionary & Snippets', icon: BookOpen },
-  { id: 'meetings', label: 'Meetings', icon: Users },
   { id: 'capture', label: 'Web Capture', icon: Globe },
-  { id: 'talkback', label: 'Talkback', icon: MessageCircle },
   { id: 'languages', label: 'Languages & Script', icon: Languages },
   { id: 'advanced', label: 'AI Models & STT', icon: Cpu },
   { id: 'privacy', label: 'Privacy & Vault', icon: ShieldCheck },
@@ -149,7 +143,6 @@ const DEFAULT_SETTINGS: AppSettings = {
     cloud_model: 'gpt-4o-mini',
   },
   stt: { whisper_model_path: '' },
-  tts: { piper_binary_path: '', piper_voice_path: '' },
   hotkeys: {
     show_hide_hotkey: 'Ctrl+Shift+Space',
     dictation_hotkey: 'Ctrl+Space',
@@ -179,7 +172,6 @@ const DEFAULT_SETTINGS: AppSettings = {
     selected_device: null,
     keep_microphone_warm: 'off',
   },
-  talkback: DEFAULT_TALKBACK_SETTINGS,
   dictionary: ['Relay', 'Whisper', 'Tauri', 'Rust', 'Supabase', 'LanceDB', 'Ollama'],
   snippets: [],
 };
@@ -279,28 +271,6 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
     }
   };
 
-  // Scoped to meetings deliberately. Dictation already has its own Fast /
-  // Accurate profile above, and the reason to reach for a model this large is
-  // a recording that is transcribed once and read for weeks — not push-to-talk,
-  // where the extra decode time is paid on every utterance.
-  const useSttModelForMeetings = (path: string) => {
-    setSettings({
-      ...settings,
-      stt: { ...settings.stt, meeting_model_path: path, meetingModelPath: path },
-    });
-  };
-
-  const clearMeetingModel = () => {
-    setSettings({
-      ...settings,
-      stt: { ...settings.stt, meeting_model_path: null, meetingModelPath: null },
-    });
-  };
-
-  // What meetings will actually load. Null means they follow the global
-  // setting, which is the shipped behaviour and stays the default.
-  const meetingModel =
-    settings.stt.meeting_model_path ?? settings.stt.meetingModelPath ?? null;
 
   const fetchSttModels = async () => {
     setLoadingSttModels(true);
@@ -1088,7 +1058,7 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                       ))}
                     </select>
                     <p className="text-[10px] text-muted-foreground leading-snug">
-                      Applies to dictation, meetings and Talkback alike. A device that is
+                      Applies to dictation. A device that is
                       unplugged falls back to the system default rather than failing the
                       recording.
                     </p>
@@ -1903,29 +1873,6 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                               </Button>
                             )}
 
-                            {m.status === 'ready' &&
-                              (meetingModel === m.path ? (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={clearMeetingModel}
-                                  className="w-full text-[11px] h-7 gap-1.5 mt-1 text-primary"
-                                >
-                                  <Check className="w-3 h-3" />
-                                  Meetings use this
-                                </Button>
-                              ) : (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => useSttModelForMeetings(m.path)}
-                                  className="w-full text-[11px] h-7 gap-1.5 mt-1"
-                                >
-                                  Use for meetings
-                                </Button>
-                              ))}
                           </div>
                         );
                       })}
@@ -1941,13 +1888,7 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                     <p className="text-[10px] text-muted-foreground leading-snug">
                       Whisper Large v3 Turbo is the accuracy ceiling and a ~1.6 GB download. It is
                       markedly better on Hindi and other non-English speech than Small, and slower
-                      on every utterance — worth it for meetings, usually not for push-to-talk.
-                      Downloading it does not switch to it.
-                    </p>
-                    <p className="text-[10px] text-muted-foreground leading-snug">
-                      {meetingModel
-                        ? 'Meetings use the model marked above. Dictation is unaffected and keeps the profile you chose below.'
-                        : 'Meetings currently follow the global model. Choose Use for meetings to give them a more accurate one without slowing dictation.'}
+                      on every utterance. Downloading it does not switch to it.
                     </p>
                   </div>
 
@@ -2023,17 +1964,14 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
                       Decode Preset
                     </label>
                     <p className="text-[11px] text-muted-foreground leading-snug">
-                      Trades decode time for how much borderline speech survives. Automatic lets
-                      each surface pick what suits it — dictation is latency-bound because someone
-                      is waiting for the text, a meeting is recall-bound because it is decoded once
-                      and read later. Choosing one here overrides both.
+                      Trades decode time for how much borderline speech survives.
                     </p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {([
                         {
                           value: '',
                           label: 'Automatic',
-                          hint: 'Fast for dictation, Quality for meetings',
+                          hint: 'Fast for dictation',
                         },
                         { value: 'fast', label: 'Fast', hint: 'Greedy. Lowest latency' },
                         { value: 'balanced', label: 'Balanced', hint: 'Beam search at 3' },
@@ -2450,36 +2388,7 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
           </div>
         )}
 
-        {/* 7. TRASH SECTION */}
-        {activeSection === 'meetings' && (
-          <MeetingsSettings
-            settings={settings}
-            onChange={async (next) => {
-              setSettings(next);
-              try {
-                await invoke('save_settings', { settings: next });
-              } catch (err) {
-                console.error('Failed to save meeting settings', err);
-              }
-            }}
-          />
-        )}
-
         {activeSection === 'capture' && <CaptureSettingsView />}
-
-        {activeSection === 'talkback' && (
-          <TalkbackSettingsView
-            settings={settings}
-            onChange={async (next) => {
-              setSettings(next);
-              try {
-                await invoke('save_settings', { settings: next });
-              } catch (err) {
-                console.error('Failed to save Talkback settings', err);
-              }
-            }}
-          />
-        )}
 
         {activeSection === 'trash' && <TrashSettings />}
 

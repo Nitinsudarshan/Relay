@@ -1170,25 +1170,6 @@ mod ingest_tests {
         assert!(restored.is_capture());
     }
 
-    #[test]
-    fn captures_are_retrievable_by_talkback() {
-        use crate::talkback::retrieval::SourceType;
-
-        let vault = TempVault::new();
-        ingest(
-            &vault.manager,
-            conversation_payload("https://chatgpt.com/c/talkback", "Vault storage design notes.")
-                .as_bytes(),
-        )
-        .unwrap();
-
-        let captures = vault.manager.list_captures().unwrap();
-        let candidate = crate::talkback::sources::capture_candidate(&captures[0]);
-        assert_eq!(candidate.source_type, SourceType::Capture);
-        assert_eq!(candidate.title, "Designing Relay Capture");
-        assert!(candidate.body.contains("ChatGPT"));
-        assert!(SourceType::ALL.contains(&SourceType::Capture));
-    }
 
     #[test]
     fn a_page_with_nothing_readable_is_refused_rather_than_saved_empty() {
@@ -1421,7 +1402,6 @@ mod contract_tests {
 mod trust_boundary_tests {
     use super::*;
     use crate::pipeline::source_boundary;
-    use crate::talkback::retrieval::SourceType;
     use crate::vault::VaultManager;
 
     /// The sentence the whole boundary exists for.
@@ -1554,23 +1534,6 @@ mod trust_boundary_tests {
         assert!(scribble.content.contains(ATTACK));
     }
 
-    #[test]
-    fn talkback_knows_a_capture_is_not_the_users_own_words() {
-        // Every other source in the vault is something the user wrote, said or
-        // imported deliberately. A capture is a record of what a website said,
-        // and Talkback's grounded prompt tells the model to answer only from
-        // the context — so the distinction has to be visible in the context.
-        assert!(SourceType::Capture.is_external());
-        for source in [
-            SourceType::Scribble,
-            SourceType::Meeting,
-            SourceType::MeetingFacts,
-            SourceType::VoiceNote,
-            SourceType::File,
-        ] {
-            assert!(!source.is_external(), "{source:?} is the user's own record");
-        }
-    }
 
     #[test]
     fn a_recognisable_domain_does_not_promote_captured_content() {

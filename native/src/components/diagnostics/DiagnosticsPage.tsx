@@ -5,7 +5,6 @@ import {
   Cpu,
   RefreshCw,
   Sliders,
-  Volume2,
   Zap,
   CheckCircle,
   AlertCircle,
@@ -25,8 +24,6 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { MeetingPipelineDiagnostics } from './MeetingPipelineDiagnostics';
-import { SpeakerEngineComparison } from './SpeakerEngineComparison';
 import { KnowledgeArchitectureDiagnostics } from './KnowledgeArchitectureDiagnostics';
 import {
   AppSettings,
@@ -46,7 +43,7 @@ interface DiagnosticsPageProps {
 }
 
 export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab }) => {
-  const [activeTab, setActiveTab] = useState<'stt' | 'meetings' | 'llm' | 'system' | 'knowledge'>(
+  const [activeTab, setActiveTab] = useState<'stt' | 'llm' | 'system' | 'knowledge'>(
     'stt',
   );
 
@@ -306,7 +303,7 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
       </div>
 
       {/* 1. SYSTEM STATUS OVERVIEW MATRIX */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {/* LLM Backend */}
         <div className="p-3.5 rounded-lg border border-border bg-card/60 flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1.5">
@@ -394,21 +391,6 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
             </p>
           </div>
         </div>
-
-        {/* TTS Engine */}
-        <div className="p-3.5 rounded-lg border border-border bg-card/60 flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[11px] font-semibold text-muted-foreground flex items-center gap-1.5">
-              <Volume2 className="w-3.5 h-3.5 text-sky-400" />
-              TTS Engine
-            </span>
-            <Badge variant="emerald" className="text-[9px] px-1.5 py-0">Ready ✓</Badge>
-          </div>
-          <div>
-            <p className="text-xs font-bold text-foreground">Piper Neural TTS</p>
-            <p className="text-[10px] text-muted-foreground font-mono">Zero Cloud Cost · On-Device</p>
-          </div>
-        </div>
       </div>
 
       {/* Navigation Tabs */}
@@ -424,19 +406,6 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
         >
           <FileAudio className="w-4 h-4" />
           Speech-to-Text Diagnostics
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('meetings')}
-          className={`pb-2.5 px-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all ${
-            activeTab === 'meetings'
-              ? 'border-primary text-primary'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <Mic className="w-4 h-4" />
-          Meeting Pipeline
         </button>
 
         <button
@@ -485,13 +454,6 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
         </div>
       )}
 
-      {activeTab === 'meetings' && (
-        <div className="space-y-6 animate-in fade-in-50">
-          <SpeakerEngineComparison />
-          <MeetingPipelineDiagnostics />
-        </div>
-      )}
-
       {/* TAB CONTENT 1: STT DIAGNOSTICS */}
       {activeTab === 'stt' && (
         <div className="space-y-6 animate-in fade-in-50">
@@ -518,7 +480,7 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
 
             {!decodeSummary || decodeSummary.decodes === 0 ? (
               <p className="text-[11px] text-muted-foreground leading-snug">
-                No decodes recorded yet. Dictate something or record a meeting, and the last 500
+                No decodes recorded yet. Dictate something, and the last 500
                 runs are kept here — counts and levels only, never any transcript.
               </p>
             ) : (
@@ -915,7 +877,7 @@ export const DiagnosticsPage: React.FC<DiagnosticsPageProps> = ({ onNavigateTab 
           <div className="p-4 rounded-lg border border-border bg-card/60 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-border/60">
               <div className="flex items-center gap-2">
-                <Volume2 className="w-4 h-4 text-emerald-500" />
+                <Mic className="w-4 h-4 text-emerald-500" />
                 <span className="text-xs font-bold text-foreground">
                   Audio Input Devices ({audioDevices.length})
                 </span>

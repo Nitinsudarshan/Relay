@@ -430,7 +430,7 @@ export const FilesPage: React.FC<FilesPageProps> = ({ onNavigateTab }) => {
           <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
             {searchQuery || selectedFilter !== 'all'
               ? 'No imported files match your search criteria.'
-              : 'Add documents to Relay to extract text, summarize, analyze, and integrate into Talkback context.'}
+              : 'Add documents to Relay to extract text, summarize, analyze, and integrate into knowledge context.'}
           </p>
         </div>
       ) : (

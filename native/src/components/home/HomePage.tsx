@@ -21,7 +21,6 @@ import type {
   AppSettings,
   CaptureBridgeStatus,
   KnowledgeTelemetrySnapshot,
-  MeetingSession,
   RelayAccount,
   Scribble,
   VaultFile,
@@ -68,13 +67,12 @@ export const HomePage: React.FC<HomePageProps> = ({
 
   const load = useCallback(async () => {
     // Each read is independent and local; a surface that fails degrades to zero
-    // rather than blanking the page, because a missing meeting index should not
-    // hide the voice notes that did load.
-    const [voiceNotes, scribbles, meetings, vaultFiles, captures, telemetry, location, bridgeStatus] =
+    // rather than blanking the page, because a failure in one surface should not
+    // hide the notes that did load.
+    const [voiceNotes, scribbles, vaultFiles, captures, telemetry, location, bridgeStatus] =
       await Promise.all([
         invoke<VaultNote[]>('get_voice_notes').catch(() => []),
         invoke<Scribble[]>('get_scribbles').catch(() => []),
-        invoke<MeetingSession[]>('list_meetings_v2').catch(() => []),
         invoke<VaultFile[]>('get_vault_files').catch(() => []),
         invoke<VaultFile[]>('get_captures').catch(() => []),
         invoke<KnowledgeTelemetrySnapshot>('get_knowledge_telemetry').catch(() => null),
@@ -85,7 +83,6 @@ export const HomePage: React.FC<HomePageProps> = ({
     setSnapshot({
       voiceNotes: voiceNotes ?? [],
       scribbles: scribbles ?? [],
-      meetings: meetings ?? [],
       // `get_vault_files` spans both trees; captures are counted on their own.
       files: (vaultFiles ?? []).filter((f) => !f.capture),
       captures: captures ?? [],
@@ -107,7 +104,6 @@ export const HomePage: React.FC<HomePageProps> = ({
       listen('scribble-saved', () => load()),
       listen('scribble-enriched', () => load()),
       listen('voice-note-saved', () => load()),
-      listen('meeting-session-state-changed', () => load()),
       listen('capture-processed', () => load()),
     ];
 

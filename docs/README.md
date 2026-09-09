@@ -18,8 +18,6 @@ is right and the document is a bug to be fixed in the same change.
 | [api.md](api.md) | Tauri command conventions and the `CommandError` contract. |
 | [user-flows.md](user-flows.md) | End-to-end flows through the shipped features. |
 | [capture.md](capture.md) | Web capture: the browser extension, the loopback bridge, the reveal-and-extract architecture, what a capture may claim about its own completeness, and why captured content is never an instruction. |
-| [meetings/MEETINGS_INTELLIGENCE_V2.md](meetings/MEETINGS_INTELLIGENCE_V2.md) | Meetings Intelligence v2: 7-layer architecture, transcript/speaker turns, self-voice anchoring, Google Calendar candidate roster, attendance reconciliation, and deterministic summary floor. |
-| [talkback/ARCHITECTURE.md](talkback/ARCHITECTURE.md) | Talkback's pipeline, state machine, retrieval, and what it deliberately does not do. |
 | [testing.md](testing.md) | What is tested, with what, and where the tests live. |
 | [GOOGLE_OAUTH_SETUP.md](GOOGLE_OAUTH_SETUP.md) | The OAuth 2.0 PKCE architecture and Google Cloud setup. |
 
@@ -48,14 +46,8 @@ version it was traced from; read them as history, not as instructions.
 
 | File | Scope |
 |---|---|
-| [meetings/MEETINGS_INTELLIGENCE_AUDIT.md](meetings/MEETINGS_INTELLIGENCE_AUDIT.md) | Stage-by-stage trace of the meetings pipeline (phase A audit). |
-| [meetings/SUMMARY_QUALITY_REBUILD.md](meetings/SUMMARY_QUALITY_REBUILD.md) | Why v0.15.1 summaries were poor and what replaced the pipeline. |
-| [meetings/TRANSCRIPT_AND_SPEAKER_REBUILD.md](meetings/TRANSCRIPT_AND_SPEAKER_REBUILD.md) | Why a recording stored four minutes of "Thank you." and reported one speaker for a room of twenty, and what replaced the code that caused both. Includes the two clustering designs that were wrong first, and the measurements the surviving constants were calibrated against. |
-| [meetings/MEETINGS_LEGACY_REMOVAL.md](meetings/MEETINGS_LEGACY_REMOVAL.md) | Archaeological record of the legacy meetings system (v0.1.0–v0.10.1). |
 | [capture/RESEARCH.md](capture/RESEARCH.md) | The research pass behind Capture v2's progressive traversal: how browsers hide content, what was verified in a real browser and what was not, the traversal and expansion designs, and the architectures rejected. |
 | [capture/BENCHMARKS.md](capture/BENCHMARKS.md) | What the reveal pass costs, measured — and, explicitly, what has not been measured. |
-| [talkback/RESEARCH.md](talkback/RESEARCH.md) | The research pass behind Talkback: competitive matrix, open-source technology matrix with licences, and the architectures rejected. |
-| [talkback/BENCHMARKS.md](talkback/BENCHMARKS.md) | What Talkback's latency actually measures at, and — explicitly — what has not been measured. |
 
 ## Archive
 
@@ -64,6 +56,7 @@ describes code that exists.
 
 | File | Scope |
 |---|---|
+| [../removed.md](../removed.md) | Architectural and functional knowledge of removed Meetings (meetings_v2) and Talkback subsystems. |
 | [archive/prompt-mode.md](archive/prompt-mode.md) | Prompt Mode, removed in v0.15.0, and the thinking behind it. |
 
 ## Elsewhere in the repo
@@ -72,7 +65,6 @@ describes code that exists.
 |---|---|
 | `../AGENTS.md` | Entry point for agents: surfaces, rule index, verification commands. |
 | `../rules/` | Coding conventions, enforced per surface. |
-| `../Meeting-rules/` | Behavioural specs for the meeting pipeline's prompts and extraction stages, cited directly from Rust doc comments. |
 | `../CHANGELOG.md` | Per-version record of what shipped. |
 
 ## Adding a document

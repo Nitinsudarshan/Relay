@@ -6,7 +6,6 @@ import {
   Cpu,
   Database,
   FolderOpen,
-  Volume2,
   Waves,
   type LucideIcon,
 } from 'lucide-react';
@@ -79,7 +78,6 @@ export const HomeSystemPanel: React.FC<HomeSystemPanelProps> = ({
         }`;
 
   const whisperPath = settings?.stt?.whisper_model_path;
-  const ttsConfigured = Boolean(settings?.tts?.piper_binary_path && settings?.tts?.piper_voice_path);
 
   const rows: SystemRow[] = [
     {
@@ -117,14 +115,6 @@ export const HomeSystemPanel: React.FC<HomeSystemPanelProps> = ({
       value: whisperPath ? `Whisper · ${basename(whisperPath)}` : 'No Whisper model selected',
       ok: Boolean(whisperPath),
       cta: whisperPath ? undefined : { label: 'Configure', onClick: () => onOpenSettings('advanced') },
-    },
-    {
-      id: 'tts',
-      icon: Volume2,
-      label: 'Talkback voice',
-      value: ttsConfigured ? 'Local speech engine installed' : 'Not installed — Talkback stays text-only',
-      ok: ttsConfigured,
-      cta: ttsConfigured ? undefined : { label: 'Install', onClick: () => onOpenSettings('talkback') },
     },
   ];
 

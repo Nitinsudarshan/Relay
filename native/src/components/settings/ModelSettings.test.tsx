@@ -22,7 +22,6 @@ const DEFAULT_TEST_SETTINGS: AppSettings = {
     cloud_model: 'gpt-4o-mini',
   },
   stt: { whisper_model_path: null, dictation_quality: 'accurate' },
-  tts: { piper_binary_path: '', piper_voice_path: '' },
   hotkeys: {
     show_hide_hotkey: 'Ctrl+Shift+Space',
     dictation_hotkey: 'Ctrl+Space',
@@ -45,7 +44,6 @@ const DEFAULT_TEST_SETTINGS: AppSettings = {
   clipboard: { auto_paste: true, copy_to_clipboard: true },
   startup: { launch_at_login: false, start_minimized: false },
   audio_input: { prefer_builtin_mic: true, selected_device: null, keep_microphone_warm: 'off' },
-  talkback: { activation_mode: 'toggle', speak_responses: true, allow_barge_in: true, sources: [], end_of_turn_silence_ms: 1000 },
   dictionary: ['Relay', 'Whisper'],
   snippets: [],
 };
@@ -237,30 +235,6 @@ describe('AI Models & STT Settings — Refactored Model Selection', () => {
     expect(within(card as HTMLElement).queryByRole('button', { name: /download/i })).toBeNull();
   });
 
-  it('scopes a model choice to meetings so dictation is not slowed with it', async () => {
-    const user = userEvent.setup();
-    render(<ProviderSettings initialSection="advanced" />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Whisper Base')).toBeDefined();
-    });
-
-    expect(screen.getByText(/Meetings currently follow the global model/)).toBeDefined();
-
-    const card = screen.getByText('Whisper Base').closest('div.p-2\\.5');
-    const use = within(card as HTMLElement).getByRole('button', { name: /use for meetings/i });
-    await user.click(use);
-
-    // The choice is meetings-only: the card now reports it, and the global
-    // dictation profile below is untouched.
-    await waitFor(() => {
-      expect(screen.getByText(/Meetings use the model marked above/)).toBeDefined();
-    });
-    expect(
-      within(card as HTMLElement).getByRole('button', { name: /meetings use this/i }),
-    ).toBeDefined();
-  });
-
   it('exposes the decode preset and defaults to letting each surface choose', async () => {
     const user = userEvent.setup();
     render(<ProviderSettings initialSection="advanced" />);
@@ -269,8 +243,7 @@ describe('AI Models & STT Settings — Refactored Model Selection', () => {
       expect(screen.getByText('Decode Preset')).toBeDefined();
     });
 
-    // Automatic is the shipped default: the empty preset is what lets dictation
-    // run Fast and meetings run Quality.
+    // Automatic is the shipped default.
     const automatic = screen.getByText('Automatic').closest('button');
     expect(automatic?.className).toContain('border-primary');
 
@@ -329,7 +302,7 @@ describe('DiagnosticsPage — Technical Observability Hub', () => {
     });
   });
 
-  it('renders system status overview cards for LLM, STT, and TTS', async () => {
+  it('renders system status overview cards for LLM and STT', async () => {
     render(<DiagnosticsPage />);
 
     await waitFor(() => {
@@ -341,7 +314,6 @@ describe('DiagnosticsPage — Technical Observability Hub', () => {
     expect(screen.getByText('Active LLM Model')).toBeDefined();
     expect(screen.getByText('STT Engine')).toBeDefined();
     expect(screen.getByText('Active STT Model')).toBeDefined();
-    expect(screen.getByText('TTS Engine')).toBeDefined();
   });
 
   it('switches tabs to LLM diagnostics and displays installed models table', async () => {

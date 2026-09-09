@@ -1,26 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import {
-  ConferencingWindowMatch,
-  DeveloperSettings,
-  NotificationSurfaceMode,
-  ReminderKind,
-} from '../../types';
-import { Terminal, RefreshCw, Check, Bell, CalendarClock, Play, SearchCode, Monitor, BellRing, Layers } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { DeveloperSettings } from '../../types';
+import { Terminal, RefreshCw } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 
 export const DeveloperSettingsView: React.FC = () => {
   const [devSettings, setDevSettings] = useState<DeveloperSettings>({
     force_onboarding_on_launch: false,
-    notification_surface_mode: 'tauri',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [savedFeedback, setSavedFeedback] = useState(false);
-  const [detected, setDetected] = useState<ConferencingWindowMatch[] | null>(null);
-  const [reminderError, setReminderError] = useState<string | null>(null);
+  const [, setSavedFeedback] = useState(false);
 
   useEffect(() => {
     loadDevSettings();
@@ -54,42 +45,6 @@ export const DeveloperSettingsView: React.FC = () => {
     }
   };
 
-  const handleSetSurfaceMode = async (mode: NotificationSurfaceMode) => {
-    try {
-      setSaving(true);
-      const res = await invoke<DeveloperSettings>('set_developer_notification_surface_mode', {
-        mode,
-      });
-      setDevSettings(res);
-      setSavedFeedback(true);
-      setTimeout(() => setSavedFeedback(false), 2000);
-    } catch (err) {
-      console.error('Failed to update notification surface mode:', err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleTriggerMockReminder = async (kind: ReminderKind) => {
-    setReminderError(null);
-    try {
-      await invoke('trigger_mock_meeting_reminder', { kind });
-    } catch (err) {
-      console.error(`Failed to trigger a mock ${kind} reminder:`, err);
-      setReminderError(String(err));
-    }
-  };
-
-  const handleCheckDetection = async () => {
-    setReminderError(null);
-    try {
-      setDetected(await invoke<ConferencingWindowMatch[]>('debug_detect_conferencing_windows'));
-    } catch (err) {
-      console.error('Failed to run window detection:', err);
-      setReminderError(String(err));
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div className="border-b border-border/40 pb-5">
@@ -106,102 +61,6 @@ export const DeveloperSettingsView: React.FC = () => {
           Diagnostic overrides for testing Relay lifecycle, transitions, and onboarding workflows.
           <strong className="text-foreground ml-1">These switches do not delete your saved notes, scribbles, or authentication credentials.</strong>
         </p>
-      </div>
-
-      {/* Surface Override Section */}
-      <div className="p-5 rounded-lg border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-foreground">
-              Meeting Reminder Surface Mode
-            </h3>
-            {savedFeedback && (
-              <Badge variant="emerald" className="text-[10px] px-1.5 py-0 animate-in fade-in">
-                Saved
-              </Badge>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
-            Choose which surfaces display meeting reminders when triggered.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
-          {/* Tauri Overlay (Default) */}
-          <button
-            type="button"
-            onClick={() => handleSetSurfaceMode('tauri')}
-            disabled={loading || saving}
-            className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between gap-2 ${
-              devSettings.notification_surface_mode === 'tauri'
-                ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/40 shadow-xs'
-                : 'border-border/60 bg-background/50 hover:bg-secondary/40 text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-2">
-                <Monitor className="w-4 h-4 text-blue-500" />
-                <span className="text-xs font-semibold">Tauri Overlay (Default)</span>
-              </div>
-              {devSettings.notification_surface_mode === 'tauri' && (
-                <div className="w-2 h-2 rounded-full bg-primary" />
-              )}
-            </div>
-            <p className="text-[11px] leading-tight text-muted-foreground">
-              Only shows the floating desktop overlay card window.
-            </p>
-          </button>
-
-          {/* Both */}
-          <button
-            type="button"
-            onClick={() => handleSetSurfaceMode('both')}
-            disabled={loading || saving}
-            className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between gap-2 ${
-              devSettings.notification_surface_mode === 'both'
-                ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/40 shadow-xs'
-                : 'border-border/60 bg-background/50 hover:bg-secondary/40 text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-primary" />
-                <span className="text-xs font-semibold">Both (Overlay + Toast)</span>
-              </div>
-              {devSettings.notification_surface_mode === 'both' && (
-                <div className="w-2 h-2 rounded-full bg-primary" />
-              )}
-            </div>
-            <p className="text-[11px] leading-tight text-muted-foreground">
-              Shows the app overlay window plus native Windows OS toast.
-            </p>
-          </button>
-
-          {/* System Notification Only */}
-          <button
-            type="button"
-            onClick={() => handleSetSurfaceMode('system')}
-            disabled={loading || saving}
-            className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between gap-2 ${
-              devSettings.notification_surface_mode === 'system'
-                ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/40 shadow-xs'
-                : 'border-border/60 bg-background/50 hover:bg-secondary/40 text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-2">
-                <BellRing className="w-4 h-4 text-amber-500" />
-                <span className="text-xs font-semibold">System Toast Only</span>
-              </div>
-              {devSettings.notification_surface_mode === 'system' && (
-                <div className="w-2 h-2 rounded-full bg-primary" />
-              )}
-            </div>
-            <p className="text-[11px] leading-tight text-muted-foreground">
-              Only dispatches native Windows OS toast notifications.
-            </p>
-          </button>
-        </div>
       </div>
 
       {/* Onboarding Replay Override Section */}
@@ -228,88 +87,6 @@ export const DeveloperSettingsView: React.FC = () => {
             />
           </div>
         </div>
-      </div>
-
-      {/* Mock Meeting Reminders Section */}
-      <div className="p-5 rounded-lg border border-border/80 bg-card/60 backdrop-blur-xs space-y-4">
-        <div className="space-y-1">
-          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-            <Bell className="w-4 h-4 text-primary" />
-            Test Meeting Reminders
-          </h3>
-          <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
-            Simulate meeting reminder payloads to test the popup and OS notification system without actually scheduling or joining a meeting.
-          </p>
-        </div>
-        
-        <div className="flex flex-wrap items-center gap-3 pt-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleCheckDetection}
-            className="text-xs h-8 gap-1.5 border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-500"
-          >
-            <SearchCode className="w-3.5 h-3.5" />
-            Check Window Detection
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleTriggerMockReminder('upcoming')}
-            className="text-xs h-8 gap-1.5 border-blue-500/30 hover:bg-blue-500/10 hover:text-blue-500"
-          >
-            <CalendarClock className="w-3.5 h-3.5" />
-            Upcoming
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleTriggerMockReminder('unrecorded')}
-            className="text-xs h-8 gap-1.5 border-orange-500/30 hover:bg-orange-500/10 hover:text-orange-500"
-          >
-            <Play className="w-3.5 h-3.5" />
-            Unrecorded
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleTriggerMockReminder('detected')}
-            className="text-xs h-8 gap-1.5 border-emerald-500/30 hover:bg-emerald-500/10 hover:text-emerald-500"
-          >
-            <Bell className="w-3.5 h-3.5" />
-            Detected
-          </Button>
-        </div>
-
-        {reminderError && (
-          <p className="text-[11px] text-destructive">{reminderError}</p>
-        )}
-
-        {detected && (
-          <div className="pt-1 space-y-1.5">
-            <p className="text-[11px] font-medium text-foreground">
-              {detected.length === 0
-                ? 'No conferencing windows on screen.'
-                : `${detected.length} conferencing ${detected.length === 1 ? 'window' : 'windows'} on screen:`}
-            </p>
-            {detected.map((match) => (
-              <div
-                key={`${match.provider}:${match.raw_title}`}
-                className="flex items-center justify-between gap-3 p-2 rounded-md border border-border/60 bg-background/50"
-              >
-                <div className="min-w-0">
-                  <p className="text-[11px] font-medium text-foreground truncate">{match.title}</p>
-                  <p className="text-[10px] font-mono text-muted-foreground truncate">
-                    {match.raw_title}
-                  </p>
-                </div>
-                <Badge variant="outline" className="text-[10px] shrink-0 font-mono">
-                  {match.provider} · {match.confidence.toFixed(2)}
-                </Badge>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );

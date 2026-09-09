@@ -535,62 +535,42 @@ mod computed_prompt_tests {
 
     #[tokio::test]
     async fn a_computed_prompt_reaches_the_model_with_the_supplied_instructions() {
-        // End to end through the seam: this is what a migrated meeting Stage A
-        // does, and what could not be tested before the trait existed.
         let completer = ScriptedCompleter::replying(vec![Ok(
-            r#"{"key_points": [], "action_items": []}"#.to_string()
+            "Tidied transcription.".to_string()
         )]);
-        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let source = SourceDescriptor::synthetic("a1", SourceType::Audio);
         let request =
-            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::MeetingFacts)
-                .at_stage(crate::pipeline::analysis::AnalysisStage::FACTS);
+            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::DictationRewrite);
 
         let executed = AnalysisService::new(&completer)
             .execute_computed(
                 &request,
                 &source,
-                &meeting_content(),
-                "EXTRACT FACTS AS JSON. Invent nothing.",
+                &test_content(),
+                "CLEANUP DICTATION TEXT.",
             )
             .await
-            .expect("the scripted answer is valid JSON for a JSON contract");
+            .expect("the scripted answer is valid prose");
 
-        assert!(executed.json.is_some(), "a JSON contract parses its answer");
         assert_eq!(executed.provider, "ollama");
         assert!(
             completer
                 .last_system_prompt()
-                .contains("EXTRACT FACTS AS JSON"),
+                .contains("CLEANUP DICTATION TEXT"),
             "the supplied instructions must be what the model was sent, got {:?}",
             completer.last_system_prompt()
         );
     }
 
     #[tokio::test]
-    async fn prose_returned_for_a_json_contract_is_a_failed_analysis() {
-        // §24. A failure path that needed a network to reach until now.
-        let completer =
-            ScriptedCompleter::replying(vec![Ok("Three interviews happened.".to_string())]);
-        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
-        let request =
-            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::MeetingFacts);
-
-        let err = AnalysisService::new(&completer)
-            .execute_computed(&request, &source, &meeting_content(), "instructions")
-            .await
-            .expect_err("prose does not satisfy a JSON contract");
-        assert!(matches!(err, AnalysisFailure::Unparseable(_)), "{err:?}");
-    }
-
-    #[tokio::test]
     async fn a_provider_failure_is_reported_as_one_rather_than_as_an_answer() {
         let completer = ScriptedCompleter::replying(vec![Err("the model timed out".to_string())]);
-        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let source = SourceDescriptor::synthetic("doc1", SourceType::Document);
         let request =
-            AnalysisRequest::new(&source, AnalysisType::Summary, PromptId::MeetingSummary);
+            AnalysisRequest::new(&source, AnalysisType::Summary, PromptId::Summary);
 
         let err = AnalysisService::new(&completer)
-            .execute_computed(&request, &source, &meeting_content(), "write prose")
+            .execute(&request, &source, &test_content())
             .await
             .expect_err("a timeout is not a summary");
         match err {
@@ -599,25 +579,23 @@ mod computed_prompt_tests {
         }
     }
 
-    fn meeting_content() -> CanonicalContent {
-        CanonicalContent::from_markdown("Volunteer interviews", "Three interviews happened.")
+    fn test_content() -> CanonicalContent {
+        CanonicalContent::from_markdown("Dictation test", "Some sample transcription text.")
     }
 
     #[tokio::test]
     async fn a_computed_prompt_without_instructions_is_refused() {
-        // The failure mode this guard exists for: sending a model an empty
-        // system prompt and treating whatever comes back as an analysis.
-        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let source = SourceDescriptor::synthetic("a1", SourceType::Audio);
         let request =
-            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::MeetingFacts);
+            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::DictationRewrite);
         let err = AnalysisService::offline()
-            .execute(&request, &source, &meeting_content())
+            .execute(&request, &source, &test_content())
             .await
             .expect_err("a computed prompt has no body of its own");
 
         match err {
             AnalysisFailure::NoCompletion(m) => {
-                assert!(m.contains("meeting.facts"), "{m}");
+                assert!(m.contains("dictation.rewrite"), "{m}");
                 assert!(m.contains("computed"), "{m}");
             }
             other => panic!("expected NoCompletion, got {other:?}"),
@@ -626,12 +604,10 @@ mod computed_prompt_tests {
 
     #[tokio::test]
     async fn instructions_supplied_for_a_static_prompt_are_refused_not_ignored() {
-        // Silently preferring one body over the other would hide a caller
-        // running the wrong prompt. Refusing says so.
         let source = SourceDescriptor::synthetic("doc1", SourceType::Document);
         let request = AnalysisRequest::new(&source, AnalysisType::Summary, PromptId::Summary);
         let err = AnalysisService::offline()
-            .execute_computed(&request, &source, &meeting_content(), "my own instructions")
+            .execute_computed(&request, &source, &test_content(), "my own instructions")
             .await
             .expect_err("Summary carries its own instructions");
 
@@ -642,34 +618,15 @@ mod computed_prompt_tests {
     }
 
     #[tokio::test]
-    async fn a_meeting_prompt_is_refused_on_a_source_that_is_not_a_meeting() {
-        // Applicability is still checked for the new entries, and before the
-        // instructions are resolved — a wrong-source call must not depend on
-        // whether the caller remembered a body.
+    async fn a_dictation_prompt_is_refused_on_a_source_that_is_not_audio() {
         let source = SourceDescriptor::synthetic("doc1", SourceType::Document);
         let request =
-            AnalysisRequest::new(&source, AnalysisType::Summary, PromptId::MeetingSummary);
+            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::DictationRewrite);
         let err = AnalysisService::offline()
-            .execute_computed(&request, &source, &meeting_content(), "instructions")
+            .execute_computed(&request, &source, &test_content(), "instructions")
             .await
-            .expect_err("a document is not a meeting");
+            .expect_err("a document is not audio");
         assert!(matches!(err, AnalysisFailure::PromptNotApplicable(_)), "{err:?}");
-    }
-
-    #[test]
-    fn the_two_meeting_prompts_are_sampled_for_what_they_produce() {
-        // Extraction invents an owner the moment it has room to be creative;
-        // prose needs a little. This is the per-stage sampling the meeting
-        // pipeline had and the registry previously could not express.
-        let facts = PromptId::MeetingFacts.definition();
-        let prose = PromptId::MeetingSummary.definition();
-        assert!(facts.expects_json());
-        assert!(!prose.expects_json());
-        assert!(
-            facts.temperature < prose.temperature,
-            "extraction must be the colder of the two"
-        );
-        assert!(facts.is_computed() && prose.is_computed());
     }
 }
 

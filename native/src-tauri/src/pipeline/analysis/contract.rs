@@ -390,16 +390,13 @@ mod tests {
     #[test]
     fn a_single_pass_analysis_carries_no_stage() {
         // Most analyses are one pass, and must not be made to look staged.
-        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let source = SourceDescriptor::synthetic("d1", SourceType::Document);
         let request = AnalysisRequest::new(&source, AnalysisType::Summary, PromptId::Summary);
         assert!(request.stage.is_none());
     }
 
     #[test]
-    fn the_two_meeting_passes_are_one_traceable_operation() {
-        // The property this type exists for: pass two is recorded as pass two
-        // *of* two, so provenance can say the prose was written from the
-        // facts rather than from the transcript.
+    fn the_two_passes_are_one_traceable_operation() {
         assert!(AnalysisStage::FACTS.is_first());
         assert!(!AnalysisStage::FACTS.is_last());
         assert!(!AnalysisStage::PROSE.is_first());
@@ -410,9 +407,9 @@ mod tests {
 
     #[test]
     fn a_stage_is_attached_without_disturbing_the_rest_of_the_request() {
-        let source = SourceDescriptor::synthetic("m1", SourceType::Meeting);
+        let source = SourceDescriptor::synthetic("d1", SourceType::Document);
         let plain =
-            AnalysisRequest::new(&source, AnalysisType::Extraction, PromptId::MeetingFacts);
+            AnalysisRequest::new(&source, AnalysisType::Summary, PromptId::Summary);
         let staged = plain.clone().at_stage(AnalysisStage::FACTS);
 
         assert_eq!(staged.stage, Some(AnalysisStage::FACTS));

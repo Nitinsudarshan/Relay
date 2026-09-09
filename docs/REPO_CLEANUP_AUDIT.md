@@ -1,8 +1,10 @@
 # Relay — Repository Cleanup, Dead Code Audit & Web Removal Report
 
-> Date: 2026-09-07  
+> Date: 2026-09-07 (updated 2026-09-10)  
 > Repository Version: v0.41.0  
 > Scope: Full repository audit for dead code, obsolete architecture, Next.js web application removal, and backlog cleanup.
+>
+> **Update (2026-09-10):** `meetings_v2`, `talkback`, `tts`, and `calendar` modules have been fully removed from the Rust backend and frontend. All architectural and functional knowledge is preserved in [`removed.md`](../removed.md). Section H notes are updated accordingly.
 
 ---
 
@@ -55,13 +57,11 @@ The retired Next.js web application lived in `web/`.
 - **Domain Modules**:
   - `capture/`: Active audio recording & STT (`cpal`, `whisper-rs`).
   - `capture/web/`: Active web capture loopback listener (`bridge.rs`), source classification, sanitization, and normalization (`normalize.rs`).
-  - `meetings_v2/`: Active meeting intelligence pipeline, diarization, transcription health, reminders, and auto-recovery.
-  - `talkback/`: Active conversational vault Q&A, turn detection, and retrieval engine.
   - `vault/`: Active local markdown vault, Scribbles, trash lifecycle, notes, and file operations.
   - `identity/`: Active native Supabase client for anonymous installation tracking, heartbeat, and diagnostics.
   - `updates/`: Active app release checks via Supabase `app_releases` and GitHub Releases.
-  - `tts/`: Active Piper local voice synthesis and installer.
   - `memory/`, `entities/`, `relationships/`, `retrieval/`, `context/`: Active knowledge architecture.
+  - ~~`meetings_v2/`~~, ~~`talkback/`~~, ~~`tts/`~~, ~~`calendar/`~~: **Removed** (2026-09-10). Full specification preserved in [`removed.md`](../removed.md).
 - **Result**: Zero dead Rust code. All Rust modules and commands are actively registered and operational.
 
 ---
@@ -69,20 +69,19 @@ The retired Next.js web application lived in `web/`.
 ## D. Frontend Dead-Code Audit (`native/src/`)
 
 - **TypeScript Compilation**: `tsc --noEmit` passed with 0 errors.
-- **Vitest Suite**: 40 test files passed (498 tests).
+- **Vitest Suite**: 25 test files passed (348 tests). *(Updated 2026-09-10 after meetings/talkback removal reduced the test count.)*
 - **Component Audit**:
   - `components/capture/`: `DictationPill`, `FloatingPill` (rendered via `main.tsx` for overlay window), `PillSettingsPopover`.
-  - `components/meetings_v2/`: Full meeting lifecycle views, overlays, reminder window, calendar modals.
   - `components/knowledge/`: First-class Knowledge Graph canvas and force physics.
   - `components/captures/`: Web capture viewer, payload inspector, and context tab.
   - `components/files/`: Document import and viewer.
   - `components/home/`: Home metrics dashboard.
-  - `components/talkback/`: Conversational agent interface.
   - `components/voicenotes/`: Voice note recorder and manager.
   - `components/scribble/`: Scribble editor, graph viewer, and merge modal.
-  - `components/settings/`: Provider settings, STT diagnostics, voice settings, trash settings.
+  - `components/settings/`: Provider settings, STT diagnostics, trash settings.
   - `components/common/`: Confirmation modal, empty state, sidebar, page header, markdown view, modals.
   - `components/ui/`: Standard shadcn primitives (`button`, `badge`, `card`, `dropdown-menu`, `input`, `skeleton`, `switch`, `tooltip`).
+  - ~~`components/meetings_v2/`~~, ~~`components/talkback/`~~: **Removed** (2026-09-10). See [`removed.md`](../removed.md).
 - **Result**: Zero dead frontend components. All views and components have live consumers in `App.tsx`, `main.tsx`, or test suites.
 
 ---
@@ -92,8 +91,8 @@ The retired Next.js web application lived in `web/`.
 Inspected every script in `scripts/`:
 1. `scripts/verify-commit-rules.js`: Enforces manifest version sync across `VERSION`, `package.json`, `native/package.json`, `native/src-tauri/tauri.conf.json`, `native/src-tauri/Cargo.toml`, and README rules. Tested by `verify-commit-rules.test.mjs`. **KEEP.**
 2. `scripts/prepare-release.mjs`: Conventional commits parser, changelog generator, and release manifest bumper. Tested by `prepare-release.test.mjs`. **KEEP.**
-3. `scripts/build-voice-manifest.mjs`: Piper TTS engine & voice asset manifest builder. Tested by `build-voice-manifest.test.mjs`. **KEEP.**
-4. `scripts/lib/archive-index.mjs` & `scripts/lib/fake-archives.mjs`: Zero-dependency ZIP / TAR reader and test fixture generator for Piper release assets. **KEEP.**
+3. `scripts/build-voice-manifest.mjs`: Piper TTS engine & voice asset manifest builder. *(Orphaned — TTS removed 2026-09-10, but the archive-reading utilities remain tested and usable for future download tooling.)*
+4. `scripts/lib/archive-index.mjs` & `scripts/lib/fake-archives.mjs`: Zero-dependency ZIP / TAR reader and test fixture generator. **KEEP** — archive reading utilities with their own passing tests, independent of the removed TTS installer.
 5. `scripts/capture-validation/`: Headless Chromium DevTools Protocol runner for web capture validation across virtualized ChatGPT, Claude, and GitHub pages. **KEEP.**
 - **Result**: All 40 unit tests in `node --test "scripts/**/*.test.mjs"` pass. Zero dead scripts.
 
@@ -152,8 +151,8 @@ Inspected all documentation files:
    - **KEEP.** This is Relay's active browser web capture system, completely distinct from the removed `web/` application. Builds into Chrome/Edge extension.
 2. **`supabase/` Directory**:
    - **KEEP.** `supabase/migrations/20260822_relay_account_schema.sql` establishes tables (`relay_accounts`, `installations`, `diagnostics_events`, `app_releases`) and RPC functions (`register_installation_heartbeat`, `ingest_diagnostic_event`) actively consumed by the native Rust backend (`native/src-tauri/src/identity/supabase.rs`, `native/src-tauri/src/updates/mod.rs`).
-3. **`Meeting-rules/`**:
-   - **KEEP.** Actively cited from Rust doc comments in `native/src-tauri/src/meetings_v2/processing/*`.
+3. ~~**`Meeting-rules/`**~~:
+   - **Removed** (2026-09-10) along with `meetings_v2`. Content preserved in [`removed.md`](../removed.md).
 4. **`scripts/capture-validation/`**:
    - **KEEP.** Live real-browser CDP test suite for web capture verification.
 

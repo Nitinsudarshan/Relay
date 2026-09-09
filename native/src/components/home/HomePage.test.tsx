@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 import { HomePage } from './HomePage';
 
-import type { AppSettings, MeetingSession, Scribble, VaultFile, VaultNote } from '@/types';
+import type { AppSettings, Scribble, VaultFile, VaultNote } from '@/types';
 
 const voiceNote: VaultNote = {
   id: 'note_1',
@@ -40,25 +40,6 @@ const scribble: Scribble = {
   },
 };
 
-const meeting = {
-  id: 'mtg_1',
-  title: 'Weekly sync',
-  state: 'COMPLETED',
-  created_at: new Date(Date.now() - 86_400_000).toISOString(),
-  updated_at: new Date(Date.now() - 86_400_000).toISOString(),
-  duration_seconds: 1800,
-  chunk_count: 6,
-  mic_active: false,
-  sys_audio_active: false,
-  mic_heard: true,
-  sys_audio_heard: false,
-  paused_seconds: 0,
-  total_audio_bytes: 1024,
-  transcript_segment_count: 12,
-  word_count: 500,
-  pending_transcription_chunks: 0,
-} as MeetingSession;
-
 const document_: VaultFile = {
   id: 'file_1',
   original_filename: 'Proposal.pdf',
@@ -90,7 +71,6 @@ const settings = {
   hotkeys: { dictation_hotkey: 'Ctrl+Shift+D' },
   provider: { active_provider: 'ollama', ollama_model: 'llama3.2', ollama_host: 'http://localhost:11434' },
   stt: { whisper_model_path: 'C:\\models\\ggml-small.bin' },
-  tts: { piper_binary_path: null, piper_voice_path: null },
 } as unknown as AppSettings;
 
 const renderHome = (overrides: Partial<React.ComponentProps<typeof HomePage>> = {}) => {
@@ -116,8 +96,6 @@ describe('HomePage', () => {
           return [voiceNote];
         case 'get_scribbles':
           return [scribble];
-        case 'list_meetings_v2':
-          return [meeting];
         case 'get_vault_files':
           return [document_];
         case 'get_captures':
@@ -159,10 +137,8 @@ describe('HomePage', () => {
     expect(screen.getByText('11')).toBeInTheDocument();
     expect(screen.getByText('6')).toBeInTheDocument();
 
-    // 4 spoken words plus a 500-word meeting transcript, and the meeting's own
-    // 30 minutes — asserted against their labels so the pairing is what is tested.
-    expect(screen.getByText('Words transcribed').previousElementSibling).toHaveTextContent('504');
-    expect(screen.getByText('Recorded').previousElementSibling).toHaveTextContent('30m');
+    // 4 spoken words from voice note.
+    expect(screen.getByText('Words transcribed').previousElementSibling).toHaveTextContent('4');
   });
 
   test('a capture card opens the mode it names rather than capturing itself', async () => {
@@ -175,12 +151,9 @@ describe('HomePage', () => {
     await user.click(screen.getByText('Clipboard'));
     expect(props.onStartCapture).toHaveBeenCalledWith('clipboard');
 
-    // Voice, meetings and web capture are surfaces, not modes of this page.
+    // Voice and web capture are surfaces, not modes of this page.
     await user.click(screen.getByText('Voice'));
     expect(props.onNavigate).toHaveBeenCalledWith('capture');
-
-    await user.click(screen.getByText('Meeting'));
-    expect(props.onNavigate).toHaveBeenCalledWith('meetings');
 
     await user.click(screen.getByText('Web Capture'));
     expect(props.onNavigate).toHaveBeenCalledWith('captures');
@@ -225,15 +198,15 @@ describe('HomePage', () => {
   });
 
   test('offers a way to fix an unconfigured capability instead of a bare warning', async () => {
-    renderHome();
+    renderHome({
+      settings: {
+        ...settings,
+        stt: { whisper_model_path: null as unknown as string },
+      },
+    });
 
-    // Talkback's voice engine is absent in this fixture.
-    expect(
-      await screen.findByText('Not installed — Talkback stays text-only'),
-    ).toBeInTheDocument();
-    // The accessible name says which capability, since two rows can both read
-    // "Configure" to a screen reader.
-    expect(screen.getByRole('button', { name: 'Install — Talkback voice' })).toBeInTheDocument();
+    expect(await screen.findByText('No Whisper model selected')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Configure — Speech-to-text' })).toBeInTheDocument();
   });
 
   test('lists the newest records first, across surfaces', async () => {
@@ -243,7 +216,7 @@ describe('HomePage', () => {
       expect(screen.getByText('Latest activity')).toBeInTheDocument();
     });
 
-    const titles = ['Retrieval is the bottleneck', 'Chunking strategy', 'Weekly sync', 'Proposal.pdf'];
+    const titles = ['Retrieval is the bottleneck', 'Chunking strategy', 'Proposal.pdf'];
     titles.forEach((title) => expect(screen.getByText(title)).toBeInTheDocument());
   });
 
@@ -259,7 +232,7 @@ describe('HomePage', () => {
 
   test('a failing read degrades that surface without hiding the others', async () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === 'list_meetings_v2') throw new Error('meeting index unreadable');
+      if (cmd === 'get_scribbles') throw new Error('scribble index unreadable');
       if (cmd === 'get_voice_notes') return [voiceNote];
       return null;
     });
@@ -269,6 +242,6 @@ describe('HomePage', () => {
     await waitFor(() => {
       expect(screen.getByText('Retrieval is the bottleneck')).toBeInTheDocument();
     });
-    expect(screen.getByText('Meetings')).toBeInTheDocument();
+    expect(screen.getByText('Scribbles')).toBeInTheDocument();
   });
 });

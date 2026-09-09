@@ -92,7 +92,7 @@ export const TrashSettings: React.FC = () => {
             <span>Trash &amp; Deleted Items</span>
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Deleted Voice Notes, Meetings, and Scribbles remain recoverable for 30 days before permanent automatic purge.
+            Deleted Voice Notes and Scribbles remain recoverable for 30 days before permanent automatic purge.
           </p>
         </div>
 
@@ -134,7 +134,7 @@ export const TrashSettings: React.FC = () => {
           <Trash2 className="w-10 h-10 mx-auto opacity-30" />
           <p className="text-sm font-semibold text-foreground">Trash is empty</p>
           <p className="text-xs max-w-sm mx-auto">
-            Deleted Voice Notes, Meetings, and Scribbles will appear here for 30 days before permanent deletion.
+            Deleted Voice Notes and Scribbles will appear here for 30 days before permanent deletion.
           </p>
         </div>
       ) : (
@@ -157,10 +157,6 @@ export const TrashSettings: React.FC = () => {
                         {item.item_type === 'voice_note' ? (
                           <>
                             <Mic className="w-2.5 h-2.5" /> VOICE NOTE
-                          </>
-                        ) : item.item_type === 'meeting' ? (
-                          <>
-                            <Mic className="w-2.5 h-2.5 text-indigo-400" /> MEETING
                           </>
                         ) : (
                           <>

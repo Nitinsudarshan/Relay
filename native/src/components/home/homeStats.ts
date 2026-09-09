@@ -10,7 +10,6 @@
 import type {
   KnowledgeTelemetrySnapshot,
   MainTabType,
-  MeetingSession,
   Scribble,
   VaultFile,
   VaultNote,
@@ -25,7 +24,7 @@ import type {
  */
 export type HomeSurface = Extract<
   MainTabType,
-  'capture' | 'meetings' | 'scribble' | 'files' | 'captures' | 'graph' | 'talkback'
+  'capture' | 'scribble' | 'files' | 'captures' | 'graph'
 >;
 
 export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -34,7 +33,6 @@ export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 export interface HomeSnapshot {
   voiceNotes: VaultNote[];
   scribbles: Scribble[];
-  meetings: MeetingSession[];
   /** Imported documents only — web captures are counted separately. */
   files: VaultFile[];
   captures: VaultFile[];
@@ -53,10 +51,8 @@ export interface HomeStat {
 }
 
 export interface HomeVitals {
-  /** Words Relay transcribed: voice notes plus meeting transcripts. */
+  /** Words Relay transcribed from voice notes. */
   spokenWords: number;
-  /** Total meeting recording time, in seconds. */
-  recordedSeconds: number;
   /** Scribbles whose AI enrichment has not finished. */
   awaitingEnrichment: number;
   /** Captures and documents with no Scribble yet — the knowledge layer's backlog. */
@@ -67,7 +63,7 @@ export interface HomeVitals {
   distinctTopics: number;
 }
 
-export type HomeActivityKind = 'voice_note' | 'scribble' | 'meeting' | 'file' | 'capture';
+export type HomeActivityKind = 'voice_note' | 'scribble' | 'file' | 'capture';
 
 export interface HomeActivityItem {
   id: string;
@@ -83,7 +79,6 @@ export interface HomeActivityItem {
 export const emptySnapshot = (): HomeSnapshot => ({
   voiceNotes: [],
   scribbles: [],
-  meetings: [],
   files: [],
   captures: [],
   telemetry: null,
@@ -138,14 +133,6 @@ export const buildHomeStats = (snapshot: HomeSnapshot, nowMs: number): HomeStat[
       surface: 'scribble',
     },
     {
-      id: 'meetings',
-      label: 'Meetings',
-      value: snapshot.meetings.length,
-      thisWeek: countCreatedSince(snapshot.meetings, weekAgo),
-      hint: 'Recorded and derived',
-      surface: 'meetings',
-    },
-    {
       id: 'files',
       label: 'Documents',
       value: snapshot.files.length,
@@ -191,7 +178,6 @@ export const buildHomeStats = (snapshot: HomeSnapshot, nowMs: number): HomeStat[
 /** The second-order numbers: what was said, what is still waiting on Relay. */
 export const buildHomeVitals = (snapshot: HomeSnapshot): HomeVitals => {
   const voiceWords = snapshot.voiceNotes.reduce((sum, n) => sum + countWords(n.content), 0);
-  const meetingWords = snapshot.meetings.reduce((sum, m) => sum + (m.word_count ?? 0), 0);
 
   const topics = new Set<string>();
   snapshot.scribbles.forEach((s) => s.topics?.forEach((t) => topics.add(t.toLowerCase())));
@@ -199,8 +185,7 @@ export const buildHomeVitals = (snapshot: HomeSnapshot): HomeVitals => {
   const unpromoted = [...snapshot.captures, ...snapshot.files].filter((f) => !f.linked_scribble_id);
 
   return {
-    spokenWords: voiceWords + meetingWords,
-    recordedSeconds: snapshot.meetings.reduce((sum, m) => sum + (m.duration_seconds ?? 0), 0),
+    spokenWords: voiceWords,
     awaitingEnrichment: snapshot.scribbles.filter(
       (s) => s.ai_metadata?.enrichment_status === 'pending',
     ).length,
@@ -210,7 +195,7 @@ export const buildHomeVitals = (snapshot: HomeSnapshot): HomeVitals => {
   };
 };
 
-/** `0m`, `7m`, `1h 3m`. Never a bare second count — nobody reads a meeting in seconds. */
+/** `0m`, `7m`, `1h 3m`. Never a bare second count — nobody reads a duration in seconds. */
 export const formatDurationShort = (seconds: number): string => {
   const safe = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
   const hours = Math.floor(safe / 3600);
@@ -243,14 +228,6 @@ export const buildRecentActivity = (snapshot: HomeSnapshot, limit = 6): HomeActi
       createdAt: s.created_at,
       detail: s.topics?.length ? s.topics.slice(0, 2).join(' · ') : String(s.source_type),
       surface: 'scribble' as const,
-    })),
-    ...snapshot.meetings.map((m) => ({
-      id: m.id,
-      kind: 'meeting' as const,
-      title: m.title || 'Untitled meeting',
-      createdAt: m.created_at,
-      detail: formatDurationShort(m.duration_seconds ?? 0),
-      surface: 'meetings' as const,
     })),
     ...snapshot.files.map((f) => ({
       id: f.id,

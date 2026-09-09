@@ -1,7 +1,0 @@
-{
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "meeting-reminder-capability",
-  "description": "Minimal permissions for the floating meeting reminder card. The card names a meeting and its participants and is the one window that appears without being asked for, so it gets the smallest surface that lets it work: core invoke, event listening, and permission to hide itself. No filesystem, shell, dialog or notification access — it reads its payload and reports every action through Relay's own commands. `core:window:allow-hide` is granted explicitly because it is not in `core:window:default`: the card plays itself out and hides on the press, and without this it would sit on screen as an invisible click-swallowing rectangle until the backend caught up.",
-  "windows": ["meeting-reminder"],
-  "permissions": ["core:default", "core:event:default", "core:window:allow-hide"]
-}

@@ -11,11 +11,9 @@
 export type MainTabType =
   | 'home'
   | 'capture'
-  | 'meetings'
   | 'scribble'
   | 'graph'
   | 'files'
   | 'captures'
-  | 'talkback'
   | 'diagnostics'
   | 'settings';

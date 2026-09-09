@@ -1,11 +1,9 @@
 import React from 'react';
 import {
-  Calendar,
   Clipboard,
   Command,
   FileText,
   Globe,
-  MessageCircle,
   Mic,
   Network,
   Upload,
@@ -143,15 +141,6 @@ export const HomeCaptureShortcuts: React.FC<HomeCaptureShortcutsProps> = ({
       onSelect: () => onNavigate('files'),
     },
     {
-      id: 'meeting',
-      title: 'Meeting',
-      subtitle: 'Mic + system audio',
-      icon: Calendar,
-      accent: 'text-indigo-400',
-      action: 'Open Meetings →',
-      onSelect: () => onNavigate('meetings'),
-    },
-    {
       id: 'web',
       title: 'Web Capture',
       subtitle: 'Pages & AI chats',
@@ -174,34 +163,18 @@ export const HomeCaptureShortcuts: React.FC<HomeCaptureShortcutsProps> = ({
         </Badge>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
         {cards.map((card) => (
           <ShortcutButton key={card.id} card={card} />
         ))}
       </div>
 
       {/* Reading back out of what was captured. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-0.5">
-        <button
-          type="button"
-          onClick={() => onNavigate('talkback')}
-          className="p-3.5 rounded-lg border border-border bg-card hover:bg-muted/40 hover:border-primary/50 text-left flex items-center gap-3 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
-            <MessageCircle className="w-4 h-4" />
-          </div>
-          <div className="min-w-0">
-            <span className="text-xs font-bold text-foreground block">Ask Relay</span>
-            <span className="text-[10px] text-muted-foreground block truncate">
-              Talkback answers from your own capture, with sources
-            </span>
-          </div>
-        </button>
-
+      <div className="pt-0.5">
         <button
           type="button"
           onClick={() => onNavigate('graph')}
-          className="p-3.5 rounded-lg border border-border bg-card hover:bg-muted/40 hover:border-primary/50 text-left flex items-center gap-3 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full p-3.5 rounded-lg border border-border bg-card hover:bg-muted/40 hover:border-primary/50 text-left flex items-center gap-3 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
             <Network className="w-4 h-4" />

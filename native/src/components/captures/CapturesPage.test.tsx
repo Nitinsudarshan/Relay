@@ -196,9 +196,6 @@ describe('CapturesPage', () => {
 
     await user.click(screen.getByText('Voice'));
     expect(onNavigateTab).toHaveBeenCalledWith('capture');
-
-    await user.click(screen.getByText('Meeting'));
-    expect(onNavigateTab).toHaveBeenCalledWith('meetings');
   });
 
   test('the web capture card switches to the pages this surface already holds', async () => {

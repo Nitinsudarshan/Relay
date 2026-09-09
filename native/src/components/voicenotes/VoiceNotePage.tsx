@@ -939,8 +939,7 @@ export const VoiceNotePage: React.FC = () => {
                           index.html and index.css) to feel native, and it
                           inherits down to here — without this the transcript
                           cannot be highlighted at all and the correction
-                          popover can never open. Meeting transcripts opt back
-                          in the same way. */}
+                          popover can never open. */}
                       <p
                         ref={(el) => {
                           noteBodyRefs.current[note.id] = el;

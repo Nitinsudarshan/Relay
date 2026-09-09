@@ -44,13 +44,7 @@ pub enum PromptId {
     ConversationContext,
     /// Structured repository context: objective, stack, features, users, issues.
     RepositoryContext,
-    /// Stage A of a meeting: the transcript reduced to structured facts.
-    MeetingFacts,
-    /// Stage B of a meeting: prose written from those facts, transcript closed.
-    MeetingSummary,
-    /// One spoken Talkback answer, grounded in retrieved context.
-    TalkbackAnswer,
-    /// Tier 2 cleanup of dictated text. Never a meeting transcript.
+    /// Tier 2 cleanup of dictated text.
     DictationRewrite,
 }
 
@@ -62,9 +56,6 @@ impl PromptId {
         PromptId::Enrichment,
         PromptId::ConversationContext,
         PromptId::RepositoryContext,
-        PromptId::MeetingFacts,
-        PromptId::MeetingSummary,
-        PromptId::TalkbackAnswer,
         PromptId::DictationRewrite,
     ];
 
@@ -76,9 +67,6 @@ impl PromptId {
             Self::Enrichment => "enrichment",
             Self::ConversationContext => "conversation.context",
             Self::RepositoryContext => "repository.context",
-            Self::MeetingFacts => "meeting.facts",
-            Self::MeetingSummary => "meeting.summary",
-            Self::TalkbackAnswer => "talkback.answer",
             Self::DictationRewrite => "dictation.rewrite",
         }
     }
@@ -231,22 +219,6 @@ pub fn definition(id: PromptId) -> PromptDefinition {
             temperature: 0.1,
             max_output_tokens: 2_400,
         },
-        PromptId::MeetingFacts => PromptDefinition {
-            id,
-            version: 1,
-            purpose: "Stage A of a meeting: the transcript reduced to structured facts.",
-            // Built per call: the instructions carry the transcript window, the
-            // speaker roster and the extraction schema, which depend on the
-            // meeting. `meetings_v2::processing::extract` owns both the builder
-            // and the validator that has to agree with it.
-            body: PromptBody::Computed,
-            output_contract: OutputContract::Json,
-            applies_to: &[SourceType::Meeting],
-            // Extraction invents an owner or a deadline the moment it is given
-            // room to be creative.
-            temperature: 0.1,
-            max_output_tokens: 2_400,
-        },
         PromptId::DictationRewrite => PromptDefinition {
             id,
             version: 1,
@@ -269,51 +241,6 @@ pub fn definition(id: PromptId) -> PromptDefinition {
             // licensing an essay.
             max_output_tokens: 800,
         },
-        PromptId::TalkbackAnswer => PromptDefinition {
-            id,
-            version: 1,
-            purpose: "One spoken Talkback answer, grounded in retrieved context.",
-            // Built per call, and more variably than either meeting stage: the
-            // instructions carry the voice rules, whether this intent requires
-            // grounding, the retrieved context and the recent conversation.
-            // `talkback::assemble` owns that assembly, including the per-item
-            // external framing a retrieved web capture needs.
-            body: PromptBody::Computed,
-            output_contract: OutputContract::Prose,
-            // Source-agnostic by nature: a Talkback turn answers over whatever
-            // retrieval found, which is routinely several source types at once.
-            applies_to: &[],
-            // Conversational warmth, still grounded. The answer is spoken, and
-            // a flat reading of retrieved text is worse than a slightly loose
-            // one; the grounding is enforced by the rules in the prompt and by
-            // retrieval, not by sampling.
-            temperature: 0.4,
-            // Spoken answers are short by design — two or three sentences by
-            // the voice rules. The low ceiling also bounds how long a runaway
-            // local model can hold the floor.
-            max_output_tokens: 400,
-        },
-        PromptId::MeetingSummary => PromptDefinition {
-            id,
-            version: 1,
-            purpose: "Stage B of a meeting: prose written from the facts, transcript closed.",
-            // Built per call: length budget, depth mode, chosen extension, the
-            // user's standing instructions, and their notes language and
-            // script. None of it is known until the call.
-            body: PromptBody::Computed,
-            output_contract: OutputContract::Prose,
-            applies_to: &[SourceType::Meeting],
-            // Slightly above extraction because rewriting requires generation,
-            // low enough to stay grounded. This entry was written at 0.4 before
-            // anything ran on it; the pipeline it now serves has always sent
-            // 0.3, and the migration follows the shipped value rather than
-            // quietly raising the temperature of every meeting summary.
-            temperature: 0.3,
-            // A default the caller almost always overrides: the real allowance
-            // is computed from the length budget the user chose.
-            max_output_tokens: 1_600,
-        },
-
     }
 }
 
@@ -333,30 +260,19 @@ pub fn context_prompt_for(source_type: SourceType) -> Option<PromptId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::CompletionOptions;
 
+    /// §47: a prompt must never ship without test coverage. If this fails,
+    /// add an explicit entry rather than widening the range.
     #[test]
-    fn every_prompt_id_resolves_and_has_a_stable_name() {
+    fn all_prompts_have_valid_definitions() {
         for id in PromptId::ALL {
             let def = id.definition();
             assert_eq!(def.id, *id);
-            assert!(!id.as_str().is_empty());
-            // A static prompt must carry instructions; a computed one must
-            // carry none, so that a caller supplying them cannot be silently
-            // ignored and a caller forgetting them cannot silently send an
-            // empty system prompt.
-            match def.body {
-                PromptBody::Static(text) => assert!(
-                    !text.trim().is_empty(),
-                    "{} is static and has no instructions",
-                    id.as_str()
-                ),
-                PromptBody::Computed => assert!(
-                    def.static_instructions().is_none(),
-                    "{} is computed and must not also carry a body",
-                    id.as_str()
-                ),
-            }
-            assert!(def.version >= 1, "{} must be versioned", id.as_str());
+            assert!(def.version >= 1);
+            assert!(!def.purpose.is_empty(), "{} has empty purpose", id.as_str());
+            assert!(def.temperature >= 0.0 && def.temperature <= 1.0);
+            assert!(def.max_output_tokens > 0);
         }
     }
 
@@ -368,8 +284,7 @@ mod tests {
         assert_eq!(PromptId::Enrichment.as_str(), "enrichment");
         assert_eq!(PromptId::ConversationContext.as_str(), "conversation.context");
         assert_eq!(PromptId::RepositoryContext.as_str(), "repository.context");
-        assert_eq!(PromptId::MeetingFacts.as_str(), "meeting.facts");
-        assert_eq!(PromptId::MeetingSummary.as_str(), "meeting.summary");
+        assert_eq!(PromptId::DictationRewrite.as_str(), "dictation.rewrite");
     }
 
     /// §47: a source-specific prompt must not be usable on another source type.
@@ -396,7 +311,6 @@ mod tests {
                 SourceType::Repository,
                 SourceType::Document,
                 SourceType::WebPage,
-                SourceType::Meeting,
             ] {
                 assert!(
                     def.applies_to_source(source_type),

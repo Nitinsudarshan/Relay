@@ -1,4 +1,3 @@
-use crate::talkback::TalkbackSettings;
 use crate::providers::ProviderConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -110,19 +109,6 @@ pub struct SttSettings {
     /// override and applies everywhere.
     #[serde(default, alias = "sttPreset")]
     pub preset: String,
-    /// A Whisper model meetings should use instead of the global one.
-    ///
-    /// Exists because the two surfaces want opposite things from a model and
-    /// `whisper_model_path` could only give them the same answer. The accuracy
-    /// ceiling is worth its decode cost on a recording that is transcribed once
-    /// and read for weeks; it is a bad trade on push-to-talk, where somebody is
-    /// waiting for the text. Selecting `large-v3-turbo` used to mean accepting
-    /// both.
-    ///
-    /// `None` means meetings follow the global setting, which is what they have
-    /// always done — so this changes nothing until it is set.
-    #[serde(default, alias = "meetingModelPath")]
-    pub meeting_model_path: Option<String>,
     /// Whether dictated text is offered to the Tier 2 cleanup layer.
     ///
     /// Off by default. The layer costs a model call before the text is usable
@@ -153,35 +139,6 @@ impl SttSettings {
         }
         Some(crate::capture::stt::SttPreset::from_setting(raw))
     }
-
-    /// The model override a meeting should use.
-    ///
-    /// `meeting_model_path` when set, otherwise the global `whisper_model_path`.
-    /// The precedence lives here rather than at the call sites because there
-    /// are two of them — the recorder and the pipeline self-test — and a
-    /// self-test that resolved a different model than the recorder would report
-    /// green for a model the user never records with.
-    pub fn meeting_model_override(&self) -> Option<&str> {
-        self.meeting_model_path
-            .as_deref()
-            .map(str::trim)
-            .filter(|p| !p.is_empty())
-            .or_else(|| {
-                self.whisper_model_path
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|p| !p.is_empty())
-            })
-    }
-}
-
-/// Local text-to-speech configuration (Piper). Both fields must be set for
-/// the "speak back" feature in voice chat; otherwise it silently degrades
-/// to text-only, matching the zero-cost-by-default constraint.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct TtsSettings {
-    pub piper_binary_path: Option<String>,
-    pub piper_voice_path: Option<String>,
 }
 
 /// Which edge of the active monitor's work area the floating pill anchors
@@ -405,6 +362,10 @@ pub struct CaptureSettings {
     pub analyze_on_capture: bool,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn default_capture_bridge_port() -> u16 {
     crate::capture::web::bridge::DEFAULT_PORT
 }
@@ -542,181 +503,7 @@ pub fn default_snippets() -> Vec<SnippetItem> {
 }
 
 
-/// Whether Relay tries to tell speakers apart in a meeting.
-///
-/// `Automatic` runs the cheap, non-biometric attribution: the microphone is the
-/// local user, system audio is everyone else. It creates no voiceprints and
-/// stores no biometric data. Diarization and a persistent voice library are
-/// deliberately not options here yet — see
-/// `Meeting-rules/meeting_speaker_identification.md` §6.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SpeakerIdentification {
-    #[default]
-    Automatic,
-    Off,
-}
 
-/// How a summary is shaped by default. Mirrors
-/// `meetings_v2::processing::model::SummaryMode`, kept separate so the settings
-/// file format does not move whenever the pipeline's internals do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DefaultSummaryMode {
-    Concise,
-    #[default]
-    Standard,
-    Detailed,
-}
-
-/// A user-defined summary extension: a named presentation treatment layered on
-/// top of a summary mode.
-///
-/// `instructions` shapes how the summary reads. It cannot change what was
-/// extracted — the canonical meeting facts are produced before any extension is
-/// applied — so a badly written extension can produce an awkward summary but
-/// never a false one.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct MeetingExtensionSetting {
-    pub id: String,
-    pub name: String,
-    pub instructions: String,
-}
-
-/// Meeting behavior the user controls.
-///
-/// Deliberately small. The processing pipeline has seven internal stages; none
-/// of them is a setting. What is exposed is what someone would actually want to
-/// change: whether the debug view is visible, whether the readable transcript is
-/// built, how long summaries are, and which presentations exist.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct MeetingSettings {
-    /// Whether the Raw Transcript tab is offered.
-    ///
-    /// This controls **visibility only**. The raw transcript is the diagnostic
-    /// source artifact for everything derived from a meeting, and turning this
-    /// off never deletes it — `transcript.jsonl` stays on disk and the pipeline
-    /// keeps reading it.
-    ///
-    /// Which is why it has no Rust reader and needs none: it decides whether a
-    /// tab is rendered, and that decision belongs where the tabs are
-    /// (`MeetingsV2View.tsx`). Audited and left alone deliberately.
-    #[serde(default = "default_true", alias = "showRawTranscript")]
-    pub show_raw_transcript: bool,
-    /// Whether the speaker-labelled conversation transcript is built.
-    #[serde(default = "default_true", alias = "generateConversationTranscript")]
-    pub generate_conversation_transcript: bool,
-    /// Whether a summary is generated automatically once a recording finishes.
-    ///
-    /// Either way this happens after the recording is safely persisted and never
-    /// blocks the recorder, the live transcript, or opening the meeting.
-    #[serde(default = "default_true", alias = "autoGenerateSummary")]
-    pub auto_generate_summary: bool,
-    #[serde(default, alias = "defaultSummaryMode")]
-    pub default_summary_mode: DefaultSummaryMode,
-    #[serde(default = "default_extension_id", alias = "defaultExtensionId")]
-    pub default_extension_id: String,
-    #[serde(default, alias = "speakerIdentification")]
-    pub speaker_identification: SpeakerIdentification,
-    /// Whether individual speakers are separated acoustically (rung 4 of
-    /// `Meeting-rules/meeting_speaker_identification.md`).
-    ///
-    /// On by default, unlike the rules' original draft. That draft defaulted it
-    /// off because it costs CPU; the cost turned out to be a few hundred
-    /// milliseconds over a whole meeting, run once after recording ends, and
-    /// the alternative default is a meeting of twenty people reporting one
-    /// remote speaker. It creates no biometric data: features live for the
-    /// duration of the run and are never stored or matched across meetings.
-    #[serde(default = "default_true", alias = "identifyIndividualSpeakers")]
-    pub identify_individual_speakers: bool,
-    /// A clustering hint: how many people are expected to speak.
-    ///
-    /// `None` means "work it out", which is the normal case. Setting it cannot
-    /// invent a speaker the audio does not support — twenty in the room and
-    /// three on the recording still yields three.
-    #[serde(default, alias = "expectedSpeakers")]
-    pub expected_speakers: Option<usize>,
-    /// Which method decides who spoke.
-    ///
-    /// A setting rather than a constant because speaker identity is the part of
-    /// this feature that has been hardest to get right, and the three methods
-    /// fail differently — a user whose meetings the default handles badly can
-    /// switch rather than wait. Diagnostics can run all three over one
-    /// recording to make that choice on evidence.
-    #[serde(default, alias = "diarizationEngine")]
-    pub diarization_engine: crate::meetings_v2::diarize::engine::DiarizationEngine,
-    /// Whether meetings are recorded with everybody sharing one microphone.
-    ///
-    /// Turns off the local-user inference, because the channel split that finds
-    /// the person at this machine means nothing when every voice arrives on the
-    /// same input — and a guess there mislabels whoever it lands on.
-    #[serde(default, alias = "meetingsAreInPerson")]
-    pub meetings_are_in_person: bool,
-    /// The user's own extensions. The shipped ones live in code and are always
-    /// available; this list only adds to them.
-    #[serde(default)]
-    pub extensions: Vec<MeetingExtensionSetting>,
-    /// Whether a card appears shortly before a scheduled meeting starts.
-    ///
-    /// The three reminder switches are separate because they interrupt at
-    /// different costs. "Before" lands while the user is still working and is
-    /// the easiest to want off; "unrecorded" lands in a meeting already under
-    /// way and is the one that saves a lost recording.
-    #[serde(default = "default_true", alias = "remindBeforeMeeting")]
-    pub remind_before_meeting: bool,
-    /// Whether a card appears when a scheduled meeting is under way and nothing
-    /// is recording it.
-    #[serde(default = "default_true", alias = "remindIfUnrecorded")]
-    pub remind_if_unrecorded: bool,
-    /// Whether a card appears for a conferencing call the calendar knows
-    /// nothing about — the ad-hoc meeting somebody pulled the user into.
-    ///
-    /// Windows only in practice: it is backed by window detection, which
-    /// reports nothing on other platforms.
-    #[serde(default = "default_true", alias = "remindOnDetection")]
-    pub remind_on_detection: bool,
-    /// Standing instructions for how this user's summaries should read — tone,
-    /// emphasis, what to lead with.
-    ///
-    /// Presentation only. The summary contract subordinates it to the accuracy
-    /// rules, so no instruction here can make Relay assign an owner or a
-    /// deadline the meeting did not establish.
-    #[serde(default, alias = "summaryInstructions")]
-    pub summary_instructions: String,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_extension_id() -> String {
-    "default".to_string()
-}
-
-impl Default for MeetingSettings {
-    fn default() -> Self {
-        Self {
-            // Both transcript switches default on: the pipeline is new, and
-            // being able to compare raw against derived output is how its
-            // quality gets judged.
-            show_raw_transcript: true,
-            generate_conversation_transcript: true,
-            auto_generate_summary: true,
-            default_summary_mode: DefaultSummaryMode::default(),
-            default_extension_id: default_extension_id(),
-            speaker_identification: SpeakerIdentification::default(),
-            identify_individual_speakers: true,
-            expected_speakers: None,
-            diarization_engine: Default::default(),
-            meetings_are_in_person: false,
-            remind_before_meeting: true,
-            remind_if_unrecorded: true,
-            remind_on_detection: true,
-            extensions: Vec::new(),
-            summary_instructions: String::new(),
-        }
-    }
-}
 
 pub fn default_dictionary_words() -> Vec<String> {
     vec![
@@ -798,8 +585,6 @@ pub struct AppSettings {
     #[serde(default)]
     pub stt: SttSettings,
     #[serde(default)]
-    pub tts: TtsSettings,
-    #[serde(default)]
     pub hotkeys: HotkeySettings,
     #[serde(default)]
     pub ui: UiSettings,
@@ -821,10 +606,6 @@ pub struct AppSettings {
     pub startup: StartupSettings,
     #[serde(default)]
     pub audio_input: AudioInputSettings,
-    #[serde(default)]
-    pub meetings: MeetingSettings,
-    #[serde(default)]
-    pub talkback: TalkbackSettings,
     #[serde(default = "default_dictionary_words")]
     pub dictionary: Vec<String>,
     #[serde(default = "default_snippets")]
@@ -842,7 +623,6 @@ impl Default for AppSettings {
         Self {
             provider: ProviderConfig::default(),
             stt: SttSettings::default(),
-            tts: TtsSettings::default(),
             hotkeys: HotkeySettings::default(),
             ui: UiSettings::default(),
             vault: VaultSettings::default(),
@@ -854,8 +634,6 @@ impl Default for AppSettings {
             capture: CaptureSettings::default(),
             startup: StartupSettings::default(),
             audio_input: AudioInputSettings::default(),
-            meetings: MeetingSettings::default(),
-            talkback: TalkbackSettings::default(),
             dictionary: default_dictionary_words(),
             snippets: default_snippets(),
             vocabulary_corrections: Vec::new(),

@@ -10,8 +10,8 @@ Relay is a native-first Windows desktop assistant built with a Rust backend and 
 │                                                                        │
 │  ┌──────────────────────────────────────────────────────────────────┐  │
 │  │                     React UI (native/src/)                       │  │
-│  │   Home | PTT Dictation Pill | Meetings | Scribbles | Graph       │  │
-│  │   Files | Captures | Talkback | Diagnostics | Settings           │  │
+│  │   Home | PTT Dictation Pill | Scribbles | Graph                  │  │
+│  │   Files | Captures | Diagnostics | Settings                      │  │
 │  └─────────────────────────────────┬────────────────────────────────┘  │
 │                                    │ Tauri IPC (invoke commands)       │
 │  ┌─────────────────────────────────▼────────────────────────────────┐  │
@@ -26,10 +26,10 @@ Relay is a native-first Windows desktop assistant built with a Rust backend and 
 │  │  │  providers   │  │    vault     │  │          mcp           │  │  │
 │  │  │(Ollama/Cloud)│  │(Vault/search)│  │(Calendar/Notion/Drive) │  │  │
 │  │  └──────────────┘  └──────────────┘  └────────────────────────┘  │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐  │  │
-│  │  │   hotkeys    │  │     tts      │  │       settings         │  │  │
-│  │  │(global+inject│  │   (Piper)    │  │  (settings.json I/O)   │  │  │
-│  │  └──────────────┘  └──────────────┘  └────────────────────────┘  │  │
+│  │  ┌──────────────┐                    ┌────────────────────────┐  │  │
+│  │  │   hotkeys    │                    │       settings         │  │  │
+│  │  │(global+inject│                    │  (settings.json I/O)   │  │  │
+│  │  └──────────────┘                    └────────────────────────┘  │  │
 │  │  ┌──────────────────────────────────────────────────────────────┐│  │
 │  │  │ capture::web  ◀── loopback (127.0.0.1) ── browser extension  ││  │
 │  │  │ (detect source → sanitize → normalize → Vault artifact)      ││  │
@@ -48,9 +48,8 @@ Relay is a native-first Windows desktop assistant built with a Rust backend and 
 - `capture`: Manages audio device input via `cpal` on a dedicated thread (resampled to 16kHz mono), writes WAV files, and (`capture::stt`) transcribes via a local Whisper model (`whisper-rs`).
 - `capture::web`: Web capture. Content arrives from the Relay browser extension over a loopback listener (`bridge.rs`) rather than through Tauri IPC — the browser is the only place a rendered page exists, and the only place a browser will grant access to one. Relay derives provenance from the URL (`source.rs`), sanitizes and normalizes the payload into markdown (`normalize.rs`), and persists it as a Vault artifact before any AI runs. See `docs/capture.md`.
 - `pipeline`: Core prompt engines (all in `mod.rs` except `chat.rs`).
-  - `process_meeting`: Extracts structured JSON tasks from raw meeting transcripts.
   - `process_scribble`: Generates structured Markdown documents from unstructured voice scribbles.
-  - `chat.rs` / `process_chat`: Voice chat — retrieves grounding notes from the vault, asks the LLM provider, optionally synthesizes speech via `tts`.
+  - `chat.rs` / `process_chat`: Voice chat — retrieves grounding notes from the vault and asks the LLM provider.
 - `pipeline::analysis`: The shared foundation every analysis runs on, so that adding one does not mean building another capture → normalize → prompt → LLM → parse → persist → provenance pipeline.
   - `source.rs`: `SourceDescriptor` — a borrowed view over a `VaultFile` answering "what is this, and how much of it does Relay have?". Classification comes from the `capture_type` that `capture::web::source` derived from the URL, not from re-matching the URL later.
   - `content.rs`: `CanonicalContent` — the analysis-facing contract every source-specific normalizer produces. Preserves turn ordinals and code artifacts, which flat markdown destroyed.
@@ -58,7 +57,6 @@ Relay is a native-first Windows desktop assistant built with a Rust backend and 
   - `prompts.rs`: The prompt registry — stable ids, versions recorded on every result, and an applicability rule so a repository prompt cannot be run against a conversation.
   - `service.rs`: `AnalysisService` — the one place a prompt is resolved, the source boundary applied, the provider called, and structured output parsed and validated.
   - `derived.rs`: `DerivedData` — one record type with typed payloads, keyed by source id. See `docs/data-model.md` §7.
-  - Not yet a consumer: `meetings_v2::processing`, which has its own staged extraction and repair loop. Marked with a `TODO(context):` at that module.
 - `triggers`: Dynamic phrase matching and classification against `triggers.json`. Extracts parameters and dispatches to tool handlers. Skipped for chat mode.
 - `providers`: Unified `LLMClient`.
   - Ollama: Connects to `http://localhost:11434`.
@@ -66,8 +64,7 @@ Relay is a native-first Windows desktop assistant built with a Rust backend and 
 - `vault`: Reads and writes markdown note files with frontmatter headers. `search_notes`/`list_notes` provide keyword-ranked retrieval over vault notes — a placeholder for the embedded LanceDB vector search Decision 6 commits to (see `docs/roadmap.md`).
 - `mcp`: Interface for dispatching trigger actions (`google-calendar`, `notion`, `gdrive`, OS notifications) — currently returns stubbed success results; real MCP client wiring is tracked as backlog (`docs/roadmap.md`).
 - `hotkeys`: Registers the show/hide and universal-dictation global OS hotkeys (`tauri-plugin-global-shortcut`), manages the always-on-top listening indicator window, and (`hotkeys::injection`) types transcribed text into whatever field has OS focus via `enigo`.
-- `tts`: Optional local text-to-speech via a user-configured Piper binary + voice model, used by voice chat's "speak back."
-- `settings`: Loads/saves `AppSettings` (provider, STT, TTS, hotkey config) at `.relay/config/settings.json`.
+- `settings`: Loads/saves `AppSettings` (provider, STT, hotkey config) at `.relay/config/settings.json`.
 - `commands.rs`: Exposes thin `#[tauri::command]` functions returning `Result<T, CommandError>`.
 
 ## Window Architecture vs Native OS Notifications

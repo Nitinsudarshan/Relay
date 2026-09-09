@@ -11,7 +11,6 @@ pub const SOURCE_TYPE_BROWSER_PAGE: &str = "browser_page";
 pub const SOURCE_TYPE_BROWSER_CONVERSATION: &str = "browser_conversation";
 pub const SOURCE_TYPE_SCREENSHOT: &str = "screenshot";
 pub const SOURCE_TYPE_IMAGE: &str = "image";
-pub const SOURCE_TYPE_MEETING: &str = "meeting";
 
 /// Relationship types between knowledge objects.
 pub const REL_RELATED_TO: &str = "RELATED_TO";
@@ -161,41 +160,6 @@ impl Scribble {
         scribble
     }
 
-    /// Builds a Scribble from a processed meeting.
-    ///
-    /// Mirrors `from_voice_note`: same constructor, same vault, same source-type
-    /// mechanism. The meeting is referenced rather than duplicated — the
-    /// recording, raw transcript, and derived artifacts all stay where they are,
-    /// and `source_metadata` carries enough to navigate back to them.
-    ///
-    /// `topics` and `entities` come from the meeting's already-extracted facts,
-    /// so promoting a meeting does not re-derive knowledge a second time through
-    /// a different path.
-    pub fn from_meeting(
-        meeting_id: &str,
-        meeting_title: &str,
-        content: &str,
-        title: &str,
-        topics: Vec<String>,
-        entities: Vec<String>,
-    ) -> Self {
-        let mut scribble = Self::new_text(content, Some(title));
-        scribble.source_type = SOURCE_TYPE_MEETING.to_string();
-        scribble.source_metadata = serde_json::json!({
-            "source_type": SOURCE_TYPE_MEETING,
-            "source_id": meeting_id,
-            "source_meeting_id": meeting_id,
-            "source_meeting_title": meeting_title,
-            "source_modality": "MEETING",
-            "promoted_at": chrono::Utc::now().to_rfc3339()
-        });
-        scribble.topics = topics;
-        scribble.entities = entities;
-        if !scribble.tags.iter().any(|t| t == "meeting") {
-            scribble.tags.push("meeting".to_string());
-        }
-        scribble
-    }
 
     pub fn from_file(
         filename: &str,
@@ -301,7 +265,7 @@ struct ScribbleFrontmatter {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct KnowledgeNode {
     pub id: String,
-    pub node_type: String, // "scribble" | "topic" | "entity" | "source" | "project" | "document" | "task" | "meeting" | "voice_note"
+    pub node_type: String, // "scribble" | "topic" | "entity" | "source" | "project" | "document" | "task" | "voice_note"
     pub label: String,
     pub summary: Option<String>,
     pub metadata: serde_json::Value,
@@ -506,32 +470,6 @@ impl KnowledgeGraphData {
                     *degrees.entry(scribble.id.clone()).or_insert(0) += 1;
                     *degrees.entry(source_node_id).or_insert(0) += 1;
                 }
-            } else if scribble.source_type == SOURCE_TYPE_MEETING {
-                let meeting_id = scribble.source_metadata.get("meeting_id").and_then(|v| v.as_str()).unwrap_or("unknown");
-                let meeting_title = scribble.source_metadata.get("meeting_title").and_then(|v| v.as_str()).unwrap_or("Meeting");
-                let source_node_id = format!("meeting_{}", meeting_id);
-
-                nodes_map.entry(source_node_id.clone()).or_insert_with(|| KnowledgeNode {
-                    id: source_node_id.clone(),
-                    node_type: "source".to_string(),
-                    label: meeting_title.to_string(),
-                    summary: Some(format!("Meeting source: {}", meeting_title)),
-                    metadata: scribble.source_metadata.clone(),
-                    degree: 0,
-                    source_type: Some("meeting".to_string()),
-                });
-
-                edges.push(KnowledgeEdge {
-                    id: format!("edge_{}_{}", scribble.id, source_node_id),
-                    source_id: scribble.id.clone(),
-                    target_id: source_node_id.clone(),
-                    relationship: REL_DERIVED_FROM.to_string(),
-                    confidence: 1.0,
-                    source: "system".to_string(),
-                });
-
-                *degrees.entry(scribble.id.clone()).or_insert(0) += 1;
-                *degrees.entry(source_node_id).or_insert(0) += 1;
             }
 
             // 5. Process Explicit Relationships between Scribbles

@@ -16,7 +16,6 @@ relay/
     src-tauri/                Rust backend
       src/
         capture/               Push-to-talk, local Whisper/Parakeet STT, web capture wiring
-        meetings_v2/           Meeting detection, diarization, summarization pipelines
         pipeline/              Kanban parser, scribble->structured-output
         triggers/              Configurable trigger-phrase system
         providers/             Local / cloud LLM providers
@@ -39,7 +38,7 @@ relay/
 - Reusable UI primitives (buttons, inputs, dialogs) go in `native/src/components/ui`
   — prefer generating via the shadcn CLI over hand-writing them.
 - Shared, non-primitive components go in `native/src/components/shared` or
-  feature-specific component directories (e.g. `components/meetings_v2/`).
+  feature-specific component directories.
 - Rust modules under `src-tauri/src/` are organized by domain
   (`capture/`, `pipeline/`, `triggers/`, `providers/`, `vault/`, `mcp/`), not
   by technical layer — a feature's parsing, validation, and persistence logic

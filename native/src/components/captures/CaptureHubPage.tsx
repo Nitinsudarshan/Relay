@@ -7,7 +7,6 @@ import {
   Upload,
   Clipboard,
   Globe,
-  Users,
   Sparkles,
   Check,
   Plus,
@@ -25,10 +24,9 @@ import { Badge } from '@/components/ui/badge';
  *
  * Deliberately only two. Voice is a global hotkey on its own surface, a
  * document belongs in the Files Vault (which extracts PDF and Word text rather
- * than reading the bytes as if they were plain text), a page comes from the
- * browser extension, and a meeting is a recording — each of those is owned by
- * a surface that already implements it, so the card opens that surface instead
- * of reimplementing it here.
+ * than reading the bytes as if they were plain text), and a page comes from the
+ * browser extension — each of those is owned by a surface that already implements
+ * it, so the card opens that surface instead of reimplementing it here.
  */
 export type CaptureMethod = 'text' | 'clipboard';
 
@@ -169,21 +167,12 @@ export const CaptureHubPage: React.FC<CaptureHubPageProps> = ({
       action: 'Captured Pages →',
       onSelect: onOpenCapturedPages,
     },
-    {
-      id: 'meeting',
-      title: 'Meeting',
-      subtitle: 'Mic + system audio',
-      icon: Users,
-      accent: 'text-indigo-400',
-      action: 'Open Meetings →',
-      onSelect: () => onNavigate('meetings'),
-    },
   ];
 
   return (
     <div className="flex-1 flex flex-col gap-4 overflow-y-auto w-full pb-10">
       {/* Capture Method Selector Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
         {/* 1. Voice — a global hotkey and its own surface, not a panel here. */}
         <button
           type="button"

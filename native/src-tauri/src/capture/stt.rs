@@ -1968,66 +1968,6 @@ mod tests {
         assert!(cfg.no_context);
     }
 
-    #[test]
-    fn the_live_clamp_covers_the_longest_live_utterance() {
-        // Not a fix — a guard. The live clock's clamp is correctly sized: 768
-        // encoder frames is ~15.4s against a 12s utterance cap, so it never
-        // truncates. That relationship is load-bearing and nothing else states
-        // it, so raising the cap without raising the clamp would silently start
-        // losing the tail of long utterances.
-        const WHISPER_FULL_CTX_FRAMES: f64 = 1500.0;
-        const WHISPER_FULL_CTX_SECONDS: f64 = 30.0;
-        let clamp_seconds =
-            LIVE_AUDIO_CTX as f64 / WHISPER_FULL_CTX_FRAMES * WHISPER_FULL_CTX_SECONDS;
-        let live_cap = crate::meetings_v2::live_stt::MAX_UTTERANCE_SECS;
-        assert!(
-            clamp_seconds > live_cap,
-            "LIVE_AUDIO_CTX covers {clamp_seconds:.1}s but utterances run to {live_cap:.1}s"
-        );
-    }
-
-    #[test]
-    fn meetings_may_name_their_own_model_without_slowing_dictation() {
-        // The whole point of the setting: the accuracy ceiling is worth its
-        // decode cost on a recording read for weeks and a bad trade on
-        // push-to-talk, and one path could only give both surfaces the same
-        // answer.
-        let mut settings = crate::settings::SttSettings {
-            whisper_model_path: Some("/models/ggml-small.bin".to_string()),
-            ..Default::default()
-        };
-
-        // Unset: meetings follow the global setting, exactly as before.
-        assert_eq!(
-            settings.meeting_model_override(),
-            Some("/models/ggml-small.bin")
-        );
-
-        settings.meeting_model_path = Some("/models/ggml-large-v3-turbo.bin".to_string());
-        assert_eq!(
-            settings.meeting_model_override(),
-            Some("/models/ggml-large-v3-turbo.bin"),
-            "meetings take their own model"
-        );
-        assert_eq!(
-            settings.whisper_model_path.as_deref(),
-            Some("/models/ggml-small.bin"),
-            "and dictation is left alone"
-        );
-
-        // Blank is not a choice. A cleared text field must fall back rather
-        // than resolve to a path that is the empty string.
-        settings.meeting_model_path = Some("   ".to_string());
-        assert_eq!(
-            settings.meeting_model_override(),
-            Some("/models/ggml-small.bin")
-        );
-
-        // Neither set: nothing to override with, and the managed default is
-        // resolved downstream.
-        let empty = crate::settings::SttSettings::default();
-        assert_eq!(empty.meeting_model_override(), None);
-    }
 
     #[test]
     fn each_surface_defaults_the_preset_and_the_user_overrides_both() {

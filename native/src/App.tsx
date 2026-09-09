@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { HomePage } from './components/home/HomePage';
 import { VoiceNotePage } from './components/voicenotes/VoiceNotePage';
 import { ScribbleViewer } from './components/scribble/ScribbleViewer';
-import { MeetingsV2View } from './components/meetings_v2/MeetingsV2View';
-import { TalkbackPage } from './components/talkback/TalkbackPage';
 import { FilesPage } from './components/files/FilesPage';
 import { CapturesPage } from './components/captures/CapturesPage';
 import { KnowledgeGraphPage } from './components/knowledge/KnowledgeGraphPage';
@@ -21,7 +19,6 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { NativeSidebar } from './components/common/NativeSidebar';
 import {
   Mic,
-  MessageCircle,
   Sparkles,
   FileText,
   Settings,
@@ -41,12 +38,10 @@ export type { MainTabType };
 const TAB_LABELS: Record<MainTabType, string> = {
   home: 'Home',
   capture: 'Voice Notes',
-  meetings: 'Meetings',
   scribble: 'Scribbles',
   graph: 'Knowledge Graph',
   files: 'Files & Docs',
   captures: 'Web Capture',
-  talkback: 'Talkback',
   diagnostics: 'Diagnostics',
   settings: 'Settings',
 };
@@ -268,16 +263,6 @@ export const App: React.FC = () => {
             glowColor="emerald"
           />
         );
-      case 'meetings':
-        return (
-          <PageHeader
-            badge={{ label: 'Meeting Intelligence', icon: Mic, variant: 'purple' }}
-            title="Crash-resilient"
-            highlightText="transcripts & memory."
-            description="Dual microphone and system audio capture with 30-second incremental persistence and AI extraction."
-            glowColor="purple"
-          />
-        );
       case 'scribble':
         return (
           <PageHeader
@@ -314,18 +299,8 @@ export const App: React.FC = () => {
             badge={{ label: 'Document Vault', icon: FileText, variant: 'default' }}
             title="Imported"
             highlightText="documents & knowledge."
-            description="Bring PDF, Word, Markdown and Text files into Relay without touching your original files. Summarize, enrich, and ask Talkback questions about them."
+            description="Bring PDF, Word, Markdown and Text files into Relay without touching your original files. Summarize, enrich, and explore connections."
             glowColor="primary"
-          />
-        );
-      case 'talkback':
-        return (
-          <PageHeader
-            badge={{ label: 'Conversational Layer', icon: MessageCircle, variant: 'emerald' }}
-            title="Think with"
-            highlightText="what Relay knows."
-            description="Ask about your own Voice Notes, Scribbles and Meetings out loud. Answers about your history come from your own capture, with the sources shown."
-            glowColor="emerald"
           />
         );
       case 'diagnostics':
@@ -449,8 +424,6 @@ export const App: React.FC = () => {
 
           {activeTab === 'capture' && <VoiceNotePage />}
 
-          {activeTab === 'meetings' && <MeetingsV2View />}
-
           {activeTab === 'scribble' && (
             <ScribbleViewer
               focusScribbleId={focusScribbleId}
@@ -474,8 +447,6 @@ export const App: React.FC = () => {
               onOpenScribble={(id) => navigateTo('scribble', { focusScribbleId: id })}
             />
           )}
-
-          {activeTab === 'talkback' && <TalkbackPage />}
 
           {activeTab === 'diagnostics' && (
             <DiagnosticsPage onNavigateTab={(tab) => navigateTo(tab)} />

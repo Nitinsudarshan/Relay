@@ -8,9 +8,8 @@ description: What to test, what not to, and where tests live
 ## Rust backend (native/src-tauri/)
 
 - Use `cargo test` with standard `#[test]`/`#[tokio::test]`.
-- Prioritize the areas that carry real product risk: `meetings_v2/`
-  (extraction quality, diarization, alignment), `pipeline/`, and `triggers/`
-  (trigger-phrase matching, false-positive and false-negative behavior).
+- Prioritize the areas that carry real product risk: `pipeline/`
+  and `triggers/` (trigger-phrase matching, false-positive and false-negative behavior).
 - Test provider trait swaps with fake/mock providers — don't hit real LLM APIs
   in automated CI tests.
 - Don't chase coverage on `commands.rs` itself — it should be thin enough

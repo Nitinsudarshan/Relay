@@ -5,8 +5,6 @@
 
 use super::pack::{ContextPack, ContextPackItem, ContextPackType};
 use crate::entities::{EntityExtractor, EntityResolver, EntityStore};
-use crate::meetings_v2::processing::MeetingProcessor;
-use crate::meetings_v2::session_store::SessionStore;
 use crate::memory::MemoryStore;
 use crate::relationships::RelationshipStore;
 use crate::retrieval::{RetrievalFilter, RetrievalQuery, UnifiedRetrievalService};
@@ -57,7 +55,7 @@ impl ContextAssemblyService {
         relationship_store: Option<&RelationshipStore>,
         request: &ContextAssemblyRequest,
     ) -> ContextPack {
-        Self::assemble_full(vault, memory_store, relationship_store, None, None, None, request)
+        Self::assemble_full(vault, memory_store, relationship_store, None, request)
     }
 
     /// Full assembly entrypoint receiving all stores for deep integration.
@@ -66,8 +64,6 @@ impl ContextAssemblyService {
         memory_store: Option<&MemoryStore>,
         relationship_store: Option<&RelationshipStore>,
         entity_store: Option<&EntityStore>,
-        session_store: Option<&SessionStore>,
-        meeting_processor: Option<&MeetingProcessor>,
         request: &ContextAssemblyRequest,
     ) -> ContextPack {
         let budget = request.char_budget.unwrap_or(8_000);
@@ -85,34 +81,20 @@ impl ContextAssemblyService {
         let ret_result = UnifiedRetrievalService::search_with_memory(
             vault,
             memory_store,
-            session_store,
-            meeting_processor,
             &ret_query,
         );
 
         // 2. Domain-Aware Item Prioritization:
         // E.g., for a Repository pack, prioritize DerivedArtifact (RepositoryContext) over raw files.
         let mut sorted_items = ret_result.items;
-        match pack_type {
-            ContextPackType::Repository => {
-                sorted_items.sort_by(|a, b| {
-                    let a_is_derived = a.source_type == crate::retrieval::RetrievalSourceType::DerivedArtifact;
-                    let b_is_derived = b.source_type == crate::retrieval::RetrievalSourceType::DerivedArtifact;
-                    b_is_derived.cmp(&a_is_derived).then_with(|| {
-                        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                });
-            }
-            ContextPackType::Meeting => {
-                sorted_items.sort_by(|a, b| {
-                    let a_is_mtg = a.source_type == crate::retrieval::RetrievalSourceType::Meeting;
-                    let b_is_mtg = b.source_type == crate::retrieval::RetrievalSourceType::Meeting;
-                    b_is_mtg.cmp(&a_is_mtg).then_with(|| {
-                        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                });
-            }
-            _ => {}
+        if let ContextPackType::Repository = pack_type {
+            sorted_items.sort_by(|a, b| {
+                let a_is_derived = a.source_type == crate::retrieval::RetrievalSourceType::DerivedArtifact;
+                let b_is_derived = b.source_type == crate::retrieval::RetrievalSourceType::DerivedArtifact;
+                b_is_derived.cmp(&a_is_derived).then_with(|| {
+                    b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+                })
+            });
         }
 
         // 3. Add retrieved items up to budget

@@ -58,7 +58,6 @@ const DOMAIN_TOPIC_PATTERNS: &[(&str, &str)] = &[
     ("lancedb", "Vector Database & LanceDB"),
     ("supabase", "Cloud Backend & Supabase"),
     ("vector", "Vector Embeddings"),
-    ("meeting", "Meeting Intelligence"),
     ("transcription", "Speech & Transcription"),
     ("whisper", "Whisper Audio Processing"),
     ("audio", "Audio Processing"),

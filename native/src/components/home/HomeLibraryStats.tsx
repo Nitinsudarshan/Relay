@@ -1,7 +1,7 @@
 import React from 'react';
-import { Clock, Link2, Loader2, Tags, Type } from 'lucide-react';
+import { Link2, Loader2, Tags, Type } from 'lucide-react';
 
-import { formatCount, formatDurationShort, type HomeStat, type HomeSurface, type HomeVitals } from './homeStats';
+import { formatCount, type HomeStat, type HomeSurface, type HomeVitals } from './homeStats';
 
 export interface HomeLibraryStatsProps {
   stats: HomeStat[];
@@ -13,7 +13,7 @@ export interface HomeLibraryStatsProps {
 interface VitalRow {
   label: string;
   value: string;
-  icon: typeof Clock;
+  icon: typeof Type;
 }
 
 /**
@@ -32,7 +32,6 @@ export const HomeLibraryStats: React.FC<HomeLibraryStatsProps> = ({
 }) => {
   const vitalRows: VitalRow[] = [
     { label: 'Words transcribed', value: formatCount(vitals.spokenWords), icon: Type },
-    { label: 'Recorded', value: formatDurationShort(vitals.recordedSeconds), icon: Clock },
     { label: 'Connected thoughts', value: formatCount(vitals.connectedScribbles), icon: Link2 },
     { label: 'Distinct topics', value: formatCount(vitals.distinctTopics), icon: Tags },
   ];

@@ -16,7 +16,6 @@ use crate::relationships::RelationshipRecord;
 #[serde(rename_all = "snake_case")]
 pub enum ContextPackType {
     Repository,
-    Meeting,
     Project,
     Conversation,
     Document,
@@ -27,7 +26,6 @@ impl ContextPackType {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Repository => "repository",
-            Self::Meeting => "meeting",
             Self::Project => "project",
             Self::Conversation => "conversation",
             Self::Document => "document",
@@ -187,19 +185,6 @@ impl ContextPack {
 
         out
     }
-
-    /// Formats a concise speech-oriented context block for Talkback.
-    pub fn to_talkback_context(&self) -> String {
-        let mut out = String::new();
-        for item in &self.items {
-            let label = if item.is_external { "Captured web evidence" } else { "Your Relay note" };
-            out.push_str(&format!("{}: {}\n{}\n\n", label, item.title, item.content.trim()));
-        }
-        for mem in &self.memories {
-            out.push_str(&format!("Remembered {}: {}\n", mem.subject, mem.content.trim()));
-        }
-        out
-    }
 }
 
 #[cfg(test)]
@@ -244,24 +229,12 @@ mod tests {
         assert!(prompt.contains("=== END EXTERNAL SOURCE CONTENT ==="));
     }
 
-    /// The two halves of Relay's token estimate have to be the same estimate.
-    ///
-    /// This file divided by 3.6 while `pipeline::analysis` multiplied by 3, so
-    /// a pack filled exactly to the spine's character budget reported ~17%
-    /// fewer tokens than the spine had reserved room for. Nothing errored:
-    /// Ollama does not refuse an overlong prompt, it truncates it from the
-    /// front, so the disagreement was only ever visible as a model that had
-    /// lost its instructions and answered anyway.
-    ///
-    /// Now both read `providers::CHARS_PER_TOKEN`, and the figures meet
-    /// exactly. The assertion is `<=` rather than `==` because what matters is
-    /// the direction of any future drift, not that it never happens.
     #[test]
     fn a_pack_filled_to_the_spine_budget_still_fits_the_window() {
         use crate::pipeline::analysis::service::INSTRUCTION_RESERVE_TOKENS;
         use crate::pipeline::analysis::{prompt_budget_chars_for, PromptId};
 
-        let prompt = PromptId::MeetingFacts;
+        let prompt = PromptId::DictationRewrite;
         let reserved = prompt
             .definition()
             .max_output_tokens
@@ -271,15 +244,15 @@ mod tests {
             let budget = prompt_budget_chars_for(prompt, window);
             assert!(budget > 0, "window {window} left no room for the source");
 
-            let mut pack = ContextPack::new(ContextPackType::Meeting, "standup", budget);
+            let mut pack = ContextPack::new(ContextPackType::General, "dictation", budget);
             pack.try_add_item(ContextPackItem {
                 id: "item_full".to_string(),
                 source_id: "src_full".to_string(),
                 item_type: "evidence".to_string(),
-                title: "Transcript".to_string(),
+                title: "Text".to_string(),
                 content: "x".repeat(budget),
                 is_external: false,
-                provenance: "meeting".to_string(),
+                provenance: "voice_note".to_string(),
             });
 
             assert_eq!(pack.total_chars, budget, "window {window}");
