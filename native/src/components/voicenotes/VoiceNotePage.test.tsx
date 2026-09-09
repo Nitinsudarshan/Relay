@@ -382,6 +382,21 @@ describe('VoiceNotePage - Phrase Correction', () => {
     });
   };
 
+  it('opts the transcript back into text selection', async () => {
+    // Relay disables selection app-wide (`user-select: none` on `<body>`, in
+    // both index.html and index.css) to feel native, and it inherits down to
+    // the transcript. Without the opt-in there is nothing to highlight and the
+    // whole correction flow is unreachable in the real app.
+    //
+    // jsdom does not compute `user-select`, so this asserts the opt-in is
+    // present rather than that selection works — the every-other-test route of
+    // building a Range directly bypasses the CSS entirely, which is exactly how
+    // this shipped broken. A browser is what proves the behaviour; this only
+    // stops the class being dropped again.
+    await renderPage();
+    expect(screen.getByText(correctableNote.content)).toHaveClass('select-text');
+  });
+
   it('offers Correct and Add to Dictionary when a phrase is selected, and nothing before', async () => {
     await renderPage();
     expect(screen.queryByRole('button', { name: 'Correct' })).not.toBeInTheDocument();

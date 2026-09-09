@@ -934,11 +934,18 @@ export const VoiceNotePage: React.FC = () => {
                     </div>
                   ) : (
                     <div className="space-y-2">
+                      {/* `select-text` is load-bearing here, not decoration.
+                          Relay sets `user-select: none` on `<body>` (both
+                          index.html and index.css) to feel native, and it
+                          inherits down to here — without this the transcript
+                          cannot be highlighted at all and the correction
+                          popover can never open. Meeting transcripts opt back
+                          in the same way. */}
                       <p
                         ref={(el) => {
                           noteBodyRefs.current[note.id] = el;
                         }}
-                        className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed"
+                        className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed select-text cursor-text"
                       >
                         {note.content}
                       </p>
