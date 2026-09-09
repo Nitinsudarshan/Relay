@@ -338,6 +338,25 @@ describe('VoiceNotePage - Phrase Correction', () => {
     return at;
   };
 
+  /** What `correct_voice_note_phrase` actually returns. */
+  const correctionResult = (learned: boolean) => ({
+    note: {
+      ...correctableNote,
+      content: 'I was testing Supabase yesterday and then opened super base again.',
+      updated_at: '2026-08-20T11:00:00Z',
+    },
+    record: {
+      id: 'corr_1',
+      note_id: 'note_1',
+      original: 'super base',
+      replacement: 'Supabase',
+      start: 14,
+      corrected_at: '2026-08-20T11:00:00Z',
+      learned,
+    },
+    learned,
+  });
+
   beforeEach(() => {
     mockedInvoke.mockReset();
     mockedInvoke.mockImplementation(async (cmd: string) => {
@@ -351,6 +370,7 @@ describe('VoiceNotePage - Phrase Correction', () => {
       }
       if (cmd === 'get_settings') return { provider: 'ollama' };
       if (cmd === 'get_voice_notes') return [correctableNote];
+      if (cmd === 'correct_voice_note_phrase') return correctionResult(false);
       return undefined;
     });
   });
@@ -416,6 +436,15 @@ describe('VoiceNotePage - Phrase Correction', () => {
 
   it('passes learn: true only when Teach Relay is ticked', async () => {
     const user = userEvent.setup();
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_vault_location') {
+        return { path: 'v', default_path: 'v', configured: true, accessible: true };
+      }
+      if (cmd === 'get_settings') return { provider: 'ollama' };
+      if (cmd === 'get_voice_notes') return [correctableNote];
+      if (cmd === 'correct_voice_note_phrase') return correctionResult(true);
+      return undefined;
+    });
     await renderPage();
     await selectPhrase('super base');
 
@@ -430,6 +459,8 @@ describe('VoiceNotePage - Phrase Correction', () => {
         expect.objectContaining({ learn: true }),
       );
     });
+    // The backend reports back whether it learned, and the toast says so.
+    expect(await screen.findByText(/· learned/)).toBeInTheDocument();
   });
 
   it('leaves the note untouched when the correction is cancelled', async () => {
@@ -451,32 +482,14 @@ describe('VoiceNotePage - Phrase Correction', () => {
 
   it('shows the corrected note and an Undo that reverses it', async () => {
     const user = userEvent.setup();
-    const corrected = {
-      ...correctableNote,
-      content: 'I was testing Supabase yesterday and then opened super base again.',
-      updated_at: '2026-08-20T11:00:00Z',
-    };
+    const corrected = correctionResult(false).note;
     mockedInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'get_vault_location') {
         return { path: 'v', default_path: 'v', configured: true, accessible: true };
       }
       if (cmd === 'get_settings') return { provider: 'ollama' };
       if (cmd === 'get_voice_notes') return [correctableNote];
-      if (cmd === 'correct_voice_note_phrase') {
-        return {
-          note: corrected,
-          record: {
-            id: 'corr_1',
-            note_id: 'note_1',
-            original: 'super base',
-            replacement: 'Supabase',
-            start: 14,
-            corrected_at: '2026-08-20T11:00:00Z',
-            learned: false,
-          },
-          learned: false,
-        };
-      }
+      if (cmd === 'correct_voice_note_phrase') return correctionResult(false);
       if (cmd === 'undo_voice_note_correction') return correctableNote;
       return undefined;
     });
@@ -548,28 +561,14 @@ describe('VoiceNotePage - Phrase Correction', () => {
 
   it('stops offering Undo once the note has moved on', async () => {
     const user = userEvent.setup();
-    const corrected = { ...correctableNote, content: 'I was testing Supabase yesterday.' };
+    const corrected = correctionResult(false).note;
     mockedInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'get_vault_location') {
         return { path: 'v', default_path: 'v', configured: true, accessible: true };
       }
       if (cmd === 'get_settings') return { provider: 'ollama' };
       if (cmd === 'get_voice_notes') return [correctableNote];
-      if (cmd === 'correct_voice_note_phrase') {
-        return {
-          note: corrected,
-          record: {
-            id: 'corr_1',
-            note_id: 'note_1',
-            original: 'super base',
-            replacement: 'Supabase',
-            start: 14,
-            corrected_at: '2026-08-20T11:00:00Z',
-            learned: false,
-          },
-          learned: false,
-        };
-      }
+      if (cmd === 'correct_voice_note_phrase') return correctionResult(false);
       if (cmd === 'undo_voice_note_correction') {
         throw { message: 'this note has changed since the text was selected' };
       }

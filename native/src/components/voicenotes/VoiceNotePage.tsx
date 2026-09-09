@@ -350,9 +350,14 @@ export const VoiceNotePage: React.FC = () => {
         replacement: replacement.trim(),
         learn: teachRelay,
       });
-      setNotes((prev) => prev.map((n) => (n.id === result.note.id ? result.note : n)));
+      // Read out of the response before queueing the update. A `setNotes`
+      // updater runs during React's next render, so dereferencing the result
+      // inside it would throw there — past this catch, and past any chance of
+      // telling the user the correction did not land.
+      const corrected = result.note;
+      setNotes((prev) => prev.map((n) => (n.id === corrected.id ? corrected : n)));
       setUndoState({
-        noteId: result.note.id,
+        noteId: corrected.id,
         message: `Corrected "${selection.text}" → "${replacement.trim()}"${
           result.learned ? ' · learned' : ''
         }`,
@@ -402,7 +407,8 @@ export const VoiceNotePage: React.FC = () => {
       const restored = await invoke<VaultNote>('undo_voice_note_correction', {
         id: undoState.noteId,
       });
-      setNotes((prev) => prev.map((n) => (n.id === restored.id ? restored : n)));
+      const restoredId = restored.id;
+      setNotes((prev) => prev.map((n) => (n.id === restoredId ? restored : n)));
       setUndoState(null);
     } catch (err: any) {
       console.error('Failed to undo correction', err);
