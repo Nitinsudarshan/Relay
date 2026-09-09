@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import {
   codePointLength,
+  findSelection,
   offsetWithin,
   readSelection,
   looksLikeVocabulary,
@@ -128,6 +129,90 @@ describe('Voice Note selection → character range', () => {
 
     expect(offsetWithin(el, el.childNodes[1], 0)).toBe(9);
     expect(offsetWithin(el, el.childNodes[2], 0)).toBe(19);
+  });
+});
+
+describe('finding which rendered note holds the selection', () => {
+  const paragraph = (text: string) => {
+    const el = document.createElement('p');
+    el.textContent = text;
+    document.body.appendChild(el);
+    return el;
+  };
+
+  const select = (node: Node, start: number, end: number) => {
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  };
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it('picks the note the selection is actually in', () => {
+    const first = paragraph('I was testing super base yesterday.');
+    const second = paragraph('Standup notes for tarui.');
+    const containers = { note_1: first, note_2: second };
+    const contents: Record<string, string> = {
+      note_1: 'I was testing super base yesterday.',
+      note_2: 'Standup notes for tarui.',
+    };
+
+    const at = contents.note_2.indexOf('tarui');
+    select(second.firstChild!, at, at + 5);
+
+    expect(findSelection(containers, (id) => contents[id])).toEqual({
+      noteId: 'note_2',
+      start: at,
+      end: at + 5,
+      text: 'tarui',
+    });
+  });
+
+  it('finds a selection made without the mouse', () => {
+    // Extending a range is what shift+arrow does. The page listens on
+    // `selectionchange`, so a keyboard selection arrives the same way a
+    // dragged one does — a `<p>` cannot be focused, so a keyup on it never
+    // would have fired.
+    const el = paragraph('we should try super base');
+    const range = document.createRange();
+    range.setStart(el.firstChild!, 14);
+    range.setEnd(el.firstChild!, 14);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    for (let i = 0; i < 10; i += 1) {
+      selection.extend(el.firstChild!, 15 + i);
+    }
+
+    expect(findSelection({ note_1: el }, () => 'we should try super base')).toEqual({
+      noteId: 'note_1',
+      start: 14,
+      end: 24,
+      text: 'super base',
+    });
+  });
+
+  it('ignores a container that is no longer rendered', () => {
+    const el = paragraph('I was testing super base yesterday.');
+    select(el.firstChild!, 14, 24);
+    expect(findSelection({ note_1: null }, () => 'I was testing super base yesterday.')).toBeNull();
+  });
+
+  it('ignores a note whose content the caller no longer has', () => {
+    const el = paragraph('I was testing super base yesterday.');
+    select(el.firstChild!, 14, 24);
+    expect(findSelection({ note_1: el }, () => undefined)).toBeNull();
+  });
+
+  it('returns null when nothing is selected', () => {
+    paragraph('I was testing super base yesterday.');
+    expect(findSelection({}, () => 'anything')).toBeNull();
   });
 });
 

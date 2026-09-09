@@ -27,7 +27,16 @@ pub const CAPTURES_DIR: &str = "captures";
 /// was captured, and analysis must not be able to rewrite it.
 pub const DERIVED_DIR: &str = "derived";
 
+/// Phrase corrections applied to a note, one JSON stack per note.
+///
+/// The same shape as `merged_sources/`, and for the same reason: a note's
+/// undoable history belongs beside the vault rather than inside the note's own
+/// Markdown, where it would be text the user has to look at.
+pub const CORRECTIONS_DIR: &str = "corrections";
+
 pub mod correction;
+pub use correction::CorrectionRecord;
+
 pub mod scribble;
 pub use scribble::*;
 
@@ -246,6 +255,71 @@ impl VaultManager {
             .collect();
         self.save_note(&note)?;
         Ok(note)
+    }
+
+    /// The path of a note's correction stack.
+    fn corrections_path(&self, note_id: &str) -> PathBuf {
+        self.vault_dir()
+            .join(CORRECTIONS_DIR)
+            .join(format!("{}.json", note_id))
+    }
+
+    /// Every correction applied to a note, oldest first.
+    ///
+    /// A note that has never been corrected has no file and an empty history —
+    /// not an error, since asking is how the UI finds out.
+    pub fn correction_history(&self, note_id: &str) -> Result<Vec<CorrectionRecord>, VaultError> {
+        let path = self.corrections_path(note_id);
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let data = fs::read_to_string(&path)?;
+        serde_json::from_str(&data).map_err(|e| VaultError::FrontmatterError(e.to_string()))
+    }
+
+    /// Appends one correction to a note's history.
+    pub fn record_correction(&self, record: &CorrectionRecord) -> Result<(), VaultError> {
+        self.init()?;
+        let mut stack = self.correction_history(&record.note_id)?;
+        stack.push(record.clone());
+        self.write_correction_stack(&record.note_id, &stack)
+    }
+
+    /// Removes and returns the most recent correction on a note.
+    ///
+    /// Popping is what keeps the history honest: an undone correction did not
+    /// happen, and leaving the record would make the next undo reverse an edit
+    /// that is no longer there.
+    pub fn pop_correction(&self, note_id: &str) -> Result<Option<CorrectionRecord>, VaultError> {
+        let mut stack = self.correction_history(note_id)?;
+        let record = stack.pop();
+        if record.is_some() {
+            self.write_correction_stack(note_id, &stack)?;
+        }
+        Ok(record)
+    }
+
+    fn write_correction_stack(
+        &self,
+        note_id: &str,
+        stack: &[CorrectionRecord],
+    ) -> Result<(), VaultError> {
+        let path = self.corrections_path(note_id);
+        if stack.is_empty() {
+            if path.exists() {
+                fs::remove_file(&path)?;
+            }
+            return Ok(());
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(stack)
+                .map_err(|e| VaultError::FrontmatterError(e.to_string()))?,
+        )?;
+        Ok(())
     }
 
     pub fn merge_notes(&self, primary_id: &str, secondary_id: &str) -> Result<VaultNote, VaultError> {
@@ -2910,5 +2984,114 @@ mod tests {
 
         let _ = fs::remove_dir_all(temp_dir);
         let _ = fs::remove_dir_all(external_dir);
+    }
+
+    /// A fresh vault in a throwaway directory, the pattern the tests above use.
+    fn scratch_vault() -> (VaultManager, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        let manager = VaultManager::new(dir.clone());
+        manager.init().unwrap();
+        (manager, dir)
+    }
+
+    /// §5 — the correction goes through the existing persistence, so it is
+    /// still there when the app comes back.
+    #[test]
+    fn a_corrected_note_reads_back_corrected_from_a_new_vault_manager() {
+        let (manager, dir) = scratch_vault();
+        let note = VaultNote::new_voice_note("I was testing super base yesterday.");
+        let id = note.id.clone();
+        manager.save_note(&note).unwrap();
+
+        let corrected = correction::replace_range(
+            &note.content,
+            note.content.find("super base").unwrap(),
+            note.content.find("super base").unwrap() + 10,
+            "super base",
+            "Supabase",
+        )
+        .unwrap();
+        let saved = manager.update_note_content(&id, &corrected).unwrap();
+        assert_eq!(saved.content, "I was testing Supabase yesterday.");
+        assert!(saved.updated_at >= note.created_at, "updated_at moves forward");
+
+        // A second manager over the same directory is what a restart looks like
+        // from the vault's point of view: nothing cached, everything re-parsed.
+        drop(manager);
+        let reopened = VaultManager::new(dir.clone());
+        let after_restart = reopened.get_note(&id).unwrap();
+        assert_eq!(after_restart.content, "I was testing Supabase yesterday.");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// §8 — the history survives the same restart, so a future undo has
+    /// something to work from.
+    #[test]
+    fn correction_history_stacks_oldest_first_and_survives_a_restart() {
+        let (manager, dir) = scratch_vault();
+        let note = VaultNote::new_voice_note("tested super base with lance db");
+        let id = note.id.clone();
+        manager.save_note(&note).unwrap();
+
+        manager
+            .record_correction(&CorrectionRecord::new(&id, "super base", "Supabase", 7, true))
+            .unwrap();
+        manager
+            .record_correction(&CorrectionRecord::new(&id, "lance db", "LanceDB", 21, false))
+            .unwrap();
+
+        drop(manager);
+        let reopened = VaultManager::new(dir.clone());
+        let history = reopened.correction_history(&id).unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].original, "super base");
+        assert!(history[0].learned, "the record remembers the checkbox");
+        assert_eq!(history[1].original, "lance db");
+        assert!(!history[1].learned);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_note_with_no_corrections_has_an_empty_history_rather_than_an_error() {
+        let (manager, dir) = scratch_vault();
+        assert!(manager.correction_history("note_never_corrected").unwrap().is_empty());
+        assert!(manager.pop_correction("note_never_corrected").unwrap().is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// §9/§10 — undo restores the previous persisted content, and the undone
+    /// correction leaves the history so the next undo reverses the right edit.
+    #[test]
+    fn undoing_a_correction_restores_the_previous_content_and_pops_the_record() {
+        let (manager, dir) = scratch_vault();
+        let original_text = "I was testing super base yesterday and then opened super base again.";
+        let note = VaultNote::new_voice_note(original_text);
+        let id = note.id.clone();
+        manager.save_note(&note).unwrap();
+
+        let start = original_text.find("super base").unwrap();
+        let corrected =
+            correction::replace_range(original_text, start, start + 10, "super base", "Supabase")
+                .unwrap();
+        manager.update_note_content(&id, &corrected).unwrap();
+        let record = CorrectionRecord::new(&id, "super base", "Supabase", start, false);
+        manager.record_correction(&record).unwrap();
+
+        let current = manager.get_note(&id).unwrap().content;
+        let restored = record.reverse(&current).unwrap();
+        manager.update_note_content(&id, &restored).unwrap();
+        manager.pop_correction(&id).unwrap();
+
+        assert_eq!(manager.get_note(&id).unwrap().content, original_text);
+        assert!(
+            manager.correction_history(&id).unwrap().is_empty(),
+            "an undone correction did not happen"
+        );
+        // Emptying the stack removes the file rather than leaving `[]` behind.
+        assert!(!manager.corrections_path(&id).exists());
+
+        let _ = fs::remove_dir_all(dir);
     }
 }

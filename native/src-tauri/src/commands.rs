@@ -774,9 +774,10 @@ pub async fn update_voice_note(
 #[derive(Debug, Clone, Serialize)]
 pub struct PhraseCorrectionResult {
     pub note: VaultNote,
-    /// The content as it stood before. Undo is `update_voice_note` with this,
-    /// which is why no versioning system is needed for it.
-    pub previous_content: String,
+    /// The correction as it was written to the note's history. Undo is
+    /// `undo_voice_note_correction`, which reverses this record — which is why
+    /// no versioning system is needed for it.
+    pub record: crate::vault::CorrectionRecord,
     /// True when the phrase was also added to the learned vocabulary.
     pub learned: bool,
 }
@@ -795,8 +796,12 @@ pub struct PhraseCorrectionResult {
 /// `learn` is opt-in per correction. Most corrections are ordinary edits —
 /// "Thursday" to "Tuesday" is not vocabulary — so nothing is added to the
 /// learned list unless the user ticks the box.
+// A Tauri command's parameters are the IPC payload's fields — they are flat by
+// construction, and grouping them would change the frontend-facing contract.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn correct_voice_note_phrase(
+    app: AppHandle,
     state: State<'_, AppState>,
     id: String,
     start: usize,
@@ -805,78 +810,138 @@ pub async fn correct_voice_note_phrase(
     replacement: String,
     learn: Option<bool>,
 ) -> Result<PhraseCorrectionResult, CommandError> {
+    if replacement.trim().is_empty() {
+        return Err(CommandError::new(
+            "CORRECTION_EMPTY",
+            "A correction needs a replacement.",
+        ));
+    }
+
     let note = state
         .vault
         .get_note(&id)
         .map_err(|e| CommandError::new("VAULT_READ_FAILED", &e.to_string()))?;
-    let previous_content = note.content.clone();
 
-    let corrected = crate::vault::correction::replace_range(
-        &previous_content,
-        start,
-        end,
-        &original,
-        &replacement,
-    )
-    .map_err(|e| CommandError::new("CORRECTION_FAILED", &e.to_string()))?;
+    let corrected =
+        crate::vault::correction::replace_range(&note.content, start, end, &original, &replacement)
+            .map_err(|e| CommandError::new("CORRECTION_FAILED", &e.to_string()))?;
 
     let note = state
         .vault
         .update_note_content(&id, &corrected)
         .map_err(|e| CommandError::new("VAULT_UPDATE_FAILED", &e.to_string()))?;
 
+    // Learning first, so the record can say truthfully whether it happened.
     let learned = if learn.unwrap_or(false) {
         let mut settings = state.settings.lock_or_recover();
-        let added = upsert_vocabulary_correction(
-            &mut settings.vocabulary_corrections,
-            &original,
-            &replacement,
-        );
+        let added = settings.learn_correction(&original, &replacement);
         if added {
             let _ = settings.save(&state.settings_path());
+            let updated = settings.clone();
+            drop(settings);
+            // The Settings window is a separate window holding its own copy,
+            // and `save_settings` writes that copy whole. Without this it
+            // would overwrite the rule the moment anything else there is
+            // changed.
+            let _ = app.emit("settings-changed", &updated);
         }
         added
     } else {
         false
     };
 
+    let record = crate::vault::CorrectionRecord::new(&id, &original, &replacement, start, learned);
+    // A history that cannot be written costs the undo, not the correction the
+    // user already sees applied — so it is logged rather than surfaced.
+    if let Err(e) = state.vault.record_correction(&record) {
+        tracing::warn!("Could not record correction history for {id}: {e}");
+    }
+
     Ok(PhraseCorrectionResult {
         note,
-        previous_content,
+        record,
         learned,
     })
 }
 
-/// Adds or updates a learned correction, in place.
+/// Reverses the most recent phrase correction on a Voice Note.
 ///
-/// Teaching the same source twice replaces the replacement rather than
-/// appending a second rule — two rules for one phrase means the applied result
-/// depends on list order, which is not something a user can see or reason
-/// about. Re-teaching also re-enables an entry that had been switched off,
-/// because teaching it again is a clear statement that it is wanted.
-fn upsert_vocabulary_correction(
-    corrections: &mut Vec<crate::settings::VocabularyCorrection>,
-    source: &str,
-    replacement: &str,
-) -> bool {
-    let candidate = crate::settings::VocabularyCorrection::new(source, replacement);
-    if !candidate.is_meaningful() {
-        return false;
+/// Puts the original phrase back where the replacement now sits, rather than
+/// restoring a snapshot of the whole note: a snapshot undo applied after the
+/// full editor touched the note would throw that edit away. If the replacement
+/// is no longer there, this refuses.
+#[tauri::command]
+pub async fn undo_voice_note_correction(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<VaultNote, CommandError> {
+    let record = state
+        .vault
+        .correction_history(&id)
+        .map_err(|e| CommandError::new("VAULT_READ_FAILED", &e.to_string()))?
+        .pop()
+        .ok_or_else(|| {
+            CommandError::new("NO_CORRECTION_TO_UNDO", "This note has no correction to undo.")
+        })?;
+
+    let note = state
+        .vault
+        .get_note(&id)
+        .map_err(|e| CommandError::new("VAULT_READ_FAILED", &e.to_string()))?;
+
+    let restored = record
+        .reverse(&note.content)
+        .map_err(|e| CommandError::new("UNDO_FAILED", &e.to_string()))?;
+
+    let note = state
+        .vault
+        .update_note_content(&id, &restored)
+        .map_err(|e| CommandError::new("VAULT_UPDATE_FAILED", &e.to_string()))?;
+
+    // Only once the note is safely written: a correction that is still applied
+    // must stay in the history, or the next undo reverses the wrong edit.
+    let _ = state.vault.pop_correction(&id);
+
+    // A learned rule is deliberately left in place. It is a standing statement
+    // about the phrase, made on purpose through a separate checkbox, and
+    // Settings › Dictionary is where it is turned off or removed.
+    Ok(note)
+}
+
+/// Adds a phrase to the user's dictionary, from wherever they found it.
+///
+/// The same list Settings › Dictionary edits, reached from a Voice Note: a
+/// spelling that is already right and that Relay should keep getting right,
+/// used to prime the recognizer before it guesses. Distinct from a learned
+/// correction, which repairs a guess already made.
+#[tauri::command]
+pub async fn add_dictionary_word(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    word: String,
+) -> Result<Vec<String>, CommandError> {
+    if word.trim().is_empty() {
+        return Err(CommandError::new(
+            "DICTIONARY_WORD_EMPTY",
+            "A dictionary entry needs a word.",
+        ));
     }
-    match corrections
-        .iter_mut()
-        .find(|existing| existing.same_source_as(source))
-    {
-        Some(existing) => {
-            existing.replacement = candidate.replacement;
-            existing.enabled = true;
-            true
-        }
-        None => {
-            corrections.push(candidate);
-            true
-        }
+
+    let mut settings = state.settings.lock_or_recover();
+    if !settings.add_dictionary_word(&word) {
+        // Already known. Saying so is the honest answer, and rewriting the
+        // file to change nothing is not.
+        return Ok(settings.dictionary.clone());
     }
+    settings
+        .save(&state.settings_path())
+        .map_err(|e| CommandError::new("CONFIG_SAVE_FAILED", &e.to_string()))?;
+
+    let updated = settings.clone();
+    drop(settings);
+    // Same reason as above: the Settings window holds its own copy.
+    let _ = app.emit("settings-changed", &updated);
+    Ok(updated.dictionary)
 }
 
 #[tauri::command]

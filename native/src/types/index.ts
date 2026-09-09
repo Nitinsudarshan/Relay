@@ -2514,3 +2514,17 @@ export interface VocabularyCorrection {
   enabled: boolean;
   created_at: string;
 }
+
+/** One correction applied to a note, kept so it can be reversed and seen.
+ *  `start` is a character offset, which is what makes undo a reversal of the
+ *  range rather than a snapshot of the whole note. */
+export interface CorrectionRecord {
+  id: string;
+  note_id: string;
+  original: string;
+  replacement: string;
+  start: number;
+  corrected_at: string;
+  /** Whether the user also ticked "Teach Relay this correction". */
+  learned: boolean;
+}

@@ -283,3 +283,71 @@ anything, so a fresh install opens no listening socket. `pairing_token` is a
 gains `capture_hotkey` (default `Ctrl+Shift+C`), which opens the Captures
 surface — reading a page is triggered from inside the browser, for the reason
 given in `docs/capture.md` §1.
+
+## 9. Voice Note Corrections
+
+Two separate records, because they answer different questions.
+
+### Correction history (`.relay/vault/corrections/<note_id>.json`)
+
+Every phrase correction applied to one Voice Note, oldest first. The same
+sidecar shape as `merged_sources/<note_id>.json`, and for the same reason: a
+note's undoable history belongs beside the vault rather than inside the note's
+own Markdown, where it would be text the user has to look at.
+
+```json
+[
+  {
+    "id": "corr_7f3c…",
+    "note_id": "note_123456789",
+    "original": "super base",
+    "replacement": "Supabase",
+    "start": 14,
+    "corrected_at": "2026-09-09T17:24:00Z",
+    "learned": true
+  }
+]
+```
+
+`start` is a **character** offset into the note content at the time of the
+correction — not bytes, and not UTF-16 code units. It is what makes undo a
+reversal of the range (put `original` back where `replacement` now sits) rather
+than a stored copy of the note: no versioning system, and a full-editor change
+made in between is refused instead of being thrown away. The file is deleted
+when the stack empties.
+
+`learned` records whether the user ticked "Teach Relay this correction". It is
+not recoverable from the note afterwards, and it is the difference between an
+ordinary edit and a standing rule.
+
+### Learned corrections (`settings.json` › `vocabulary_corrections`)
+
+```json
+{
+  "dictionary": ["Relay", "Whisper", "Supabase"],
+  "vocabulary_corrections": [
+    {
+      "source": "super base",
+      "replacement": "Supabase",
+      "enabled": true,
+      "created_at": "2026-09-09T17:24:00Z"
+    }
+  ]
+}
+```
+
+Distinct from `dictionary`, and deliberately not merged into it. `dictionary`
+is canonical words used to prime the recognizer *before* it guesses (via
+`build_stt_prompt`) and to correct near-misses by edit distance. A correction
+repairs a form the recognizer keeps producing *after* the fact, applied in
+`capture::text_normalize` ahead of the glossary so the user's specific rule
+wins over a fuzzy token match. Putting `"super base"` in `dictionary` would
+prime Relay to produce the very phrase being corrected.
+
+Empty by default: every entry was put there by the user ticking the box on a
+correction made inside Relay. Nothing is learned by watching what they type in
+other applications — see `maybe_later.md` §13.
+
+`enabled: false` keeps an entry visible and stops it being applied, so a
+correction that turns out to be wrong can be silenced without losing the record
+of having made it. Both are managed in Settings › Dictionary.
