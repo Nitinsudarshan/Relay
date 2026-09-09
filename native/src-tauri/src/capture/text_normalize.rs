@@ -119,7 +119,11 @@ pub fn apply_learned_corrections(
         .iter()
         .filter(|c| c.enabled && c.is_meaningful())
     {
-        out = replace_phrase_ignoring_case(&out, correction.source.trim(), &correction.replacement);
+        // Trimmed again at apply time, not only when the rule was written: a
+        // rule taught before that trim existed still has the sentence's full
+        // stop welded to it, and would otherwise stay dead until re-taught.
+        let source = crate::settings::trim_phrase(&correction.source);
+        out = replace_phrase_ignoring_case(&out, source, &correction.replacement);
     }
     out
 }
@@ -674,6 +678,30 @@ mod learned_correction_tests {
             apply_learned_corrections("a freelancer used lance today", &list),
             "a freelancer used LanceDB today"
         );
+    }
+
+    #[test]
+    fn a_learned_word_is_repaired_whatever_punctuation_follows_it() {
+        // The reported case: taught from "Maine.", it must still fire on
+        // "Maine!" and on the bare word.
+        let list = corrections(&[("Maine.", "Main")]);
+        assert_eq!(
+            apply_learned_corrections("I live in Maine! Maine, and Maine.", &list),
+            "I live in Main! Main, and Main."
+        );
+    }
+
+    #[test]
+    fn a_rule_stored_with_punctuation_before_the_trim_existed_still_fires() {
+        // Written straight into the struct, the way a rule taught by the
+        // shipped build sits in settings.json today — no re-teaching required.
+        let list = vec![VocabularyCorrection {
+            source: "Maine.".to_string(),
+            replacement: "Main".to_string(),
+            enabled: true,
+            created_at: String::new(),
+        }];
+        assert_eq!(apply_learned_corrections("about Maine!", &list), "about Main!");
     }
 
     #[test]

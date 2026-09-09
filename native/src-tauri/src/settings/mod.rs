@@ -758,10 +758,39 @@ pub struct VocabularyCorrection {
     pub created_at: String,
 }
 
+/// Punctuation a selection picks up by accident, at each edge.
+///
+/// The two sets differ on purpose. A *trailing* full stop is almost always the
+/// end of the sentence the phrase sat in; a *leading* one can be part of the
+/// term itself (".net"), so it stays.
+const LEADING_NOISE: &[char] = &['"', '\'', '`', '(', '[', '{', '«', '\u{201C}', '\u{2018}'];
+const TRAILING_NOISE: &[char] = &[
+    '.', ',', '!', '?', ';', ':', '"', '\'', '`', ')', ']', '}', '»', '\u{201D}', '\u{2019}',
+    '\u{2026}',
+];
+
+/// The phrase inside `text`, without the punctuation around it.
+///
+/// A learned rule has to be about the word, not about the sentence it happened
+/// to end. Teaching "Maine." → "Main" from a selection that swallowed the full
+/// stop produces a rule that never fires again, because the next transcript
+/// says "Maine!" — matching is whole-word, so the bare phrase catches every
+/// one of them.
+pub fn trim_phrase(text: &str) -> &str {
+    text.trim()
+        .trim_start_matches(|c| LEADING_NOISE.contains(&c))
+        .trim_end_matches(|c| TRAILING_NOISE.contains(&c))
+        .trim()
+}
+
 impl VocabularyCorrection {
     pub fn new(source: &str, replacement: &str) -> Self {
         Self {
-            source: source.trim().to_string(),
+            // The source came from a selection, so it may carry punctuation the
+            // user never meant to teach. The replacement was typed, so it is
+            // left exactly as written — someone teaching "eg" → "e.g." means
+            // that full stop.
+            source: trim_phrase(source).to_string(),
             replacement: replacement.trim().to_string(),
             enabled: true,
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -787,7 +816,7 @@ impl VocabularyCorrection {
     /// regardless of case — the recognizer's capitalisation of a phrase it got
     /// wrong is not a distinction worth two entries.
     pub fn same_source_as(&self, other: &str) -> bool {
-        self.source.trim().eq_ignore_ascii_case(other.trim())
+        trim_phrase(&self.source).eq_ignore_ascii_case(trim_phrase(other))
     }
 }
 
@@ -1074,6 +1103,46 @@ mod tests {
         assert!(!settings.learn_correction("super base", ""));
         assert!(!settings.learn_correction("Supabase", "  Supabase  "), "identical is not a repair");
         assert!(settings.vocabulary_corrections.is_empty());
+    }
+
+    #[test]
+    fn teaching_from_a_selection_that_swallowed_the_full_stop_learns_the_word() {
+        // Reported: "Main" was heard as "Maine", the highlight took the full
+        // stop with it, and the rule "Maine." → "Main" never fired again
+        // because the next transcript said "Maine!".
+        let mut settings = AppSettings::default();
+        assert!(settings.learn_correction("Maine.", "Main"));
+        assert_eq!(settings.vocabulary_corrections[0].source, "Maine");
+        assert_eq!(settings.vocabulary_corrections[0].replacement, "Main");
+    }
+
+    #[test]
+    fn re_teaching_the_same_word_with_different_punctuation_is_the_same_rule() {
+        let mut settings = AppSettings::default();
+        settings.learn_correction("Maine.", "Main");
+        settings.learn_correction("Maine!", "Main");
+        settings.learn_correction("\"Maine\"", "Main");
+        assert_eq!(settings.vocabulary_corrections.len(), 1, "one word, one rule");
+    }
+
+    #[test]
+    fn a_typed_replacement_keeps_its_own_punctuation() {
+        // The source came from a selection and may carry punctuation by
+        // accident; the replacement was typed on purpose.
+        let mut settings = AppSettings::default();
+        assert!(settings.learn_correction("eg", "e.g."));
+        assert_eq!(settings.vocabulary_corrections[0].replacement, "e.g.");
+    }
+
+    #[test]
+    fn a_leading_dot_belongs_to_the_term_and_is_kept() {
+        // ".net" is the word. Trimming both edges alike would learn "net".
+        assert_eq!(trim_phrase(".net"), ".net");
+        assert_eq!(trim_phrase("  \"Maine.\"  "), "Maine");
+        assert_eq!(trim_phrase("super base,"), "super base");
+        assert_eq!(trim_phrase("don't"), "don't");
+        assert_eq!(trim_phrase("lance-db;"), "lance-db");
+        assert_eq!(trim_phrase("..."), "", "punctuation alone is not a phrase");
     }
 
     #[test]

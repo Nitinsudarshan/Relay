@@ -63,12 +63,46 @@ export function offsetWithin(
 }
 
 /**
+ * Punctuation a drag selection picks up by accident, at each edge.
+ *
+ * Double-clicking "Maine." or dragging a word at the end of a sentence takes
+ * the full stop with it, and the two sets differ on purpose: a *trailing* stop
+ * is almost always the sentence's, while a *leading* one can belong to the term
+ * (".net", ".gitignore"), so it stays.
+ */
+const LEADING_NOISE = new Set([...' \t\n\r"\'`([{«“‘']);
+const TRAILING_NOISE = new Set([...' \t\n\r.,!?;:"\'`)]}»”’…']);
+
+/**
+ * Narrows `[start, end)` to the phrase inside it, dropping edge punctuation.
+ *
+ * This is what keeps the sentence intact. Selecting "Maine." and replacing it
+ * with "Main" would otherwise delete the full stop as well, and — worse —
+ * teach Relay a rule about "Maine." that never fires again, because the next
+ * transcript says "Maine!" instead.
+ */
+export function narrowToPhrase(
+  characters: string[],
+  start: number,
+  end: number,
+): [number, number] {
+  let from = start;
+  let to = end;
+  while (from < to && LEADING_NOISE.has(characters[from])) from += 1;
+  while (to > from && TRAILING_NOISE.has(characters[to - 1])) to -= 1;
+  return [from, to];
+}
+
+/**
  * Reads the current window selection as a range in `content`.
  *
  * Returns null unless the selection is non-empty, lies entirely inside
  * `container`, and matches `content` at the offsets computed — the last check
  * being what stops a mismatch between what is rendered and what is stored from
  * reaching the backend as a corrupting edit.
+ *
+ * The range returned is narrowed past edge punctuation, so what the popover
+ * shows is what gets replaced.
  */
 export function readSelection(
   container: HTMLElement | null,
@@ -93,15 +127,17 @@ export function readSelection(
   const characters = Array.from(content);
   if (end > characters.length) return null;
 
-  const text = characters.slice(start, end).join('');
-  // Whitespace alone is not a phrase worth correcting, and the popover
-  // appearing for a stray drag is noise.
-  if (!text.trim()) return null;
-  // What is rendered must be what is stored. If they disagree the offsets are
-  // meaningless, and refusing is the only safe answer.
-  if (text !== selection.toString()) return null;
+  // Checked against the *raw* span, before narrowing: what is rendered must be
+  // what is stored, and if they disagree the offsets are meaningless. Refusing
+  // is the only safe answer.
+  if (characters.slice(start, end).join('') !== selection.toString()) return null;
 
-  return { noteId, start, end, text };
+  const [from, to] = narrowToPhrase(characters, start, end);
+  // Punctuation or whitespace alone is not a phrase worth correcting, and the
+  // popover appearing for a stray drag is noise.
+  if (to <= from) return null;
+
+  return { noteId, start: from, end: to, text: characters.slice(from, to).join('') };
 }
 
 /**

@@ -607,6 +607,53 @@ describe('VoiceNotePage - Phrase Correction', () => {
     expect(screen.getByText(corrected.content)).toBeInTheDocument();
   });
 
+  it('replaces the word without eating the sentence full stop', async () => {
+    // Reported end to end: "Main" heard as "Maine", the highlight took the
+    // stop, and replacing it removed the stop from the note as well.
+    const user = userEvent.setup();
+    const note: VaultNote = { ...correctableNote, content: 'I drove through Maine. It was long.' };
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_vault_location') {
+        return { path: 'v', default_path: 'v', configured: true, accessible: true };
+      }
+      if (cmd === 'get_settings') return { provider: 'ollama' };
+      if (cmd === 'get_voice_notes') return [note];
+      return undefined;
+    });
+
+    render(<VoiceNotePage />);
+    await waitFor(() => expect(screen.getByText(note.content)).toBeInTheDocument());
+
+    const paragraph = screen.getByText(note.content);
+    const at = note.content.indexOf('Maine.');
+    const range = document.createRange();
+    range.setStart(paragraph.firstChild!, at);
+    range.setEnd(paragraph.firstChild!, at + 'Maine.'.length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+
+    // The popover reports the narrowed phrase, so what it shows is what it
+    // will replace.
+    await waitFor(() => expect(screen.getByText('Maine')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    await user.type(screen.getByLabelText('Replacement text'), 'Main');
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+
+    await waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith('correct_voice_note_phrase', {
+        id: 'note_1',
+        start: at,
+        end: at + 'Maine'.length, // not 'Maine.' — the stop is not in the range
+        original: 'Maine',
+        replacement: 'Main',
+        learn: false,
+      });
+    });
+  });
+
   it('keeps the full-note editor available alongside the popover', async () => {
     const user = userEvent.setup();
     await renderPage();

@@ -87,6 +87,61 @@ describe('Voice Note selection → character range', () => {
     expect(result?.text).toBe('super base');
   });
 
+  it('drops a full stop the highlight swallowed', () => {
+    // Reported: "Main" was heard as "Maine", the drag took the sentence's full
+    // stop, and replacing it deleted the stop from the note and taught a rule
+    // about "Maine." that never fired again.
+    const content = 'I drove through Maine. It was long.';
+    const el = render(content);
+    const at = content.indexOf('Maine.');
+    select(el.firstChild!, at, at + 'Maine.'.length);
+
+    expect(readSelection(el, 'note_1', content)).toEqual({
+      noteId: 'note_1',
+      start: at,
+      end: at + 'Maine'.length,
+      text: 'Maine',
+    });
+  });
+
+  it('drops surrounding quotes and a trailing comma', () => {
+    const content = 'he said "super base", twice';
+    const el = render(content);
+    const at = content.indexOf('"super base",');
+    select(el.firstChild!, at, at + '"super base",'.length);
+
+    const found = readSelection(el, 'note_1', content);
+    expect(found?.text).toBe('super base');
+    expect(content.slice(found!.start, found!.end)).toBe('super base');
+  });
+
+  it('keeps a leading dot, which belongs to the term', () => {
+    const content = 'we target .net here';
+    const el = render(content);
+    const at = content.indexOf('.net');
+    select(el.firstChild!, at, at + '.net'.length);
+
+    expect(readSelection(el, 'note_1', content)?.text).toBe('.net');
+  });
+
+  it('keeps punctuation inside the phrase', () => {
+    const content = 'it is lance-db, actually';
+    const el = render(content);
+    const at = content.indexOf('lance-db,');
+    select(el.firstChild!, at, at + 'lance-db,'.length);
+
+    expect(readSelection(el, 'note_1', content)?.text).toBe('lance-db');
+  });
+
+  it('ignores a selection that is only punctuation', () => {
+    const content = 'done... next';
+    const el = render(content);
+    const at = content.indexOf('...');
+    select(el.firstChild!, at, at + 3);
+
+    expect(readSelection(el, 'note_1', content)).toBeNull();
+  });
+
   it('ignores a collapsed selection', () => {
     const content = 'nothing selected here';
     const el = render(content);
