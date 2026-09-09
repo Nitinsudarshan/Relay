@@ -699,12 +699,22 @@ mod learned_correction_tests {
         let list = vec![
             VocabularyCorrection::new("", "Supabase"),
             VocabularyCorrection::new("ollama", "  "),
-            VocabularyCorrection::new("Ollama", "ollama"),
+            VocabularyCorrection::new("Supabase", "  Supabase  "),
         ];
         assert!(!list[0].is_meaningful());
         assert!(!list[1].is_meaningful());
-        assert!(!list[2].is_meaningful(), "differing only by case is not a repair");
+        assert!(!list[2].is_meaningful(), "identical after trimming is not a repair");
         assert_eq!(apply_learned_corrections("ollama and Supabase", &list), "ollama and Supabase");
+    }
+
+    #[test]
+    fn a_recasing_rule_repairs_the_word_the_recognizer_lowercased() {
+        // Matching ignores case, the replacement is written exactly as taught.
+        let list = corrections(&[("ollama", "Ollama")]);
+        assert_eq!(
+            apply_learned_corrections("I ran ollama and then OLLAMA again", &list),
+            "I ran Ollama and then Ollama again"
+        );
     }
 
     #[test]

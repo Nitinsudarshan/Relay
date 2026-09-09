@@ -751,8 +751,9 @@ pub struct VocabularyCorrection {
     /// having made it.
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// When it was learned. The whole of the correction history Relay keeps —
-    /// see the note in `vault::correction` about why there is no second store.
+    /// When it was learned. The note this came from keeps its own record — see
+    /// `vault::CorrectionRecord` — but a rule outlives the note that taught it,
+    /// so it carries its own date.
     #[serde(default)]
     pub created_at: String,
 }
@@ -769,12 +770,17 @@ impl VocabularyCorrection {
 
     /// Whether this entry could ever do anything.
     ///
-    /// An empty side, or a source equal to its replacement, is a no-op that
+    /// An empty side, or a source identical to its replacement, is a no-op that
     /// would sit in the list looking like a rule.
+    ///
+    /// Case alone *is* a difference. "ollama" → "Ollama" is one of the repairs
+    /// this exists for: matching ignores case and the replacement is written
+    /// exactly as the user typed it, so recasing a word the recognizer keeps
+    /// lowercasing is the whole mechanism working as intended.
     pub fn is_meaningful(&self) -> bool {
         !self.source.trim().is_empty()
             && !self.replacement.trim().is_empty()
-            && !self.source.eq_ignore_ascii_case(self.replacement.trim())
+            && self.source.trim() != self.replacement.trim()
     }
 
     /// Two corrections are the same rule when they read the same source,
@@ -927,11 +933,182 @@ impl AppSettings {
             Some(terms.join(", "))
         }
     }
+
+    /// Teaches Relay that `source` should read as `replacement`.
+    ///
+    /// Returns whether the vocabulary changed. Called only when the user ticks
+    /// "Teach Relay this correction" — most corrections are ordinary edits, and
+    /// "Thursday" to "Tuesday" is not something to repeat on every future
+    /// transcript.
+    ///
+    /// `dictionary` is deliberately not touched. The two lists do different
+    /// jobs: a dictionary word primes the recognizer before it guesses, and a
+    /// correction repairs a guess it already made. Putting "super base" in the
+    /// dictionary would prime Relay to produce the very phrase being corrected.
+    ///
+    /// Teaching the same source twice updates it in place rather than
+    /// appending a second rule — two rules for one phrase would make the result
+    /// depend on list order, which is not something a user can see or reason
+    /// about. Re-teaching also re-enables an entry that had been switched off,
+    /// because teaching it again is a clear statement that it is wanted.
+    pub fn learn_correction(&mut self, source: &str, replacement: &str) -> bool {
+        let candidate = VocabularyCorrection::new(source, replacement);
+        if !candidate.is_meaningful() {
+            return false;
+        }
+        match self
+            .vocabulary_corrections
+            .iter_mut()
+            .find(|existing| existing.same_source_as(source))
+        {
+            Some(existing) => {
+                existing.replacement = candidate.replacement;
+                existing.enabled = true;
+            }
+            None => self.vocabulary_corrections.push(candidate),
+        }
+        true
+    }
+
+    /// Adds one canonical word to the user's dictionary.
+    ///
+    /// Returns whether the list changed. This is the *correct* spelling of
+    /// something Relay should recognize — the same thing Settings › Dictionary
+    /// adds, reached from a Voice Note instead — so it primes the recognizer
+    /// and is matched case-insensitively against what is already there, since
+    /// two spellings of one word prime nothing extra.
+    pub fn add_dictionary_word(&mut self, word: &str) -> bool {
+        let word = word.trim();
+        if word.is_empty() {
+            return false;
+        }
+        if self
+            .dictionary
+            .iter()
+            .any(|existing| existing.trim().eq_ignore_ascii_case(word))
+        {
+            return false;
+        }
+        self.dictionary.push(word.to_string());
+        true
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn teaching_a_correction_records_the_mapping_not_just_the_word() {
+        // The distinction the whole feature turns on: Whisper keeps producing
+        // "super base", so the canonical spelling alone cannot repair it.
+        let mut settings = AppSettings::default();
+        assert!(settings.learn_correction("super base", "Supabase"));
+
+        assert_eq!(settings.vocabulary_corrections.len(), 1);
+        let learned = &settings.vocabulary_corrections[0];
+        assert_eq!(learned.source, "super base");
+        assert_eq!(learned.replacement, "Supabase");
+        assert!(learned.enabled);
+        assert!(!learned.created_at.is_empty());
+    }
+
+    #[test]
+    fn teaching_a_correction_leaves_the_dictionary_alone() {
+        // "super base" in the dictionary would prime the recognizer to produce
+        // the exact phrase being corrected. The lists are not interchangeable.
+        let mut settings = AppSettings::default();
+        let before = settings.dictionary.clone();
+        settings.learn_correction("super base", "Supabase");
+        assert_eq!(settings.dictionary, before);
+    }
+
+    #[test]
+    fn an_ordinary_correction_is_not_vocabulary_unless_it_is_taught() {
+        // Applying a correction does not call this; only the checkbox does.
+        // "Thursday" → "Tuesday" is the brief's own counter-example.
+        let settings = AppSettings::default();
+        assert!(
+            settings.vocabulary_corrections.is_empty(),
+            "nothing is learned by default"
+        );
+    }
+
+    #[test]
+    fn teaching_the_same_source_twice_updates_rather_than_duplicates() {
+        let mut settings = AppSettings::default();
+        settings.learn_correction("lance db", "Lance DB");
+        settings.learn_correction("super base", "Supabase");
+        assert_eq!(settings.vocabulary_corrections.len(), 2, "different sources are different rules");
+
+        // Re-teaching replaces the replacement in place. Two rules for one
+        // phrase would make the applied result depend on list order, which is
+        // not something a user can see or reason about.
+        settings.learn_correction("lance db", "LanceDB");
+        assert_eq!(settings.vocabulary_corrections.len(), 2);
+        assert_eq!(settings.vocabulary_corrections[0].source, "lance db");
+        assert_eq!(settings.vocabulary_corrections[0].replacement, "LanceDB");
+
+        // Case-insensitive on the source: the recognizer's capitalisation of a
+        // phrase it got wrong is not a distinction worth two entries.
+        settings.learn_correction("LANCE DB", "Lance DB");
+        assert_eq!(settings.vocabulary_corrections.len(), 2);
+        assert_eq!(settings.vocabulary_corrections[0].replacement, "Lance DB");
+    }
+
+    #[test]
+    fn re_teaching_a_disabled_correction_switches_it_back_on() {
+        let mut settings = AppSettings::default();
+        settings.learn_correction("super base", "Supabase");
+        settings.vocabulary_corrections[0].enabled = false;
+
+        settings.learn_correction("super base", "Supabase");
+        assert_eq!(settings.vocabulary_corrections.len(), 1);
+        assert!(settings.vocabulary_corrections[0].enabled);
+    }
+
+    #[test]
+    fn a_correction_that_could_never_do_anything_is_refused() {
+        let mut settings = AppSettings::default();
+        assert!(!settings.learn_correction("   ", "Supabase"));
+        assert!(!settings.learn_correction("super base", ""));
+        assert!(!settings.learn_correction("Supabase", "  Supabase  "), "identical is not a repair");
+        assert!(settings.vocabulary_corrections.is_empty());
+    }
+
+    #[test]
+    fn recasing_a_word_is_a_repair_worth_learning() {
+        // The brief names "ollama" → "Ollama" as useful vocabulary, and the
+        // correction UI offers to learn it. Refusing here would mean the
+        // checkbox silently did nothing.
+        let mut settings = AppSettings::default();
+        assert!(settings.learn_correction("ollama", "Ollama"));
+        assert_eq!(settings.vocabulary_corrections[0].replacement, "Ollama");
+    }
+
+    #[test]
+    fn adding_a_dictionary_word_appends_it_once() {
+        let mut settings = AppSettings {
+            dictionary: vec!["Relay".to_string()],
+            ..Default::default()
+        };
+
+        assert!(settings.add_dictionary_word("  Supabase  "));
+        assert_eq!(settings.dictionary, vec!["Relay", "Supabase"]);
+
+        // Already known, in any casing: two spellings prime nothing extra.
+        assert!(!settings.add_dictionary_word("supabase"));
+        assert!(!settings.add_dictionary_word("   "));
+        assert_eq!(settings.dictionary, vec!["Relay", "Supabase"]);
+    }
+
+    #[test]
+    fn adding_a_dictionary_word_leaves_learned_corrections_alone() {
+        let mut settings = AppSettings::default();
+        settings.learn_correction("super base", "Supabase");
+        settings.add_dictionary_word("LanceDB");
+        assert_eq!(settings.vocabulary_corrections.len(), 1);
+    }
 
     #[test]
     fn test_snippet_expansion() {

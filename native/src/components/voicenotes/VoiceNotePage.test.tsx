@@ -303,3 +303,302 @@ describe('VoiceNotePage - Multi-Select and Bulk Delete', () => {
   });
 });
 
+
+describe('VoiceNotePage - Phrase Correction', () => {
+  const correctableNote: VaultNote = {
+    id: 'note_1',
+    title: 'Note 1',
+    note_type: 'voice_note',
+    created_at: '2026-08-20T10:00:00Z',
+    updated_at: '2026-08-20T10:00:00Z',
+    tags: [],
+    source_audio: null,
+    content: 'I was testing super base yesterday and then opened super base again.',
+  };
+
+  /**
+   * Selects a range of the rendered transcript the way a user would, and lets
+   * the page's `selectionchange` listener see it. jsdom does not fire that
+   * event from `addRange`, so it is dispatched explicitly.
+   */
+  const selectPhrase = async (phrase: string, occurrence: 1 | 2 = 1) => {
+    const paragraph = screen.getByText(correctableNote.content);
+    const textNode = paragraph.firstChild!;
+    const text = correctableNote.content;
+    const at = occurrence === 1 ? text.indexOf(phrase) : text.lastIndexOf(phrase);
+
+    const range = document.createRange();
+    range.setStart(textNode, at);
+    range.setEnd(textNode, at + phrase.length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+    await waitFor(() => expect(screen.getByText('Selected')).toBeInTheDocument());
+    return at;
+  };
+
+  /** What `correct_voice_note_phrase` actually returns. */
+  const correctionResult = (learned: boolean) => ({
+    note: {
+      ...correctableNote,
+      content: 'I was testing Supabase yesterday and then opened super base again.',
+      updated_at: '2026-08-20T11:00:00Z',
+    },
+    record: {
+      id: 'corr_1',
+      note_id: 'note_1',
+      original: 'super base',
+      replacement: 'Supabase',
+      start: 14,
+      corrected_at: '2026-08-20T11:00:00Z',
+      learned,
+    },
+    learned,
+  });
+
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_vault_location') {
+        return {
+          path: 'C:\\Users\\Test\\RelayVault',
+          default_path: 'C:\\Users\\Test\\RelayVault',
+          configured: true,
+          accessible: true,
+        };
+      }
+      if (cmd === 'get_settings') return { provider: 'ollama' };
+      if (cmd === 'get_voice_notes') return [correctableNote];
+      if (cmd === 'correct_voice_note_phrase') return correctionResult(false);
+      return undefined;
+    });
+  });
+
+  const renderPage = async () => {
+    render(<VoiceNotePage />);
+    await waitFor(() => {
+      expect(screen.getByText(correctableNote.content)).toBeInTheDocument();
+    });
+  };
+
+  it('offers Correct and Add to Dictionary when a phrase is selected, and nothing before', async () => {
+    await renderPage();
+    expect(screen.queryByRole('button', { name: 'Correct' })).not.toBeInTheDocument();
+
+    await selectPhrase('super base');
+
+    expect(screen.getByRole('button', { name: 'Correct' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add to Dictionary' })).toBeInTheDocument();
+    // Two steps: no input until the user says which action they want.
+    expect(screen.queryByLabelText('Replacement text')).not.toBeInTheDocument();
+  });
+
+  it('does not offer to correct a whitespace-only selection', async () => {
+    await renderPage();
+    const paragraph = screen.getByText(correctableNote.content);
+    const at = correctableNote.content.indexOf(' yesterday');
+    const range = document.createRange();
+    range.setStart(paragraph.firstChild!, at);
+    range.setEnd(paragraph.firstChild!, at + 1);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Selected')).not.toBeInTheDocument();
+    });
+  });
+
+  it('sends the selected occurrence as a character range, without learning it', async () => {
+    const user = userEvent.setup();
+    await renderPage();
+    const at = await selectPhrase('super base', 2);
+
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    await user.type(screen.getByLabelText('Replacement text'), 'Supabase');
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+
+    await waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith('correct_voice_note_phrase', {
+        id: 'note_1',
+        start: at,
+        end: at + 'super base'.length,
+        original: 'super base',
+        replacement: 'Supabase',
+        // The unticked box is the point: an ordinary correction is not
+        // vocabulary, so nothing reaches the dictionary by default.
+        learn: false,
+      });
+    });
+  });
+
+  it('passes learn: true only when Teach Relay is ticked', async () => {
+    const user = userEvent.setup();
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_vault_location') {
+        return { path: 'v', default_path: 'v', configured: true, accessible: true };
+      }
+      if (cmd === 'get_settings') return { provider: 'ollama' };
+      if (cmd === 'get_voice_notes') return [correctableNote];
+      if (cmd === 'correct_voice_note_phrase') return correctionResult(true);
+      return undefined;
+    });
+    await renderPage();
+    await selectPhrase('super base');
+
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    await user.type(screen.getByLabelText('Replacement text'), 'Supabase');
+    await user.click(screen.getByRole('checkbox', { name: /Teach Relay this correction/i }));
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+
+    await waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith(
+        'correct_voice_note_phrase',
+        expect.objectContaining({ learn: true }),
+      );
+    });
+    // The backend reports back whether it learned, and the toast says so.
+    expect(await screen.findByText(/· learned/)).toBeInTheDocument();
+  });
+
+  it('leaves the note untouched when the correction is cancelled', async () => {
+    const user = userEvent.setup();
+    await renderPage();
+    await selectPhrase('super base');
+
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    await user.type(screen.getByLabelText('Replacement text'), 'Supabase');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByLabelText('Replacement text')).not.toBeInTheDocument();
+    expect(screen.getByText(correctableNote.content)).toBeInTheDocument();
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      'correct_voice_note_phrase',
+      expect.anything(),
+    );
+  });
+
+  it('shows the corrected note and an Undo that reverses it', async () => {
+    const user = userEvent.setup();
+    const corrected = correctionResult(false).note;
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_vault_location') {
+        return { path: 'v', default_path: 'v', configured: true, accessible: true };
+      }
+      if (cmd === 'get_settings') return { provider: 'ollama' };
+      if (cmd === 'get_voice_notes') return [correctableNote];
+      if (cmd === 'correct_voice_note_phrase') return correctionResult(false);
+      if (cmd === 'undo_voice_note_correction') return correctableNote;
+      return undefined;
+    });
+
+    await renderPage();
+    await selectPhrase('super base');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    await user.type(screen.getByLabelText('Replacement text'), 'Supabase');
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+
+    // Only the selected occurrence changed; the second is still there.
+    await waitFor(() => {
+      expect(screen.getByText(corrected.content)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Corrected "super base" → "Supabase"/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Undo/i }));
+
+    await waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith('undo_voice_note_correction', { id: 'note_1' });
+    });
+    await waitFor(() => {
+      expect(screen.getByText(correctableNote.content)).toBeInTheDocument();
+    });
+  });
+
+  it('reports a correction the backend refused instead of pretending it applied', async () => {
+    const user = userEvent.setup();
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_vault_location') {
+        return { path: 'v', default_path: 'v', configured: true, accessible: true };
+      }
+      if (cmd === 'get_settings') return { provider: 'ollama' };
+      if (cmd === 'get_voice_notes') return [correctableNote];
+      if (cmd === 'correct_voice_note_phrase') {
+        throw { message: 'this note has changed since the text was selected' };
+      }
+      return undefined;
+    });
+
+    await renderPage();
+    await selectPhrase('super base');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    await user.type(screen.getByLabelText('Replacement text'), 'Supabase');
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/has changed since/i);
+    });
+    expect(screen.getByText(correctableNote.content)).toBeInTheDocument();
+  });
+
+  it('adds the selected spelling to the dictionary without touching the note', async () => {
+    const user = userEvent.setup();
+    await renderPage();
+    await selectPhrase('yesterday');
+
+    await user.click(screen.getByRole('button', { name: 'Add to Dictionary' }));
+
+    await waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith('add_dictionary_word', { word: 'yesterday' });
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      'correct_voice_note_phrase',
+      expect.anything(),
+    );
+    expect(screen.getByText(correctableNote.content)).toBeInTheDocument();
+  });
+
+  it('stops offering Undo once the note has moved on', async () => {
+    const user = userEvent.setup();
+    const corrected = correctionResult(false).note;
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_vault_location') {
+        return { path: 'v', default_path: 'v', configured: true, accessible: true };
+      }
+      if (cmd === 'get_settings') return { provider: 'ollama' };
+      if (cmd === 'get_voice_notes') return [correctableNote];
+      if (cmd === 'correct_voice_note_phrase') return correctionResult(false);
+      if (cmd === 'undo_voice_note_correction') {
+        throw { message: 'this note has changed since the text was selected' };
+      }
+      return undefined;
+    });
+
+    await renderPage();
+    await selectPhrase('super base');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    await user.type(screen.getByLabelText('Replacement text'), 'Supabase');
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+
+    await user.click(await screen.findByRole('button', { name: /Undo/i }));
+
+    // Refusing is the point — the full editor's change is not thrown away —
+    // so the button goes rather than inviting the same failure again.
+    await waitFor(() => {
+      expect(screen.getByText(/has changed since/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /Undo/i })).not.toBeInTheDocument();
+    expect(screen.getByText(corrected.content)).toBeInTheDocument();
+  });
+
+  it('keeps the full-note editor available alongside the popover', async () => {
+    const user = userEvent.setup();
+    await renderPage();
+    await selectPhrase('super base');
+
+    // The pencil still opens the whole note — the two workflows coexist.
+    await user.click(screen.getByLabelText('Edit transcript'));
+    expect(screen.getByDisplayValue(correctableNote.content)).toBeInTheDocument();
+  });
+});

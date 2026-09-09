@@ -105,6 +105,31 @@ export function readSelection(
 }
 
 /**
+ * The first note whose rendered body holds the current selection.
+ *
+ * Driven from a document-level `selectionchange` rather than a handler on each
+ * paragraph, so a selection made with the keyboard counts the same as one made
+ * with the mouse: a `<p>` is not focusable, so a `keyup` bound to it never
+ * fires for caret-browsing or shift-arrow selection.
+ *
+ * Containers the caller no longer renders are simply absent from the lookup, so
+ * an unmounted note cannot produce a match.
+ */
+export function findSelection(
+  containers: Record<string, HTMLElement | null>,
+  contentOf: (noteId: string) => string | undefined,
+): PhraseSelection | null {
+  for (const [noteId, container] of Object.entries(containers)) {
+    if (!container) continue;
+    const content = contentOf(noteId);
+    if (content === undefined) continue;
+    const found = readSelection(container, noteId, content);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
  * Whether this correction *looks* like vocabulary, for a hint beside the
  * checkbox.
  *

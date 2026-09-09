@@ -26,7 +26,21 @@
 //! stored as Markdown text and the edit is a substring replacement within that
 //! text, so a heading stays a heading and a list stays a list — the syntax is
 //! never converted to a document model and back.
+//!
+//! # Why the history is a range and not a snapshot
+//!
+//! [`CorrectionRecord`] stores the two phrases and where they were, not the
+//! note before and after. A range edit is its own inverse — put `original`
+//! back where `replacement` now sits — so reversal needs nothing more, and
+//! storing whole copies of the note per correction would be a versioning
+//! system, which this deliberately is not.
+//!
+//! Reversing through the range also fails safe. A snapshot undo applied after
+//! the full editor touched the note would throw that edit away; reversing the
+//! range asks whether `replacement` is still where it was left and refuses
+//! when it is not.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Why a correction could not be applied.
@@ -106,6 +120,57 @@ fn char_to_byte(text: &str, index: usize) -> usize {
         .nth(index)
         .map(|(byte, _)| byte)
         .unwrap_or(text.len())
+}
+
+/// One applied correction, kept so it can be reversed and seen.
+///
+/// The four things the record has to answer are what was wrong, what it became,
+/// when, and whether the user also asked Relay to learn it — that last one
+/// being the difference between an ordinary edit and a standing rule, and not
+/// recoverable from the note itself afterwards.
+///
+/// `start` is a character offset, matching [`replace_range`]. It is what makes
+/// [`reverse`](CorrectionRecord::reverse) possible without storing a copy of
+/// the note.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CorrectionRecord {
+    pub id: String,
+    pub note_id: String,
+    /// The phrase as the recognizer wrote it.
+    pub original: String,
+    /// The phrase as the user says it should read.
+    pub replacement: String,
+    /// Character offset of the replacement within the note it was applied to.
+    pub start: usize,
+    pub corrected_at: String,
+    /// Whether the user ticked "Teach Relay this correction". A learned
+    /// correction also exists as a `settings::VocabularyCorrection`; this is
+    /// the record that *this* note is where it came from.
+    pub learned: bool,
+}
+
+impl CorrectionRecord {
+    pub fn new(note_id: &str, original: &str, replacement: &str, start: usize, learned: bool) -> Self {
+        Self {
+            id: format!("corr_{}", uuid::Uuid::new_v4()),
+            note_id: note_id.to_string(),
+            original: original.to_string(),
+            replacement: replacement.to_string(),
+            start,
+            corrected_at: chrono::Utc::now().to_rfc3339(),
+            learned,
+        }
+    }
+
+    /// Puts the original phrase back, if the replacement is still where this
+    /// record left it.
+    ///
+    /// Refuses otherwise rather than guessing: the note having moved on is the
+    /// case where an undo would destroy work the user did after correcting.
+    pub fn reverse(&self, content: &str) -> Result<String, CorrectionError> {
+        let end = self.start + self.replacement.chars().count();
+        replace_range(content, self.start, end, &self.replacement, &self.original)
+    }
 }
 
 #[cfg(test)]
@@ -223,5 +288,63 @@ mod tests {
         let (start, end) = range_of(note, "मीटिंग");
         let out = replace_range(note, start, end, "मीटिंग", "meeting").unwrap();
         assert_eq!(out, "कल meeting है");
+    }
+
+    /// A record, and the correction it describes, applied together — which is
+    /// how the command uses them.
+    fn apply_and_record(note: &str, needle: &str, replacement: &str, learned: bool) -> (String, CorrectionRecord) {
+        let (start, end) = range_of(note, needle);
+        let corrected = replace_range(note, start, end, needle, replacement).expect("applies");
+        (
+            corrected,
+            CorrectionRecord::new("note_1", needle, replacement, start, learned),
+        )
+    }
+
+    #[test]
+    fn reversing_a_record_restores_the_previous_content() {
+        let before = "I was testing super base yesterday.";
+        let (after, record) = apply_and_record(before, "super base", "Supabase", false);
+        assert_eq!(record.reverse(&after).unwrap(), before);
+    }
+
+    #[test]
+    fn reversing_touches_only_the_occurrence_that_was_corrected() {
+        let before = "opened super base, then super base crashed";
+        let (after, record) = apply_and_record(before, "super base", "Supabase", false);
+        assert_eq!(after, "opened Supabase, then super base crashed");
+        assert_eq!(record.reverse(&after).unwrap(), before);
+    }
+
+    #[test]
+    fn reversing_after_the_note_moved_on_is_refused_rather_than_destroying_the_edit() {
+        // The full editor rewrote the note after the correction. A snapshot
+        // undo would throw that rewrite away; reversing the range asks first.
+        let (_, record) = apply_and_record("I was testing super base yesterday.", "super base", "Supabase", false);
+        let rewritten = "Completely different notes now.";
+        assert!(
+            matches!(record.reverse(rewritten), Err(CorrectionError::Stale { .. })),
+            "a moved-on note must refuse the reversal"
+        );
+    }
+
+    #[test]
+    fn a_record_remembers_whether_the_correction_was_taught() {
+        // Not recoverable from the note afterwards, and it is the difference
+        // between an ordinary edit and a standing rule.
+        let (_, taught) = apply_and_record("tested super base", "super base", "Supabase", true);
+        let (_, ordinary) = apply_and_record("meeting on Thursday", "Thursday", "Tuesday", false);
+        assert!(taught.learned);
+        assert!(!ordinary.learned);
+        assert!(!taught.corrected_at.is_empty(), "a timestamp is part of the record");
+        assert_ne!(taught.id, ordinary.id, "records are individually addressable");
+    }
+
+    #[test]
+    fn reversing_a_multibyte_correction_uses_character_offsets() {
+        let before = "मैं super base चला रहा हूं";
+        let (after, record) = apply_and_record(before, "super base", "Supabase", false);
+        assert_eq!(after, "मैं Supabase चला रहा हूं");
+        assert_eq!(record.reverse(&after).unwrap(), before);
     }
 }

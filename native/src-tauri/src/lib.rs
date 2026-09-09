@@ -281,6 +281,8 @@ pub fn run() {
             commands::get_voice_notes,
             commands::update_voice_note,
             commands::correct_voice_note_phrase,
+            commands::undo_voice_note_correction,
+            commands::add_dictionary_word,
             commands::delete_voice_note,
             commands::delete_voice_notes,
             commands::merge_voice_notes,
